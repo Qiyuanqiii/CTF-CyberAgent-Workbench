@@ -174,3 +174,54 @@ func TestRunCLISupervisorStepAndCheckpoint(t *testing.T) {
 		t.Fatalf("unexpected supervisor timeline output=%s stderr=%s", timeline, stderr)
 	}
 }
+
+func TestRunCLIExecuteAndFinalize(t *testing.T) {
+	t.Setenv("CYBERAGENT_HOME", t.TempDir())
+	created, stderr, code := executeTestCommand(t, "run", "create", "execute cli smoke", "--profile", "code", "--max-turns", "3", "--max-tokens", "1000", "--timeout", "30s")
+	if code != 0 {
+		t.Fatalf("run create failed: %s", stderr)
+	}
+	runID := runIDPattern.FindString(created)
+	if runID == "" {
+		t.Fatalf("missing run id: %s", created)
+	}
+	if _, stderr, code := executeTestCommand(t, "run", "start", runID); code != 0 {
+		t.Fatalf("run start failed: %s", stderr)
+	}
+	executed, stderr, code := executeTestCommand(t, "run", "execute", runID, "--max-steps", "2", "--finish", "--summary", "operator verified")
+	if code != 0 || strings.Count(executed, "turn ") != 2 || !strings.Contains(executed, "finalized: completed") {
+		t.Fatalf("unexpected execute output=%s stderr=%s code=%d", executed, stderr, code)
+	}
+	shown, stderr, code := executeTestCommand(t, "run", "show", runID)
+	if code != 0 || !strings.Contains(shown, "status: completed") {
+		t.Fatalf("unexpected finalized run output=%s stderr=%s", shown, stderr)
+	}
+	checkpoint, stderr, code := executeTestCommand(t, "run", "checkpoint", runID)
+	if code != 0 || !strings.Contains(checkpoint, "phase: run_completed") || !strings.Contains(checkpoint, "next_turn: 3") || !strings.Contains(checkpoint, "total_tokens:") {
+		t.Fatalf("unexpected finalized checkpoint output=%s stderr=%s", checkpoint, stderr)
+	}
+	timeline, stderr, code := executeTestCommand(t, "run", "events", runID)
+	if code != 0 || strings.Count(timeline, "supervisor.run_completed") != 1 {
+		t.Fatalf("unexpected completion timeline output=%s stderr=%s", timeline, stderr)
+	}
+	if _, stderr, code := executeTestCommand(t, "run", "finish", runID, "--summary", "repeat"); code != 0 {
+		t.Fatalf("repeat finish was not idempotent: %s", stderr)
+	}
+	after, stderr, code := executeTestCommand(t, "run", "events", runID)
+	if code != 0 || strings.Count(after, "supervisor.run_completed") != 1 {
+		t.Fatalf("repeat finish duplicated timeline output=%s stderr=%s", after, stderr)
+	}
+
+	failedCreated, stderr, code := executeTestCommand(t, "run", "create", "fail cli smoke", "--profile", "review")
+	if code != 0 {
+		t.Fatalf("failed-run create failed: %s", stderr)
+	}
+	failedRunID := runIDPattern.FindString(failedCreated)
+	if _, stderr, code := executeTestCommand(t, "run", "start", failedRunID); code != 0 {
+		t.Fatalf("failed-run start failed: %s", stderr)
+	}
+	failed, stderr, code := executeTestCommand(t, "run", "fail", failedRunID, "--reason", "operator stopped")
+	if code != 0 || !strings.Contains(failed, "finalized: failed") {
+		t.Fatalf("unexpected fail output=%s stderr=%s code=%d", failed, stderr, code)
+	}
+}

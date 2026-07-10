@@ -131,6 +131,8 @@ Transitions are checked in Go domain services and written with an event. UI code
 
 The supervisor owns process handles and channels only in memory. Durable IDs, statuses, inbox messages, checkpoints, and events live in SQLite so a process restart can reconstruct the run.
 
+The current single-Agent slice persists cumulative input/output/total tokens and model-call execution milliseconds in the Supervisor checkpoint. A bounded executor performs only an operator-selected number of durable steps. Completion and failure are explicit lifecycle operations that update the Run, checkpoint, and events in one transaction; arbitrary assistant text cannot finalize a Run.
+
 ## Agent Coordinator
 
 One `AgentCoordinator` owns the graph for a run:
@@ -258,7 +260,7 @@ CLI and headless mode print events. Bubble Tea renders them locally. The future 
 
 ## Persistence
 
-SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, and `v5` adds durable Supervisor checkpoints. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
+SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, and `v6` adds cumulative token and model-time budget counters. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
 
 ```text
 missions

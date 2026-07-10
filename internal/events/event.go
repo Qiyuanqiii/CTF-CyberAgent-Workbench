@@ -33,6 +33,8 @@ const (
 	AgentTurnStartedEvent       = "agent.turn_started"
 	AgentTurnCompletedEvent     = "agent.turn_completed"
 	AgentTurnFailedEvent        = "agent.turn_failed"
+	SupervisorRunCompletedEvent = "supervisor.run_completed"
+	SupervisorRunFailedEvent    = "supervisor.run_failed"
 )
 
 type Event struct {

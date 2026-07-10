@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 5
+const LatestSchemaVersion = 6
 
 type migration struct {
 	Version    int
@@ -118,6 +118,13 @@ var supervisorCheckpointStatements = []string{
 		FOREIGN KEY(run_id) REFERENCES runs(id),
 		CHECK(next_turn > 0)
 	);`,
+}
+
+var supervisorBudgetStatements = []string{
+	`ALTER TABLE run_supervisor_checkpoints ADD COLUMN input_tokens INTEGER NOT NULL DEFAULT 0;`,
+	`ALTER TABLE run_supervisor_checkpoints ADD COLUMN output_tokens INTEGER NOT NULL DEFAULT 0;`,
+	`ALTER TABLE run_supervisor_checkpoints ADD COLUMN total_tokens INTEGER NOT NULL DEFAULT 0;`,
+	`ALTER TABLE run_supervisor_checkpoints ADD COLUMN execution_millis INTEGER NOT NULL DEFAULT 0;`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {

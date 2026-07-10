@@ -20,9 +20,12 @@ import (
 
 const maxSupervisorErrorChars = 4096
 
+const supervisorCheckpointSelect = `SELECT run_id, next_turn, phase, attempt_id, last_error,
+	input_tokens, output_tokens, total_tokens, execution_millis, updated_at
+	FROM run_supervisor_checkpoints WHERE run_id = ?`
+
 func (s *SQLiteStore) GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error) {
-	checkpoint, err := scanSupervisorCheckpoint(s.db.QueryRowContext(ctx, `SELECT run_id, next_turn, phase,
-		attempt_id, last_error, updated_at FROM run_supervisor_checkpoints WHERE run_id = ?`, strings.TrimSpace(runID)))
+	checkpoint, err := scanSupervisorCheckpoint(s.db.QueryRowContext(ctx, supervisorCheckpointSelect, strings.TrimSpace(runID)))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.SupervisorCheckpoint{}, false, nil
 	}
@@ -68,9 +71,21 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, runID string) (do
 			RunID: run.ID, NextTurn: 1, Phase: domain.SupervisorIdle, UpdatedAt: time.Now().UTC(),
 		}
 	}
+	if checkpoint.Phase == domain.SupervisorRunCompleted || checkpoint.Phase == domain.SupervisorRunFailed {
+		return domain.SupervisorTurn{}, apperror.New(apperror.CodeFailedPrecondition,
+			fmt.Sprintf("run %s supervisor is finalized as %s", run.ID, checkpoint.Phase))
+	}
 	if checkpoint.NextTurn > run.Budget.MaxTurns {
 		return domain.SupervisorTurn{}, apperror.New(apperror.CodeResourceExhausted,
 			fmt.Sprintf("run %s exhausted its %d turn budget", run.ID, run.Budget.MaxTurns))
+	}
+	if run.Budget.MaxTokens > 0 && checkpoint.TotalTokens >= run.Budget.MaxTokens {
+		return domain.SupervisorTurn{}, apperror.New(apperror.CodeResourceExhausted,
+			fmt.Sprintf("run %s exhausted its %d token budget", run.ID, run.Budget.MaxTokens))
+	}
+	if run.Budget.TimeoutSeconds > 0 && checkpoint.ExecutionMillis >= run.Budget.TimeoutSeconds*1000 {
+		return domain.SupervisorTurn{}, apperror.New(apperror.CodeDeadlineExceeded,
+			fmt.Sprintf("run %s exhausted its %s execution timeout", run.ID, time.Duration(run.Budget.TimeoutSeconds)*time.Second))
 	}
 	if checkpoint.Phase == domain.SupervisorTurnStarted {
 		if err := tx.Commit(); err != nil {
@@ -102,7 +117,7 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, runID string) (do
 	return domain.SupervisorTurn{Run: run, Mission: mission, Checkpoint: checkpoint}, nil
 }
 
-func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string, response llm.ChatResponse, decision policy.Decision) (domain.SupervisorCheckpoint, error) {
+func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string, response llm.ChatResponse, decision policy.Decision, elapsed time.Duration) (domain.SupervisorCheckpoint, error) {
 	if err := checkpoint.Validate(); err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
@@ -111,6 +126,14 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	}
 	if !decision.Allowed {
 		return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeFailedPrecondition, "denied supervisor output cannot be completed")
+	}
+	inputTokens, outputTokens, totalTokens, err := supervisorUsage(response.Usage)
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
+	elapsedMillis, err := supervisorElapsedMillis(elapsed)
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, err
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
@@ -163,6 +186,22 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 		return domain.SupervisorCheckpoint{}, err
 	}
 	current.NextTurn++
+	current.InputTokens, err = supervisorAddCounter(current.InputTokens, inputTokens, "input token")
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
+	current.OutputTokens, err = supervisorAddCounter(current.OutputTokens, outputTokens, "output token")
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
+	current.TotalTokens, err = supervisorAddCounter(current.TotalTokens, totalTokens, "total token")
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
+	current.ExecutionMillis, err = supervisorAddCounter(current.ExecutionMillis, elapsedMillis, "execution time")
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
 	current.Phase = domain.SupervisorIdle
 	current.AttemptID = ""
 	current.LastError = ""
@@ -172,6 +211,8 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.SupervisorCheckpointedEvent, "run_supervisor", run.ID, map[string]any{
 		"phase": current.Phase, "next_turn": current.NextTurn, "completed_turn": checkpoint.NextTurn,
+		"input_tokens": current.InputTokens, "output_tokens": current.OutputTokens,
+		"total_tokens": current.TotalTokens, "execution_millis": current.ExecutionMillis,
 	}); err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
@@ -181,8 +222,12 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	return current, nil
 }
 
-func (s *SQLiteStore) FailSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, cause string) (domain.SupervisorCheckpoint, error) {
+func (s *SQLiteStore) FailSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, cause string, elapsed time.Duration) (domain.SupervisorCheckpoint, error) {
 	if err := checkpoint.Validate(); err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
+	elapsedMillis, err := supervisorElapsedMillis(elapsed)
+	if err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
 	cause = redact.String(strings.TrimSpace(cause))
@@ -221,6 +266,10 @@ func (s *SQLiteStore) FailSupervisorTurn(ctx context.Context, checkpoint domain.
 	}
 	current.Phase = domain.SupervisorTurnFailed
 	current.LastError = cause
+	current.ExecutionMillis, err = supervisorAddCounter(current.ExecutionMillis, elapsedMillis, "execution time")
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
 	current.UpdatedAt = time.Now().UTC()
 	if err := upsertSupervisorCheckpointTx(ctx, tx, current); err != nil {
 		return domain.SupervisorCheckpoint{}, err
@@ -232,6 +281,7 @@ func (s *SQLiteStore) FailSupervisorTurn(ctx context.Context, checkpoint domain.
 	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.SupervisorCheckpointedEvent, "run_supervisor", run.ID, map[string]any{
 		"phase": current.Phase, "next_turn": current.NextTurn, "attempt_id": current.AttemptID,
+		"execution_millis": current.ExecutionMillis,
 	}); err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
@@ -241,9 +291,123 @@ func (s *SQLiteStore) FailSupervisorTurn(ctx context.Context, checkpoint domain.
 	return current, nil
 }
 
+func (s *SQLiteStore) FinalizeSupervisorRun(ctx context.Context, runID string, target domain.RunStatus, summary string) (domain.Run, domain.SupervisorCheckpoint, error) {
+	if target != domain.RunCompleted && target != domain.RunFailed {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeInvalidArgument, "supervisor final status must be completed or failed")
+	}
+	summary = redact.String(strings.TrimSpace(summary))
+	if summary == "" {
+		if target == domain.RunCompleted {
+			summary = "run completed"
+		} else {
+			summary = "run failed"
+		}
+	}
+	runes := []rune(summary)
+	if len(runes) > maxSupervisorErrorChars {
+		summary = string(runes[:maxSupervisorErrorChars])
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	run, err := scanRun(tx.QueryRowContext(ctx, `SELECT id, mission_id, session_id, status, config_json, budget_json,
+		started_at, finished_at, created_at, updated_at FROM runs WHERE id = ?`, strings.TrimSpace(runID)))
+	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
+	checkpoint, ok, err := getSupervisorCheckpointTx(ctx, tx, run.ID)
+	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
+	if !ok {
+		checkpoint = domain.SupervisorCheckpoint{
+			RunID: run.ID, NextTurn: 1, Phase: domain.SupervisorIdle, UpdatedAt: time.Now().UTC(),
+		}
+	}
+	if run.Status == target {
+		if err := tx.Commit(); err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, err
+		}
+		return run, checkpoint, nil
+	}
+	if run.Terminal() {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeConflict,
+			fmt.Sprintf("run %s is already terminal as %s", run.ID, run.Status))
+	}
+	if checkpoint.Phase == domain.SupervisorTurnStarted {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeFailedPrecondition, "cannot finalize while a supervisor turn is started")
+	}
+	if target == domain.RunCompleted && checkpoint.Phase != domain.SupervisorIdle {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeFailedPrecondition, "only an idle supervisor can complete a run")
+	}
+	expected := run.Status
+	if err := run.Transition(target, time.Now().UTC()); err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, apperror.Wrap(apperror.CodeFailedPrecondition, err.Error(), err)
+	}
+	configJSON, err := marshalRedactedJSON(run.Config)
+	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
+	budgetJSON, err := marshalRedactedJSON(run.Budget)
+	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE runs SET status = ?, config_json = ?, budget_json = ?,
+		started_at = ?, finished_at = ?, updated_at = ? WHERE id = ? AND status = ?`,
+		run.Status, configJSON, budgetJSON, nullableTS(run.StartedAt), nullableTS(run.FinishedAt),
+		ts(run.UpdatedAt), run.ID, expected)
+	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
+	if rows != 1 {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeConflict, "run changed before supervisor finalization")
+	}
+	checkpoint.AttemptID = ""
+	checkpoint.UpdatedAt = run.UpdatedAt
+	if target == domain.RunCompleted {
+		checkpoint.Phase = domain.SupervisorRunCompleted
+		checkpoint.LastError = ""
+	} else {
+		checkpoint.Phase = domain.SupervisorRunFailed
+		checkpoint.LastError = summary
+	}
+	if err := upsertSupervisorCheckpointTx(ctx, tx, checkpoint); err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
+	statusEvent, err := events.New(run.ID, run.MissionID, events.RunStatusChangedEvent, "run_supervisor", run.ID, map[string]any{
+		"from": expected, "to": target, "reason": summary,
+	})
+	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
+	if _, err := insertRunEventTx(ctx, tx, statusEvent); err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
+	eventType := events.SupervisorRunCompletedEvent
+	if target == domain.RunFailed {
+		eventType = events.SupervisorRunFailedEvent
+	}
+	if err := appendSupervisorEventTx(ctx, tx, run, eventType, "run_supervisor", run.ID, map[string]any{
+		"summary": summary, "turns_completed": checkpoint.NextTurn - 1,
+		"input_tokens": checkpoint.InputTokens, "output_tokens": checkpoint.OutputTokens,
+		"total_tokens": checkpoint.TotalTokens, "execution_millis": checkpoint.ExecutionMillis,
+	}); err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
+	return run, checkpoint, nil
+}
+
 func getSupervisorCheckpointTx(ctx context.Context, tx *sql.Tx, runID string) (domain.SupervisorCheckpoint, bool, error) {
-	checkpoint, err := scanSupervisorCheckpoint(tx.QueryRowContext(ctx, `SELECT run_id, next_turn, phase,
-		attempt_id, last_error, updated_at FROM run_supervisor_checkpoints WHERE run_id = ?`, runID))
+	checkpoint, err := scanSupervisorCheckpoint(tx.QueryRowContext(ctx, supervisorCheckpointSelect, runID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.SupervisorCheckpoint{}, false, nil
 	}
@@ -259,12 +423,16 @@ func upsertSupervisorCheckpointTx(ctx context.Context, tx *sql.Tx, checkpoint do
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO run_supervisor_checkpoints
-		(run_id, next_turn, phase, attempt_id, last_error, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		(run_id, next_turn, phase, attempt_id, last_error, input_tokens, output_tokens,
+		total_tokens, execution_millis, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(run_id) DO UPDATE SET next_turn=excluded.next_turn, phase=excluded.phase,
-		attempt_id=excluded.attempt_id, last_error=excluded.last_error, updated_at=excluded.updated_at`,
+		attempt_id=excluded.attempt_id, last_error=excluded.last_error, input_tokens=excluded.input_tokens,
+		output_tokens=excluded.output_tokens, total_tokens=excluded.total_tokens,
+		execution_millis=excluded.execution_millis, updated_at=excluded.updated_at`,
 		checkpoint.RunID, checkpoint.NextTurn, checkpoint.Phase, checkpoint.AttemptID,
-		checkpoint.LastError, ts(checkpoint.UpdatedAt))
+		checkpoint.LastError, checkpoint.InputTokens, checkpoint.OutputTokens, checkpoint.TotalTokens,
+		checkpoint.ExecutionMillis, ts(checkpoint.UpdatedAt))
 	return err
 }
 
@@ -283,7 +451,9 @@ func scanSupervisorCheckpoint(row scanner) (domain.SupervisorCheckpoint, error) 
 	var attempt sql.NullString
 	var lastError sql.NullString
 	var updated string
-	if err := row.Scan(&checkpoint.RunID, &checkpoint.NextTurn, &phase, &attempt, &lastError, &updated); err != nil {
+	if err := row.Scan(&checkpoint.RunID, &checkpoint.NextTurn, &phase, &attempt, &lastError,
+		&checkpoint.InputTokens, &checkpoint.OutputTokens, &checkpoint.TotalTokens,
+		&checkpoint.ExecutionMillis, &updated); err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
 	checkpoint.Phase = domain.SupervisorPhase(phase)
@@ -291,4 +461,42 @@ func scanSupervisorCheckpoint(row scanner) (domain.SupervisorCheckpoint, error) 
 	checkpoint.LastError = lastError.String
 	checkpoint.UpdatedAt = parseTS(updated)
 	return checkpoint, checkpoint.Validate()
+}
+
+func supervisorUsage(usage llm.Usage) (int64, int64, int64, error) {
+	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.TotalTokens < 0 {
+		return 0, 0, 0, apperror.New(apperror.CodeFailedPrecondition, "provider returned negative token usage")
+	}
+	input := int64(usage.InputTokens)
+	output := int64(usage.OutputTokens)
+	total := int64(usage.TotalTokens)
+	combined, err := supervisorAddCounter(input, output, "provider token usage")
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if total < combined {
+		total = combined
+	}
+	return input, output, total, nil
+}
+
+func supervisorAddCounter(current, delta int64, name string) (int64, error) {
+	if current < 0 || delta < 0 {
+		return 0, apperror.New(apperror.CodeFailedPrecondition, name+" counter cannot be negative")
+	}
+	if delta > (1<<63-1)-current {
+		return 0, apperror.New(apperror.CodeResourceExhausted, name+" counter overflow")
+	}
+	return current + delta, nil
+}
+
+func supervisorElapsedMillis(elapsed time.Duration) (int64, error) {
+	if elapsed < 0 {
+		return 0, apperror.New(apperror.CodeInvalidArgument, "supervisor elapsed time cannot be negative")
+	}
+	millis := elapsed.Milliseconds()
+	if elapsed > 0 && millis == 0 {
+		millis = 1
+	}
+	return millis, nil
 }

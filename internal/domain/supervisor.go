@@ -10,18 +10,24 @@ import (
 type SupervisorPhase string
 
 const (
-	SupervisorIdle        SupervisorPhase = "idle"
-	SupervisorTurnStarted SupervisorPhase = "turn_started"
-	SupervisorTurnFailed  SupervisorPhase = "turn_failed"
+	SupervisorIdle         SupervisorPhase = "idle"
+	SupervisorTurnStarted  SupervisorPhase = "turn_started"
+	SupervisorTurnFailed   SupervisorPhase = "turn_failed"
+	SupervisorRunCompleted SupervisorPhase = "run_completed"
+	SupervisorRunFailed    SupervisorPhase = "run_failed"
 )
 
 type SupervisorCheckpoint struct {
-	RunID     string
-	NextTurn  int
-	Phase     SupervisorPhase
-	AttemptID string
-	LastError string
-	UpdatedAt time.Time
+	RunID           string
+	NextTurn        int
+	Phase           SupervisorPhase
+	AttemptID       string
+	LastError       string
+	InputTokens     int64
+	OutputTokens    int64
+	TotalTokens     int64
+	ExecutionMillis int64
+	UpdatedAt       time.Time
 }
 
 type SupervisorTurn struct {
@@ -39,9 +45,9 @@ func (c SupervisorCheckpoint) Validate() error {
 		return errors.New("checkpoint next turn must be positive")
 	}
 	switch c.Phase {
-	case SupervisorIdle:
+	case SupervisorIdle, SupervisorRunCompleted, SupervisorRunFailed:
 		if strings.TrimSpace(c.AttemptID) != "" {
-			return errors.New("idle checkpoint cannot have an active attempt")
+			return fmt.Errorf("checkpoint phase %s cannot have an active attempt", c.Phase)
 		}
 	case SupervisorTurnStarted, SupervisorTurnFailed:
 		if strings.TrimSpace(c.AttemptID) == "" {
@@ -49,6 +55,9 @@ func (c SupervisorCheckpoint) Validate() error {
 		}
 	default:
 		return fmt.Errorf("invalid supervisor checkpoint phase %q", c.Phase)
+	}
+	if c.InputTokens < 0 || c.OutputTokens < 0 || c.TotalTokens < 0 || c.ExecutionMillis < 0 {
+		return errors.New("checkpoint usage counters cannot be negative")
 	}
 	if c.UpdatedAt.IsZero() {
 		return errors.New("checkpoint timestamp is required")

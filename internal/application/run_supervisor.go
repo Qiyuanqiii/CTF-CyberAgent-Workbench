@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/domain"
@@ -18,8 +19,9 @@ const maxSupervisorHistoryMessages = 20
 
 type SupervisorStore interface {
 	BeginSupervisorTurn(ctx context.Context, runID string) (domain.SupervisorTurn, error)
-	CompleteSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string, response llm.ChatResponse, decision policy.Decision) (domain.SupervisorCheckpoint, error)
-	FailSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, cause string) (domain.SupervisorCheckpoint, error)
+	CompleteSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string, response llm.ChatResponse, decision policy.Decision, elapsed time.Duration) (domain.SupervisorCheckpoint, error)
+	FailSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, cause string, elapsed time.Duration) (domain.SupervisorCheckpoint, error)
+	FinalizeSupervisorRun(ctx context.Context, runID string, target domain.RunStatus, summary string) (domain.Run, domain.SupervisorCheckpoint, error)
 	GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error)
 	GetRun(ctx context.Context, id string) (domain.Run, error)
 	ListSessionMessages(ctx context.Context, sessionID string, includeCompacted bool) ([]session.Message, error)
@@ -51,6 +53,27 @@ type LifecycleResult struct {
 	Checkpoint domain.SupervisorCheckpoint
 }
 
+type LifecycleOutcome string
+
+const (
+	LifecycleOutcomeCompleted LifecycleOutcome = "completed"
+	LifecycleOutcomeFailed    LifecycleOutcome = "failed"
+)
+
+type FinalizationResult struct {
+	Run        domain.Run
+	Checkpoint domain.SupervisorCheckpoint
+	Outcome    LifecycleOutcome
+	Summary    string
+}
+
+type ExecutionResult struct {
+	RunID      string
+	Steps      []LifecycleResult
+	StopReason string
+	RunStatus  domain.RunStatus
+}
+
 type RunSupervisor struct {
 	store   SupervisorStore
 	router  *llm.Router
@@ -79,7 +102,7 @@ func (s *RunSupervisor) Step(ctx context.Context, runID string) (LifecycleResult
 	}
 	history, err := s.store.ListSessionMessages(ctx, turn.Run.SessionID, false)
 	if err != nil {
-		failure := s.recordFailure(ctx, &result, err)
+		failure := s.recordFailure(ctx, &result, err, 0)
 		return result, failure
 	}
 	input := supervisorTurnInput(turn.Mission.Goal, turn.Checkpoint.NextTurn)
@@ -90,12 +113,29 @@ func (s *RunSupervisor) Step(ctx context.Context, runID string) (LifecycleResult
 			"turn": fmt.Sprint(turn.Checkpoint.NextTurn), "attempt_id": turn.Checkpoint.AttemptID,
 		},
 	}
-	response, err := supervisorChat(ctx, s.router, turn.Run.Config.ModelRoute, request)
+	if turn.Run.Budget.MaxTokens > 0 {
+		remaining := turn.Run.Budget.MaxTokens - turn.Checkpoint.TotalTokens
+		maxInt := int64(int(^uint(0) >> 1))
+		if remaining > maxInt {
+			remaining = maxInt
+		}
+		request.MaxTokens = int(remaining)
+	}
+	callCtx, cancel := supervisorModelContext(ctx, turn.Run.Budget, turn.Checkpoint)
+	startedAt := time.Now()
+	response, err := supervisorChat(callCtx, s.router, turn.Run.Config.ModelRoute, request)
+	elapsed := time.Since(startedAt)
+	cancel()
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if ctx.Err() != nil {
 			return result, apperror.Normalize(err)
 		}
-		failure := s.recordFailure(ctx, &result, err)
+		failure := s.recordFailure(ctx, &result, err, elapsed)
+		return result, failure
+	}
+	if response == nil {
+		err := apperror.New(apperror.CodeFailedPrecondition, "provider returned an empty response")
+		failure := s.recordFailure(ctx, &result, err, elapsed)
 		return result, failure
 	}
 	if err := ctx.Err(); err != nil {
@@ -103,18 +143,23 @@ func (s *RunSupervisor) Step(ctx context.Context, runID string) (LifecycleResult
 	}
 	if len(response.ToolCalls) > 0 {
 		err := apperror.New(apperror.CodeFailedPrecondition, "tool calls are disabled in the P2 supervisor foundation")
-		failure := s.recordFailure(ctx, &result, err)
+		failure := s.recordFailure(ctx, &result, err, elapsed)
+		return result, failure
+	}
+	if response.Usage.InputTokens < 0 || response.Usage.OutputTokens < 0 || response.Usage.TotalTokens < 0 {
+		err := apperror.New(apperror.CodeFailedPrecondition, "provider returned negative token usage")
+		failure := s.recordFailure(ctx, &result, err, elapsed)
 		return result, failure
 	}
 	decision := s.checker.CheckText("supervisor_assistant_response", response.Text)
 	if !decision.Allowed {
 		err := apperror.New(apperror.CodePolicyDenied, "policy denied supervisor response: "+decision.Reason)
-		failure := s.recordFailure(ctx, &result, err)
+		failure := s.recordFailure(ctx, &result, err, elapsed)
 		return result, failure
 	}
 	safeResponse := *response
 	safeResponse.Text = redact.String(response.Text)
-	checkpoint, err := s.store.CompleteSupervisorTurn(ctx, turn.Checkpoint, input, safeResponse, decision)
+	checkpoint, err := s.store.CompleteSupervisorTurn(ctx, turn.Checkpoint, input, safeResponse, decision, elapsed)
 	if err != nil {
 		return result, apperror.Normalize(err)
 	}
@@ -125,6 +170,62 @@ func (s *RunSupervisor) Step(ctx context.Context, runID string) (LifecycleResult
 	result.Usage = response.Usage
 	result.Checkpoint = checkpoint
 	return result, nil
+}
+
+func (s *RunSupervisor) Execute(ctx context.Context, runID string, maxSteps int) (ExecutionResult, error) {
+	if s == nil || s.store == nil || s.router == nil || s.checker == nil {
+		return ExecutionResult{}, apperror.New(apperror.CodeFailedPrecondition, "run supervisor dependencies are required")
+	}
+	if maxSteps <= 0 {
+		return ExecutionResult{}, apperror.New(apperror.CodeInvalidArgument, "max steps must be positive")
+	}
+	result := ExecutionResult{RunID: strings.TrimSpace(runID), Steps: make([]LifecycleResult, 0)}
+	for range maxSteps {
+		run, err := s.store.GetRun(ctx, result.RunID)
+		if err != nil {
+			return result, apperror.Normalize(err)
+		}
+		result.RunStatus = run.Status
+		if run.Terminal() {
+			result.StopReason = "run_terminal"
+			return result, nil
+		}
+		step, err := s.Step(ctx, result.RunID)
+		if step.Turn > 0 {
+			result.Steps = append(result.Steps, step)
+		}
+		if err != nil {
+			result.StopReason = strings.ToLower(string(apperror.CodeOf(err)))
+			return result, err
+		}
+	}
+	run, err := s.store.GetRun(ctx, result.RunID)
+	if err != nil {
+		return result, apperror.Normalize(err)
+	}
+	result.RunStatus = run.Status
+	result.StopReason = "step_limit"
+	return result, nil
+}
+
+func (s *RunSupervisor) Finalize(ctx context.Context, runID string, outcome LifecycleOutcome, summary string) (FinalizationResult, error) {
+	if s == nil || s.store == nil {
+		return FinalizationResult{}, apperror.New(apperror.CodeFailedPrecondition, "run supervisor store is required")
+	}
+	var target domain.RunStatus
+	switch outcome {
+	case LifecycleOutcomeCompleted:
+		target = domain.RunCompleted
+	case LifecycleOutcomeFailed:
+		target = domain.RunFailed
+	default:
+		return FinalizationResult{}, apperror.New(apperror.CodeInvalidArgument, "lifecycle outcome must be completed or failed")
+	}
+	run, checkpoint, err := s.store.FinalizeSupervisorRun(ctx, strings.TrimSpace(runID), target, summary)
+	if err != nil {
+		return FinalizationResult{}, apperror.Normalize(err)
+	}
+	return FinalizationResult{Run: run, Checkpoint: checkpoint, Outcome: outcome, Summary: redact.String(strings.TrimSpace(summary))}, nil
 }
 
 func (s *RunSupervisor) Checkpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error) {
@@ -145,15 +246,26 @@ func (s *RunSupervisor) Checkpoint(ctx context.Context, runID string) (domain.Su
 	return domain.SupervisorCheckpoint{}, false, nil
 }
 
-func (s *RunSupervisor) recordFailure(ctx context.Context, result *LifecycleResult, cause error) error {
+func (s *RunSupervisor) recordFailure(ctx context.Context, result *LifecycleResult, cause error, elapsed time.Duration) error {
 	classified := apperror.Normalize(cause)
 	safeCause := apperror.Wrap(apperror.CodeOf(classified), redact.String(classified.Error()), classified)
-	checkpoint, err := s.store.FailSupervisorTurn(ctx, result.Checkpoint, safeCause.Error())
+	checkpoint, err := s.store.FailSupervisorTurn(ctx, result.Checkpoint, safeCause.Error(), elapsed)
 	if err != nil {
 		return errors.Join(safeCause, err)
 	}
 	result.Checkpoint = checkpoint
 	return safeCause
+}
+
+func supervisorModelContext(ctx context.Context, budget domain.Budget, checkpoint domain.SupervisorCheckpoint) (context.Context, context.CancelFunc) {
+	if budget.TimeoutSeconds <= 0 {
+		return context.WithCancel(ctx)
+	}
+	remainingMillis := budget.TimeoutSeconds*1000 - checkpoint.ExecutionMillis
+	if remainingMillis <= 0 {
+		remainingMillis = 1
+	}
+	return context.WithTimeout(ctx, time.Duration(remainingMillis)*time.Millisecond)
 }
 
 func supervisorTurnInput(goal string, turn int) string {

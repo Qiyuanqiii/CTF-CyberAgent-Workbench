@@ -55,3 +55,11 @@ func TestScopeRejectsUnrestrictedNetwork(t *testing.T) {
 		t.Fatal("expected unrestricted network to be rejected")
 	}
 }
+
+func TestBudgetRejectsTimeoutDurationOverflow(t *testing.T) {
+	budget := DefaultBudget()
+	budget.TimeoutSeconds = int64((1<<63-1)/int64(time.Second)) + 1
+	if err := budget.Validate(); err == nil {
+		t.Fatal("expected oversized timeout to be rejected")
+	}
+}

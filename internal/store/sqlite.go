@@ -190,6 +190,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 3, Name: "run session projection", Statements: runSessionProjectionStatements},
 		{Version: 4, Name: "legacy task run mapping", Statements: legacyTaskRunStatements},
 		{Version: 5, Name: "supervisor checkpoints", Statements: supervisorCheckpointStatements},
+		{Version: 6, Name: "supervisor budget ledger", Statements: supervisorBudgetStatements},
 	})
 }
 

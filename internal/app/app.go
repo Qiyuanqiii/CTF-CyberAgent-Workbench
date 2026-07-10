@@ -168,7 +168,7 @@ func (a *App) printHelp() {
 	fmt.Fprintln(a.out, "  cyberagent session create|list|send|history")
 	fmt.Fprintln(a.out, "  cyberagent tool list|show|approve|deny")
 	fmt.Fprintln(a.out, "  cyberagent edit propose|list|show|approve|deny")
-	fmt.Fprintln(a.out, "  cyberagent run create|adapt-task|list|show|events|start|step|checkpoint|pause|resume|cancel")
+	fmt.Fprintln(a.out, "  cyberagent run create|adapt-task|list|show|events|start|step|execute|checkpoint|finish|fail|pause|resume|cancel")
 	fmt.Fprintln(a.out, "  cyberagent tui")
 }
 

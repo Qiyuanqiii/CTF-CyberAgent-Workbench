@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
@@ -123,7 +124,7 @@ func TestRunSupervisorRecoversStartedTurnAcrossStoreRestart(t *testing.T) {
 	if countEventType(before, events.AgentTurnStartedEvent) != 1 || countEventType(before, events.AgentTurnCompletedEvent) != 1 {
 		t.Fatalf("recovery duplicated lifecycle events: %#v", before)
 	}
-	checkpoint, err := st.CompleteSupervisorTurn(ctx, started.Checkpoint, "ignored duplicate", llm.ChatResponse{Text: "ignored", Provider: "mock", Model: "mock-code"}, policy.Decision{Allowed: true, Reason: "allowed"})
+	checkpoint, err := st.CompleteSupervisorTurn(ctx, started.Checkpoint, "ignored duplicate", llm.ChatResponse{Text: "ignored", Provider: "mock", Model: "mock-code"}, policy.Decision{Allowed: true, Reason: "allowed"}, 0)
 	if err != nil || checkpoint.NextTurn != 2 {
 		t.Fatalf("idempotent completion failed checkpoint=%#v err=%v", checkpoint, err)
 	}
@@ -176,6 +177,13 @@ func TestRunSupervisorRejectsToolCallsWithoutExecution(t *testing.T) {
 	}
 	if countEventType(items, events.AgentTurnFailedEvent) != 1 || countEventType(items, events.AgentTurnCompletedEvent) != 0 {
 		t.Fatalf("unexpected failed-turn events: %#v", items)
+	}
+	finalized, err := supervisor.Finalize(ctx, run.ID, application.LifecycleOutcomeFailed, "tool call rejected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finalized.Run.Status != domain.RunFailed || finalized.Checkpoint.Phase != domain.SupervisorRunFailed {
+		t.Fatalf("failed turn did not finalize: %#v", finalized)
 	}
 }
 
@@ -242,6 +250,223 @@ func TestRunSupervisorRedactsImmediateAndPersistedResponse(t *testing.T) {
 		if strings.Contains(message.Content, token[:11]) {
 			t.Fatalf("persisted response contained secret: %#v", messages)
 		}
+	}
+}
+
+func TestRunSupervisorRejectsNilProviderResponse(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	service := application.NewRunService(st)
+	_, run, err := service.Create(ctx, application.CreateRunRequest{
+		Goal: "nil provider response", Profile: "review", ModelRoute: "nil-test/model", Budget: domain.Budget{MaxTurns: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	router := llm.NewRouter(llm.ModelRef{Provider: "nil-test", Model: "model"})
+	router.RegisterProvider(nilResponseProvider{})
+	result, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID)
+	if apperror.CodeOf(err) != apperror.CodeFailedPrecondition || result.Checkpoint.Phase != domain.SupervisorTurnFailed {
+		t.Fatalf("nil response was not checkpointed safely result=%#v code=%s err=%v", result, apperror.CodeOf(err), err)
+	}
+}
+
+func TestRunSupervisorTracksAndEnforcesTokenBudget(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	service := application.NewRunService(st)
+	_, run, err := service.Create(ctx, application.CreateRunRequest{
+		Goal: "token budget", Profile: "code", ModelRoute: "usage-test/model",
+		Budget: domain.Budget{MaxTurns: 3, MaxTokens: 5},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	provider := &fixedUsageProvider{}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	supervisor := application.NewRunSupervisor(st, router, policy.NewDefaultChecker())
+	result, err := supervisor.Step(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.lastMaxTokens != 5 {
+		t.Fatalf("remaining token budget was not forwarded: %d", provider.lastMaxTokens)
+	}
+	if result.Checkpoint.InputTokens != 2 || result.Checkpoint.OutputTokens != 3 || result.Checkpoint.TotalTokens != 5 || result.Checkpoint.ExecutionMillis < 0 {
+		t.Fatalf("usage was not accumulated: %#v", result.Checkpoint)
+	}
+	if _, err := supervisor.Step(ctx, run.ID); apperror.CodeOf(err) != apperror.CodeResourceExhausted {
+		t.Fatalf("unexpected token budget error code=%s err=%v", apperror.CodeOf(err), err)
+	}
+}
+
+func TestRunSupervisorEnforcesPersistedExecutionTimeout(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	service := application.NewRunService(st)
+	_, run, err := service.Create(ctx, application.CreateRunRequest{
+		Goal: "timeout budget", Profile: "learn", Budget: domain.Budget{MaxTurns: 3, TimeoutSeconds: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := st.BeginSupervisorTurn(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, err := st.FailSupervisorTurn(ctx, turn.Checkpoint, "simulated timeout", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checkpoint.ExecutionMillis != 1000 {
+		t.Fatalf("elapsed execution time was not persisted: %#v", checkpoint)
+	}
+	supervisor := application.NewRunSupervisor(st, llm.NewDefaultRouter(), policy.NewDefaultChecker())
+	if _, err := supervisor.Step(ctx, run.ID); apperror.CodeOf(err) != apperror.CodeDeadlineExceeded {
+		t.Fatalf("unexpected timeout code=%s err=%v", apperror.CodeOf(err), err)
+	}
+}
+
+func TestRunSupervisorAppliesRemainingExecutionDeadline(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	service := application.NewRunService(st)
+	_, run, err := service.Create(ctx, application.CreateRunRequest{
+		Goal: "remaining deadline", Profile: "learn", ModelRoute: "blocking-test/model",
+		Budget: domain.Budget{MaxTurns: 3, TimeoutSeconds: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := st.BeginSupervisorTurn(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.FailSupervisorTurn(ctx, turn.Checkpoint, "consume time", 999*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	router := llm.NewRouter(llm.ModelRef{Provider: "blocking-test", Model: "model"})
+	router.RegisterProvider(blockingProvider{})
+	result, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID)
+	if apperror.CodeOf(err) != apperror.CodeDeadlineExceeded {
+		t.Fatalf("unexpected child deadline code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	if result.Checkpoint.Phase != domain.SupervisorTurnFailed || result.Checkpoint.ExecutionMillis < 1000 {
+		t.Fatalf("deadline failure did not accumulate elapsed time: %#v", result)
+	}
+}
+
+func TestRunSupervisorFinalizationIsAtomicAndIdempotent(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	service := application.NewRunService(st)
+	_, run, err := service.Create(ctx, application.CreateRunRequest{
+		Goal: "finalize supervisor", Profile: "review", Budget: domain.Budget{MaxTurns: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	supervisor := application.NewRunSupervisor(st, llm.NewDefaultRouter(), policy.NewDefaultChecker())
+	if _, err := supervisor.Step(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	finalized, err := supervisor.Finalize(ctx, run.ID, application.LifecycleOutcomeCompleted, "review complete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finalized.Run.Status != domain.RunCompleted || finalized.Run.FinishedAt == nil || finalized.Checkpoint.Phase != domain.SupervisorRunCompleted {
+		t.Fatalf("unexpected finalization: %#v", finalized)
+	}
+	before, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countEventType(before, events.SupervisorRunCompletedEvent) != 1 {
+		t.Fatalf("missing supervisor completion event: %#v", before)
+	}
+	if _, err := supervisor.Finalize(ctx, run.ID, application.LifecycleOutcomeCompleted, "repeat"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("repeat finalization appended events: before=%d after=%d", len(before), len(after))
+	}
+	if _, err := supervisor.Step(ctx, run.ID); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("terminal run accepted a step code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	maxInt := int(^uint(0) >> 1)
+	execution, err := supervisor.Execute(ctx, run.ID, maxInt)
+	if err != nil {
+		t.Fatalf("execute terminal run: %v", err)
+	}
+	if execution.StopReason != "run_terminal" || len(execution.Steps) != 0 {
+		t.Fatalf("unexpected terminal execution result: %#v", execution)
+	}
+}
+
+func TestRunSupervisorExecuteStopsAtBoundedStepLimit(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	service := application.NewRunService(st)
+	_, run, err := service.Create(ctx, application.CreateRunRequest{
+		Goal: "bounded execution", Profile: "code", Budget: domain.Budget{MaxTurns: 4},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	supervisor := application.NewRunSupervisor(st, llm.NewDefaultRouter(), policy.NewDefaultChecker())
+	result, err := supervisor.Execute(ctx, run.ID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Steps) != 2 || result.StopReason != "step_limit" || result.RunStatus != domain.RunRunning || result.Steps[1].Checkpoint.NextTurn != 3 {
+		t.Fatalf("unexpected bounded execution: %#v", result)
 	}
 }
 
@@ -313,3 +538,78 @@ func (p secretResponseProvider) StreamChat(ctx context.Context, req llm.ChatRequ
 func (secretResponseProvider) SupportsTools(string) bool    { return false }
 func (secretResponseProvider) SupportsVision(string) bool   { return false }
 func (secretResponseProvider) SupportsJSONMode(string) bool { return false }
+
+type fixedUsageProvider struct {
+	lastMaxTokens int
+}
+
+func (*fixedUsageProvider) Name() string { return "usage-test" }
+
+func (*fixedUsageProvider) ListModels(context.Context) ([]llm.ModelInfo, error) {
+	return []llm.ModelInfo{{ID: "model", Provider: "usage-test"}}, nil
+}
+
+func (p *fixedUsageProvider) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	p.lastMaxTokens = req.MaxTokens
+	return &llm.ChatResponse{
+		Text: "bounded response", Provider: p.Name(), Model: "model",
+		Usage: llm.Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5},
+	}, nil
+}
+
+func (p *fixedUsageProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (<-chan llm.ChatChunk, error) {
+	response, err := p.Chat(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	chunks := make(chan llm.ChatChunk, 1)
+	chunks <- llm.ChatChunk{Text: response.Text, Done: true}
+	close(chunks)
+	return chunks, nil
+}
+
+func (*fixedUsageProvider) SupportsTools(string) bool    { return false }
+func (*fixedUsageProvider) SupportsVision(string) bool   { return false }
+func (*fixedUsageProvider) SupportsJSONMode(string) bool { return false }
+
+type blockingProvider struct{}
+
+func (blockingProvider) Name() string { return "blocking-test" }
+
+func (blockingProvider) ListModels(context.Context) ([]llm.ModelInfo, error) {
+	return []llm.ModelInfo{{ID: "model", Provider: "blocking-test"}}, nil
+}
+
+func (blockingProvider) Chat(ctx context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (p blockingProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (<-chan llm.ChatChunk, error) {
+	_, err := p.Chat(ctx, req)
+	return nil, err
+}
+
+func (blockingProvider) SupportsTools(string) bool    { return false }
+func (blockingProvider) SupportsVision(string) bool   { return false }
+func (blockingProvider) SupportsJSONMode(string) bool { return false }
+
+type nilResponseProvider struct{}
+
+func (nilResponseProvider) Name() string { return "nil-test" }
+
+func (nilResponseProvider) ListModels(context.Context) ([]llm.ModelInfo, error) {
+	return []llm.ModelInfo{{ID: "model", Provider: "nil-test"}}, nil
+}
+
+func (nilResponseProvider) Chat(context.Context, llm.ChatRequest) (*llm.ChatResponse, error) {
+	return nil, nil
+}
+
+func (nilResponseProvider) StreamChat(context.Context, llm.ChatRequest) (<-chan llm.ChatChunk, error) {
+	return nil, nil
+}
+
+func (nilResponseProvider) SupportsTools(string) bool    { return false }
+func (nilResponseProvider) SupportsVision(string) bool   { return false }
+func (nilResponseProvider) SupportsJSONMode(string) bool { return false }

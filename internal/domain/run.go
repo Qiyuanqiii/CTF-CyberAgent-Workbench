@@ -76,6 +76,9 @@ func (b Budget) Validate() error {
 	if b.MaxTokens < 0 || b.MaxCostUSD < 0 || b.TimeoutSeconds < 0 {
 		return errors.New("budget limits cannot be negative")
 	}
+	if b.TimeoutSeconds > int64((1<<63-1)/int64(time.Second)) {
+		return errors.New("timeout exceeds supported duration")
+	}
 	if math.IsNaN(b.MaxCostUSD) || math.IsInf(b.MaxCostUSD, 0) {
 		return errors.New("max cost must be a finite number")
 	}

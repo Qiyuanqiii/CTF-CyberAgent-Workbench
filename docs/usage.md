@@ -12,6 +12,10 @@ cyberagent run show <run-id>
 cyberagent run events <run-id>
 cyberagent run start <run-id>
 cyberagent run step <run-id>
+cyberagent run execute <run-id> --max-steps 3
+cyberagent run execute <run-id> --max-steps 3 --finish --summary "planning complete"
+cyberagent run finish <run-id> --summary "review complete"
+cyberagent run fail <run-id> --reason "blocked by provider"
 cyberagent run checkpoint <run-id>
 cyberagent run pause <run-id>
 cyberagent run resume <run-id>
@@ -22,7 +26,11 @@ A Mission is the stable goal and authorization scope. A Run is one resumable exe
 
 Session messages, assistant policy decisions, ToolRun changes, and FileEdit changes are projected into `run events` transactionally. Activity carrying a workspace different from the Run scope is rejected. `run start` advances the lifecycle from `created` through `preparing` to `running`; it does not invoke a model by itself.
 
-`run step` asks the RunSupervisor to execute exactly one root Agent planning turn. It writes a `turn_started` checkpoint before the model call, rejects tool calls, and atomically stores the user/assistant messages, policy decision, model usage, completion event, and next-turn checkpoint. `run checkpoint` displays the durable phase and next turn. A process restart resumes an unfinished started turn; a committed turn is never appended twice. Turn budget exhaustion returns exit code 8.
+`run step` asks the RunSupervisor to execute exactly one root Agent planning turn. It writes a `turn_started` checkpoint before the model call, rejects tool calls, and atomically stores the user/assistant messages, policy decision, model usage, completion event, cumulative token/model-time counters, and next-turn checkpoint. `run checkpoint` displays the durable phase, next turn, token counters, and execution milliseconds. A process restart resumes an unfinished started turn; a committed turn is never appended twice. Turn or token budget exhaustion returns exit code 8, while the persisted execution-time boundary returns a deadline error.
+
+`run execute` repeats that same durable step up to `--max-steps`; it is bounded and never turns model prose into a terminal state. `--finish` explicitly completes the Run after the requested steps succeed. `run finish` and `run fail` are operator lifecycle commands and atomically update the Run, Supervisor checkpoint, and event stream. Repeating the same terminal command is idempotent, while a conflicting terminal transition is rejected.
+
+Before each model call, the Supervisor passes the remaining token allowance as the request limit and applies the remaining persisted model-execution deadline. Provider-reported usage is authoritative: if one call exceeds the remaining token allowance, its full actual usage is committed and subsequent calls are blocked. `MaxCostUSD` and tool-call budgets are configuration fields only until provider pricing and the unified Tool Gateway are available.
 
 `run adapt-task` converts a v0.1 `agent.Task` into a new Mission, Run, and Session. The mapping is transactional and keyed by Task ID, so repeated or concurrent calls return the same Run and append only one `legacy.task_adapted` event. Historical task status is recorded for audit, but the new Run always starts at `created` and never executes implicitly. Legacy CTF tasks map to the safe generic `review` profile until the dedicated CTF phase.
 

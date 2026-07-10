@@ -34,8 +34,14 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runEvents(ctx, service, args[1:])
 	case "step":
 		return a.runSupervisorStep(ctx, args[1:])
+	case "execute":
+		return a.runSupervisorExecute(ctx, args[1:])
 	case "checkpoint":
 		return a.runSupervisorCheckpoint(ctx, args[1:])
+	case "finish":
+		return a.runSupervisorFinalize(ctx, application.LifecycleOutcomeCompleted, args[1:])
+	case "fail":
+		return a.runSupervisorFinalize(ctx, application.LifecycleOutcomeFailed, args[1:])
 	case "start":
 		return a.runTransition(ctx, service, "start", args[1:])
 	case "pause":
@@ -61,10 +67,72 @@ func (a *App) runSupervisorStep(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(a.out, "run %s turn %d completed\nattempt: %s\nrecovered: %t\nprovider: %s\nmodel: %s\nusage: input=%d output=%d total=%d\nnext_turn: %d\nresponse: %s\n",
+	fmt.Fprintf(a.out, "run %s turn %d completed\nattempt: %s\nrecovered: %t\nprovider: %s\nmodel: %s\nusage: input=%d output=%d total=%d\ncumulative_tokens: %d\nexecution_millis: %d\nnext_turn: %d\nresponse: %s\n",
 		result.Handle.RunID, result.Turn, result.AttemptID, result.Recovered, result.Provider, result.Model,
 		result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.TotalTokens,
-		result.Checkpoint.NextTurn, result.Text)
+		result.Checkpoint.TotalTokens, result.Checkpoint.ExecutionMillis, result.Checkpoint.NextTurn, result.Text)
+	return nil
+}
+
+func (a *App) runSupervisorExecute(ctx context.Context, args []string) error {
+	fs := newFlagSet("run execute", a.errOut)
+	maxSteps := fs.Int("max-steps", 1, "maximum supervised turns in this invocation")
+	finish := fs.Bool("finish", false, "finalize the run as completed after the step limit")
+	summary := fs.String("summary", "", "completion summary used with --finish")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{"max-steps": true, "finish": false, "summary": true})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 || *maxSteps <= 0 {
+		return errors.New("usage: cyberagent run execute <run-id> [--max-steps <n>] [--finish] [--summary <text>]")
+	}
+	supervisor := application.NewRunSupervisor(a.store, a.router, a.checker)
+	result, err := supervisor.Execute(ctx, fs.Arg(0), *maxSteps)
+	for _, step := range result.Steps {
+		fmt.Fprintf(a.out, "turn %d\t%s/%s\ttokens=%d\tnext=%d\n",
+			step.Turn, step.Provider, step.Model, step.Usage.TotalTokens, step.Checkpoint.NextTurn)
+	}
+	if err != nil {
+		fmt.Fprintf(a.out, "execution stopped: %s\n", result.StopReason)
+		return err
+	}
+	if *finish {
+		completionSummary := strings.TrimSpace(*summary)
+		if completionSummary == "" {
+			completionSummary = fmt.Sprintf("operator finalized after %d supervised turn(s)", len(result.Steps))
+		}
+		finalized, err := supervisor.Finalize(ctx, fs.Arg(0), application.LifecycleOutcomeCompleted, completionSummary)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(a.out, "run %s finalized: %s\n", finalized.Run.ID, finalized.Run.Status)
+		return nil
+	}
+	fmt.Fprintf(a.out, "execution stopped: %s\nrun_status: %s\n", result.StopReason, result.RunStatus)
+	return nil
+}
+
+func (a *App) runSupervisorFinalize(ctx context.Context, outcome application.LifecycleOutcome, args []string) error {
+	name := "finish"
+	flagName := "summary"
+	if outcome == application.LifecycleOutcomeFailed {
+		name = "fail"
+		flagName = "reason"
+	}
+	fs := newFlagSet("run "+name, a.errOut)
+	text := fs.String(flagName, "", flagName+" text")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{flagName: true})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: cyberagent run %s <run-id> [--%s <text>]", name, flagName)
+	}
+	result, err := application.NewRunSupervisor(a.store, a.router, a.checker).Finalize(ctx, fs.Arg(0), outcome, *text)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "run %s finalized: %s\nphase: %s\nturns_completed: %d\ntotal_tokens: %d\nexecution_millis: %d\n",
+		result.Run.ID, result.Run.Status, result.Checkpoint.Phase, result.Checkpoint.NextTurn-1,
+		result.Checkpoint.TotalTokens, result.Checkpoint.ExecutionMillis)
 	return nil
 }
 
@@ -84,9 +152,10 @@ func (a *App) runSupervisorCheckpoint(ctx context.Context, args []string) error 
 		fmt.Fprintf(a.out, "run %s has no supervisor checkpoint\n", fs.Arg(0))
 		return nil
 	}
-	fmt.Fprintf(a.out, "run: %s\nphase: %s\nnext_turn: %d\nattempt: %s\nlast_error: %s\nupdated_at: %s\n",
+	fmt.Fprintf(a.out, "run: %s\nphase: %s\nnext_turn: %d\nattempt: %s\nlast_error: %s\ninput_tokens: %d\noutput_tokens: %d\ntotal_tokens: %d\nexecution_millis: %d\nupdated_at: %s\n",
 		checkpoint.RunID, checkpoint.Phase, checkpoint.NextTurn, checkpoint.AttemptID,
-		checkpoint.LastError, checkpoint.UpdatedAt.Format(time.RFC3339))
+		checkpoint.LastError, checkpoint.InputTokens, checkpoint.OutputTokens,
+		checkpoint.TotalTokens, checkpoint.ExecutionMillis, checkpoint.UpdatedAt.Format(time.RFC3339))
 	return nil
 }
 

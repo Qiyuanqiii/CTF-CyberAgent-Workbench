@@ -29,9 +29,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 53%.
+- Overall product vision: about 57%.
 - v0.1 generic agent MVP: about 98%.
-- V2 run-centric runtime: about 52%.
+- V2 run-centric runtime: about 58%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -66,7 +66,7 @@ Completed:
 - Accepted ADR 0002: Mission/Run aggregates, RunSupervisor, a single AgentCoordinator, structured WorkItems/Notes/Findings, lifecycle actions, and a unified event stream.
 - Reworked `docs/architecture.md` around run-scoped budget, event, sandbox, report, approval, and recovery ownership without copying the reference implementation.
 - Added `docs/TASK_BOOK.md` with phased migration tasks, acceptance criteria, compatibility rules, and CTF deferred to the final phase.
-- Versioned SQLite migrations through schema v5: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, and Supervisor checkpoints; each version is checksummed and transactional.
+- Versioned SQLite migrations through schema v6: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, and cumulative budget counters; each version is checksummed and transactional.
 - Migration tests cover idempotence, legacy data preservation, checksum history, and failed-migration rollback.
 - Unified `internal/idgen` now backs agent tasks, sessions, tool runs, file edits, Mission/Run, and event IDs.
 - Added pure Go Mission, Scope, Budget, RunConfig, Run status machine, and legal transition checks.
@@ -89,6 +89,12 @@ Completed:
 - Started turns recover across Store/process restart; repeated completion is idempotent and committed turns are not duplicated.
 - MaxTurns and preflight cancellation are enforced before model calls; tool calls are rejected and never create ToolRuns in this slice.
 - Immediate Supervisor responses and persisted responses share the same secret-redaction boundary.
+- Added schema v6 cumulative input/output/total token counters and model-execution milliseconds to durable Supervisor checkpoints.
+- MaxTokens and TimeoutSeconds are checked before each call; remaining tokens and model-call time are passed to the Provider boundary.
+- Added a bounded `run execute` loop with an explicit step ceiling and structured stop reason.
+- Added atomic, idempotent operator-controlled `run finish` and `run fail` transitions across Run status, Supervisor checkpoint, and event stream.
+- Provider nil responses and negative token usage are rejected and checkpointed instead of reaching persistence.
+- Counter accumulation rejects integer overflow, and bounded execution no longer preallocates memory from an untrusted `--max-steps` value.
 
 Not done yet:
 
@@ -98,7 +104,7 @@ Not done yet:
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
-- Automatic Supervisor loop, cumulative token/cost/time budgets, root finalization, Work Board, Notes, AgentCoordinator, and Findings/Evidence.
+- Structured model-driven root lifecycle actions, provider cost/tool-call budgets, Work Board, Notes, AgentCoordinator, and Findings/Evidence.
 
 ## Code Audit Notes
 
@@ -115,11 +121,13 @@ Residual risks to address soon:
 - Session `/run` now creates a persisted tool proposal; approval still dry-runs by design. Real execution must flow through stricter workspace scoping, sandbox, and event logging.
 - Mimo API keys must remain env-only for tests; do not persist user keys until a real secrets backend exists.
 - Future Rust and TypeScript modules must not bypass Go for LLM, secrets, policy, workspace permissions, Docker, shell, network scope, or persistence.
-- `run start` advances lifecycle only; `run step` explicitly performs one supervised model turn. This separation remains intentional until bounded automatic execution is implemented.
+- `run start` advances lifecycle only; `run step` performs one model turn and `run execute` performs only the operator-selected number of durable steps.
 - A crash after the pre-call checkpoint can repeat a side-effect-free model request, but committed messages and completed turns are never duplicated. Tool calls stay disabled until execution idempotency exists.
 - Supervisor history is currently bounded by 20 messages, not a token-aware Context Builder budget.
-- MaxTurns is enforced, but cumulative token, cost, timeout, and tool-call budgets are not yet persisted or enforced.
-- Budget exhaustion leaves the Run in `running`; terminal finalization is part of the next P2 slice.
+- MaxCostUSD and tool-call budgets are not enforced until provider pricing metadata and the unified Tool Gateway exist.
+- ExecutionMillis measures Provider model-call time, not total wall-clock orchestration time.
+- One Provider response can exceed the remaining token allowance; actual usage is committed conservatively and the next call is blocked.
+- Budget exhaustion leaves the Run in `running` until an operator explicitly finishes, fails, or cancels it. Model text cannot self-finalize a Run.
 - Applied migration statements are immutable once released because their checksums are verified. Schema changes must always add a new migration version.
 - Schema v3 intentionally rejects duplicate non-empty Run/Session associations. A legacy database containing duplicates must be audited before upgrade instead of silently discarding an association.
 - `apperror.Normalize` includes a transitional text classifier for legacy plain errors. New services must return typed errors directly so future localization cannot affect classification.
@@ -133,6 +141,10 @@ go test ./...
 go run ./cmd/cyberagent run create "review this workspace" --workspace demo --profile review --max-turns 15
 go run ./cmd/cyberagent run start <run-id>
 go run ./cmd/cyberagent run step <run-id>
+go run ./cmd/cyberagent run execute <run-id> --max-steps 2
+go run ./cmd/cyberagent run execute <run-id> --max-steps 2 --finish --summary "planning complete"
+go run ./cmd/cyberagent run finish <run-id> --summary "review complete"
+go run ./cmd/cyberagent run fail <run-id> --reason "blocked by provider"
 go run ./cmd/cyberagent run checkpoint <run-id>
 go run ./cmd/cyberagent run pause <run-id>
 go run ./cmd/cyberagent run resume <run-id>
@@ -197,16 +209,17 @@ Expected context behavior:
 - TaskAdapter tests passed for repeated and eight-way concurrent adaptation, event order, unsupported legacy kinds, and a single persisted Run.
 - Isolated adapter CLI smoke passed across separate processes with one three-event timeline and stable exit codes `2` (invalid argument) and `3` (not found).
 - Legacy Task/Event Store-boundary redaction tests passed with runtime-generated token-shaped fixtures.
-- RunSupervisor tests passed for normal completion, schema v5 checkpoint persistence, MaxTurns rejection, cancellation before begin, tool-call rejection, immediate/persisted redaction, and idempotent completion.
+- RunSupervisor tests passed for normal completion, schema v6 checkpoint persistence, cumulative tokens, persisted execution timeout, remaining call deadline, bounded execution, atomic/idempotent finalization, MaxTurns rejection, cancellation before begin, nil response/negative usage rejection, tool-call rejection, and immediate/persisted redaction.
 - Restart recovery test persisted `turn_started`, closed and reopened SQLite, resumed the same attempt, and observed one `agent.turn_started` plus one `agent.turn_completed` event.
-- Isolated Supervisor CLI smoke passed across separate processes with `next_turn=2` and stable exit codes `4` (precondition) and `8` (budget exhausted).
+- Isolated Supervisor CLI smoke passed across separate processes with two bounded turns, completed/failed finalization, cumulative token exhaustion, and stable exit codes `4` (precondition) and `8` (budget exhausted).
+- Final gate passed with `go test -count=1 ./...`, `go vet ./...`, and targeted `go test -race` across error, domain, event, application, store, session, LLM, and app packages.
 
 ## Recommended Next Slice
 
-Continue P2 with durable budget and finalization semantics:
+Continue P2 with a structured root lifecycle protocol and one execution path:
 
-- Extend the checkpoint with cumulative input/output tokens and elapsed execution time.
-- Enforce MaxTokens and TimeoutSeconds before each new model call.
-- Add structured root completion/failure results and atomically transition Run to a terminal status.
-- Add a bounded `run execute` loop that stops on completion, budget, cancellation, policy, or approval boundaries.
+- Define schema-validated root actions for `continue`, `finish`, and `wait`.
+- Let only RunSupervisor interpret lifecycle actions and transition durable state.
+- Route existing Session chat model turns through RunSupervisor instead of calling Router directly.
+- Normalize provider retryability, rate-limit pauses, stream events, and cancellation behavior.
 - Keep tool execution and multi-agent concurrency disabled.
