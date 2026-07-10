@@ -128,9 +128,10 @@ Workspace file reads and model-bound messages pass through heuristic secret reda
 
 File changes use a separate approval boundary. `edit propose` and session `/write` persist a redacted diff without changing the workspace. `edit approve` re-resolves the workspace path and compares the current file hash with the proposal before writing, so stale proposals do not overwrite newer user changes.
 
-## Optional Mimo Provider
+## 可选在线 Provider / Optional Online Providers
 
-The CLI registers a `mimo` Anthropic-compatible provider only when `MIMO_API_KEY` exists in the current environment. Secrets are not written to repo files or SQLite.
+CLI 只在对应 API key 存在于当前进程环境时注册 `mimo` 或 `deepseek` Anthropic-compatible Provider。密钥不会写入仓库文件、SQLite 或 Run 事件。<br>
+The CLI registers the `mimo` and `deepseek` Anthropic-compatible providers only when their API keys exist in the current process environment. Keys are never written to repository files, SQLite, or Run events.
 
 ```powershell
 $env:MIMO_API_KEY = "<token-plan-key>"
@@ -138,4 +139,13 @@ $env:MIMO_BASE_URL = "https://token-plan-cn.xiaomimimo.com/anthropic"
 $env:MIMO_MODEL = "mimo-v2.5-pro"
 go run ./cmd/cyberagent provider list
 go run ./cmd/cyberagent provider test mimo/mimo-v2.5-pro
+
+$env:DEEPSEEK_API_KEY = "<deepseek-key>"
+$env:DEEPSEEK_BASE_URL = "https://api.deepseek.com/anthropic"
+$env:DEEPSEEK_MODEL = "deepseek-v4-flash"
+go run ./cmd/cyberagent provider list
+go run ./cmd/cyberagent provider test deepseek/deepseek-v4-flash
+go run ./cmd/cyberagent run create "review this workspace" --profile review --route deepseek/deepseek-v4-flash
 ```
+
+`DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL` are optional; their current defaults are the values shown above. Use `deepseek-v4-pro` explicitly when the higher-capability model is required. See the official [DeepSeek Anthropic API guide](https://api-docs.deepseek.com/guides/anthropic_api) for current compatibility and model details.

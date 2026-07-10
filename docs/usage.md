@@ -132,11 +132,12 @@ cyberagent ctf writeup baby-web
 cyberagent provider list
 cyberagent provider test
 cyberagent provider test mimo/mimo-v2.5-pro
+cyberagent provider test deepseek/deepseek-v4-flash
 cyberagent model list
 cyberagent model set script mock/mock-code
 ```
 
-`provider test` accepts either a route name, such as `learn`, or a direct `provider/model` reference. The optional `mimo` provider is registered from `MIMO_API_KEY`, `MIMO_BASE_URL`, and `MIMO_MODEL`.
+`provider test` accepts either a route name, such as `learn`, or a direct `provider/model` reference. The optional `mimo` provider is registered from `MIMO_API_KEY`, `MIMO_BASE_URL`, and `MIMO_MODEL`. The optional `deepseek` provider uses `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, and `DEEPSEEK_MODEL`; its defaults are `https://api.deepseek.com/anthropic` and `deepseek-v4-flash`. Only the API key is required.
 
 ## TUI
 
@@ -185,6 +186,7 @@ cyberagent session send <session-id> "summarize your current capabilities"
 cyberagent session send <session-id> "/help"
 cyberagent session send <session-id> "/model script"
 cyberagent session send <session-id> "/model mimo/mimo-v2.5-pro"
+cyberagent session send <session-id> "/model deepseek/deepseek-v4-flash"
 cyberagent session send <session-id> "/compact"
 cyberagent session send <session-id> "/ls ."
 cyberagent session send <session-id> "/read README.md"

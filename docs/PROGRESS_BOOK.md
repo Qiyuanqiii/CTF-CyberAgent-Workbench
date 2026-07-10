@@ -28,7 +28,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 ### 模型层
 
 - Provider 接口、模型路由和可重复测试的 MockProvider。
-- Anthropic-compatible Provider，已用环境变量完成 Mimo 连通验证。
+- Anthropic-compatible Provider，已用环境变量完成 Mimo 与 DeepSeek 连通验证；二者都有独立 Provider 名称和环境变量边界。
 - 模型请求进入 Provider 前进行敏感信息脱敏。
 - Provider 错误统一分类为 retryable、rate_limited、invalid_response、cancelled、permanent。
 - Anthropic-compatible Provider 对 429、408/425、5xx/529、永久 4xx、畸形/空响应和 `Retry-After` 进行类型化处理。
@@ -203,6 +203,10 @@ go vet ./...
 Notes/Context Builder 切片新增验证：schema v9->v10 数据保留、分类/可见性/Owner、关系复合外键、标签联合过滤、事件原子回滚、并发版本、content-file 大小与 UTF-8、CLI archive/restore、root 可见 Note 选择、token 预算优先级、敏感文本隔离，以及 `model.started` 仅保存来源元数据。隔离 smoke 核对 1 条 `note.created`、3 条 `note.changed` 和最终 version 4。
 
 发布前人工审计额外修复了三项低风险一致性问题：所有 Note 文本/关系字段现在显式拒绝非法 UTF-8；Store 拒绝负数列表上限；`note.changed` 的 `changed_fields` 只记录规范化后真正变化的字段。三项均有回归测试。
+
+DeepSeek Provider 切片新增 `DEEPSEEK_API_KEY`/`BASE_URL`/`MODEL` 独立注册和无 Key 不注册测试。真实 `deepseek-v4-flash` smoke 同时通过普通 Messages 请求与 RunSupervisor SSE 路径，并产生不含文本的 `model.delta` 持久化进度。
+
+该增量最终门通过 `go test -count=1 ./...`、`go vet ./...`、`go test -race -count=1 ./internal/app ./internal/llm`、`staticcheck ./...` 与 `govulncheck ./...`；可达漏洞为 0，真实 DeepSeek Key 与其他凭据模式未进入仓库。
 
 ## 七、下一开发切片
 

@@ -57,7 +57,7 @@ Completed:
 - Secret redaction layer for common API keys, bearer tokens, GitHub tokens, AWS access keys, JWTs, assignment-style secrets, and private-key blocks.
 - Redaction is applied at file reads, session message creation, SQLite session/context/tool-run storage, context prompt construction, and final LLM router dispatch.
 - Automatic context compaction after long active session histories.
-- Optional Anthropic-compatible `mimo` provider registered from environment variables only.
+- Optional Anthropic-compatible `mimo` and `deepseek` providers registered from separate environment-variable namespaces only.
 - `provider test` and session `/model` both support direct `provider/model` references.
 - Tool proposal and approval flow: `/run` creates `tool_runs`; `tool approve` completes dry-run; `tool deny` records denial.
 - Persisted file edit lifecycle: `edit propose/list/show/approve/deny` stores redacted whole-file replacements and unified-style diffs in `file_edits`.
@@ -182,7 +182,8 @@ Residual risks to address soon:
 - The symlink-escape unit test is skipped on this Windows account because creating symlinks requires an unavailable privilege; traversal, path resolution, and stale-file tests pass, and the runtime still resolves links before accepting a path.
 - Docker runner intentionally returns a clear placeholder error and is not a real isolation boundary yet.
 - Session `/run` now creates a persisted tool proposal; approval still dry-runs by design. Real execution must flow through stricter workspace scoping, sandbox, and event logging.
-- Mimo API keys must remain env-only for tests; do not persist user keys until a real secrets backend exists.
+- Mimo and DeepSeek API keys must remain env-only for tests; do not persist user keys until a real secrets backend exists.
+- DeepSeek model availability is an external contract. `deepseek-v4-flash` was live-verified on 2026-07-10, while `DEEPSEEK_MODEL` remains the explicit override when the service changes its model catalog.
 - Future Rust and TypeScript modules must not bypass Go for LLM, secrets, policy, workspace permissions, Docker, shell, network scope, or persistence.
 - `run start` advances lifecycle only; `run step` performs one model turn and `run execute` performs only the operator-selected number of durable steps.
 - A crash after the pre-call checkpoint can repeat a side-effect-free model request, but committed messages and completed turns are never duplicated. Tool calls stay disabled until execution idempotency exists.
@@ -270,7 +271,9 @@ go run ./cmd/cyberagent session send <session-id> "/write README.md # Session pr
 go run ./cmd/cyberagent session send <session-id> "/run echo hello"
 go run ./cmd/cyberagent session history <session-id> --all
 go run ./cmd/cyberagent provider test mimo/mimo-v2.5-pro
+go run ./cmd/cyberagent provider test deepseek/deepseek-v4-flash
 go run ./cmd/cyberagent session send <session-id> "/model mimo/mimo-v2.5-pro"
+go run ./cmd/cyberagent session send <session-id> "/model deepseek/deepseek-v4-flash"
 go run ./cmd/cyberagent session send <session-id> "/run echo hello"
 go run ./cmd/cyberagent tool list --session <session-id>
 go run ./cmd/cyberagent tool show <tool-run-id>
@@ -287,6 +290,7 @@ Expected context behavior:
 - Slash commands are persisted as normal session turns.
 - Long session histories automatically compact older active messages into `context_summaries`.
 - MiMo live smoke passed with env-only key and `mimo-v2.5-pro`; no key is stored by the application.
+- DeepSeek live smoke passed with an env-only key and `deepseek-v4-flash` through both non-streaming provider health and RunSupervisor SSE paths; durable events contained model metadata/counters without the key.
 - Tool proposal smoke passed: proposed shell command, dry-run approval completion, policy-denied risky command.
 - TUI snapshot smoke passed with existing session history, selected proposed tool run, status line, and keyboard help rendered from SQLite.
 - TUI picker smoke passed for empty state, existing session list, and direct session snapshot.
@@ -335,6 +339,7 @@ Expected context behavior:
 - Note gates passed for domain invariants, invalid UTF-8 rejection, migration v9-to-v10 preservation, relation foreign keys, visibility/tag/limit filters, transactional rollback, exact changed-field audit, stale/concurrent versions, service/CLI lifecycle, bounded content-file input, and terminal-Run rejection.
 - Context selection tests passed for deterministic priority, exact estimate limits, redaction, root visibility, pinned/category priority, overflow provenance, and Note-body isolation from durable events.
 - An isolated Note CLI smoke created, updated, archived, and restored one Note, ending at version 4 with exactly one `note.created` and three `note.changed` events.
+- DeepSeek adapter tests passed for env-only registration, no-key exclusion, default model selection, Anthropic request path/header shape, and CLI key non-disclosure. Live `deepseek-v4-flash` health and Supervisor SSE smoke both succeeded with positive stream bytes and durable started/delta/completed events.
 
 ## Recommended Next Slice
 

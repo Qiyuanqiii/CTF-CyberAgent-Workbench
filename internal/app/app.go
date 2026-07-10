@@ -25,7 +25,23 @@ import (
 )
 
 const Version = "v0.1.0"
-const defaultMimoBaseURL = "https://token-plan-cn.xiaomimimo.com/anthropic"
+
+const (
+	defaultMimoBaseURL     = "https://token-plan-cn.xiaomimimo.com/anthropic"
+	defaultMimoModel       = "mimo-v2.5-pro"
+	defaultDeepSeekBaseURL = "https://api.deepseek.com/anthropic"
+	defaultDeepSeekModel   = "deepseek-v4-flash"
+	defaultAnthropicURL    = "https://api.anthropic.com"
+)
+
+type envAnthropicProviderConfig struct {
+	name           string
+	apiKeyEnv      string
+	baseURLEnv     string
+	modelEnv       string
+	defaultBaseURL string
+	defaultModel   string
+}
 
 type App struct {
 	home    string
@@ -70,42 +86,43 @@ func (a *App) newRunSupervisor() *application.RunSupervisor {
 }
 
 func (a *App) registerEnvProviders() {
-	mimoKey := strings.TrimSpace(os.Getenv("MIMO_API_KEY"))
-	if mimoKey != "" {
-		baseURL := strings.TrimSpace(os.Getenv("MIMO_BASE_URL"))
-		if baseURL == "" {
-			baseURL = defaultMimoBaseURL
-		}
-		model := strings.TrimSpace(os.Getenv("MIMO_MODEL"))
-		if model == "" {
-			model = "mimo-v2.5-pro"
-		}
-		provider, err := llm.NewAnthropicCompatibleProvider(llm.AnthropicCompatibleConfig{
-			Name:         "mimo",
-			BaseURL:      baseURL,
-			APIKey:       mimoKey,
-			DefaultModel: model,
-		})
-		if err == nil {
-			a.router.RegisterProvider(provider)
-		}
+	configs := []envAnthropicProviderConfig{
+		{
+			name: "mimo", apiKeyEnv: "MIMO_API_KEY", baseURLEnv: "MIMO_BASE_URL", modelEnv: "MIMO_MODEL",
+			defaultBaseURL: defaultMimoBaseURL, defaultModel: defaultMimoModel,
+		},
+		{
+			name: "deepseek", apiKeyEnv: "DEEPSEEK_API_KEY", baseURLEnv: "DEEPSEEK_BASE_URL", modelEnv: "DEEPSEEK_MODEL",
+			defaultBaseURL: defaultDeepSeekBaseURL, defaultModel: defaultDeepSeekModel,
+		},
+		{
+			name: "anthropic", apiKeyEnv: "CYBERAGENT_ANTHROPIC_API_KEY", baseURLEnv: "CYBERAGENT_ANTHROPIC_BASE_URL",
+			modelEnv: "CYBERAGENT_ANTHROPIC_MODEL", defaultBaseURL: defaultAnthropicURL,
+		},
 	}
+	for _, config := range configs {
+		a.registerEnvAnthropicProvider(config)
+	}
+}
 
-	anthropicKey := strings.TrimSpace(os.Getenv("CYBERAGENT_ANTHROPIC_API_KEY"))
-	if anthropicKey != "" {
-		baseURL := strings.TrimSpace(os.Getenv("CYBERAGENT_ANTHROPIC_BASE_URL"))
-		if baseURL == "" {
-			baseURL = "https://api.anthropic.com"
-		}
-		provider, err := llm.NewAnthropicCompatibleProvider(llm.AnthropicCompatibleConfig{
-			Name:         "anthropic",
-			BaseURL:      baseURL,
-			APIKey:       anthropicKey,
-			DefaultModel: strings.TrimSpace(os.Getenv("CYBERAGENT_ANTHROPIC_MODEL")),
-		})
-		if err == nil {
-			a.router.RegisterProvider(provider)
-		}
+func (a *App) registerEnvAnthropicProvider(config envAnthropicProviderConfig) {
+	apiKey := strings.TrimSpace(os.Getenv(config.apiKeyEnv))
+	if apiKey == "" {
+		return
+	}
+	baseURL := strings.TrimSpace(os.Getenv(config.baseURLEnv))
+	if baseURL == "" {
+		baseURL = config.defaultBaseURL
+	}
+	model := strings.TrimSpace(os.Getenv(config.modelEnv))
+	if model == "" {
+		model = config.defaultModel
+	}
+	provider, err := llm.NewAnthropicCompatibleProvider(llm.AnthropicCompatibleConfig{
+		Name: config.name, BaseURL: baseURL, APIKey: apiKey, DefaultModel: model,
+	})
+	if err == nil {
+		a.router.RegisterProvider(provider)
 	}
 }
 
