@@ -135,3 +135,42 @@ func TestCLIStableExitCodesPreserveErrorText(t *testing.T) {
 		t.Fatalf("unexpected not found result code=%d stderr=%q", code, stderr)
 	}
 }
+
+func TestRunCLISupervisorStepAndCheckpoint(t *testing.T) {
+	t.Setenv("CYBERAGENT_HOME", t.TempDir())
+	_, stderr, code := executeTestCommand(t, "run", "checkpoint", "run-missing")
+	if code != 3 {
+		t.Fatalf("unexpected missing checkpoint result code=%d stderr=%s", code, stderr)
+	}
+	created, stderr, code := executeTestCommand(t, "run", "create", "supervisor cli smoke", "--profile", "review", "--max-turns", "1")
+	if code != 0 {
+		t.Fatalf("run create failed: %s", stderr)
+	}
+	runID := runIDPattern.FindString(created)
+	if runID == "" {
+		t.Fatalf("missing run id: %s", created)
+	}
+	_, stderr, code = executeTestCommand(t, "run", "step", runID)
+	if code != 4 || !strings.Contains(stderr, "supervisor requires running") {
+		t.Fatalf("unexpected precondition result code=%d stderr=%s", code, stderr)
+	}
+	if _, stderr, code := executeTestCommand(t, "run", "start", runID); code != 0 {
+		t.Fatalf("run start failed: %s", stderr)
+	}
+	stepped, stderr, code := executeTestCommand(t, "run", "step", runID)
+	if code != 0 || !strings.Contains(stepped, "turn 1 completed") || !strings.Contains(stepped, "next_turn: 2") {
+		t.Fatalf("unexpected step output=%s stderr=%s code=%d", stepped, stderr, code)
+	}
+	checkpoint, stderr, code := executeTestCommand(t, "run", "checkpoint", runID)
+	if code != 0 || !strings.Contains(checkpoint, "phase: idle") || !strings.Contains(checkpoint, "next_turn: 2") {
+		t.Fatalf("unexpected checkpoint output=%s stderr=%s code=%d", checkpoint, stderr, code)
+	}
+	_, stderr, code = executeTestCommand(t, "run", "step", runID)
+	if code != 8 || !strings.Contains(stderr, "exhausted its 1 turn budget") {
+		t.Fatalf("unexpected budget result code=%d stderr=%s", code, stderr)
+	}
+	timeline, stderr, code := executeTestCommand(t, "run", "events", runID)
+	if code != 0 || strings.Count(timeline, "agent.turn_started") != 1 || strings.Count(timeline, "agent.turn_completed") != 1 {
+		t.Fatalf("unexpected supervisor timeline output=%s stderr=%s", timeline, stderr)
+	}
+}

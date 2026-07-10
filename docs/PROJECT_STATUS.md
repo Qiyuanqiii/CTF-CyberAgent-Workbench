@@ -29,9 +29,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 49%.
+- Overall product vision: about 53%.
 - v0.1 generic agent MVP: about 98%.
-- V2 run-centric runtime: about 46%.
+- V2 run-centric runtime: about 52%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -66,7 +66,7 @@ Completed:
 - Accepted ADR 0002: Mission/Run aggregates, RunSupervisor, a single AgentCoordinator, structured WorkItems/Notes/Findings, lifecycle actions, and a unified event stream.
 - Reworked `docs/architecture.md` around run-scoped budget, event, sandbox, report, approval, and recovery ownership without copying the reference implementation.
 - Added `docs/TASK_BOOK.md` with phased migration tasks, acceptance criteria, compatibility rules, and CTF deferred to the final phase.
-- Versioned SQLite migrations through schema v4: legacy baseline, run-centric foundation, Run/Session projection constraints, and legacy Task mapping; each version is checksummed and transactional.
+- Versioned SQLite migrations through schema v5: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, and Supervisor checkpoints; each version is checksummed and transactional.
 - Migration tests cover idempotence, legacy data preservation, checksum history, and failed-migration rollback.
 - Unified `internal/idgen` now backs agent tasks, sessions, tool runs, file edits, Mission/Run, and event IDs.
 - Added pure Go Mission, Scope, Budget, RunConfig, Run status machine, and legal transition checks.
@@ -83,6 +83,12 @@ Completed:
 - Added `run adapt-task <task-id>` and a transactional TaskAdapter that creates one Session/Mission/Run plus `legacy.task_adapted`, or returns the existing mapping.
 - Concurrent and repeated adaptation converges on one Run; historical Task status is audit data and never starts execution implicitly.
 - Legacy Task goals and legacy Event messages/payloads are now redacted at the SQLite Store boundary.
+- Added schema v5 `run_supervisor_checkpoints` with bounded phase, next-turn, attempt, and redacted last-error state.
+- Added `RunSupervisor`, `RunHandle`, and `LifecycleResult`, plus `run step` and `run checkpoint` CLI commands.
+- A supervised turn checkpoints before the model call and atomically commits Session messages, policy decision, model usage, completion event, and the next checkpoint.
+- Started turns recover across Store/process restart; repeated completion is idempotent and committed turns are not duplicated.
+- MaxTurns and preflight cancellation are enforced before model calls; tool calls are rejected and never create ToolRuns in this slice.
+- Immediate Supervisor responses and persisted responses share the same secret-redaction boundary.
 
 Not done yet:
 
@@ -92,7 +98,7 @@ Not done yet:
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
-- RunSupervisor, Work Board, Notes, AgentCoordinator, Findings/Evidence, and resumable execution.
+- Automatic Supervisor loop, cumulative token/cost/time budgets, root finalization, Work Board, Notes, AgentCoordinator, and Findings/Evidence.
 
 ## Code Audit Notes
 
@@ -109,7 +115,11 @@ Residual risks to address soon:
 - Session `/run` now creates a persisted tool proposal; approval still dry-runs by design. Real execution must flow through stricter workspace scoping, sandbox, and event logging.
 - Mimo API keys must remain env-only for tests; do not persist user keys until a real secrets backend exists.
 - Future Rust and TypeScript modules must not bypass Go for LLM, secrets, policy, workspace permissions, Docker, shell, network scope, or persistence.
-- `run start` currently advances lifecycle state only; it intentionally does not call a model or execute tools until RunSupervisor is implemented in P2.
+- `run start` advances lifecycle only; `run step` explicitly performs one supervised model turn. This separation remains intentional until bounded automatic execution is implemented.
+- A crash after the pre-call checkpoint can repeat a side-effect-free model request, but committed messages and completed turns are never duplicated. Tool calls stay disabled until execution idempotency exists.
+- Supervisor history is currently bounded by 20 messages, not a token-aware Context Builder budget.
+- MaxTurns is enforced, but cumulative token, cost, timeout, and tool-call budgets are not yet persisted or enforced.
+- Budget exhaustion leaves the Run in `running`; terminal finalization is part of the next P2 slice.
 - Applied migration statements are immutable once released because their checksums are verified. Schema changes must always add a new migration version.
 - Schema v3 intentionally rejects duplicate non-empty Run/Session associations. A legacy database containing duplicates must be audited before upgrade instead of silently discarding an association.
 - `apperror.Normalize` includes a transitional text classifier for legacy plain errors. New services must return typed errors directly so future localization cannot affect classification.
@@ -122,6 +132,8 @@ Latest verified commands:
 go test ./...
 go run ./cmd/cyberagent run create "review this workspace" --workspace demo --profile review --max-turns 15
 go run ./cmd/cyberagent run start <run-id>
+go run ./cmd/cyberagent run step <run-id>
+go run ./cmd/cyberagent run checkpoint <run-id>
 go run ./cmd/cyberagent run pause <run-id>
 go run ./cmd/cyberagent run resume <run-id>
 go run ./cmd/cyberagent run cancel <run-id>
@@ -185,13 +197,16 @@ Expected context behavior:
 - TaskAdapter tests passed for repeated and eight-way concurrent adaptation, event order, unsupported legacy kinds, and a single persisted Run.
 - Isolated adapter CLI smoke passed across separate processes with one three-event timeline and stable exit codes `2` (invalid argument) and `3` (not found).
 - Legacy Task/Event Store-boundary redaction tests passed with runtime-generated token-shaped fixtures.
+- RunSupervisor tests passed for normal completion, schema v5 checkpoint persistence, MaxTurns rejection, cancellation before begin, tool-call rejection, immediate/persisted redaction, and idempotent completion.
+- Restart recovery test persisted `turn_started`, closed and reopened SQLite, resumed the same attempt, and observed one `agent.turn_started` plus one `agent.turn_completed` event.
+- Isolated Supervisor CLI smoke passed across separate processes with `next_turn=2` and stable exit codes `4` (precondition) and `8` (budget exhausted).
 
 ## Recommended Next Slice
 
-Begin the first P2 single-agent supervision slice:
+Continue P2 with durable budget and finalization semantics:
 
-- Define `RunSupervisor`, `RunHandle`, and structured `LifecycleResult` contracts.
-- Persist a bounded supervisor checkpoint before and after one deterministic mock Agent turn.
-- Make resume idempotent across process restart without executing tools.
-- Enforce turn and cancellation boundaries before adding model streaming or real tool execution.
-- Keep multi-agent concurrency disabled.
+- Extend the checkpoint with cumulative input/output tokens and elapsed execution time.
+- Enforce MaxTokens and TimeoutSeconds before each new model call.
+- Add structured root completion/failure results and atomically transition Run to a terminal status.
+- Add a bounded `run execute` loop that stops on completion, budget, cancellation, policy, or approval boundaries.
+- Keep tool execution and multi-agent concurrency disabled.

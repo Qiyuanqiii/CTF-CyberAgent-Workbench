@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 49%。
+- 整体产品愿景：约 53%。
 - v0.1 通用 Agent MVP：约 98%。
-- V2 Run-centric Runtime：约 46%。
+- V2 Run-centric Runtime：约 52%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成：版本化 migration、稳定错误契约、Mission/Run 状态机、自动 Run/Session 绑定、append-only 事件主干、活动投影、legacy Task 幂等适配和 CLI 生命周期均已落地。下一步进入 P2 单 Agent RunSupervisor。
+V2 的 P0/P1 已完成，P2 第一纵向切片已落地：schema v5 Supervisor checkpoint、单次无工具 root Agent turn、重启恢复、turn budget、取消前置检查和 CLI step/checkpoint。下一步补累计预算、终态 finalization 与有界执行循环。
 
 ## 二、已完成功能
 
@@ -54,6 +54,12 @@ V2 的 P0/P1 已完成：版本化 migration、稳定错误契约、Mission/Run 
 - schema v4 使用 `legacy_task_runs.task_id` 作为幂等键，`run adapt-task` 可安全重复或并发执行。
 - TaskAdapter 在一个事务内创建 Session、Mission、Run、映射和三条初始事件；历史状态不会触发隐式执行。
 - 旧 Task Goal 与旧 Event 内容补齐 Store 级脱敏。
+- schema v5 持久化 Supervisor phase、next turn、attempt 和脱敏错误。
+- `run step` 每次只执行一个无工具规划 turn；`run checkpoint` 可观察恢复状态。
+- 模型调用前写 started checkpoint，完成时原子写消息、策略、用量、事件和下一个 checkpoint。
+- 重启会恢复同一 started attempt；已提交完成的 turn 和消息不会重复。
+- MaxTurns 与调用前 cancellation 已执行，模型返回 ToolCall 会失败且不会创建 ToolRun。
+- 即时 CLI 模型回复和持久化回复都经过同一脱敏边界。
 - Run 状态转换与事件写入保持原子性，Store 会拒绝非法或陈旧转换。
 - `run create/list/show/events/start/pause/resume/cancel` 已可使用。
 - `Run` 是可恢复的执行实例，不是编程语言；Go 负责控制，TypeScript 负责界面，Rust 负责确定性分析。
@@ -73,7 +79,7 @@ V2 的 P0/P1 已完成：版本化 migration、稳定错误契约、Mission/Run 
 
 ## 四、尚未完成
 
-- 可恢复的 RunSupervisor 和单 root Agent 执行循环。
+- 自动 RunSupervisor 循环、累计 token/cost/time 预算和 root finalization。
 - 结构化 WorkItem、Notes、Findings、Evidence 与 Report。
 - 真正的流式 token 更新、取消和超时体验。
 - OpenAI-compatible 与 Ollama Provider。
@@ -91,7 +97,10 @@ V2 的 P0/P1 已完成：版本化 migration、稳定错误契约、Mission/Run 
 - Windows 当前账号不能创建符号链接，真实链接逃逸测试会跳过；运行时仍会解析链接并检查工作区边界。
 - 脱敏是启发式安全层，不是完整的 Secrets Manager。
 - Docker Runner 还不是真实隔离边界。
-- `run start` 当前只推进生命周期，不会启动模型或命令；执行能力要等 RunSupervisor 落地。
+- `run start` 只推进生命周期，`run step` 显式执行一个模型 turn；自动循环尚未开放。
+- pre-call checkpoint 后崩溃可能重发一次无副作用模型请求，但已完成 turn 不会重复；工具调用因此继续禁用。
+- Supervisor 历史目前按 20 条消息限制，还不是 token-aware Context Builder。
+- MaxTurns 已执行，累计 token、费用、时间和工具预算尚未持久化；预算耗尽后 Run 暂时保持 running。
 - 已发布 migration 的语句和 checksum 不可修改，后续 schema 变化必须新增版本。
 - v3 会拒绝一个 Session 关联多个 Run；若旧数据库存在重复关联，应先审计，而不是自动丢弃数据。
 - 兼容期仍有普通字符串错误通过 `apperror.Normalize` 分类；新服务必须直接返回 typed error。
@@ -107,15 +116,15 @@ go vet ./...
 
 共享状态、并发或存储变更还要运行相关包的 `go test -race`。CLI 行为变更要在隔离的 `CYBERAGENT_HOME` 中完成 smoke test。提交前扫描凭据前缀，确认本地数据库、工作区、环境文件和 API key 未进入 Git。
 
-最新验证已覆盖 Run 生命周期、schema v4、稳定错误映射、自动/现有 Session 绑定、统一事件投影、TaskAdapter 八路并发幂等、跨工作区回滚、旧表脱敏、文件编辑审批、工具 dry-run、上下文压缩、模型路由和 TUI。独立 adapter CLI smoke 验证了三条连续事件及退出码 2/3。
+最新验证已覆盖 schema v5、Supervisor 正常 turn、重启恢复、幂等完成、MaxTurns、取消前置、工具拒绝、即时/持久化脱敏，以及原有 Run、TaskAdapter、审批、上下文、TUI 和安全边界。独立 Supervisor CLI smoke 验证了跨进程 `next_turn=2` 与退出码 4/8。
 
 ## 七、下一开发切片
 
-1. 定义 `RunSupervisor`、`RunHandle` 和结构化 `LifecycleResult`。
-2. 在一次确定性 mock Agent turn 前后持久化 checkpoint。
-3. 验证进程重启后 resume 不重复已完成 turn。
-4. 先落实 turn budget 与 cancellation 边界，不执行真实工具。
-5. 多 Agent 并发继续关闭。
+1. 在 checkpoint 中累计 input/output tokens 和有效执行时间。
+2. 每次模型调用前执行 MaxTokens 与 TimeoutSeconds。
+3. 增加结构化 root completion/failure，并原子推进 Run 终态。
+4. 增加有界 `run execute` 循环，在完成、预算、取消、策略或审批边界停止。
+5. 工具执行和多 Agent 并发继续关闭。
 
 ## 八、仓库同步与恢复约定
 

@@ -14,6 +14,7 @@ The v0.1 scaffold focuses on stable boundaries:
 - automatic Run/Session binding with transactional Session, Policy, ToolRun, and FileEdit timeline projection
 - stable typed errors with CLI exit-code and future HTTP-status mappings
 - idempotent legacy Task-to-Run adaptation through `run adapt-task`
+- resumable no-tool RunSupervisor turns with durable pre/post checkpoints
 - workspace-scoped list/read commands for safe file context
 - secret redaction before file context, session storage, context summaries, tool runs, and provider calls
 - tool proposal and approval flow for session `/run`
@@ -49,6 +50,8 @@ go run ./cmd/cyberagent run list
 go run ./cmd/cyberagent run show <run-id>
 go run ./cmd/cyberagent run events <run-id>
 go run ./cmd/cyberagent run start <run-id>
+go run ./cmd/cyberagent run step <run-id>
+go run ./cmd/cyberagent run checkpoint <run-id>
 go run ./cmd/cyberagent session create --workspace demo --title "Agent basics" --route learn
 go run ./cmd/cyberagent session send <session-id> "/ls ."
 go run ./cmd/cyberagent session send <session-id> "/read README.md"
@@ -82,7 +85,7 @@ Local runtime databases, workspace data, environment files, API keys, IDE metada
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. P0 migration foundations and the P1 Mission/Run event backbone are complete, including stable errors, automatic Run/Session binding, activity projection, and idempotent legacy Task adaptation. Next comes resumable single-agent supervision, followed by structured work items/notes and controlled multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. P0 and P1 are complete, and the first P2 slice now runs one resumable, no-tool root Agent turn through durable checkpoints. Next comes cumulative budget accounting, lifecycle finalization, and a bounded supervisor loop before structured work items/notes or multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
 TUI quick controls: `cyberagent tui` opens a session picker. In chat, `Tab` switches focus, `PgUp/PgDn` scroll messages, `j/k` select tool runs, `a` approves, `d` denies, `Ctrl+R` refreshes, and `Esc` quits. Slow sends, refreshes, and tool approvals run through async commands with visible status text such as `thinking...`, `proposing tool...`, or `approving...`. Attached workspaces render in the side panel with local directory counts for attachments, scripts, outputs, logs, and writeups.
 

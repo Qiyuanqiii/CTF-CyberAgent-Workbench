@@ -32,6 +32,10 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runShow(ctx, service, args[1:])
 	case "events":
 		return a.runEvents(ctx, service, args[1:])
+	case "step":
+		return a.runSupervisorStep(ctx, args[1:])
+	case "checkpoint":
+		return a.runSupervisorCheckpoint(ctx, args[1:])
 	case "start":
 		return a.runTransition(ctx, service, "start", args[1:])
 	case "pause":
@@ -43,6 +47,47 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown run subcommand %q", args[0])
 	}
+}
+
+func (a *App) runSupervisorStep(ctx context.Context, args []string) error {
+	fs := newFlagSet("run step", a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run step <run-id>")
+	}
+	result, err := application.NewRunSupervisor(a.store, a.router, a.checker).Step(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "run %s turn %d completed\nattempt: %s\nrecovered: %t\nprovider: %s\nmodel: %s\nusage: input=%d output=%d total=%d\nnext_turn: %d\nresponse: %s\n",
+		result.Handle.RunID, result.Turn, result.AttemptID, result.Recovered, result.Provider, result.Model,
+		result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.TotalTokens,
+		result.Checkpoint.NextTurn, result.Text)
+	return nil
+}
+
+func (a *App) runSupervisorCheckpoint(ctx context.Context, args []string) error {
+	fs := newFlagSet("run checkpoint", a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run checkpoint <run-id>")
+	}
+	checkpoint, ok, err := application.NewRunSupervisor(a.store, a.router, a.checker).Checkpoint(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		fmt.Fprintf(a.out, "run %s has no supervisor checkpoint\n", fs.Arg(0))
+		return nil
+	}
+	fmt.Fprintf(a.out, "run: %s\nphase: %s\nnext_turn: %d\nattempt: %s\nlast_error: %s\nupdated_at: %s\n",
+		checkpoint.RunID, checkpoint.Phase, checkpoint.NextTurn, checkpoint.AttemptID,
+		checkpoint.LastError, checkpoint.UpdatedAt.Format(time.RFC3339))
+	return nil
 }
 
 func (a *App) runAdaptTask(ctx context.Context, args []string) error {
@@ -239,7 +284,7 @@ func (a *App) runTransition(ctx context.Context, service *application.RunService
 	}
 	fmt.Fprintf(a.out, "run %s %s\n", run.ID, run.Status)
 	if action == "start" {
-		fmt.Fprintln(a.out, "note: lifecycle state only; RunSupervisor execution arrives in P2")
+		fmt.Fprintln(a.out, "note: lifecycle is running; use `cyberagent run step <run-id>` for one supervised turn")
 	}
 	return nil
 }

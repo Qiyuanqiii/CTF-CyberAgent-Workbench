@@ -189,6 +189,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 2, Name: "run-centric foundation", Statements: runCentricSchemaStatements},
 		{Version: 3, Name: "run session projection", Statements: runSessionProjectionStatements},
 		{Version: 4, Name: "legacy task run mapping", Statements: legacyTaskRunStatements},
+		{Version: 5, Name: "supervisor checkpoints", Statements: supervisorCheckpointStatements},
 	})
 }
 
@@ -450,6 +451,22 @@ func (s *SQLiteStore) ListSessions(ctx context.Context) ([]session.Session, erro
 }
 
 func (s *SQLiteStore) SaveSessionMessage(ctx context.Context, message session.Message) (session.Message, error) {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return session.Message{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	message, err = saveSessionMessageTx(ctx, tx, message)
+	if err != nil {
+		return session.Message{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return session.Message{}, err
+	}
+	return message, nil
+}
+
+func saveSessionMessageTx(ctx context.Context, tx *sql.Tx, message session.Message) (session.Message, error) {
 	if strings.TrimSpace(message.SessionID) == "" {
 		return session.Message{}, errors.New("session id is required")
 	}
@@ -458,11 +475,6 @@ func (s *SQLiteStore) SaveSessionMessage(ctx context.Context, message session.Me
 	if message.CreatedAt.IsZero() {
 		message.CreatedAt = time.Now().UTC()
 	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
-	if err != nil {
-		return session.Message{}, err
-	}
-	defer func() { _ = tx.Rollback() }()
 	res, err := tx.ExecContext(ctx, `INSERT INTO session_messages
 		(session_id, role, content, token_estimate, compacted, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)`,
@@ -471,9 +483,10 @@ func (s *SQLiteStore) SaveSessionMessage(ctx context.Context, message session.Me
 		return session.Message{}, err
 	}
 	id, err := res.LastInsertId()
-	if err == nil {
-		message.ID = id
+	if err != nil {
+		return session.Message{}, err
 	}
+	message.ID = id
 	result, err := tx.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, ts(time.Now().UTC()), message.SessionID)
 	if err != nil {
 		return session.Message{}, err
@@ -486,9 +499,6 @@ func (s *SQLiteStore) SaveSessionMessage(ctx context.Context, message session.Me
 		return session.Message{}, errors.New("session was not found")
 	}
 	if err := projectSessionMessageTx(ctx, tx, message); err != nil {
-		return session.Message{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return session.Message{}, err
 	}
 	return message, nil

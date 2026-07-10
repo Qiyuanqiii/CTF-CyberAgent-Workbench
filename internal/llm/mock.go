@@ -26,6 +26,9 @@ func (MockProvider) ListModels(ctx context.Context) ([]ModelInfo, error) {
 }
 
 func (MockProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	model := req.Model
 	if model == "" {
 		model = "mock-cyber-agent"

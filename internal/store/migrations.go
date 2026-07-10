@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 4
+const LatestSchemaVersion = 5
 
 type migration struct {
 	Version    int
@@ -105,6 +105,19 @@ var legacyTaskRunStatements = []string{
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_legacy_task_runs_run_id
 		ON legacy_task_runs(run_id);`,
+}
+
+var supervisorCheckpointStatements = []string{
+	`CREATE TABLE IF NOT EXISTS run_supervisor_checkpoints (
+		run_id TEXT PRIMARY KEY,
+		next_turn INTEGER NOT NULL,
+		phase TEXT NOT NULL,
+		attempt_id TEXT,
+		last_error TEXT,
+		updated_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id),
+		CHECK(next_turn > 0)
+	);`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {

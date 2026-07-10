@@ -11,6 +11,8 @@ cyberagent run list --status paused
 cyberagent run show <run-id>
 cyberagent run events <run-id>
 cyberagent run start <run-id>
+cyberagent run step <run-id>
+cyberagent run checkpoint <run-id>
 cyberagent run pause <run-id>
 cyberagent run resume <run-id>
 cyberagent run cancel <run-id>
@@ -18,7 +20,9 @@ cyberagent run cancel <run-id>
 
 A Mission is the stable goal and authorization scope. A Run is one resumable execution attempt. Each new Run creates a dedicated active Session unless `--session <id>` selects an unattached active Session. Session creation or attachment, Run creation, and their initial events commit together in SQLite.
 
-Session messages, assistant policy decisions, ToolRun changes, and FileEdit changes are projected into `run events` transactionally. Activity carrying a workspace different from the Run scope is rejected. `run start` currently advances the auditable lifecycle from `created` through `preparing` to `running`; the model-driven RunSupervisor execution loop is scheduled for P2 and is not started implicitly in this slice.
+Session messages, assistant policy decisions, ToolRun changes, and FileEdit changes are projected into `run events` transactionally. Activity carrying a workspace different from the Run scope is rejected. `run start` advances the lifecycle from `created` through `preparing` to `running`; it does not invoke a model by itself.
+
+`run step` asks the RunSupervisor to execute exactly one root Agent planning turn. It writes a `turn_started` checkpoint before the model call, rejects tool calls, and atomically stores the user/assistant messages, policy decision, model usage, completion event, and next-turn checkpoint. `run checkpoint` displays the durable phase and next turn. A process restart resumes an unfinished started turn; a committed turn is never appended twice. Turn budget exhaustion returns exit code 8.
 
 `run adapt-task` converts a v0.1 `agent.Task` into a new Mission, Run, and Session. The mapping is transactional and keyed by Task ID, so repeated or concurrent calls return the same Run and append only one `legacy.task_adapted` event. Historical task status is recorded for audit, but the new Run always starts at `created` and never executes implicitly. Legacy CTF tasks map to the safe generic `review` profile until the dedicated CTF phase.
 
