@@ -112,11 +112,11 @@ cyberagent workspace read demo README.md
 
 ```powershell
 cyberagent script new "parse pcap http token" --workspace demo
-cyberagent script run C:\path\to\script.py
-cyberagent script run C:\path\to\script.py --local
+cyberagent script run scripts/<script-name>.py --workspace demo
+cyberagent script run scripts/<script-name>.py --workspace demo --local --flag value
 ```
 
-`script run` uses a dry-run sandbox by default. Add `--local` only when you want to execute the script on your machine.
+`script new` prints both the absolute artifact path and `script_relative`; pass the latter to `script run`. `script run` no longer executes a Sandbox or host process. It requires a workspace-relative existing file, rejects absolute paths/traversal/symlink escape, creates a Script Profile Mission/Run/Session, and persists a policy-checked Tool Gateway proposal. The structured `script_process.v1` payload contains executable, argv, workspace-relative working directory, requested backend, and the fixed execution mode `disabled`. `--local` records intent for future Sandbox work; it does not execute locally. Use the printed Tool ID with `tool show` or `tool approve`; approval currently completes as dry-run only.
 
 ## CTF Mode
 
@@ -202,7 +202,7 @@ Session chat is the main path for generic AI agent features. Ordinary text in a 
 
 The Gateway validates exact argument schemas, binds production file operations to the Store-owned workspace root, runs policy checks, selects an approval mode, and normalizes execution results. `read_file` and `list_workspace` use automatic approval only when scope and policy allow them. `replace_file` and `shell` use per-call approval. A policy denial is terminal and cannot be converted into approval by a later review request. Session-scoped grants are represented by the domain contract but are not issued or persisted yet.
 
-Text output is valid UTF-8, secret-redacted, MIME-labelled, and bounded to 128 KiB stdout, 32 KiB stderr, and 64 KiB proposal previews. Truncation is explicit. The Gateway does not currently capture oversized output as an Artifact, and `script run --local` is still a documented compatibility bypass scheduled for the next P5 slice.
+Text output is valid UTF-8, secret-redacted, MIME-labelled, and bounded to 128 KiB stdout, 32 KiB stderr, and 64 KiB proposal previews. Truncation is explicit. The Gateway does not currently capture oversized output as an Artifact. No production CLI path invokes LocalSandbox; script-process proposals remain deliberately non-executable.
 
 ## File Edit Proposals
 

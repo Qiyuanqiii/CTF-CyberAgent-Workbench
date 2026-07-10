@@ -33,6 +33,12 @@ func NewWorkspaceFS(root string) WorkspaceFS {
 	}
 }
 
+// ResolveFileForRead validates a workspace-relative file path without reading it.
+func (fs WorkspaceFS) ResolveFileForRead(requested string) (string, error) {
+	fs = fs.withFallback("")
+	return fs.resolveExistingFile(requested)
+}
+
 type ReadFileTool struct {
 	FS WorkspaceFS
 }

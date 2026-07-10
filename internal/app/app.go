@@ -16,9 +16,9 @@ import (
 	"cyberagent-workbench/internal/agent"
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
+	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
-	"cyberagent-workbench/internal/sandbox"
 	"cyberagent-workbench/internal/store"
 	"cyberagent-workbench/internal/toolgateway"
 	"cyberagent-workbench/internal/tools"
@@ -445,7 +445,12 @@ func (a *App) scriptNew(ctx context.Context, args []string) error {
 	}); err != nil {
 		return err
 	}
-	fmt.Fprintf(a.out, "script task %s completed\nworkspace: %s\nscript: %s\n", task.ID, rec.RootPath, scriptPath)
+	relativeScriptPath, err := filepath.Rel(rec.RootPath, scriptPath)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "script task %s completed\nworkspace: %s\nscript: %s\nscript_relative: %s\n",
+		task.ID, rec.RootPath, scriptPath, filepath.ToSlash(relativeScriptPath))
 	return nil
 }
 
@@ -454,34 +459,60 @@ func (a *App) scriptRun(ctx context.Context, args []string) error {
 		return err
 	}
 	fs := newFlagSet("script run", a.errOut)
-	local := fs.Bool("local", false, "execute locally instead of dry run")
-	if err := fs.Parse(reorderFlags(args, map[string]bool{"local": false})); err != nil {
+	workspaceName := fs.String("workspace", "", "workspace containing the script")
+	local := fs.Bool("local", false, "record a local backend request; execution remains disabled")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{"workspace": true, "local": false})); err != nil {
 		return err
 	}
-	if fs.NArg() < 1 {
-		return errors.New("usage: cyberagent script run <path> [--local] [args...]")
+	if fs.NArg() < 1 || strings.TrimSpace(*workspaceName) == "" {
+		return errors.New("usage: cyberagent script run <workspace-relative-path> --workspace <name> [--local] [args...]")
 	}
-	scriptPath := fs.Arg(0)
+	rec, err := a.store.GetWorkspaceByName(ctx, workspace.Slug(*workspaceName))
+	if err != nil {
+		return err
+	}
+	rawPath := strings.TrimSpace(fs.Arg(0))
+	if _, err := tools.NewWorkspaceFS(rec.RootPath).ResolveFileForRead(rawPath); err != nil {
+		if os.IsNotExist(err) {
+			return err
+		}
+		return apperror.Wrap(apperror.CodeInvalidArgument, "invalid script path: "+err.Error(), err)
+	}
+	scriptPath := filepath.ToSlash(filepath.Clean(rawPath))
 	cmd, cmdArgs := commandForScript(scriptPath, fs.Args()[1:])
-	decision := a.checker.CheckToolCall(tools.Call{
-		Name: "sandbox.run",
-		Args: map[string]string{"command": strings.Join(append([]string{cmd}, cmdArgs...), " ")},
-	})
-	if !decision.Allowed {
-		return fmt.Errorf("policy denied script run: %s", decision.Reason)
-	}
-	var runner sandbox.Runner = sandbox.NewNoopRunner()
+	requestedBackend := "sandbox"
 	if *local {
-		runner = sandbox.NewLocalRunner()
+		requestedBackend = "local"
 	}
-	result, err := runner.Run(ctx, sandbox.RunRequest{Command: cmd, Args: cmdArgs, Timeout: 30 * time.Second})
-	if result.Stdout != "" {
-		fmt.Fprintln(a.out, result.Stdout)
+	processProposal := toolgateway.ScriptProcessProposal{
+		Executable: cmd, Arguments: cmdArgs, WorkingDirectory: ".", RequestedBackend: requestedBackend,
 	}
-	if result.Stderr != "" {
-		fmt.Fprintln(a.errOut, result.Stderr)
+	if _, err := toolgateway.EncodeScriptProcessProposal(processProposal); err != nil {
+		return apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
 	}
-	return err
+	mission, run, err := application.NewRunService(a.store).Create(ctx, application.CreateRunRequest{
+		Goal: "Review execution of workspace script " + scriptPath, Profile: string(domain.ProfileScript),
+		WorkspaceID: rec.ID, Interactive: true,
+	})
+	if err != nil {
+		return err
+	}
+	outcome, err := a.newToolGateway().ProposeScriptProcess(ctx, toolgateway.ToolCall{
+		RunID: run.ID, SessionID: run.SessionID, WorkspaceID: rec.ID, RequestedBy: "script_cli",
+	}, processProposal)
+	if err != nil {
+		return err
+	}
+	if outcome.Proposal == nil {
+		return errors.New("script run did not create a tool proposal")
+	}
+	fmt.Fprintf(a.out, "script run proposal %s\nmission: %s\nrun: %s\nsession: %s\nworkspace: %s\nscript: %s\nrequested_backend: %s\nstatus: %s\napproval: %s\nexecution: disabled; approval completes as dry run\n",
+		outcome.Proposal.ID, mission.ID, run.ID, run.SessionID, rec.ID, scriptPath, requestedBackend,
+		outcome.Proposal.Status, outcome.Decision.Approval)
+	if !outcome.Decision.Allowed {
+		return apperror.New(apperror.CodePolicyDenied, "policy denied script run: "+outcome.Decision.Reason)
+	}
+	return nil
 }
 
 func (a *App) ctfCommand(ctx context.Context, args []string) error {

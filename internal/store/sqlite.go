@@ -300,8 +300,12 @@ func (s *SQLiteStore) RecordEvent(ctx context.Context, event agent.Event) error 
 		event.CreatedAt = time.Now().UTC()
 	}
 	event.Message = redact.String(event.Message)
-	event.PayloadJSON = redact.String(event.PayloadJSON)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO events (task_id, workspace_id, type, message, payload_json, created_at)
+	redactedPayload, err := redactJSONPayload(event.PayloadJSON)
+	if err != nil {
+		return err
+	}
+	event.PayloadJSON = redactedPayload
+	_, err = s.db.ExecContext(ctx, `INSERT INTO events (task_id, workspace_id, type, message, payload_json, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)`,
 		event.TaskID, event.WorkspaceID, event.Type, event.Message, event.PayloadJSON, ts(event.CreatedAt))
 	return err

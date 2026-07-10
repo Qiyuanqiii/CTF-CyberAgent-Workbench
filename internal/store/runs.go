@@ -15,6 +15,12 @@ import (
 	"cyberagent-workbench/internal/session"
 )
 
+const (
+	maxStoreJSONPayloadBytes = 1024 * 1024
+	maxStoreJSONDepth        = 64
+	maxStoreJSONNodes        = 100000
+)
+
 func (s *SQLiteStore) CreateMissionRun(ctx context.Context, mission domain.Mission, run domain.Run, linkedSession session.Session, createSession bool, initialEvents []events.Event) error {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
@@ -247,7 +253,11 @@ func insertRunEventTx(ctx context.Context, tx *sql.Tx, event events.Event) (even
 	if event.Sequence != 0 {
 		return events.Event{}, errors.New("run event sequence is assigned by the store")
 	}
-	event.PayloadJSON = redact.String(event.PayloadJSON)
+	redactedPayload, err := redactJSONPayload(event.PayloadJSON)
+	if err != nil {
+		return events.Event{}, err
+	}
+	event.PayloadJSON = redactedPayload
 	if err := event.Validate(); err != nil {
 		return events.Event{}, err
 	}
@@ -331,11 +341,74 @@ func marshalRedactedJSON(value any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	safe := redact.String(string(data))
-	if !json.Valid([]byte(safe)) {
-		return "", errors.New("redaction produced invalid JSON")
+	return redactJSONPayload(string(data))
+}
+
+func redactJSONPayload(payload string) (string, error) {
+	if strings.TrimSpace(payload) == "" {
+		return "", nil
 	}
-	return safe, nil
+	if len([]byte(payload)) > maxStoreJSONPayloadBytes {
+		return "", fmt.Errorf("event payload exceeds %d bytes", maxStoreJSONPayloadBytes)
+	}
+	if !json.Valid([]byte(payload)) {
+		return "", errors.New("event payload must be valid JSON")
+	}
+	decoder := json.NewDecoder(strings.NewReader(payload))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return "", err
+	}
+	nodes := 0
+	safeValue, err := redactJSONValue(value, 0, &nodes)
+	if err != nil {
+		return "", err
+	}
+	encoded, err := json.Marshal(safeValue)
+	if err != nil {
+		return "", err
+	}
+	if len(encoded) > maxStoreJSONPayloadBytes {
+		return "", fmt.Errorf("redacted event payload exceeds %d bytes", maxStoreJSONPayloadBytes)
+	}
+	return string(encoded), nil
+}
+
+func redactJSONValue(value any, depth int, nodes *int) (any, error) {
+	if depth > maxStoreJSONDepth {
+		return nil, fmt.Errorf("event payload exceeds JSON depth %d", maxStoreJSONDepth)
+	}
+	(*nodes)++
+	if *nodes > maxStoreJSONNodes {
+		return nil, fmt.Errorf("event payload exceeds %d JSON nodes", maxStoreJSONNodes)
+	}
+	switch current := value.(type) {
+	case string:
+		return redact.String(current), nil
+	case []any:
+		out := make([]any, len(current))
+		for index, item := range current {
+			redacted, err := redactJSONValue(item, depth+1, nodes)
+			if err != nil {
+				return nil, err
+			}
+			out[index] = redacted
+		}
+		return out, nil
+	case map[string]any:
+		out := make(map[string]any, len(current))
+		for key, item := range current {
+			redacted, err := redactJSONValue(item, depth+1, nodes)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = redacted
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
 }
 
 func nullableTS(value *time.Time) any {

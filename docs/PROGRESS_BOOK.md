@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 77%。
+- 整体产品愿景：约 78%。
 - v0.1 通用 Agent MVP：约 98%。
-- V2 Run-centric Runtime：约 92%。
+- V2 Run-centric Runtime：约 93%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming 和进程内主动取消链路。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P5 第一纵向切片已落地统一 Tool Gateway，真实命令执行继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming 和进程内主动取消链路。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P5 已落地统一 Tool Gateway 并移除 `script run --local` 的宿主机执行旁路，真实命令执行继续关闭。
 
 ## 二、已完成功能
 
@@ -49,6 +49,9 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - CLI、Session 与 TUI 生产路径通过 Gateway/兼容适配器调用；底层 read tool、ToolRun Manager 和 FileEdit Manager 的构造已集中到 Gateway。
 - 生产文件操作按 workspace ID 查询 Store-owned root，并在调用方路径不一致时于文件访问前拒绝。
 - 输出执行 UTF-8、MIME、stdout/stderr/preview 硬限制、截断标记和敏感信息脱敏。
+- `script run` 现在要求 workspace 相对文件，自动创建 Script Profile Mission/Run/Session，并持久化 `script_process.v1` 提案及 Policy/Tool Run events。
+- `--local` 只记录 requested backend；CLI 不再构造 Local/Noop Runner，审批前后均只产生 dry-run，不执行宿主机命令。
+- Store 对 JSON payload 先解析、递归脱敏字符串值再编码，嵌套 JSON、转义和 64-bit 数字不会被字符串级正则破坏。
 - 文件编辑提案、diff 预览、审批、拒绝、失败和已应用状态持久化。
 - 审批前重新解析路径并校验 SHA-256，拒绝覆盖提案后被修改的文件。
 - ToolRun 提案与审批状态机；`/run` 当前只创建提案，批准仍为 dry-run。
@@ -147,10 +150,12 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 
 最新审计未发现高严重度问题。主要残余风险：
 
+- 本轮移除了 `script run --local` 的直接 LocalSandbox 路径；审计同时发现字符串级二次脱敏可破坏事件中的嵌套 JSON 转义，现已改为值级递归脱敏并增加 1 MiB、64 层、100,000 节点限制。
 - 本轮审计修复了截断时非法 UTF-8 被误判成功、极小输出上限溢出、持久化拒绝状态在错误路径下映射不一致，以及文件工具信任调用方 workspace root 的问题；均已增加回归测试。
 - Gateway 已集中现有工作区读、Shell 提案和 FileEdit 生产入口，但仍复用 `tool_runs`/`file_edits` 作为兼容持久化表；尚无统一 Proposal/Decision 表和跨重启 Session grant。
 - `staticcheck ./...` 当前零告警；本轮顺带清理了既存 TUI `S1008`、`S1011` 和未使用 helper `U1000`。
-- `script run --local` 仍可在词法策略检查后直接本机执行，应接入统一提案、审批和 Run 事件。
+- `script run --local` 的执行旁路已移除；生产代码扫描中不再存在 Sandbox Runner 调用，LocalSandbox 仅保留为未接线的开发后端。
+- Run 创建与 script ToolRun 提案目前是两个事务；极少数第二事务存储失败会留下可审计但无提案的 created Run，后续统一幂等 Approval transaction 时应收敛。
 - 文件写入已二次解析路径并重新校验哈希，但跨平台 `os.WriteFile` 无法完全消除很小的 TOCTOU 窗口。
 - Windows 当前账号不能创建符号链接，真实链接逃逸测试会跳过；运行时仍会解析链接并检查工作区边界。
 - 脱敏是启发式安全层，不是完整的 Secrets Manager。
@@ -219,10 +224,14 @@ Tool Gateway 第一纵向切片新增领域不变量、精确参数 schema、aut
 
 本轮最终发布门通过 `go test -count=1 ./...`、`go vet ./...`、全仓库 `go test -race -count=1 ./...`、`staticcheck ./...` 与 `govulncheck ./...`；可达漏洞为 0。隔离 CLI smoke 验证 workspace read、Shell dry-run、FileEdit approve 和危险 `masscan 0.0.0.0/0` 提案拒绝，未执行危险命令。仓库扫描返回 `NO_CREDENTIAL_PATTERN_IN_REPO` 与 `NO_RUNTIME_OR_SECRET_ARTIFACTS_IN_REPO`。
 
+Script Gateway 切片新增 workspace/path 前置校验、`script_process.v1` schema、executable/argv/backend/disabled-mode 上限、自动 Script Profile Run、Policy/Tool event 投影，以及 `--local` 零副作用测试。含 token-shaped 参数的 JSON 在 ToolRun 与 Run Event 中均脱敏且保持可解析；危险参数持久化 `tool.denied`。
+
+该切片最终门再次通过 `go test -count=1 ./...`、`go vet ./...`、全仓库 `go test -race -count=1 ./...`、`staticcheck ./...` 和 `govulncheck ./...`，可达漏洞为 0。临时构建的真实 CLI 二进制 smoke 返回危险请求退出码 5，审批前后均未创建脚本标记文件；扫描返回 `NO_PRODUCTION_SANDBOX_RUNNER_CALLS`、`NO_CREDENTIAL_PATTERN_IN_REPO` 和 `NO_RUNTIME_OR_SECRET_ARTIFACTS_IN_REPO`。
+
 ## 七、下一开发切片
 
-1. 把 `script run --local` 改成 Gateway 提案路径，消除最后一个已知生产执行旁路；真实执行默认仍关闭。
-2. 为 Approval 增加持久化幂等键、Run/Session 关联、重启恢复和可撤销的 Session grant，随后执行工具调用预算。
+1. 为 Approval 增加持久化幂等键、Run/Session 关联、重启恢复和可撤销的 Session grant，随后执行工具调用预算。
+2. 把 script process 从 legacy Shell ToolRun 升级为独立 typed proposal，并让 Run 创建与提案提交具备幂等恢复语义。
 3. 为 WorkItem/Note 增加低风险结构化工具提案，使模型修改经过 schema、scope、policy、事件和显式控制边界。
 4. 定义工具输出到 Artifact 的捕获阈值、哈希、MIME 和事件投影，避免截断内容静默丢失。
 5. Docker/Local 真实命令执行继续关闭，直到审批持久化、Sandbox 和 Artifact 边界同时通过审计。

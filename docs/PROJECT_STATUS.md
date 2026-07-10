@@ -31,6 +31,7 @@ Use these files first when resuming:
 - `internal/session/session.go`
 - `internal/toolgateway/model.go`
 - `internal/toolgateway/gateway.go`
+- `internal/toolgateway/script_process.go`
 - `internal/toolrun/toolrun.go`
 - `internal/tui/model.go`
 - `internal/tui/picker.go`
@@ -40,9 +41,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 77%.
+- Overall product vision: about 78%.
 - v0.1 generic agent MVP: about 98%.
-- V2 run-centric runtime: about 92%.
+- V2 run-centric runtime: about 93%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -60,6 +61,9 @@ Completed:
 - Workspace reads, shell proposals, and whole-file replacements now share one Go-owned schema/scope/policy/approval/result pipeline. CLI, Session, and TUI production paths use Gateway adapters rather than constructing legacy managers directly.
 - Production file calls resolve a trusted root from the persisted workspace ID and reject a mismatched supplied directory before filesystem access.
 - Gateway results carry validated MIME, UTF-8 output, explicit truncation, secret redaction, and hard stdout/stderr/preview limits. Shell approval remains dry-run and file edits remain proposal-first.
+- `script run` now requires a persisted workspace and relative existing file, creates a Script Profile Mission/Run/Session, and persists a validated `script_process.v1` Tool Gateway proposal with full Policy/Tool event projection.
+- `--local` is retained only as requested-backend metadata. Production code has no Local/Noop Sandbox Runner invocation, and tool approval remains dry-run without host side effects.
+- JSON payload redaction is structure-aware: Store code parses JSON with exact numbers, recursively redacts string values, and re-encodes before validation/persistence, preserving nested escaped JSON.
 - Secret redaction layer for common API keys, bearer tokens, GitHub tokens, AWS access keys, JWTs, assignment-style secrets, and private-key blocks.
 - Redaction is applied at file reads, session message creation, SQLite session/context/tool-run storage, context prompt construction, and final LLM router dispatch.
 - Automatic context compaction after long active session histories.
@@ -171,7 +175,7 @@ Not done yet:
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
 - Provider cost/tool-call budgets, AgentCoordinator, and Findings/Evidence/Report; WorkItem/Note model tools and dedicated TUI views remain pending.
-- Persisted session approval grants, a unified durable approval/idempotency record, tool-output Artifact capture, and removal of the `script run --local` compatibility bypass.
+- Persisted session approval grants, a unified durable approval/idempotency record, a first-class script-process ToolRun type, and tool-output Artifact capture.
 
 ## Code Audit Notes
 
@@ -179,10 +183,13 @@ No high-severity issue was found in the latest slice.
 
 The Tool Gateway audit found and fixed four correctness/security issues: invalid UTF-8 before a truncation boundary could be deleted and misreported as valid text; a tiny output limit could overflow its truncation marker; a persisted shell denial could be mapped inconsistently when a later Store operation also returned an error; and production file calls trusted a caller-supplied workspace root. Regression tests cover each case, and production roots are now bound to the workspace Store record.
 
+The script slice removed the direct LocalSandbox execution path. Its audit also found that applying regex redaction to an already serialized Run-event payload could corrupt escaping around a nested JSON command. Store redaction now parses JSON with exact numbers, recursively redacts string values, re-encodes, and enforces 1 MiB, 64-level, and 100,000-node limits. Regression tests cover nested JSON, token-shaped argv, invalid JSON, resource exhaustion, policy denial, and zero host side effects.
+
 Residual risks to address soon:
 
 - `staticcheck ./...` is clean; the prior TUI `S1008`, `S1011`, and unused-helper `U1000` findings were removed in this slice.
-- `script run --local` can execute local commands after only lexical policy checks; it needs explicit approval and workspace scoping.
+- `script run --local` no longer executes commands. It creates a workspace-scoped, Run-bound, policy-checked proposal and records `execution_mode=disabled`; LocalSandbox remains disconnected from production.
+- Script Run creation and ToolRun proposal persistence use two transactions. A Store failure in the second transaction can leave a created Run without its expected proposal; durable idempotency/recovery is the next Approval slice.
 - The Gateway still persists shell and file proposals in the legacy `tool_runs` and `file_edits` tables. Their Run-event projection is transactional, but unified approval idempotency and Session grant records do not exist yet.
 - Automatic workspace read outcomes are normalized but are not independently persisted when invoked by standalone CLI commands; Session slash-command text is still audited through Session messages.
 - Secret redaction is heuristic, not a full secrets manager; add opt-in raw local inspection later only with clear warnings.
@@ -352,13 +359,16 @@ Expected context behavior:
 - Tool Gateway tests passed for exact schemas, lifecycle invariants, approval modes, workspace-root binding, secret redaction, hard output bounds, MIME/UTF-8 validation, valid multibyte truncation, invalid bytes at and before the boundary, policy denial, dry-run shell review, file approval, and legacy adapter compatibility.
 - Production-path regression tests passed for CLI, Run-bound and legacy Session slash commands, SQLite ToolRun/FileEdit Run-event projection, and Bubble Tea tool review after direct manager construction was centralized behind the Gateway.
 - The final Tool Gateway gate passed with uncached full tests, vet, full-repository race tests, clean staticcheck, zero reachable govulncheck findings, isolated CLI approval/denial smoke, `NO_CREDENTIAL_PATTERN_IN_REPO`, and `NO_RUNTIME_OR_SECRET_ARTIFACTS_IN_REPO`.
+- Script Gateway tests passed for required workspace scope, relative-file resolution, absolute/traversal rejection before Run creation, deterministic `script_process.v1` encoding, backend/argv/size constraints, token redaction, policy-denied persistence, Run-event projection, and no local side effects before or after approval.
+- Structure-aware Store redaction tests passed for nested JSON strings, exact 64-bit numbers, invalid payloads, 1 MiB size, 64-level depth, and event rollback on failure.
+- The final script slice gate passed with uncached full tests, vet, full-repository race tests, clean staticcheck, zero reachable govulncheck findings, and an isolated real-binary smoke that observed risky exit code 5 with no marker file. Scans returned `NO_PRODUCTION_SANDBOX_RUNNER_CALLS`, `NO_CREDENTIAL_PATTERN_IN_REPO`, and `NO_RUNTIME_OR_SECRET_ARTIFACTS_IN_REPO`.
 
 ## Recommended Next Slice
 
-Continue P5 after the first unified Tool Gateway slice:
+Continue P5 after removing the final known execution bypass:
 
-- Route `script run --local` through a proposal-first Gateway path and keep real execution disabled by default.
 - Add durable approval idempotency, Run/Session correlation, restart recovery, revocable Session grants, and tool-call budget accounting.
+- Promote `script_process.v1` from a legacy Shell ToolRun payload to a first-class typed proposal and make Run-plus-proposal creation recoverably idempotent.
 - Add low-risk structured WorkItem/Note mutation proposals with schema validation, scope checks, policy decisions, durable events, and explicit approval where required.
 - Capture oversized or durable tool output as hashed, MIME-labelled Artifacts before enabling Local/Docker execution.
 - Keep TypeScript, Rust, and model providers unable to bypass the Go Tool Gateway or policy boundary.

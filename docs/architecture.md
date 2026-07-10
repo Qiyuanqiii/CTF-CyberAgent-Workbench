@@ -207,7 +207,9 @@ The first P5 slice implements this boundary in `internal/toolgateway`. It define
 
 Workspace IDs are resolved to Store-owned roots before production reads or writes, and a mismatched caller path is rejected before policy or filesystem access. Scoped low-risk reads use automatic approval. Shell and whole-file replacement use per-call approval, while policy rejection maps to permanent denial. Shell completion remains dry-run. The session approval mode exists in the domain contract but has no persisted grant implementation yet.
 
-Existing `tool_runs` and `file_edits` remain the durable compatibility records, so their transactional Run-event projection is preserved. Gateway outputs enforce hard stdout/stderr/preview limits, valid UTF-8, MIME metadata, truncation flags, and secret redaction. A unified durable proposal table, Artifact capture rules, model-authored WorkItem/Note tools, and removal of the legacy local-script bypass remain P5 work.
+`script run` now requires a persisted workspace and a workspace-relative existing file. It creates a Script Profile Mission/Run/Session and submits executable/argv through the Gateway as a validated `script_process.v1` JSON envelope whose execution mode is fixed to `disabled`. `--local` changes only the recorded requested backend. The CLI never constructs a Local/Noop runner, and approval still completes through the legacy dry-run ToolRun state machine.
+
+Existing `tool_runs` and `file_edits` remain the durable compatibility records, so their transactional Run-event projection is preserved. Gateway outputs enforce hard stdout/stderr/preview limits, valid UTF-8, MIME metadata, truncation flags, and secret redaction. Store JSON redaction parses payloads with exact numbers, redacts string values recursively, and re-encodes them so escaped nested JSON cannot be corrupted. Payloads are capped at 1 MiB, 64 levels, and 100,000 nodes. A unified durable proposal table, Artifact capture rules, and model-authored WorkItem/Note tools remain P5 work.
 
 ## Sandbox
 
