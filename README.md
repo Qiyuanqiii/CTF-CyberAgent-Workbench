@@ -1,39 +1,43 @@
 # CyberAgent Workbench
 
-CyberAgent Workbench is a local-first Go skeleton for a general coding and cyber learning agent runtime.
+> 本地优先、可恢复、可审计的通用 AI Agent 工作台<br>
+> A local-first, resumable, and auditable workbench for general-purpose AI agents.
 
-The project is transitioning to a run-centric architecture: a `Mission` is the stable user objective, while a `Run` is one resumable execution attempt. `Run` is a domain concept implemented and controlled by Go, not a programming language.
+## 项目简介 / Project Overview
 
-The v0.1 scaffold focuses on stable boundaries:
+### 中文
 
-- CLI-first workflow through `cyberagent`
-- deterministic mock LLM provider
-- Codex-style context compaction scaffold
-- persisted agent sessions with slash commands
-- versioned SQLite migrations plus Mission/Run lifecycle and append-only run events
-- automatic Run/Session binding with transactional Session, Policy, ToolRun, and FileEdit timeline projection
-- stable typed errors with CLI exit-code and future HTTP-status mappings
-- idempotent legacy Task-to-Run adaptation through `run adapt-task`
-- resumable no-tool RunSupervisor turns with durable pre/post checkpoints
-- persisted cumulative token/model-time budgets with per-call remaining-token limits
-- bounded `run execute` loops and atomic operator-controlled Run completion/failure
-- strict `root_lifecycle.v1` actions with Supervisor-owned `continue`, `finish`, and resumable `wait`
-- ordinary Run-bound Session chat routed through the same RunSupervisor, budgets, policy, and event stream
-- durable, redacted pending user input with restart recovery and exactly-once Session message commit
-- typed Provider outcomes with bounded, cancellation-aware retry and `Retry-After` handling
-- durable `model.started`, `model.completed`, and `model.failed` events with per-attempt execution accounting
-- workspace-scoped list/read commands for safe file context
-- secret redaction before file context, session storage, context summaries, tool runs, and provider calls
-- tool proposal and approval flow for session `/run`
-- persisted file edit proposals with safe diff preview, stale-file detection, and explicit approval
-- Bubble Tea terminal UI shell with session picker, loading states, and workspace context
-- model router and future provider extension points
-- local workspace layout under `~/.cyberagent-workbench`
-- SQLite event store via `github.com/mattn/go-sqlite3`
-- safety policy checks for risky cyber actions
-- no-op, local, and placeholder Docker sandbox runners
+CyberAgent Workbench 是一个由 Go 驱动的本地 AI Agent 工作台，面向代码开发、代码审查、安全学习、脚本任务和受控网络安全分析。它把模型调用、长上下文、工作区文件、策略检查、审批、执行预算和事件记录统一到一套可恢复的运行时中，让一次任务即使在程序退出后也能继续，并且每一步都可以追踪和复核。
 
-API keys are never stored by the application. Optional live providers read keys from the current process environment only.
+每个用户目标会被记录为一个 `Mission`，每次可恢复的执行过程则是一个 `Run`。Go 是唯一控制平面，负责模型路由、状态机、SQLite 持久化、安全策略和工具边界；未来的 TypeScript 界面与 Rust 确定性分析器都通过 Go 协议接入，不绕过安全控制。
+
+项目当前优先完善通用单 Agent 运行时。CTF 将作为后续 Profile 和 Skills 能力接入，而不是另建一套独立运行系统。
+
+### English
+
+CyberAgent Workbench is a local AI agent workbench powered by Go for coding, code review, security learning, scripting, and controlled cybersecurity analysis. It brings model calls, long-context memory, workspace files, policy checks, approvals, execution budgets, and event history into one resumable runtime, so work can continue after a process restart and every action remains inspectable.
+
+Each user objective is stored as a `Mission`, while each resumable execution is a `Run`. Go is the sole control plane for model routing, state machines, SQLite persistence, safety policy, and tool boundaries. Future TypeScript interfaces and deterministic Rust analyzers connect through Go-defined protocols instead of bypassing those controls.
+
+The current priority is the general-purpose single-agent runtime. CTF capabilities will be added later as Profiles and Skills on top of the same foundation rather than as a separate execution system.
+
+## 核心能力 / Core Capabilities
+
+- **可恢复运行 / Resumable runs:** durable checkpoints, bounded execution, restart recovery, and explicit lifecycle actions.
+- **统一模型网关 / Model gateway:** route-based providers, typed failures, cancellation-aware retry, and model attempt events.
+- **长上下文管理 / Long-context memory:** persisted sessions and automatic context compaction inspired by modern coding agents.
+- **本地工作区 / Local workspace:** scoped file access, safe reads, persistent artifacts, and reviewable edit proposals.
+- **安全与审批 / Safety and approval:** policy checks, secret redaction, dry-run tool proposals, and explicit approval boundaries.
+- **完整审计链 / Audit trail:** append-only Run events for messages, model calls, policy decisions, tool proposals, and file edits.
+- **CLI 与 TUI / CLI and TUI:** a scriptable `cyberagent` CLI plus a Bubble Tea terminal interface.
+- **可扩展架构 / Extensible architecture:** Go control plane with planned HTTP/WebSocket, TypeScript UI, Docker sandbox, and Rust analyzer boundaries.
+
+> [!NOTE]
+> 当前版本仍在积极开发中。真实工具自动执行、多 Agent 协作、Web UI 和 CTF 自动求解尚未开放。<br>
+> This project is under active development. Autonomous tool execution, multi-agent coordination, the Web UI, and automated CTF solving are not enabled yet.
+
+**密钥边界 / Secret boundary:** 应用不会持久化 API key；可选在线 Provider 只从当前进程环境变量读取密钥。<br>
+The application never persists API keys; optional live providers read them only from the current process environment.
 
 ## Build Requirements
 
