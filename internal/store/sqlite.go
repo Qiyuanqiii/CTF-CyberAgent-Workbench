@@ -187,6 +187,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 	return s.applyMigrations(ctx, []migration{
 		{Version: 1, Name: "v0.1 baseline", Statements: baseline},
 		{Version: 2, Name: "run-centric foundation", Statements: runCentricSchemaStatements},
+		{Version: 3, Name: "run session projection", Statements: runSessionProjectionStatements},
 	})
 }
 
@@ -390,14 +391,14 @@ func (s *SQLiteStore) LatestContextSummary(ctx context.Context, taskID string) (
 }
 
 func (s *SQLiteStore) SaveSession(ctx context.Context, sess session.Session) error {
-	if strings.TrimSpace(sess.ID) == "" {
-		return errors.New("session id is required")
-	}
 	if sess.Status == "" {
 		sess.Status = session.StatusActive
 	}
 	if sess.Route == "" {
 		sess.Route = "learn"
+	}
+	if strings.TrimSpace(sess.Title) == "" {
+		sess.Title = "New session"
 	}
 	if sess.CreatedAt.IsZero() {
 		sess.CreatedAt = time.Now().UTC()
@@ -405,6 +406,10 @@ func (s *SQLiteStore) SaveSession(ctx context.Context, sess session.Session) err
 	if sess.UpdatedAt.IsZero() {
 		sess.UpdatedAt = time.Now().UTC()
 	}
+	if err := sess.Validate(); err != nil {
+		return err
+	}
+	sess.Title = redact.String(sess.Title)
 	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions (id, workspace_id, title, route, status, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
@@ -448,7 +453,12 @@ func (s *SQLiteStore) SaveSessionMessage(ctx context.Context, message session.Me
 	if message.CreatedAt.IsZero() {
 		message.CreatedAt = time.Now().UTC()
 	}
-	res, err := s.db.ExecContext(ctx, `INSERT INTO session_messages
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return session.Message{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `INSERT INTO session_messages
 		(session_id, role, content, token_estimate, compacted, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)`,
 		message.SessionID, message.Role, message.Content, message.TokenEstimate, boolInt(message.Compacted), ts(message.CreatedAt))
@@ -459,7 +469,23 @@ func (s *SQLiteStore) SaveSessionMessage(ctx context.Context, message session.Me
 	if err == nil {
 		message.ID = id
 	}
-	_, _ = s.db.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, ts(time.Now().UTC()), message.SessionID)
+	result, err := tx.ExecContext(ctx, `UPDATE sessions SET updated_at = ? WHERE id = ?`, ts(time.Now().UTC()), message.SessionID)
+	if err != nil {
+		return session.Message{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return session.Message{}, err
+	}
+	if rows != 1 {
+		return session.Message{}, errors.New("session was not found")
+	}
+	if err := projectSessionMessageTx(ctx, tx, message); err != nil {
+		return session.Message{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return session.Message{}, err
+	}
 	return message, nil
 }
 
@@ -516,7 +542,18 @@ func (s *SQLiteStore) SaveToolRun(ctx context.Context, run toolrun.ToolRun) (too
 	if run.UpdatedAt.IsZero() {
 		run.UpdatedAt = time.Now().UTC()
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO tool_runs
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return toolrun.ToolRun{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var previousStatus string
+	lookupErr := tx.QueryRowContext(ctx, `SELECT status FROM tool_runs WHERE id = ?`, run.ID).Scan(&previousStatus)
+	existed := lookupErr == nil
+	if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+		return toolrun.ToolRun{}, lookupErr
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO tool_runs
 		(id, session_id, workspace_id, tool_name, command, status, risk, policy_reason, stdout, stderr, exit_code, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
@@ -534,6 +571,12 @@ func (s *SQLiteStore) SaveToolRun(ctx context.Context, run toolrun.ToolRun) (too
 		run.ID, run.SessionID, run.WorkspaceID, run.ToolName, run.Command, run.Status, run.Risk,
 		run.PolicyReason, run.Stdout, run.Stderr, run.ExitCode, ts(run.CreatedAt), ts(run.UpdatedAt))
 	if err != nil {
+		return toolrun.ToolRun{}, err
+	}
+	if err := projectToolRunTx(ctx, tx, run, previousStatus, existed); err != nil {
+		return toolrun.ToolRun{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return toolrun.ToolRun{}, err
 	}
 	return run, nil
@@ -605,7 +648,18 @@ func (s *SQLiteStore) SaveFileEdit(ctx context.Context, edit fileedit.Edit) (fil
 	if edit.UpdatedAt.IsZero() {
 		edit.UpdatedAt = time.Now().UTC()
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO file_edits
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return fileedit.Edit{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var previousStatus string
+	lookupErr := tx.QueryRowContext(ctx, `SELECT status FROM file_edits WHERE id = ?`, edit.ID).Scan(&previousStatus)
+	existed := lookupErr == nil
+	if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
+		return fileedit.Edit{}, lookupErr
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO file_edits
 		(id, session_id, workspace_id, path, status, original_text, proposed_text, diff_text,
 		 original_hash, proposed_hash, reason, secrets_redacted, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -626,6 +680,12 @@ func (s *SQLiteStore) SaveFileEdit(ctx context.Context, edit fileedit.Edit) (fil
 		edit.ProposedText, edit.Diff, edit.OriginalHash, edit.ProposedHash, edit.Reason,
 		boolInt(edit.SecretsRedacted), ts(edit.CreatedAt), ts(edit.UpdatedAt))
 	if err != nil {
+		return fileedit.Edit{}, err
+	}
+	if err := projectFileEditTx(ctx, tx, edit, previousStatus, existed); err != nil {
+		return fileedit.Edit{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return fileedit.Edit{}, err
 	}
 	return edit, nil

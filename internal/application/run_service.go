@@ -10,12 +10,14 @@ import (
 	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/redact"
+	"cyberagent-workbench/internal/session"
 )
 
 type RunStore interface {
-	CreateMissionRun(ctx context.Context, mission domain.Mission, run domain.Run, event events.Event) error
+	CreateMissionRun(ctx context.Context, mission domain.Mission, run domain.Run, linkedSession session.Session, createSession bool, initialEvents []events.Event) error
 	GetMission(ctx context.Context, id string) (domain.Mission, error)
 	GetRun(ctx context.Context, id string) (domain.Run, error)
+	GetSession(ctx context.Context, id string) (session.Session, error)
 	ListRuns(ctx context.Context, filter domain.RunFilter) ([]domain.Run, error)
 	TransitionRun(ctx context.Context, run domain.Run, expected domain.RunStatus, event events.Event) error
 	ListRunEvents(ctx context.Context, runID string) ([]events.Event, error)
@@ -55,9 +57,32 @@ func (s *RunService) Create(ctx context.Context, req CreateRunRequest) (domain.M
 	if err != nil {
 		return domain.Mission{}, domain.Run{}, err
 	}
+	workspaceID := strings.TrimSpace(req.WorkspaceID)
+	requestedSessionID := strings.TrimSpace(req.SessionID)
+	var linkedSession session.Session
+	createSession := requestedSessionID == ""
+	if !createSession {
+		linkedSession, err = s.store.GetSession(ctx, requestedSessionID)
+		if err != nil {
+			return domain.Mission{}, domain.Run{}, err
+		}
+		if linkedSession.Status != session.StatusActive {
+			return domain.Mission{}, domain.Run{}, errors.New("run session must be active")
+		}
+		if workspaceID != "" && linkedSession.WorkspaceID != "" && workspaceID != linkedSession.WorkspaceID {
+			return domain.Mission{}, domain.Run{}, errors.New("session and requested workspace do not match")
+		}
+		if workspaceID == "" {
+			workspaceID = linkedSession.WorkspaceID
+		}
+	}
 	route := strings.TrimSpace(req.ModelRoute)
 	if route == "" {
-		route = string(profile)
+		if !createSession {
+			route = linkedSession.Route
+		} else {
+			route = string(profile)
+		}
 	}
 	budget := req.Budget
 	if budget.MaxTurns == 0 {
@@ -67,19 +92,30 @@ func (s *RunService) Create(ctx context.Context, req CreateRunRequest) (domain.M
 		return domain.Mission{}, domain.Run{}, err
 	}
 	now := time.Now().UTC()
+	if createSession {
+		linkedSession = session.New(workspaceID, goal, route)
+		linkedSession.CreatedAt = now
+	} else {
+		linkedSession.WorkspaceID = workspaceID
+		linkedSession.Route = route
+	}
+	linkedSession.UpdatedAt = now
+	if err := linkedSession.Validate(); err != nil {
+		return domain.Mission{}, domain.Run{}, err
+	}
 	mission := domain.Mission{
 		ID:          idgen.New("mission"),
 		Goal:        goal,
 		Profile:     profile,
-		WorkspaceID: strings.TrimSpace(req.WorkspaceID),
-		Scope:       domain.DefaultScope(req.WorkspaceID),
+		WorkspaceID: workspaceID,
+		Scope:       domain.DefaultScope(workspaceID),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
 	run := domain.Run{
 		ID:        idgen.New("run"),
 		MissionID: mission.ID,
-		SessionID: strings.TrimSpace(req.SessionID),
+		SessionID: linkedSession.ID,
 		Status:    domain.RunCreated,
 		Config: domain.RunConfig{
 			ModelRoute:  route,
@@ -95,15 +131,24 @@ func (s *RunService) Create(ctx context.Context, req CreateRunRequest) (domain.M
 	if err := run.Validate(); err != nil {
 		return domain.Mission{}, domain.Run{}, err
 	}
-	event, err := events.New(run.ID, mission.ID, events.RunCreatedEvent, "run_service", run.ID, map[string]any{
+	createdEvent, err := events.New(run.ID, mission.ID, events.RunCreatedEvent, "run_service", run.ID, map[string]any{
 		"status":       run.Status,
 		"profile":      mission.Profile,
 		"network_mode": mission.Scope.NetworkMode,
+		"session_id":   run.SessionID,
 	})
 	if err != nil {
 		return domain.Mission{}, domain.Run{}, err
 	}
-	if err := s.store.CreateMissionRun(ctx, mission, run, event); err != nil {
+	attachedEvent, err := events.New(run.ID, mission.ID, events.SessionAttachedEvent, "run_service", linkedSession.ID, map[string]any{
+		"created":      createSession,
+		"route":        linkedSession.Route,
+		"workspace_id": linkedSession.WorkspaceID,
+	})
+	if err != nil {
+		return domain.Mission{}, domain.Run{}, err
+	}
+	if err := s.store.CreateMissionRun(ctx, mission, run, linkedSession, createSession, []events.Event{createdEvent, attachedEvent}); err != nil {
 		return domain.Mission{}, domain.Run{}, err
 	}
 	return mission, run, nil

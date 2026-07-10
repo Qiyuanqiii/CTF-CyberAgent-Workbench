@@ -15,7 +15,9 @@ cyberagent run resume <run-id>
 cyberagent run cancel <run-id>
 ```
 
-A Mission is the stable goal and authorization scope. A Run is one resumable execution attempt. Run state changes and their events are committed together in SQLite. `run start` currently advances the auditable lifecycle from `created` through `preparing` to `running`; the model-driven RunSupervisor execution loop is scheduled for P2 and is not started implicitly in this slice.
+A Mission is the stable goal and authorization scope. A Run is one resumable execution attempt. Each new Run creates a dedicated active Session unless `--session <id>` selects an unattached active Session. Session creation or attachment, Run creation, and their initial events commit together in SQLite.
+
+Session messages, assistant policy decisions, ToolRun changes, and FileEdit changes are projected into `run events` transactionally. Activity carrying a workspace different from the Run scope is rejected. `run start` currently advances the auditable lifecycle from `created` through `preparing` to `running`; the model-driven RunSupervisor execution loop is scheduled for P2 and is not started implicitly in this slice.
 
 Supported profiles are `code`, `review`, `learn`, and `script`. New runs start with network access disabled. Budget flags reject negative values and include maximum turns, tokens, model cost, and wall-clock timeout.
 

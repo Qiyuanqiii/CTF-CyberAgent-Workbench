@@ -12,24 +12,40 @@ import (
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/redact"
+	"cyberagent-workbench/internal/session"
 )
 
-func (s *SQLiteStore) CreateMissionRun(ctx context.Context, mission domain.Mission, run domain.Run, event events.Event) error {
+func (s *SQLiteStore) CreateMissionRun(ctx context.Context, mission domain.Mission, run domain.Run, linkedSession session.Session, createSession bool, initialEvents []events.Event) error {
 	mission.Goal = redact.String(mission.Goal)
+	linkedSession.Title = redact.String(linkedSession.Title)
 	if err := mission.Validate(); err != nil {
 		return err
 	}
 	if err := run.Validate(); err != nil {
 		return err
 	}
+	if err := linkedSession.Validate(); err != nil {
+		return err
+	}
 	if run.Status != domain.RunCreated {
 		return errors.New("new run must start in created status")
 	}
-	if run.MissionID != mission.ID || event.RunID != run.ID || event.MissionID != mission.ID {
-		return errors.New("mission, run, and event identities do not match")
+	if run.MissionID != mission.ID || run.SessionID != linkedSession.ID {
+		return errors.New("mission, run, and session identities do not match")
 	}
-	if err := event.Validate(); err != nil {
-		return err
+	if mission.WorkspaceID != linkedSession.WorkspaceID {
+		return errors.New("mission and session workspaces do not match")
+	}
+	if len(initialEvents) == 0 {
+		return errors.New("initial run events are required")
+	}
+	for _, event := range initialEvents {
+		if event.RunID != run.ID || event.MissionID != mission.ID {
+			return errors.New("mission, run, and event identities do not match")
+		}
+		if err := event.Validate(); err != nil {
+			return err
+		}
 	}
 	scopeJSON, err := marshalRedactedJSON(mission.Scope)
 	if err != nil {
@@ -48,6 +64,28 @@ func (s *SQLiteStore) CreateMissionRun(ctx context.Context, mission domain.Missi
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if createSession {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions
+			(id, workspace_id, title, route, status, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`, linkedSession.ID, linkedSession.WorkspaceID, linkedSession.Title,
+			linkedSession.Route, linkedSession.Status, ts(linkedSession.CreatedAt), ts(linkedSession.UpdatedAt)); err != nil {
+			return err
+		}
+	} else {
+		result, err := tx.ExecContext(ctx, `UPDATE sessions SET workspace_id = ?, route = ?, updated_at = ?
+			WHERE id = ? AND status = ?`, linkedSession.WorkspaceID, linkedSession.Route,
+			ts(linkedSession.UpdatedAt), linkedSession.ID, session.StatusActive)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return errors.New("active run session was not found")
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO missions
 		(id, goal, profile, workspace_id, scope_json, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`, mission.ID, mission.Goal, mission.Profile, mission.WorkspaceID,
@@ -60,8 +98,10 @@ func (s *SQLiteStore) CreateMissionRun(ctx context.Context, mission domain.Missi
 		configJSON, budgetJSON, nullableTS(run.StartedAt), nullableTS(run.FinishedAt), ts(run.CreatedAt), ts(run.UpdatedAt)); err != nil {
 		return err
 	}
-	if _, err := insertRunEventTx(ctx, tx, event); err != nil {
-		return err
+	for _, event := range initialEvents {
+		if _, err := insertRunEventTx(ctx, tx, event); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

@@ -29,9 +29,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 42%.
+- Overall product vision: about 46%.
 - v0.1 generic agent MVP: about 97%.
-- V2 run-centric runtime: about 34%.
+- V2 run-centric runtime: about 41%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -73,6 +73,11 @@ Completed:
 - Added transactional `missions`, `runs`, and append-only `run_events` persistence; event sequence is assigned only by the Store.
 - Added `run create/list/show/events/start/pause/resume/cancel` CLI and end-to-end lifecycle tests.
 - Run status updates and corresponding events commit atomically; Store independently rejects illegal or stale transitions.
+- Added schema v3 with a unique Run/Session association and triggers that reject references to missing sessions.
+- Every new Run now creates a dedicated active Session by default; an existing active Session can be attached once after workspace validation.
+- Run creation, optional Session creation/update, and initial `run.created` plus `session.attached` events commit in one transaction.
+- Session messages, assistant-output policy decisions, ToolRun policy/status changes, and FileEdit status changes project into the append-only Run timeline.
+- Activity records and projected events commit atomically, repeated saves do not duplicate events, and Store rejects cross-workspace projection.
 
 Not done yet:
 
@@ -82,7 +87,8 @@ Not done yet:
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
-- Projection of Session, ToolRun, FileEdit, and policy activity into the unified Run event stream.
+- Stable typed error codes across CLI and future APIs.
+- Idempotent compatibility mapping from legacy `agent.Task` to Mission/Run.
 - RunSupervisor, Work Board, Notes, AgentCoordinator, Findings/Evidence, and resumable execution.
 
 ## Code Audit Notes
@@ -102,6 +108,7 @@ Residual risks to address soon:
 - Future Rust and TypeScript modules must not bypass Go for LLM, secrets, policy, workspace permissions, Docker, shell, network scope, or persistence.
 - `run start` currently advances lifecycle state only; it intentionally does not call a model or execute tools until RunSupervisor is implemented in P2.
 - Applied migration statements are immutable once released because their checksums are verified. Schema changes must always add a new migration version.
+- Schema v3 intentionally rejects duplicate non-empty Run/Session associations. A legacy database containing duplicates must be audited before upgrade instead of silently discarding an association.
 
 ## Feature Verification
 
@@ -169,13 +176,14 @@ Expected context behavior:
 - Repository token-prefix scan returned `NO_TOKEN_PATTERN_IN_REPO`.
 - Mission/Run CLI smoke passed in an isolated home: create, ordered events, start, pause, resume, cancel, show, filtered list, legacy provider command, and cleanup all succeeded.
 - Final run-centric race tests passed for `domain`, `events`, `application`, `store`, and `app`.
+- Run activity projection tests passed for automatic/existing Session binding, one-to-one reuse rejection, contiguous event order, idempotent saves, invalid-state rollback, and cross-workspace rejection.
+- Isolated CLI smoke produced 14 contiguous events spanning Run, Session, Policy, ToolRun, and FileEdit across separate process invocations.
 
 ## Recommended Next Slice
 
-Complete P1 compatibility projection before P2 execution:
+Finish P0/P1 compatibility before P2 execution:
 
 - Add stable typed error codes without changing current human-readable CLI errors.
-- Attach or create a Session for a Run and record that association.
-- Project Session messages, ToolRun proposals/decisions, FileEdit proposals/applications, and policy decisions into `run_events`.
 - Add an idempotent compatibility adapter from legacy `agent.Task` to Mission/Run.
+- Expose adapter outcomes as normalized Run events and verify repeated conversion does not create duplicate Missions or Runs.
 - Keep `run start` lifecycle-only and keep multi-agent concurrency disabled until RunSupervisor arrives in P2.

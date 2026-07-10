@@ -11,6 +11,7 @@ The v0.1 scaffold focuses on stable boundaries:
 - Codex-style context compaction scaffold
 - persisted agent sessions with slash commands
 - versioned SQLite migrations plus Mission/Run lifecycle and append-only run events
+- automatic Run/Session binding with transactional Session, Policy, ToolRun, and FileEdit timeline projection
 - workspace-scoped list/read commands for safe file context
 - secret redaction before file context, session storage, context summaries, tool runs, and provider calls
 - tool proposal and approval flow for session `/run`
@@ -78,7 +79,7 @@ Local runtime databases, workspace data, environment files, API keys, IDE metada
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. Versioned migrations and the first Mission/Run/event slice now exist; next comes projection of existing Session/ToolRun/FileEdit activity into the Run timeline, followed by resumable single-agent supervision, structured work items/notes, and controlled multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. Versioned migrations, Mission/Run lifecycle, automatic Run/Session binding, and transactional Session/Policy/ToolRun/FileEdit event projection now exist. Next comes stable error codes and the legacy Task compatibility adapter, followed by resumable single-agent supervision, structured work items/notes, and controlled multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
 TUI quick controls: `cyberagent tui` opens a session picker. In chat, `Tab` switches focus, `PgUp/PgDn` scroll messages, `j/k` select tool runs, `a` approves, `d` denies, `Ctrl+R` refreshes, and `Esc` quits. Slow sends, refreshes, and tool approvals run through async commands with visible status text such as `thinking...`, `proposing tool...`, or `approving...`. Attached workspaces render in the side panel with local directory counts for attachments, scripts, outputs, logs, and writeups.
 

@@ -1,6 +1,8 @@
 package policy
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -13,6 +15,30 @@ type Decision struct {
 	Reason        string `json:"reason"`
 	Risk          string `json:"risk,omitempty"`
 	NeedsApproval bool   `json:"needs_approval,omitempty"`
+}
+
+type DecisionRecord struct {
+	SessionID string
+	SubjectID string
+	Context   string
+	Decision  Decision
+}
+
+func (r DecisionRecord) Validate() error {
+	if strings.TrimSpace(r.SessionID) == "" {
+		return errors.New("policy decision session id is required")
+	}
+	if strings.TrimSpace(r.Context) == "" {
+		return errors.New("policy decision context is required")
+	}
+	if strings.TrimSpace(r.Decision.Reason) == "" {
+		return errors.New("policy decision reason is required")
+	}
+	return nil
+}
+
+type DecisionRecorder interface {
+	RecordPolicyDecision(ctx context.Context, record DecisionRecord) error
 }
 
 type Checker interface {

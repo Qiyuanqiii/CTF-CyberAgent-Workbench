@@ -32,6 +32,44 @@ type Session struct {
 	UpdatedAt   time.Time
 }
 
+func New(workspaceID string, title string, route string) Session {
+	if strings.TrimSpace(route) == "" {
+		route = "learn"
+	}
+	if strings.TrimSpace(title) == "" {
+		title = "New session"
+	}
+	now := time.Now().UTC()
+	return Session{
+		ID:          newID("sess"),
+		WorkspaceID: strings.TrimSpace(workspaceID),
+		Title:       strings.TrimSpace(title),
+		Route:       strings.TrimSpace(route),
+		Status:      StatusActive,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+}
+
+func (s Session) Validate() error {
+	if strings.TrimSpace(s.ID) == "" {
+		return errors.New("session id is required")
+	}
+	if strings.TrimSpace(s.Title) == "" {
+		return errors.New("session title is required")
+	}
+	if strings.TrimSpace(s.Route) == "" {
+		return errors.New("session route is required")
+	}
+	if s.Status != StatusActive && s.Status != StatusArchived {
+		return fmt.Errorf("invalid session status %q", s.Status)
+	}
+	if s.CreatedAt.IsZero() || s.UpdatedAt.IsZero() {
+		return errors.New("session timestamps are required")
+	}
+	return nil
+}
+
 type Message struct {
 	ID            int64
 	SessionID     string
@@ -96,22 +134,7 @@ func NewManager(store Store, router *llm.Router, checker policy.Checker) *Manage
 }
 
 func (m *Manager) Create(ctx context.Context, workspaceID string, title string, route string) (Session, error) {
-	if strings.TrimSpace(route) == "" {
-		route = "learn"
-	}
-	if strings.TrimSpace(title) == "" {
-		title = "New session"
-	}
-	now := time.Now().UTC()
-	session := Session{
-		ID:          newID("sess"),
-		WorkspaceID: workspaceID,
-		Title:       strings.TrimSpace(title),
-		Route:       strings.TrimSpace(route),
-		Status:      StatusActive,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
+	session := New(workspaceID, title, route)
 	if err := m.store.SaveSession(ctx, session); err != nil {
 		return Session{}, err
 	}
@@ -360,6 +383,16 @@ func (m *Manager) chat(ctx context.Context, sess Session, userMsg Message) (Send
 		return SendResult{}, err
 	}
 	decision := m.checker.CheckText("assistant_response", resp.Text)
+	if recorder, ok := m.store.(policy.DecisionRecorder); ok {
+		if err := recorder.RecordPolicyDecision(ctx, policy.DecisionRecord{
+			SessionID: sess.ID,
+			SubjectID: sess.ID,
+			Context:   "assistant_response",
+			Decision:  decision,
+		}); err != nil {
+			return SendResult{}, err
+		}
+	}
 	if !decision.Allowed {
 		return SendResult{}, fmt.Errorf("policy denied assistant response: %s", decision.Reason)
 	}

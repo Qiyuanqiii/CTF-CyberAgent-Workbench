@@ -107,8 +107,8 @@ func (a *App) runCreate(ctx context.Context, service *application.RunService, ar
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(a.out, "run %s created\nmission: %s\nstatus: %s\nprofile: %s\nworkspace: %s\nroute: %s\n",
-		run.ID, mission.ID, run.Status, mission.Profile, mission.WorkspaceID, run.Config.ModelRoute)
+	fmt.Fprintf(a.out, "run %s created\nmission: %s\nsession: %s\nstatus: %s\nprofile: %s\nworkspace: %s\nroute: %s\n",
+		run.ID, mission.ID, run.SessionID, run.Status, mission.Profile, mission.WorkspaceID, run.Config.ModelRoute)
 	return nil
 }
 

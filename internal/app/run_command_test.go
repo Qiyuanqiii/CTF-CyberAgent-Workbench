@@ -8,6 +8,9 @@ import (
 )
 
 var runIDPattern = regexp.MustCompile(`run-[0-9]{14}-[a-f0-9]{12}`)
+var sessionIDPattern = regexp.MustCompile(`sess-[0-9]{14}-[a-f0-9]{12}`)
+var toolIDPattern = regexp.MustCompile(`tool-[0-9]{14}-[a-f0-9]{12}`)
+var editIDPattern = regexp.MustCompile(`edit-[0-9]{14}-[a-f0-9]{12}`)
 
 func executeTestCommand(t *testing.T, args ...string) (string, string, int) {
 	t.Helper()
@@ -27,12 +30,38 @@ func TestRunCLIEndToEndLifecycle(t *testing.T) {
 		t.Fatalf("run create failed: %s", stderr)
 	}
 	runID := runIDPattern.FindString(created)
-	if runID == "" || !strings.Contains(created, "status: created") {
+	sessionID := sessionIDPattern.FindString(created)
+	if runID == "" || sessionID == "" || !strings.Contains(created, "status: created") {
 		t.Fatalf("unexpected create output: %s", created)
 	}
 	initialEvents, stderr, code := executeTestCommand(t, "run", "events", runID)
-	if code != 0 || !strings.Contains(initialEvents, "run.created") {
+	if code != 0 || !strings.Contains(initialEvents, "run.created") || !strings.Contains(initialEvents, "session.attached") {
 		t.Fatalf("unexpected initial events output=%s stderr=%s", initialEvents, stderr)
+	}
+	if _, stderr, code := executeTestCommand(t, "session", "send", sessionID, "hello run timeline"); code != 0 {
+		t.Fatalf("session send failed: %s", stderr)
+	}
+	toolOutput, stderr, code := executeTestCommand(t, "session", "send", sessionID, "/run echo hello")
+	if code != 0 {
+		t.Fatalf("tool proposal failed: %s", stderr)
+	}
+	toolID := toolIDPattern.FindString(toolOutput)
+	if toolID == "" {
+		t.Fatalf("missing tool id in output: %s", toolOutput)
+	}
+	if _, stderr, code := executeTestCommand(t, "tool", "approve", toolID); code != 0 {
+		t.Fatalf("tool approval failed: %s", stderr)
+	}
+	editOutput, stderr, code := executeTestCommand(t, "edit", "propose", "--workspace", "demo", "--session", sessionID, "--path", "notes.txt", "--content", "timeline note")
+	if code != 0 {
+		t.Fatalf("file edit proposal failed: %s", stderr)
+	}
+	editID := editIDPattern.FindString(editOutput)
+	if editID == "" {
+		t.Fatalf("missing edit id in output: %s", editOutput)
+	}
+	if _, stderr, code := executeTestCommand(t, "edit", "approve", editID); code != 0 {
+		t.Fatalf("file edit approval failed: %s", stderr)
 	}
 	for _, step := range []struct {
 		action string
@@ -55,6 +84,11 @@ func TestRunCLIEndToEndLifecycle(t *testing.T) {
 	eventOutput, stderr, code := executeTestCommand(t, "run", "events", runID)
 	if code != 0 || strings.Count(eventOutput, "run.status_changed") != 5 {
 		t.Fatalf("unexpected event timeline output=%s stderr=%s", eventOutput, stderr)
+	}
+	for _, eventType := range []string{"session.message_created", "policy.decision", "tool.proposed", "tool.approved", "tool.completed", "file_edit.proposed", "file_edit.approved", "file_edit.applied"} {
+		if !strings.Contains(eventOutput, eventType) {
+			t.Fatalf("event timeline missing %s: %s", eventType, eventOutput)
+		}
 	}
 	listed, stderr, code := executeTestCommand(t, "run", "list", "--status", "cancelled")
 	if code != 0 || !strings.Contains(listed, runID) {

@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/fileedit"
+	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/toolrun"
 )
@@ -163,8 +165,122 @@ func TestSQLiteStoreRejectsIllegalRunTransitionAtPersistenceBoundary(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].Type != events.RunCreatedEvent {
+	if len(items) != 2 || items[0].Type != events.RunCreatedEvent || items[1].Type != events.SessionAttachedEvent {
 		t.Fatalf("illegal transition appended an event: %#v", items)
+	}
+}
+
+func TestSQLiteStoreProjectsRunActivityAtomically(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	service := application.NewRunService(st)
+	_, run, err := service.Create(ctx, application.CreateRunRequest{
+		Goal: "project activity", Profile: "code", WorkspaceID: "ws-projection", Budget: domain.Budget{MaxTurns: 10},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SaveSessionMessage(ctx, session.NewMessage(run.SessionID, "user", "inspect the project")); err != nil {
+		t.Fatal(err)
+	}
+
+	toolManager := toolrun.NewManager(st, policy.NewDefaultChecker())
+	tool, err := toolManager.ProposeShell(ctx, run.SessionID, "ws-projection", "echo hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, err = toolManager.Approve(ctx, tool.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SaveToolRun(ctx, tool); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	edit := fileedit.Edit{
+		ID: "edit-projection", SessionID: run.SessionID, WorkspaceID: "ws-projection", Path: "notes.txt",
+		Status: fileedit.StatusProposed, ProposedText: "hello", Diff: "+hello", OriginalHash: "missing",
+		ProposedHash: fileedit.HashText("hello"), CreatedAt: now, UpdatedAt: now,
+	}
+	edit, err = st.SaveFileEdit(ctx, edit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edit.Status = fileedit.StatusApproved
+	edit.UpdatedAt = time.Now().UTC()
+	edit, err = st.SaveFileEdit(ctx, edit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edit.Status = fileedit.StatusApplied
+	edit.UpdatedAt = time.Now().UTC()
+	edit, err = st.SaveFileEdit(ctx, edit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SaveFileEdit(ctx, edit); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := st.RecordPolicyDecision(ctx, policy.DecisionRecord{
+		SessionID: run.SessionID,
+		SubjectID: run.SessionID,
+		Context:   "assistant_response",
+		Decision:  policy.Decision{Allowed: true, Reason: "allowed in test"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := service.Events(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTypes := []string{
+		events.RunCreatedEvent,
+		events.SessionAttachedEvent,
+		events.SessionMessageEvent,
+		events.PolicyDecisionEvent,
+		events.ToolProposedEvent,
+		events.ToolApprovedEvent,
+		events.ToolCompletedEvent,
+		events.FileEditProposedEvent,
+		events.FileEditApprovedEvent,
+		events.FileEditAppliedEvent,
+		events.PolicyDecisionEvent,
+	}
+	if len(items) != len(wantTypes) {
+		t.Fatalf("unexpected projected timeline length: %#v", items)
+	}
+	for index, want := range wantTypes {
+		if items[index].Sequence != int64(index+1) || items[index].Type != want {
+			t.Fatalf("unexpected projected event at %d: %#v", index, items[index])
+		}
+	}
+
+	bad := toolrun.ToolRun{
+		ID: "tool-invalid", SessionID: run.SessionID, WorkspaceID: "ws-projection", ToolName: toolrun.ShellTool,
+		Command: "echo invalid", Status: "unknown", CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err := st.SaveToolRun(ctx, bad); err == nil {
+		t.Fatal("expected invalid tool status to roll back")
+	}
+	if _, err := st.GetToolRun(ctx, bad.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("invalid tool run was persisted: %v", err)
+	}
+	crossWorkspace := bad
+	crossWorkspace.ID = "tool-cross-workspace"
+	crossWorkspace.Status = toolrun.StatusProposed
+	crossWorkspace.WorkspaceID = "ws-other"
+	if _, err := st.SaveToolRun(ctx, crossWorkspace); err == nil {
+		t.Fatal("expected cross-workspace activity to be rejected")
+	}
+	if _, err := st.GetToolRun(ctx, crossWorkspace.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("cross-workspace tool run was persisted: %v", err)
 	}
 }
 

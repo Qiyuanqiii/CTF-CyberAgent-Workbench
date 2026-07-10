@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 2
+const LatestSchemaVersion = 3
 
 type migration struct {
 	Version    int
@@ -71,6 +71,26 @@ var runCentricSchemaStatements = []string{
 	);`,
 	`CREATE INDEX IF NOT EXISTS idx_run_events_run_sequence
 		ON run_events(run_id, sequence);`,
+}
+
+var runSessionProjectionStatements = []string{
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_session_id_unique
+		ON runs(session_id)
+		WHERE session_id IS NOT NULL AND session_id <> '';`,
+	`CREATE TRIGGER IF NOT EXISTS trg_runs_session_insert
+		BEFORE INSERT ON runs
+		WHEN NEW.session_id IS NOT NULL AND NEW.session_id <> ''
+			AND NOT EXISTS (SELECT 1 FROM sessions WHERE id = NEW.session_id)
+		BEGIN
+			SELECT RAISE(ABORT, 'run session does not exist');
+		END;`,
+	`CREATE TRIGGER IF NOT EXISTS trg_runs_session_update
+		BEFORE UPDATE OF session_id ON runs
+		WHEN NEW.session_id IS NOT NULL AND NEW.session_id <> ''
+			AND NOT EXISTS (SELECT 1 FROM sessions WHERE id = NEW.session_id)
+		BEGIN
+			SELECT RAISE(ABORT, 'run session does not exist');
+		END;`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {
