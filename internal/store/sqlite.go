@@ -188,6 +188,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 1, Name: "v0.1 baseline", Statements: baseline},
 		{Version: 2, Name: "run-centric foundation", Statements: runCentricSchemaStatements},
 		{Version: 3, Name: "run session projection", Statements: runSessionProjectionStatements},
+		{Version: 4, Name: "legacy task run mapping", Statements: legacyTaskRunStatements},
 	})
 }
 
@@ -254,6 +255,8 @@ func (s *SQLiteStore) SaveTask(ctx context.Context, task agent.Task) error {
 	if task.Status == "" {
 		task.Status = agent.StatusPending
 	}
+	task.Goal = redact.String(task.Goal)
+	task.Mode = redact.String(task.Mode)
 	_, err := s.db.ExecContext(ctx, `INSERT INTO tasks (id, kind, goal, workspace_id, mode, status, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET status=excluded.status`,
@@ -290,6 +293,8 @@ func (s *SQLiteStore) RecordEvent(ctx context.Context, event agent.Event) error 
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now().UTC()
 	}
+	event.Message = redact.String(event.Message)
+	event.PayloadJSON = redact.String(event.PayloadJSON)
 	_, err := s.db.ExecContext(ctx, `INSERT INTO events (task_id, workspace_id, type, message, payload_json, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)`,
 		event.TaskID, event.WorkspaceID, event.Type, event.Message, event.PayloadJSON, ts(event.CreatedAt))

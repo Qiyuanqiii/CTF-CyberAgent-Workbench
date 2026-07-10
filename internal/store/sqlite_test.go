@@ -368,6 +368,33 @@ func TestSQLiteStoreRedactsSensitiveContent(t *testing.T) {
 	mimoToken := "t" + "p-" + strings.Repeat("a", 40)
 	openAIToken := "s" + "k-" + "abcdefghijklmnopqrstuvwxyz123456"
 	openAIPrefix := "s" + "k-" + "abcdefghijklmnopqrstuvwxyz"
+	task := agent.Task{
+		ID: "task-secret", Kind: agent.TaskScript, Goal: "inspect " + mimoToken, Mode: "python",
+		Status: agent.StatusPending, CreatedAt: time.Now().UTC(),
+	}
+	if err := st.SaveTask(ctx, task); err != nil {
+		t.Fatal(err)
+	}
+	loadedTask, err := st.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(loadedTask.Goal, mimoToken[:11]) {
+		t.Fatalf("secret stored in legacy task: %#v", loadedTask)
+	}
+	if err := st.RecordEvent(ctx, agent.Event{
+		TaskID: task.ID, Type: "test.secret", Message: "observed " + mimoToken,
+		PayloadJSON: `{"token":"` + mimoToken + `"}`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	legacyEvents, err := st.ListEventsByTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legacyEvents) != 1 || strings.Contains(legacyEvents[0].Message+legacyEvents[0].PayloadJSON, mimoToken[:11]) {
+		t.Fatalf("secret stored in legacy event: %#v", legacyEvents)
+	}
 	saved, err := st.SaveContextSummary(ctx, contextmgr.Summary{
 		TaskID:  "task-secret",
 		Content: "OPENAI_API_KEY=" + openAIToken,

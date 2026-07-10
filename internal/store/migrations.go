@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 3
+const LatestSchemaVersion = 4
 
 type migration struct {
 	Version    int
@@ -91,6 +91,20 @@ var runSessionProjectionStatements = []string{
 		BEGIN
 			SELECT RAISE(ABORT, 'run session does not exist');
 		END;`,
+}
+
+var legacyTaskRunStatements = []string{
+	`CREATE TABLE IF NOT EXISTS legacy_task_runs (
+		task_id TEXT PRIMARY KEY,
+		mission_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL UNIQUE,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(task_id) REFERENCES tasks(id),
+		FOREIGN KEY(mission_id) REFERENCES missions(id),
+		FOREIGN KEY(run_id) REFERENCES runs(id)
+	);`,
+	`CREATE INDEX IF NOT EXISTS idx_legacy_task_runs_run_id
+		ON legacy_task_runs(run_id);`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {

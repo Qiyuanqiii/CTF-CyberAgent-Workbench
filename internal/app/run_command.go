@@ -24,6 +24,8 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "create":
 		return a.runCreate(ctx, service, args[1:])
+	case "adapt-task":
+		return a.runAdaptTask(ctx, args[1:])
 	case "list":
 		return a.runList(ctx, service, args[1:])
 	case "show":
@@ -41,6 +43,27 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown run subcommand %q", args[0])
 	}
+}
+
+func (a *App) runAdaptTask(ctx context.Context, args []string) error {
+	fs := newFlagSet("run adapt-task", a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run adapt-task <task-id>")
+	}
+	result, err := application.NewTaskAdapter(a.store).Adapt(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	action := "reused"
+	if result.Created {
+		action = "adapted"
+	}
+	fmt.Fprintf(a.out, "task %s %s\nmission: %s\nrun: %s\nsession: %s\nstatus: %s\nprofile: %s\n",
+		result.Source.ID, action, result.Mission.ID, result.Run.ID, result.Run.SessionID, result.Run.Status, result.Mission.Profile)
+	return nil
 }
 
 func (a *App) runCreate(ctx context.Context, service *application.RunService, args []string) error {

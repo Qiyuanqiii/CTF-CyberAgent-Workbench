@@ -5,6 +5,7 @@
 ```powershell
 cyberagent run create "review this workspace" --workspace demo --profile review
 cyberagent run create "explain this code" --profile learn --max-turns 40 --max-tokens 20000 --timeout 20m
+cyberagent run adapt-task <legacy-task-id>
 cyberagent run list
 cyberagent run list --status paused
 cyberagent run show <run-id>
@@ -18,6 +19,10 @@ cyberagent run cancel <run-id>
 A Mission is the stable goal and authorization scope. A Run is one resumable execution attempt. Each new Run creates a dedicated active Session unless `--session <id>` selects an unattached active Session. Session creation or attachment, Run creation, and their initial events commit together in SQLite.
 
 Session messages, assistant policy decisions, ToolRun changes, and FileEdit changes are projected into `run events` transactionally. Activity carrying a workspace different from the Run scope is rejected. `run start` currently advances the auditable lifecycle from `created` through `preparing` to `running`; the model-driven RunSupervisor execution loop is scheduled for P2 and is not started implicitly in this slice.
+
+`run adapt-task` converts a v0.1 `agent.Task` into a new Mission, Run, and Session. The mapping is transactional and keyed by Task ID, so repeated or concurrent calls return the same Run and append only one `legacy.task_adapted` event. Historical task status is recorded for audit, but the new Run always starts at `created` and never executes implicitly. Legacy CTF tasks map to the safe generic `review` profile until the dedicated CTF phase.
+
+CLI errors keep their existing text and use stable exit codes documented in [errors.md](errors.md).
 
 Supported profiles are `code`, `review`, `learn`, and `script`. New runs start with network access disabled. Budget flags reject negative values and include maximum turns, tokens, model cost, and wall-clock timeout.
 

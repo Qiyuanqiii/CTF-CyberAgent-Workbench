@@ -95,3 +95,43 @@ func TestRunCLIEndToEndLifecycle(t *testing.T) {
 		t.Fatalf("unexpected list output=%s stderr=%s", listed, stderr)
 	}
 }
+
+func TestRunCLIAdaptsLegacyTaskIdempotently(t *testing.T) {
+	t.Setenv("CYBERAGENT_HOME", t.TempDir())
+	createdTask, stderr, code := executeTestCommand(t, "script", "new", "adapter smoke", "--workspace", "adapter-demo")
+	if code != 0 {
+		t.Fatalf("script new failed: %s", stderr)
+	}
+	taskID := regexp.MustCompile(`task-[0-9]{14}-[a-f0-9]{12}`).FindString(createdTask)
+	if taskID == "" {
+		t.Fatalf("missing task id: %s", createdTask)
+	}
+	first, stderr, code := executeTestCommand(t, "run", "adapt-task", taskID)
+	if code != 0 || !strings.Contains(first, " adapted") {
+		t.Fatalf("first adaptation failed output=%s stderr=%s code=%d", first, stderr, code)
+	}
+	runID := runIDPattern.FindString(first)
+	if runID == "" || sessionIDPattern.FindString(first) == "" {
+		t.Fatalf("missing adapted ids: %s", first)
+	}
+	second, stderr, code := executeTestCommand(t, "run", "adapt-task", taskID)
+	if code != 0 || !strings.Contains(second, " reused") || runIDPattern.FindString(second) != runID {
+		t.Fatalf("repeat adaptation was not idempotent output=%s stderr=%s code=%d", second, stderr, code)
+	}
+	timeline, stderr, code := executeTestCommand(t, "run", "events", runID)
+	if code != 0 || strings.Count(timeline, "legacy.task_adapted") != 1 || strings.Count(timeline, "run.created") != 1 {
+		t.Fatalf("unexpected adapted timeline output=%s stderr=%s", timeline, stderr)
+	}
+}
+
+func TestCLIStableExitCodesPreserveErrorText(t *testing.T) {
+	t.Setenv("CYBERAGENT_HOME", t.TempDir())
+	_, stderr, code := executeTestCommand(t, "run", "show")
+	if code != 2 || stderr != "error: usage: cyberagent run show <run-id>\n" {
+		t.Fatalf("unexpected invalid argument result code=%d stderr=%q", code, stderr)
+	}
+	_, stderr, code = executeTestCommand(t, "run", "show", "run-missing")
+	if code != 3 || stderr != "error: sql: no rows in result set\n" {
+		t.Fatalf("unexpected not found result code=%d stderr=%q", code, stderr)
+	}
+}

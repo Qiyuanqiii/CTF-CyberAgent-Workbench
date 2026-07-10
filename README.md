@@ -12,6 +12,8 @@ The v0.1 scaffold focuses on stable boundaries:
 - persisted agent sessions with slash commands
 - versioned SQLite migrations plus Mission/Run lifecycle and append-only run events
 - automatic Run/Session binding with transactional Session, Policy, ToolRun, and FileEdit timeline projection
+- stable typed errors with CLI exit-code and future HTTP-status mappings
+- idempotent legacy Task-to-Run adaptation through `run adapt-task`
 - workspace-scoped list/read commands for safe file context
 - secret redaction before file context, session storage, context summaries, tool runs, and provider calls
 - tool proposal and approval flow for session `/run`
@@ -42,6 +44,7 @@ go run ./cmd/cyberagent workspace init demo
 go run ./cmd/cyberagent workspace tree demo
 go run ./cmd/cyberagent workspace read demo README.md
 go run ./cmd/cyberagent run create "review this workspace" --workspace demo --profile review
+go run ./cmd/cyberagent run adapt-task <legacy-task-id>
 go run ./cmd/cyberagent run list
 go run ./cmd/cyberagent run show <run-id>
 go run ./cmd/cyberagent run events <run-id>
@@ -69,7 +72,7 @@ Use `CYBERAGENT_HOME` to point runtime data at another directory during tests or
 
 ## Project Memory
 
-Read [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [docs/PROGRESS_BOOK.md](docs/PROGRESS_BOOK.md), [docs/TASK_BOOK.md](docs/TASK_BOOK.md), [ADR 0001](docs/adr/0001-go-control-plane.md), and [ADR 0002](docs/adr/0002-run-centric-runtime.md) first when resuming development after a long conversation. They record current progress, language ownership, run architecture, audit notes, verified commands, and the recommended next slice.
+Read [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [docs/PROGRESS_BOOK.md](docs/PROGRESS_BOOK.md), [docs/TASK_BOOK.md](docs/TASK_BOOK.md), [docs/errors.md](docs/errors.md), [ADR 0001](docs/adr/0001-go-control-plane.md), and [ADR 0002](docs/adr/0002-run-centric-runtime.md) first when resuming development after a long conversation. They record current progress, language ownership, run architecture, error contract, audit notes, verified commands, and the recommended next slice.
 
 ## Repository Workflow
 
@@ -79,7 +82,7 @@ Local runtime databases, workspace data, environment files, API keys, IDE metada
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. Versioned migrations, Mission/Run lifecycle, automatic Run/Session binding, and transactional Session/Policy/ToolRun/FileEdit event projection now exist. Next comes stable error codes and the legacy Task compatibility adapter, followed by resumable single-agent supervision, structured work items/notes, and controlled multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. P0 migration foundations and the P1 Mission/Run event backbone are complete, including stable errors, automatic Run/Session binding, activity projection, and idempotent legacy Task adaptation. Next comes resumable single-agent supervision, followed by structured work items/notes and controlled multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
 TUI quick controls: `cyberagent tui` opens a session picker. In chat, `Tab` switches focus, `PgUp/PgDn` scroll messages, `j/k` select tool runs, `a` approves, `d` denies, `Ctrl+R` refreshes, and `Esc` quits. Slow sends, refreshes, and tool approvals run through async commands with visible status text such as `thinking...`, `proposing tool...`, or `approving...`. Attached workspaces render in the side panel with local directory counts for attachments, scripts, outputs, logs, and writeups.
 

@@ -29,9 +29,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 46%.
-- v0.1 generic agent MVP: about 97%.
-- V2 run-centric runtime: about 41%.
+- Overall product vision: about 49%.
+- v0.1 generic agent MVP: about 98%.
+- V2 run-centric runtime: about 46%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -66,7 +66,7 @@ Completed:
 - Accepted ADR 0002: Mission/Run aggregates, RunSupervisor, a single AgentCoordinator, structured WorkItems/Notes/Findings, lifecycle actions, and a unified event stream.
 - Reworked `docs/architecture.md` around run-scoped budget, event, sandbox, report, approval, and recovery ownership without copying the reference implementation.
 - Added `docs/TASK_BOOK.md` with phased migration tasks, acceptance criteria, compatibility rules, and CTF deferred to the final phase.
-- Versioned SQLite migrations: checksummed `v1` legacy baseline and `v2` run-centric foundation, each applied in its own transaction.
+- Versioned SQLite migrations through schema v4: legacy baseline, run-centric foundation, Run/Session projection constraints, and legacy Task mapping; each version is checksummed and transactional.
 - Migration tests cover idempotence, legacy data preservation, checksum history, and failed-migration rollback.
 - Unified `internal/idgen` now backs agent tasks, sessions, tool runs, file edits, Mission/Run, and event IDs.
 - Added pure Go Mission, Scope, Budget, RunConfig, Run status machine, and legal transition checks.
@@ -78,6 +78,11 @@ Completed:
 - Run creation, optional Session creation/update, and initial `run.created` plus `session.attached` events commit in one transaction.
 - Session messages, assistant-output policy decisions, ToolRun policy/status changes, and FileEdit status changes project into the append-only Run timeline.
 - Activity records and projected events commit atomically, repeated saves do not duplicate events, and Store rejects cross-workspace projection.
+- Added stable `apperror` codes with compatible Go wrapping, CLI exit codes, and future HTTP status mappings while preserving current error text.
+- Added schema v4 `legacy_task_runs` with unique Task, Mission, and Run identities.
+- Added `run adapt-task <task-id>` and a transactional TaskAdapter that creates one Session/Mission/Run plus `legacy.task_adapted`, or returns the existing mapping.
+- Concurrent and repeated adaptation converges on one Run; historical Task status is audit data and never starts execution implicitly.
+- Legacy Task goals and legacy Event messages/payloads are now redacted at the SQLite Store boundary.
 
 Not done yet:
 
@@ -87,8 +92,6 @@ Not done yet:
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
-- Stable typed error codes across CLI and future APIs.
-- Idempotent compatibility mapping from legacy `agent.Task` to Mission/Run.
 - RunSupervisor, Work Board, Notes, AgentCoordinator, Findings/Evidence, and resumable execution.
 
 ## Code Audit Notes
@@ -109,6 +112,7 @@ Residual risks to address soon:
 - `run start` currently advances lifecycle state only; it intentionally does not call a model or execute tools until RunSupervisor is implemented in P2.
 - Applied migration statements are immutable once released because their checksums are verified. Schema changes must always add a new migration version.
 - Schema v3 intentionally rejects duplicate non-empty Run/Session associations. A legacy database containing duplicates must be audited before upgrade instead of silently discarding an association.
+- `apperror.Normalize` includes a transitional text classifier for legacy plain errors. New services must return typed errors directly so future localization cannot affect classification.
 
 ## Feature Verification
 
@@ -178,12 +182,16 @@ Expected context behavior:
 - Final run-centric race tests passed for `domain`, `events`, `application`, `store`, and `app`.
 - Run activity projection tests passed for automatic/existing Session binding, one-to-one reuse rejection, contiguous event order, idempotent saves, invalid-state rollback, and cross-workspace rejection.
 - Isolated CLI smoke produced 14 contiguous events spanning Run, Session, Policy, ToolRun, and FileEdit across separate process invocations.
+- TaskAdapter tests passed for repeated and eight-way concurrent adaptation, event order, unsupported legacy kinds, and a single persisted Run.
+- Isolated adapter CLI smoke passed across separate processes with one three-event timeline and stable exit codes `2` (invalid argument) and `3` (not found).
+- Legacy Task/Event Store-boundary redaction tests passed with runtime-generated token-shaped fixtures.
 
 ## Recommended Next Slice
 
-Finish P0/P1 compatibility before P2 execution:
+Begin the first P2 single-agent supervision slice:
 
-- Add stable typed error codes without changing current human-readable CLI errors.
-- Add an idempotent compatibility adapter from legacy `agent.Task` to Mission/Run.
-- Expose adapter outcomes as normalized Run events and verify repeated conversion does not create duplicate Missions or Runs.
-- Keep `run start` lifecycle-only and keep multi-agent concurrency disabled until RunSupervisor arrives in P2.
+- Define `RunSupervisor`, `RunHandle`, and structured `LifecycleResult` contracts.
+- Persist a bounded supervisor checkpoint before and after one deterministic mock Agent turn.
+- Make resume idempotent across process restart without executing tools.
+- Enforce turn and cancellation boundaries before adding model streaming or real tool execution.
+- Keep multi-agent concurrency disabled.

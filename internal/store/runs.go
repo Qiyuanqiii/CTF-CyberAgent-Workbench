@@ -16,6 +16,18 @@ import (
 )
 
 func (s *SQLiteStore) CreateMissionRun(ctx context.Context, mission domain.Mission, run domain.Run, linkedSession session.Session, createSession bool, initialEvents []events.Event) error {
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := createMissionRunTx(ctx, tx, mission, run, linkedSession, createSession, initialEvents); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func createMissionRunTx(ctx context.Context, tx *sql.Tx, mission domain.Mission, run domain.Run, linkedSession session.Session, createSession bool, initialEvents []events.Event) error {
 	mission.Goal = redact.String(mission.Goal)
 	linkedSession.Title = redact.String(linkedSession.Title)
 	if err := mission.Validate(); err != nil {
@@ -59,11 +71,6 @@ func (s *SQLiteStore) CreateMissionRun(ctx context.Context, mission domain.Missi
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
 	if createSession {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions
 			(id, workspace_id, title, route, status, created_at, updated_at)
@@ -103,7 +110,7 @@ func (s *SQLiteStore) CreateMissionRun(ctx context.Context, mission domain.Missi
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *SQLiteStore) GetMission(ctx context.Context, id string) (domain.Mission, error) {

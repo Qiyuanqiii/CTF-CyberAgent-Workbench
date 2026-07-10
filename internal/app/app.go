@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"cyberagent-workbench/internal/agent"
+	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/sandbox"
@@ -47,8 +48,9 @@ func Execute(args []string, out io.Writer, errOut io.Writer) int {
 	defer app.Close()
 
 	if err := app.dispatch(context.Background(), args); err != nil {
-		fmt.Fprintln(errOut, "error:", err)
-		return 1
+		classified := apperror.Normalize(err)
+		fmt.Fprintln(errOut, "error:", classified)
+		return apperror.ExitCode(classified)
 	}
 	return 0
 }
@@ -166,7 +168,7 @@ func (a *App) printHelp() {
 	fmt.Fprintln(a.out, "  cyberagent session create|list|send|history")
 	fmt.Fprintln(a.out, "  cyberagent tool list|show|approve|deny")
 	fmt.Fprintln(a.out, "  cyberagent edit propose|list|show|approve|deny")
-	fmt.Fprintln(a.out, "  cyberagent run create|list|show|events|start|pause|resume|cancel")
+	fmt.Fprintln(a.out, "  cyberagent run create|adapt-task|list|show|events|start|pause|resume|cancel")
 	fmt.Fprintln(a.out, "  cyberagent tui")
 }
 

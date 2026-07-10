@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 46%。
-- v0.1 通用 Agent MVP：约 97%。
-- V2 Run-centric Runtime：约 41%。
+- 整体产品愿景：约 49%。
+- v0.1 通用 Agent MVP：约 98%。
+- V2 Run-centric Runtime：约 46%。
 - 项目骨架和模块边界：约 99%。
 
-V2 已完成版本化 migration、Mission/Run 状态机、自动 Run/Session 绑定、append-only 事件主干、活动投影和 CLI 生命周期。下一步完成稳定错误码与 legacy Task 适配，不做一次性重写。
+V2 的 P0/P1 已完成：版本化 migration、稳定错误契约、Mission/Run 状态机、自动 Run/Session 绑定、append-only 事件主干、活动投影、legacy Task 幂等适配和 CLI 生命周期均已落地。下一步进入 P2 单 Agent RunSupervisor。
 
 ## 二、已完成功能
 
@@ -50,6 +50,10 @@ V2 已完成版本化 migration、Mission/Run 状态机、自动 Run/Session 绑
 - 新 Run 默认在同一事务中创建独立 Session；也可绑定一次现有活跃 Session，并统一工作区和模型路由。
 - Session Message、assistant policy、ToolRun 和 FileEdit 状态会在业务写入的同一事务内投影为 Run Event。
 - 重复保存不会产生重复事件；跨工作区 ToolRun/FileEdit 会在 Store 边界回滚。
+- `apperror` 提供稳定代码、CLI 退出码和未来 HTTP 映射，现有错误文本保持不变。
+- schema v4 使用 `legacy_task_runs.task_id` 作为幂等键，`run adapt-task` 可安全重复或并发执行。
+- TaskAdapter 在一个事务内创建 Session、Mission、Run、映射和三条初始事件；历史状态不会触发隐式执行。
+- 旧 Task Goal 与旧 Event 内容补齐 Store 级脱敏。
 - Run 状态转换与事件写入保持原子性，Store 会拒绝非法或陈旧转换。
 - `run create/list/show/events/start/pause/resume/cancel` 已可使用。
 - `Run` 是可恢复的执行实例，不是编程语言；Go 负责控制，TypeScript 负责界面，Rust 负责确定性分析。
@@ -69,8 +73,6 @@ V2 已完成版本化 migration、Mission/Run 状态机、自动 Run/Session 绑
 
 ## 四、尚未完成
 
-- 跨 CLI/API 的稳定 typed error codes。
-- legacy `agent.Task -> Mission/Run` 幂等兼容适配器。
 - 可恢复的 RunSupervisor 和单 root Agent 执行循环。
 - 结构化 WorkItem、Notes、Findings、Evidence 与 Report。
 - 真正的流式 token 更新、取消和超时体验。
@@ -92,6 +94,7 @@ V2 已完成版本化 migration、Mission/Run 状态机、自动 Run/Session 绑
 - `run start` 当前只推进生命周期，不会启动模型或命令；执行能力要等 RunSupervisor 落地。
 - 已发布 migration 的语句和 checksum 不可修改，后续 schema 变化必须新增版本。
 - v3 会拒绝一个 Session 关联多个 Run；若旧数据库存在重复关联，应先审计，而不是自动丢弃数据。
+- 兼容期仍有普通字符串错误通过 `apperror.Normalize` 分类；新服务必须直接返回 typed error。
 
 ## 六、验证基线
 
@@ -104,14 +107,15 @@ go vet ./...
 
 共享状态、并发或存储变更还要运行相关包的 `go test -race`。CLI 行为变更要在隔离的 `CYBERAGENT_HOME` 中完成 smoke test。提交前扫描凭据前缀，确认本地数据库、工作区、环境文件和 API key 未进入 Git。
 
-最新验证已覆盖 Run create/start/pause/resume/cancel/show/events 生命周期、migration 升级与回滚、自动/现有 Session 绑定、统一事件投影、幂等保存、跨工作区回滚、文件编辑审批、工具 dry-run、上下文压缩、模型路由、TUI 快照和敏感信息脱敏。独立 CLI smoke 在多次进程调用间生成了 14 条连续 Run Event。
+最新验证已覆盖 Run 生命周期、schema v4、稳定错误映射、自动/现有 Session 绑定、统一事件投影、TaskAdapter 八路并发幂等、跨工作区回滚、旧表脱敏、文件编辑审批、工具 dry-run、上下文压缩、模型路由和 TUI。独立 adapter CLI smoke 验证了三条连续事件及退出码 2/3。
 
 ## 七、下一开发切片
 
-1. 增加稳定的 typed error codes，保持现有人类可读 CLI 错误不变。
-2. 增加 legacy `agent.Task -> Mission/Run` 幂等适配器。
-3. 将适配结果写成标准 Run Event，重复转换不得创建重复 Mission 或 Run。
-4. 保持 `run start` 仅推进生命周期，多 Agent 并发继续关闭，直到 RunSupervisor 到来。
+1. 定义 `RunSupervisor`、`RunHandle` 和结构化 `LifecycleResult`。
+2. 在一次确定性 mock Agent turn 前后持久化 checkpoint。
+3. 验证进程重启后 resume 不重复已完成 turn。
+4. 先落实 turn budget 与 cancellation 边界，不执行真实工具。
+5. 多 Agent 并发继续关闭。
 
 ## 八、仓库同步与恢复约定
 
@@ -119,4 +123,4 @@ go vet ./...
 
 每次完成一个开发切片后，依次执行功能复核、测试、代码与安全审计、项目记忆更新、Git 提交和 GitHub 推送。PR 由用户主动创建；使用功能分支时生成可直接采用的 Summary、Validation 和 Audit 文本。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/adr/0001-go-control-plane.md` 和 `docs/adr/0002-run-centric-runtime.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/errors.md`、`docs/adr/0001-go-control-plane.md` 和 `docs/adr/0002-run-centric-runtime.md`。

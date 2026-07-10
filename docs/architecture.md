@@ -258,7 +258,7 @@ CLI and headless mode print events. Bubble Tea renders them locally. The future 
 
 ## Persistence
 
-SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline and `v2` adds the first run-centric tables. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
+SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, and `v4` adds the idempotent legacy Task mapping. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
 
 ```text
 missions
