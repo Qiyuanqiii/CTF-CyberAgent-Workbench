@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -24,7 +25,7 @@ const (
 )
 
 const supervisorCheckpointSelect = `SELECT run_id, next_turn, phase, attempt_id, last_error,
-	pending_input, input_tokens, output_tokens, total_tokens, execution_millis, updated_at
+	pending_input, repair_phase, repair_reason, input_tokens, output_tokens, total_tokens, execution_millis, updated_at
 	FROM run_supervisor_checkpoints WHERE run_id = ?`
 
 func (s *SQLiteStore) GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error) {
@@ -82,18 +83,6 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, runID string, pen
 		return domain.SupervisorTurn{}, apperror.New(apperror.CodeFailedPrecondition,
 			fmt.Sprintf("run %s supervisor is finalized as %s", run.ID, checkpoint.Phase))
 	}
-	if checkpoint.NextTurn > run.Budget.MaxTurns {
-		return domain.SupervisorTurn{}, apperror.New(apperror.CodeResourceExhausted,
-			fmt.Sprintf("run %s exhausted its %d turn budget", run.ID, run.Budget.MaxTurns))
-	}
-	if run.Budget.MaxTokens > 0 && checkpoint.TotalTokens >= run.Budget.MaxTokens {
-		return domain.SupervisorTurn{}, apperror.New(apperror.CodeResourceExhausted,
-			fmt.Sprintf("run %s exhausted its %d token budget", run.ID, run.Budget.MaxTokens))
-	}
-	if run.Budget.TimeoutSeconds > 0 && checkpoint.ExecutionMillis >= run.Budget.TimeoutSeconds*1000 {
-		return domain.SupervisorTurn{}, apperror.New(apperror.CodeDeadlineExceeded,
-			fmt.Sprintf("run %s exhausted its %s execution timeout", run.ID, time.Duration(run.Budget.TimeoutSeconds)*time.Second))
-	}
 	if checkpoint.Phase == domain.SupervisorTurnStarted {
 		if pendingInput != "" {
 			switch {
@@ -112,6 +101,18 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, runID string, pen
 		}
 		return domain.SupervisorTurn{Run: run, Mission: mission, Checkpoint: checkpoint, Recovered: true}, nil
 	}
+	if checkpoint.NextTurn > run.Budget.MaxTurns {
+		return domain.SupervisorTurn{}, apperror.New(apperror.CodeResourceExhausted,
+			fmt.Sprintf("run %s exhausted its %d turn budget", run.ID, run.Budget.MaxTurns))
+	}
+	if run.Budget.MaxTokens > 0 && checkpoint.TotalTokens >= run.Budget.MaxTokens {
+		return domain.SupervisorTurn{}, apperror.New(apperror.CodeResourceExhausted,
+			fmt.Sprintf("run %s exhausted its %d token budget", run.ID, run.Budget.MaxTokens))
+	}
+	if run.Budget.TimeoutSeconds > 0 && checkpoint.ExecutionMillis >= run.Budget.TimeoutSeconds*1000 {
+		return domain.SupervisorTurn{}, apperror.New(apperror.CodeDeadlineExceeded,
+			fmt.Sprintf("run %s exhausted its %s execution timeout", run.ID, time.Duration(run.Budget.TimeoutSeconds)*time.Second))
+	}
 	if checkpoint.Phase == domain.SupervisorTurnFailed && pendingInput == "" {
 		pendingInput = checkpoint.PendingInput
 	}
@@ -119,6 +120,8 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, runID string, pen
 	checkpoint.Phase = domain.SupervisorTurnStarted
 	checkpoint.AttemptID = idgen.New("attempt")
 	checkpoint.PendingInput = pendingInput
+	checkpoint.RepairPhase = domain.ProtocolRepairNone
+	checkpoint.RepairReason = ""
 	checkpoint.LastError = ""
 	checkpoint.UpdatedAt = time.Now().UTC()
 	if err := upsertSupervisorCheckpointTx(ctx, tx, checkpoint); err != nil {
@@ -185,31 +188,45 @@ func (s *SQLiteStore) BindSupervisorTurnInput(ctx context.Context, checkpoint do
 	return current, nil
 }
 
-func (s *SQLiteStore) NextSupervisorModelAttempt(ctx context.Context, checkpoint domain.SupervisorCheckpoint) (int, error) {
+func (s *SQLiteStore) NextSupervisorModelAttempt(ctx context.Context, checkpoint domain.SupervisorCheckpoint, protocolRepair int) (int, int, error) {
 	if err := checkpoint.Validate(); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if checkpoint.Phase != domain.SupervisorTurnStarted {
-		return 0, apperror.New(apperror.CodeFailedPrecondition, "only a started supervisor turn can call a model")
+		return 0, 0, apperror.New(apperror.CodeFailedPrecondition, "only a started supervisor turn can call a model")
+	}
+	if protocolRepair < 0 || protocolRepair > 1 {
+		return 0, 0, apperror.New(apperror.CodeInvalidArgument, "protocol repair number must be zero or one")
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, _, err := requireActiveSupervisorAttemptTx(ctx, tx, checkpoint); err != nil {
-		return 0, err
+	_, current, err := requireActiveSupervisorAttemptTx(ctx, tx, checkpoint)
+	if err != nil {
+		return 0, 0, err
 	}
-	var count int
+	if protocolRepair == 0 && current.RepairPhase != domain.ProtocolRepairNone {
+		return 0, 0, apperror.New(apperror.CodeConflict, "primary model attempt cannot run during protocol repair")
+	}
+	if protocolRepair == 1 && current.RepairPhase != domain.ProtocolRepairPending {
+		return 0, 0, apperror.New(apperror.CodeFailedPrecondition, "protocol repair is not pending")
+	}
+	var totalCount int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_events
 		WHERE run_id = ? AND type = ? AND source = ? AND subject_id LIKE ?`, checkpoint.RunID,
-		events.ModelStartedEvent, "model_gateway", supervisorModelSubjectPrefix(checkpoint)+"%").Scan(&count); err != nil {
-		return 0, err
+		events.ModelStartedEvent, "model_gateway", supervisorModelSubjectPrefix(checkpoint)+"%").Scan(&totalCount); err != nil {
+		return 0, 0, err
+	}
+	transportCount, err := supervisorModelPurposeCountTx(ctx, tx, checkpoint, protocolRepair)
+	if err != nil {
+		return 0, 0, err
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return count + 1, nil
+	return totalCount + 1, transportCount + 1, nil
 }
 
 func (s *SQLiteStore) RecordSupervisorModelStarted(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt) (bool, error) {
@@ -231,7 +248,7 @@ func (s *SQLiteStore) RecordSupervisorModelStarted(ctx context.Context, checkpoi
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	run, _, err := requireActiveSupervisorAttemptTx(ctx, tx, checkpoint)
+	run, current, err := requireActiveSupervisorAttemptTx(ctx, tx, checkpoint)
 	if err != nil {
 		return false, err
 	}
@@ -255,12 +272,34 @@ func (s *SQLiteStore) RecordSupervisorModelStarted(ctx context.Context, checkpoi
 	if attempt.Number != startedCount+1 {
 		return false, apperror.New(apperror.CodeConflict, "model attempt number is not the next durable attempt")
 	}
+	transportCount, err := supervisorModelPurposeCountTx(ctx, tx, checkpoint, attempt.ProtocolRepair)
+	if err != nil {
+		return false, err
+	}
+	if attempt.TransportNumber() != transportCount+1 {
+		return false, apperror.New(apperror.CodeConflict, "model transport attempt number is not the next durable attempt")
+	}
+	if attempt.ProtocolRepair == 0 && current.RepairPhase != domain.ProtocolRepairNone {
+		return false, apperror.New(apperror.CodeConflict, "primary model attempt cannot run during protocol repair")
+	}
+	if attempt.ProtocolRepair == 1 && current.RepairPhase != domain.ProtocolRepairPending {
+		return false, apperror.New(apperror.CodeFailedPrecondition, "protocol repair is not pending")
+	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.ModelStartedEvent, "model_gateway", subject, map[string]any{
 		"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
-		"model_attempt": attempt.Number, "max_attempts": attempt.MaxAttempts,
+		"model_attempt": attempt.Number, "transport_attempt": attempt.TransportNumber(),
+		"max_attempts": attempt.MaxAttempts, "protocol_repair": attempt.ProtocolRepair,
 		"provider": attempt.Provider, "model": attempt.Model,
 	}); err != nil {
 		return false, err
+	}
+	if attempt.ProtocolRepair == 1 && attempt.TransportNumber() == 1 {
+		if err := appendSupervisorEventTx(ctx, tx, run, events.ProtocolRepairStartedEvent, "run_supervisor", checkpoint.AttemptID, map[string]any{
+			"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID, "protocol_repair": 1,
+			"model_attempt": attempt.Number,
+		}); err != nil {
+			return false, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return false, err
@@ -278,11 +317,12 @@ func (s *SQLiteStore) RecordSupervisorModelCompleted(ctx context.Context, checkp
 	}
 	payload := map[string]any{
 		"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
-		"model_attempt": attempt.Number, "max_attempts": attempt.MaxAttempts,
+		"model_attempt": attempt.Number, "transport_attempt": attempt.TransportNumber(),
+		"max_attempts": attempt.MaxAttempts, "protocol_repair": attempt.ProtocolRepair,
 		"provider": attempt.Provider, "model": attempt.Model, "outcome": attempt.Outcome,
 		"elapsed_millis": attempt.Elapsed.Milliseconds(), "usage": response.Usage,
 	}
-	return s.recordSupervisorModelTerminal(ctx, checkpoint, attempt, events.ModelCompletedEvent, payload)
+	return s.recordSupervisorModelTerminal(ctx, checkpoint, attempt, events.ModelCompletedEvent, payload, supervisorModelTerminalOptions{Usage: &response.Usage})
 }
 
 func (s *SQLiteStore) RecordSupervisorModelFailed(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt) (domain.SupervisorCheckpoint, error) {
@@ -292,15 +332,63 @@ func (s *SQLiteStore) RecordSupervisorModelFailed(ctx context.Context, checkpoin
 	}
 	payload := map[string]any{
 		"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
-		"model_attempt": attempt.Number, "max_attempts": attempt.MaxAttempts,
+		"model_attempt": attempt.Number, "transport_attempt": attempt.TransportNumber(),
+		"max_attempts": attempt.MaxAttempts, "protocol_repair": attempt.ProtocolRepair,
 		"provider": attempt.Provider, "model": attempt.Model, "outcome": attempt.Outcome,
 		"error": attempt.ErrorText, "elapsed_millis": attempt.Elapsed.Milliseconds(),
 		"retry_after_millis": attempt.RetryAfter.Milliseconds(), "retry_planned": attempt.RetryPlanned,
 	}
-	return s.recordSupervisorModelTerminal(ctx, checkpoint, attempt, events.ModelFailedEvent, payload)
+	return s.recordSupervisorModelTerminal(ctx, checkpoint, attempt, events.ModelFailedEvent, payload, supervisorModelTerminalOptions{})
 }
 
-func (s *SQLiteStore) recordSupervisorModelTerminal(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, eventType string, payload map[string]any) (domain.SupervisorCheckpoint, error) {
+func (s *SQLiteStore) RecordSupervisorProtocolFailure(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, response llm.ChatResponse, reason string, requestRepair bool) (domain.SupervisorCheckpoint, error) {
+	reason = sanitizeSupervisorText(reason)
+	if reason == "" {
+		reason = "provider returned an invalid root lifecycle response"
+	}
+	attempt = sanitizeModelAttempt(attempt)
+	attempt.Outcome = llm.OutcomeInvalidResponse
+	attempt.ErrorText = reason
+	attempt.RetryAfter = 0
+	attempt.RetryPlanned = false
+	if err := attempt.ValidateFailed(); err != nil {
+		return domain.SupervisorCheckpoint{}, apperror.Wrap(apperror.CodeInvalidArgument, "invalid protocol failure attempt", err)
+	}
+	if _, _, _, err := supervisorUsage(response.Usage); err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
+	phase := domain.ProtocolRepairExhausted
+	eventType := events.ProtocolRepairFailedEvent
+	if requestRepair {
+		if attempt.ProtocolRepair != 0 {
+			return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeInvalidArgument, "only a primary model response can request protocol repair")
+		}
+		phase = domain.ProtocolRepairPending
+		eventType = events.ProtocolRepairRequestedEvent
+	} else if attempt.ProtocolRepair != 1 {
+		return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeInvalidArgument, "only a repair response can exhaust protocol repair")
+	}
+	payload := map[string]any{
+		"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
+		"model_attempt": attempt.Number, "transport_attempt": attempt.TransportNumber(),
+		"max_attempts": attempt.MaxAttempts, "protocol_repair": attempt.ProtocolRepair,
+		"provider": attempt.Provider, "model": attempt.Model, "outcome": attempt.Outcome,
+		"error": attempt.ErrorText, "elapsed_millis": attempt.Elapsed.Milliseconds(),
+		"retry_after_millis": 0, "retry_planned": false, "usage": response.Usage,
+	}
+	return s.recordSupervisorModelTerminal(ctx, checkpoint, attempt, events.ModelFailedEvent, payload, supervisorModelTerminalOptions{
+		Usage: &response.Usage, RepairPhase: phase, RepairReason: reason, RepairEvent: eventType,
+	})
+}
+
+type supervisorModelTerminalOptions struct {
+	Usage        *llm.Usage
+	RepairPhase  domain.ProtocolRepairPhase
+	RepairReason string
+	RepairEvent  string
+}
+
+func (s *SQLiteStore) recordSupervisorModelTerminal(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, eventType string, payload map[string]any, options supervisorModelTerminalOptions) (domain.SupervisorCheckpoint, error) {
 	if err := checkpoint.Validate(); err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
@@ -324,6 +412,9 @@ func (s *SQLiteStore) recordSupervisorModelTerminal(ctx context.Context, checkpo
 	if !started {
 		return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeFailedPrecondition, "model attempt was not started")
 	}
+	if err := requireSupervisorModelStartedMatchTx(ctx, tx, run.ID, subject, attempt); err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
 	completed, err := supervisorModelEventExistsTx(ctx, tx, run.ID, events.ModelCompletedEvent, subject)
 	if err != nil {
 		return domain.SupervisorCheckpoint{}, err
@@ -341,6 +432,29 @@ func (s *SQLiteStore) recordSupervisorModelTerminal(ctx context.Context, checkpo
 	if completed || failed {
 		return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeConflict, "model attempt already has a terminal event")
 	}
+	if attempt.ProtocolRepair == 0 && current.RepairPhase != domain.ProtocolRepairNone {
+		return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeConflict, "primary model attempt cannot finish during protocol repair")
+	}
+	if attempt.ProtocolRepair == 1 && current.RepairPhase != domain.ProtocolRepairPending {
+		return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeFailedPrecondition, "protocol repair is not pending")
+	}
+	if options.RepairPhase != domain.ProtocolRepairNone {
+		switch options.RepairPhase {
+		case domain.ProtocolRepairPending:
+			if current.RepairPhase != domain.ProtocolRepairNone {
+				return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeConflict, "protocol repair was already requested")
+			}
+		case domain.ProtocolRepairExhausted:
+			if current.RepairPhase != domain.ProtocolRepairPending {
+				return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeFailedPrecondition, "protocol repair is not pending")
+			}
+		default:
+			return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeInvalidArgument, "invalid protocol repair transition")
+		}
+		if strings.TrimSpace(options.RepairReason) == "" || strings.TrimSpace(options.RepairEvent) == "" {
+			return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeInvalidArgument, "protocol repair transition requires a reason and event")
+		}
+	}
 	elapsedMillis, err := supervisorElapsedMillis(attempt.Elapsed)
 	if err != nil {
 		return domain.SupervisorCheckpoint{}, err
@@ -349,12 +463,42 @@ func (s *SQLiteStore) recordSupervisorModelTerminal(ctx context.Context, checkpo
 	if err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
+	if options.Usage != nil {
+		inputTokens, outputTokens, totalTokens, err := supervisorUsage(*options.Usage)
+		if err != nil {
+			return domain.SupervisorCheckpoint{}, err
+		}
+		current.InputTokens, err = supervisorAddCounter(current.InputTokens, inputTokens, "input token")
+		if err != nil {
+			return domain.SupervisorCheckpoint{}, err
+		}
+		current.OutputTokens, err = supervisorAddCounter(current.OutputTokens, outputTokens, "output token")
+		if err != nil {
+			return domain.SupervisorCheckpoint{}, err
+		}
+		current.TotalTokens, err = supervisorAddCounter(current.TotalTokens, totalTokens, "total token")
+		if err != nil {
+			return domain.SupervisorCheckpoint{}, err
+		}
+	}
+	if options.RepairPhase != domain.ProtocolRepairNone {
+		current.RepairPhase = options.RepairPhase
+		current.RepairReason = sanitizeSupervisorText(options.RepairReason)
+	}
 	current.UpdatedAt = time.Now().UTC()
 	if err := upsertSupervisorCheckpointTx(ctx, tx, current); err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
 	if err := appendSupervisorEventTx(ctx, tx, run, eventType, "model_gateway", subject, payload); err != nil {
 		return domain.SupervisorCheckpoint{}, err
+	}
+	if options.RepairPhase != domain.ProtocolRepairNone {
+		if err := appendSupervisorEventTx(ctx, tx, run, options.RepairEvent, "run_supervisor", checkpoint.AttemptID, map[string]any{
+			"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
+			"protocol_repair": 1, "model_attempt": attempt.Number, "reason": current.RepairReason,
+		}); err != nil {
+			return domain.SupervisorCheckpoint{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.SupervisorCheckpoint{}, err
@@ -393,6 +537,86 @@ func supervisorModelEventExistsTx(ctx context.Context, tx *sql.Tx, runID string,
 	return count > 0, nil
 }
 
+func supervisorModelPurposeCountTx(ctx context.Context, tx *sql.Tx, checkpoint domain.SupervisorCheckpoint, protocolRepair int) (int, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT payload_json FROM run_events WHERE run_id = ? AND type = ? AND source = ?
+		AND subject_id LIKE ? ORDER BY sequence`, checkpoint.RunID, events.ModelStartedEvent, "model_gateway",
+		supervisorModelSubjectPrefix(checkpoint)+"%")
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		var payloadJSON string
+		if err := rows.Scan(&payloadJSON); err != nil {
+			return 0, err
+		}
+		payload, err := parseSupervisorModelStartedPayload(payloadJSON)
+		if err != nil {
+			return 0, err
+		}
+		if payload.protocolRepair() == protocolRepair {
+			count++
+		}
+	}
+	return count, rows.Err()
+}
+
+type supervisorModelStartedPayload struct {
+	ModelAttempt     int    `json:"model_attempt"`
+	TransportAttempt *int   `json:"transport_attempt"`
+	MaxAttempts      int    `json:"max_attempts"`
+	ProtocolRepair   *int   `json:"protocol_repair"`
+	Provider         string `json:"provider"`
+	Model            string `json:"model"`
+}
+
+func (p supervisorModelStartedPayload) transportAttempt() int {
+	if p.TransportAttempt != nil {
+		return *p.TransportAttempt
+	}
+	return p.ModelAttempt
+}
+
+func (p supervisorModelStartedPayload) protocolRepair() int {
+	if p.ProtocolRepair != nil {
+		return *p.ProtocolRepair
+	}
+	return 0
+}
+
+func parseSupervisorModelStartedPayload(payloadJSON string) (supervisorModelStartedPayload, error) {
+	var payload supervisorModelStartedPayload
+	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+		return supervisorModelStartedPayload{}, apperror.Wrap(apperror.CodeFailedPrecondition, "invalid durable model start payload", err)
+	}
+	if payload.ModelAttempt <= 0 || payload.MaxAttempts <= 0 || strings.TrimSpace(payload.Provider) == "" || strings.TrimSpace(payload.Model) == "" {
+		return supervisorModelStartedPayload{}, apperror.New(apperror.CodeFailedPrecondition, "incomplete durable model start payload")
+	}
+	if payload.transportAttempt() <= 0 || payload.transportAttempt() > payload.MaxAttempts || payload.protocolRepair() < 0 || payload.protocolRepair() > 1 {
+		return supervisorModelStartedPayload{}, apperror.New(apperror.CodeFailedPrecondition, "invalid durable model start counters")
+	}
+	return payload, nil
+}
+
+func requireSupervisorModelStartedMatchTx(ctx context.Context, tx *sql.Tx, runID string, subject string, attempt llm.ModelAttempt) error {
+	var payloadJSON string
+	if err := tx.QueryRowContext(ctx, `SELECT payload_json FROM run_events
+		WHERE run_id = ? AND type = ? AND source = ? AND subject_id = ?`, runID, events.ModelStartedEvent, "model_gateway", subject).Scan(&payloadJSON); err != nil {
+		return err
+	}
+	payload, err := parseSupervisorModelStartedPayload(payloadJSON)
+	if err != nil {
+		return err
+	}
+	if payload.ModelAttempt != attempt.Number || payload.transportAttempt() != attempt.TransportNumber() ||
+		payload.MaxAttempts != attempt.MaxAttempts || payload.protocolRepair() != attempt.ProtocolRepair ||
+		payload.Provider != attempt.Provider || payload.Model != attempt.Model {
+		return apperror.New(apperror.CodeConflict, "model terminal metadata does not match its durable start event")
+	}
+	return nil
+}
+
 func supervisorModelSubjectPrefix(checkpoint domain.SupervisorCheckpoint) string {
 	return checkpoint.AttemptID + "/model/"
 }
@@ -404,12 +628,17 @@ func supervisorModelSubject(checkpoint domain.SupervisorCheckpoint, number int) 
 func sanitizeModelAttempt(attempt llm.ModelAttempt) llm.ModelAttempt {
 	attempt.Provider = redact.String(strings.TrimSpace(attempt.Provider))
 	attempt.Model = redact.String(strings.TrimSpace(attempt.Model))
-	attempt.ErrorText = redact.String(strings.TrimSpace(attempt.ErrorText))
-	runes := []rune(attempt.ErrorText)
-	if len(runes) > maxSupervisorErrorChars {
-		attempt.ErrorText = string(runes[:maxSupervisorErrorChars])
-	}
+	attempt.ErrorText = sanitizeSupervisorText(attempt.ErrorText)
 	return attempt
+}
+
+func sanitizeSupervisorText(value string) string {
+	value = redact.String(strings.TrimSpace(value))
+	runes := []rune(value)
+	if len(runes) > maxSupervisorErrorChars {
+		value = string(runes[:maxSupervisorErrorChars])
+	}
+	return value
 }
 
 func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, response llm.ChatResponse, action domain.RootAction, decision policy.Decision, elapsed time.Duration) (domain.Run, domain.SupervisorCheckpoint, session.TurnMessages, error) {
@@ -428,8 +657,7 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, apperror.Wrap(apperror.CodeFailedPrecondition, "invalid root lifecycle action", err)
 	}
 	response.Text = action.Message
-	inputTokens, outputTokens, totalTokens, err := supervisorUsage(response.Usage)
-	if err != nil {
+	if _, _, _, err := supervisorUsage(response.Usage); err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}
 	elapsedMillis, err := supervisorElapsedMillis(elapsed)
@@ -465,6 +693,13 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	if run.Status != domain.RunRunning {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, apperror.New(apperror.CodeFailedPrecondition, "run stopped before turn completion")
 	}
+	if current.RepairPhase == domain.ProtocolRepairExhausted {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, apperror.New(apperror.CodeFailedPrecondition, "exhausted protocol repair cannot complete a supervisor turn")
+	}
+	if err := requireLatestSupervisorModelCompletedTx(ctx, tx, run.ID, checkpoint); err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+	}
+	repairCompleted := current.RepairPhase == domain.ProtocolRepairPending
 	if current.PendingInput == "" {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, apperror.New(apperror.CodeFailedPrecondition, "supervisor turn has no pending input")
 	}
@@ -490,19 +725,14 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	}); err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}
+	if repairCompleted {
+		if err := appendSupervisorEventTx(ctx, tx, run, events.ProtocolRepairCompletedEvent, "run_supervisor", checkpoint.AttemptID, map[string]any{
+			"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID, "protocol_repair": 1,
+		}); err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+		}
+	}
 	current.NextTurn++
-	current.InputTokens, err = supervisorAddCounter(current.InputTokens, inputTokens, "input token")
-	if err != nil {
-		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
-	}
-	current.OutputTokens, err = supervisorAddCounter(current.OutputTokens, outputTokens, "output token")
-	if err != nil {
-		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
-	}
-	current.TotalTokens, err = supervisorAddCounter(current.TotalTokens, totalTokens, "total token")
-	if err != nil {
-		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
-	}
 	current.ExecutionMillis, err = supervisorAddCounter(current.ExecutionMillis, elapsedMillis, "execution time")
 	if err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
@@ -510,6 +740,8 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	current.Phase = supervisorPhaseForAction(action.Kind)
 	current.AttemptID = ""
 	current.PendingInput = ""
+	current.RepairPhase = domain.ProtocolRepairNone
+	current.RepairReason = ""
 	current.LastError = ""
 	current.UpdatedAt = time.Now().UTC()
 	switch action.Kind {
@@ -559,6 +791,23 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	return run, current, session.TurnMessages{User: userMessage, Assistant: assistantMessage}, nil
 }
 
+func requireLatestSupervisorModelCompletedTx(ctx context.Context, tx *sql.Tx, runID string, checkpoint domain.SupervisorCheckpoint) error {
+	var eventType string
+	if err := tx.QueryRowContext(ctx, `SELECT type FROM run_events
+		WHERE run_id = ? AND source = ? AND subject_id LIKE ? AND type IN (?, ?, ?)
+		ORDER BY sequence DESC LIMIT 1`, runID, "model_gateway", supervisorModelSubjectPrefix(checkpoint)+"%",
+		events.ModelStartedEvent, events.ModelCompletedEvent, events.ModelFailedEvent).Scan(&eventType); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return apperror.New(apperror.CodeFailedPrecondition, "supervisor turn has no completed model attempt")
+		}
+		return err
+	}
+	if eventType != events.ModelCompletedEvent {
+		return apperror.New(apperror.CodeFailedPrecondition, "latest supervisor model attempt is not completed")
+	}
+	return nil
+}
+
 func (s *SQLiteStore) FailSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, cause string, elapsed time.Duration) (domain.SupervisorCheckpoint, error) {
 	if err := checkpoint.Validate(); err != nil {
 		return domain.SupervisorCheckpoint{}, err
@@ -601,7 +850,11 @@ func (s *SQLiteStore) FailSupervisorTurn(ctx context.Context, checkpoint domain.
 	if err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
+	repairAborted := current.RepairPhase == domain.ProtocolRepairPending
+	repairReason := current.RepairReason
 	current.Phase = domain.SupervisorTurnFailed
+	current.RepairPhase = domain.ProtocolRepairNone
+	current.RepairReason = ""
 	current.LastError = cause
 	current.ExecutionMillis, err = supervisorAddCounter(current.ExecutionMillis, elapsedMillis, "execution time")
 	if err != nil {
@@ -615,6 +868,14 @@ func (s *SQLiteStore) FailSupervisorTurn(ctx context.Context, checkpoint domain.
 		"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID, "error": cause,
 	}); err != nil {
 		return domain.SupervisorCheckpoint{}, err
+	}
+	if repairAborted {
+		if err := appendSupervisorEventTx(ctx, tx, run, events.ProtocolRepairFailedEvent, "run_supervisor", checkpoint.AttemptID, map[string]any{
+			"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID, "protocol_repair": 1,
+			"reason": cause, "requested_reason": repairReason, "stage": "aborted",
+		}); err != nil {
+			return domain.SupervisorCheckpoint{}, err
+		}
 	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.SupervisorCheckpointedEvent, "run_supervisor", run.ID, map[string]any{
 		"phase": current.Phase, "next_turn": current.NextTurn, "attempt_id": current.AttemptID,
@@ -684,6 +945,8 @@ func (s *SQLiteStore) FinalizeSupervisorRun(ctx context.Context, runID string, t
 	}
 	checkpoint.AttemptID = ""
 	checkpoint.PendingInput = ""
+	checkpoint.RepairPhase = domain.ProtocolRepairNone
+	checkpoint.RepairReason = ""
 	checkpoint.UpdatedAt = run.UpdatedAt
 	if target == domain.RunCompleted {
 		checkpoint.Phase = domain.SupervisorRunCompleted
@@ -726,20 +989,23 @@ func getSupervisorCheckpointTx(ctx context.Context, tx *sql.Tx, runID string) (d
 func upsertSupervisorCheckpointTx(ctx context.Context, tx *sql.Tx, checkpoint domain.SupervisorCheckpoint) error {
 	checkpoint.LastError = redact.String(checkpoint.LastError)
 	checkpoint.PendingInput = redact.String(checkpoint.PendingInput)
+	checkpoint.RepairReason = redact.String(checkpoint.RepairReason)
 	if err := checkpoint.Validate(); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO run_supervisor_checkpoints
-		(run_id, next_turn, phase, attempt_id, last_error, pending_input, input_tokens, output_tokens,
+		(run_id, next_turn, phase, attempt_id, last_error, pending_input, repair_phase, repair_reason, input_tokens, output_tokens,
 		total_tokens, execution_millis, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(run_id) DO UPDATE SET next_turn=excluded.next_turn, phase=excluded.phase,
 		attempt_id=excluded.attempt_id, last_error=excluded.last_error, pending_input=excluded.pending_input,
+		repair_phase=excluded.repair_phase, repair_reason=excluded.repair_reason,
 		input_tokens=excluded.input_tokens,
 		output_tokens=excluded.output_tokens, total_tokens=excluded.total_tokens,
 		execution_millis=excluded.execution_millis, updated_at=excluded.updated_at`,
 		checkpoint.RunID, checkpoint.NextTurn, checkpoint.Phase, checkpoint.AttemptID,
-		checkpoint.LastError, checkpoint.PendingInput, checkpoint.InputTokens, checkpoint.OutputTokens, checkpoint.TotalTokens,
+		checkpoint.LastError, checkpoint.PendingInput, checkpoint.RepairPhase, checkpoint.RepairReason,
+		checkpoint.InputTokens, checkpoint.OutputTokens, checkpoint.TotalTokens,
 		checkpoint.ExecutionMillis, ts(checkpoint.UpdatedAt))
 	return err
 }
@@ -758,8 +1024,10 @@ func scanSupervisorCheckpoint(row scanner) (domain.SupervisorCheckpoint, error) 
 	var phase string
 	var attempt sql.NullString
 	var lastError sql.NullString
+	var repairPhase string
 	var updated string
 	if err := row.Scan(&checkpoint.RunID, &checkpoint.NextTurn, &phase, &attempt, &lastError, &checkpoint.PendingInput,
+		&repairPhase, &checkpoint.RepairReason,
 		&checkpoint.InputTokens, &checkpoint.OutputTokens, &checkpoint.TotalTokens,
 		&checkpoint.ExecutionMillis, &updated); err != nil {
 		return domain.SupervisorCheckpoint{}, err
@@ -767,6 +1035,7 @@ func scanSupervisorCheckpoint(row scanner) (domain.SupervisorCheckpoint, error) 
 	checkpoint.Phase = domain.SupervisorPhase(phase)
 	checkpoint.AttemptID = attempt.String
 	checkpoint.LastError = lastError.String
+	checkpoint.RepairPhase = domain.ProtocolRepairPhase(repairPhase)
 	checkpoint.UpdatedAt = parseTS(updated)
 	return checkpoint, checkpoint.Validate()
 }

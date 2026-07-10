@@ -133,7 +133,9 @@ The supervisor owns process handles and channels only in memory. Durable IDs, st
 
 The current single-Agent slice persists cumulative input/output/total tokens, model-call execution milliseconds, and the redacted pending user input in the Supervisor checkpoint. A bounded executor performs only an operator-selected number of durable steps. Root model output uses strict `root_lifecycle.v1` JSON: `continue` returns to idle, `finish` completes the Run, and `wait` pauses it for explicit resume. Turn data, status, checkpoint, Session messages, and events commit in one transaction; arbitrary assistant text cannot mutate lifecycle state.
 
-Provider calls use typed outcomes: `retryable`, `rate_limited`, `invalid_response`, `cancelled`, or `permanent`. RunSupervisor retries only the first two, at most three attempts by default, with cancellation-aware exponential backoff. Server `Retry-After` is honored only when it is within the local maximum wait; a longer delay returns a stable rate-limit result instead of retrying early. Each attempt receives a durable sequential subject and emits `model.started` plus exactly one terminal model event. Terminal event persistence and model execution-time accounting share one transaction, so restart recovery neither loses nor double-charges completed attempt time.
+Provider calls use typed outcomes: `retryable`, `rate_limited`, `invalid_response`, `cancelled`, or `permanent`. RunSupervisor retries only the first two, at most three transport attempts per protocol phase by default, with cancellation-aware exponential backoff. Server `Retry-After` is honored only when it is within the local maximum wait; a longer delay returns a stable rate-limit result instead of retrying early. Each call receives a durable global sequence number plus a phase-local transport number and emits `model.started` plus exactly one terminal model event. Terminal event persistence, token usage, and model execution time share one transaction, so restart recovery neither loses nor double-charges completed calls.
+
+If a response fails strict `root_lifecycle.v1` parsing, the Supervisor persists a redacted diagnostic and requests exactly one protocol repair without replaying the raw output. Repair transport retries use their own bounded counter. Pending repair resumes after restart, exhausted repair never calls the Provider again, and request/start/completion/failure transitions are append-only Run events. Only a validated repaired response can reach Session history.
 
 Ordinary text sent to a Run-bound Session uses this same Supervisor path. A `created` Run starts automatically, a paused Run resumes for follow-up input, and terminal or approval-waiting Runs reject new model turns. The input is checkpointed before the Provider call and is recovered after process restart without duplicating the committed user/assistant pair. Sessions without a Run retain an explicit legacy Router path during migration; slash commands remain command adapters rather than implicit Agent turns.
 
@@ -170,7 +172,7 @@ Autonomous/headless execution cannot finish with an arbitrary assistant paragrap
 - blocked agent: `agent.wait` with reason and awaited dependency;
 - cancellation: coordinator-owned transition, never model-owned.
 
-The current root implementation maps `wait` to a durable paused Run and resumes at the next turn. Child actions, dependency records, and bounded automatic protocol repair remain future Coordinator work.
+The current root implementation maps `wait` to a durable paused Run and resumes at the next turn, and it permits one bounded automatic repair for an invalid root response. Child actions and structured dependency records remain future Coordinator work.
 
 ## Tool Gateway
 
@@ -251,6 +253,8 @@ agent.created
 agent.status_changed
 agent.message
 model.started / model.completed / model.failed
+supervisor.protocol_repair_requested / supervisor.protocol_repair_started
+supervisor.protocol_repair_completed / supervisor.protocol_repair_failed
 model.delta (future streaming event)
 work_item.changed
 tool.proposed / tool.approved / tool.completed / tool.failed
@@ -267,7 +271,7 @@ CLI and headless mode print events. Bubble Tea renders them locally. The future 
 
 ## Persistence
 
-SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, `v6` adds cumulative token and model-time budget counters, and `v7` adds bounded pending input recovery. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
+SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, `v6` adds cumulative token and model-time budget counters, `v7` adds bounded pending input recovery, and `v8` adds protocol-repair phase/reason recovery. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
 
 ```text
 missions

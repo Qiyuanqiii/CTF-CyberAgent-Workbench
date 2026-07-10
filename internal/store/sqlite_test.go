@@ -44,6 +44,28 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 	if count != LatestSchemaVersion {
 		t.Fatalf("expected %d migration records, got %d", LatestSchemaVersion, count)
 	}
+	rows, err := st.db.QueryContext(ctx, `PRAGMA table_info(run_supervisor_checkpoints)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatal(err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !columns["repair_phase"] || !columns["repair_reason"] {
+		t.Fatalf("schema v8 protocol repair columns are missing: %#v", columns)
+	}
 }
 
 func TestSQLiteStoreUpgradesLegacyDatabaseWithoutLosingData(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -412,6 +413,11 @@ func TestSupervisorModelTerminalReplayDoesNotDoubleChargeBudget(t *testing.T) {
 	attempt.Outcome = llm.OutcomeRetryable
 	attempt.ErrorText = "temporary"
 	attempt.Elapsed = 25 * time.Millisecond
+	mismatched := attempt
+	mismatched.Model = "other-model"
+	if _, err := st.RecordSupervisorModelFailed(ctx, turn.Checkpoint, mismatched); apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("mismatched model terminal code=%s err=%v", apperror.CodeOf(err), err)
+	}
 	first, err := st.RecordSupervisorModelFailed(ctx, turn.Checkpoint, attempt)
 	if err != nil {
 		t.Fatal(err)
@@ -429,6 +435,44 @@ func TestSupervisorModelTerminalReplayDoesNotDoubleChargeBudget(t *testing.T) {
 	}
 	if countEventType(items, events.ModelStartedEvent) != 1 || countEventType(items, events.ModelFailedEvent) != 1 {
 		t.Fatalf("terminal replay duplicated events: %#v", items)
+	}
+}
+
+func TestSupervisorProtocolFailureReplayIsAtomicAndIdempotent(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	run := newStartedRunForProvider(t, st, "lifecycle-test", domain.Budget{MaxTurns: 2, MaxTokens: 10})
+	turn, err := st.BeginSupervisorTurn(ctx, run.ID, "idempotent protocol failure")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt := llm.ModelAttempt{Number: 1, TransportAttempt: 1, MaxAttempts: 3, Provider: "lifecycle-test", Model: "model"}
+	inserted, err := st.RecordSupervisorModelStarted(ctx, turn.Checkpoint, attempt)
+	if err != nil || !inserted {
+		t.Fatalf("model start inserted=%t err=%v", inserted, err)
+	}
+	response := llm.ChatResponse{Usage: llm.Usage{InputTokens: 2, OutputTokens: 3, TotalTokens: 5}}
+	first, err := st.RecordSupervisorProtocolFailure(ctx, turn.Checkpoint, attempt, response, "invalid protocol", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := st.RecordSupervisorProtocolFailure(ctx, turn.Checkpoint, attempt, response, "invalid protocol", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.TotalTokens != 5 || second.TotalTokens != first.TotalTokens || second.RepairPhase != domain.ProtocolRepairPending {
+		t.Fatalf("protocol failure replay changed checkpoint first=%#v second=%#v", first, second)
+	}
+	items, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countEventType(items, events.ModelFailedEvent) != 1 || countEventType(items, events.ProtocolRepairRequestedEvent) != 1 {
+		t.Fatalf("protocol failure replay duplicated events: %#v", items)
 	}
 }
 
@@ -1002,57 +1046,326 @@ func TestRunSupervisorRootWaitPausesAndResumesAtNextTurn(t *testing.T) {
 	}
 }
 
-func TestRunSupervisorRejectsMalformedRootActionWithoutMessages(t *testing.T) {
+func TestRunSupervisorRepairsMalformedRootActionOnce(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
 	ctx := context.Background()
-	service := application.NewRunService(st)
-	_, run, err := service.Create(ctx, application.CreateRunRequest{
-		Goal: "reject malformed lifecycle", Profile: "code", ModelRoute: "lifecycle-test/model", Budget: domain.Budget{MaxTurns: 2},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.Start(ctx, run.ID); err != nil {
-		t.Fatal(err)
-	}
-	provider := &lifecycleProvider{responses: []string{`{"version":"root_lifecycle.v1","action":"continue","message":"ok","unknown":true}`}}
+	run := newStartedRunForProvider(t, st, "lifecycle-test", domain.Budget{MaxTurns: 2})
+	invalidRaw := `{"version":"root_lifecycle.v1","action":"continue","message":"do-not-persist-secret-value","unknown":true}`
+	provider := &lifecycleProvider{responses: []string{
+		invalidRaw,
+		rootActionResponse(domain.RootActionContinue, "protocol repaired", "", ""),
+	}}
 	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
 	router.RegisterProvider(provider)
 	result, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID)
-	if apperror.CodeOf(err) != apperror.CodeFailedPrecondition || result.Checkpoint.Phase != domain.SupervisorTurnFailed {
-		t.Fatalf("malformed lifecycle action was not checkpointed: result=%#v code=%s err=%v", result, apperror.CodeOf(err), err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls != 2 || result.Status != application.LifecycleTurnCompleted || result.ModelAttempts != 2 ||
+		result.ProtocolRepairs != 1 || result.ModelOutcome != llm.OutcomeSuccess || result.Checkpoint.TotalTokens != 4 {
+		t.Fatalf("malformed lifecycle action was not repaired exactly once: calls=%d result=%#v", provider.calls, result)
 	}
 	messages, err := st.ListSessionMessages(ctx, run.SessionID, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(messages) != 0 {
-		t.Fatalf("malformed action wrote session messages: %#v", messages)
+	if len(messages) != 2 || messages[1].Content != "protocol repaired" {
+		t.Fatalf("repair did not commit exactly one clean session turn: %#v", messages)
 	}
-	persisted, err := st.GetRun(ctx, run.ID)
-	if err != nil {
-		t.Fatal(err)
+	if provider.requests[1].Metadata["protocol_repair"] != "1" {
+		t.Fatalf("repair request metadata is missing: %#v", provider.requests[1].Metadata)
 	}
-	if persisted.Status != domain.RunRunning {
-		t.Fatalf("malformed action changed run status: %#v", persisted)
+	for _, message := range provider.requests[1].Messages {
+		if strings.Contains(message.Content, invalidRaw) || strings.Contains(message.Content, "do-not-persist-secret-value") {
+			t.Fatalf("repair prompt replayed the invalid model output: %#v", provider.requests[1].Messages)
+		}
 	}
 	items, err := st.ListRunEvents(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	foundInvalid := false
 	for _, item := range items {
-		if item.Type == events.ModelFailedEvent && strings.Contains(item.PayloadJSON, string(llm.OutcomeInvalidResponse)) {
-			foundInvalid = true
+		if strings.Contains(item.PayloadJSON, "do-not-persist-secret-value") {
+			t.Fatalf("invalid model output leaked into event stream: %s", item.PayloadJSON)
 		}
 	}
-	if countEventType(items, events.ModelStartedEvent) != 1 || countEventType(items, events.ModelFailedEvent) != 1 ||
-		countEventType(items, events.ModelCompletedEvent) != 0 || !foundInvalid {
-		t.Fatalf("malformed action model events: %#v", items)
+	if countEventType(items, events.ModelStartedEvent) != 2 || countEventType(items, events.ModelFailedEvent) != 1 ||
+		countEventType(items, events.ModelCompletedEvent) != 1 || countEventType(items, events.ProtocolRepairRequestedEvent) != 1 ||
+		countEventType(items, events.ProtocolRepairStartedEvent) != 1 || countEventType(items, events.ProtocolRepairCompletedEvent) != 1 ||
+		countEventType(items, events.ProtocolRepairFailedEvent) != 0 {
+		t.Fatalf("unexpected successful repair event stream: %#v", items)
+	}
+}
+
+func TestRunSupervisorSeparatesRepairTransportAttemptsFromGlobalSequence(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	run := newStartedRunForProvider(t, st, "lifecycle-test", domain.Budget{MaxTurns: 2})
+	provider := &lifecycleProvider{
+		responses: []string{
+			`{"version":"root_lifecycle.v1","action":"continue","message":"invalid","unknown":true}`,
+			"",
+			rootActionResponse(domain.RootActionContinue, "repair transport recovered", "", ""),
+		},
+		failures: []error{
+			nil,
+			llm.NewProviderError(llm.OutcomeRetryable, "lifecycle-test", "temporary repair transport failure", nil),
+		},
+	}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	result, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).WithModelRetryPolicy(
+		application.ModelRetryPolicy{MaxAttempts: 3},
+	).Step(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.calls != 3 || result.ModelAttempts != 3 || result.ProtocolRepairs != 1 || result.ModelOutcome != llm.OutcomeSuccess {
+		t.Fatalf("repair transport counters were not independent: calls=%d result=%#v", provider.calls, result)
+	}
+	items, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantAttempts := []string{
+		`"model_attempt":1,"protocol_repair":0,"provider":"lifecycle-test","transport_attempt":1`,
+		`"model_attempt":2,"protocol_repair":1,"provider":"lifecycle-test","transport_attempt":1`,
+		`"model_attempt":3,"protocol_repair":1,"provider":"lifecycle-test","transport_attempt":2`,
+	}
+	found := make([]bool, len(wantAttempts))
+	for _, item := range items {
+		if item.Type != events.ModelStartedEvent {
+			continue
+		}
+		for index, want := range wantAttempts {
+			if strings.Contains(item.PayloadJSON, want) {
+				found[index] = true
+			}
+		}
+	}
+	if slices.Contains(found, false) || countEventType(items, events.ProtocolRepairStartedEvent) != 1 {
+		t.Fatalf("unexpected global/transport model sequence found=%v events=%#v", found, items)
+	}
+}
+
+func TestRunSupervisorFailsAfterSecondMalformedRootAction(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	run := newStartedRunForProvider(t, st, "lifecycle-test", domain.Budget{MaxTurns: 2})
+	provider := &lifecycleProvider{responses: []string{
+		`{"version":"root_lifecycle.v1","action":"continue","message":"first","unknown":true}`,
+		`{"version":"root_lifecycle.v1","action":"continue","message":"second","unknown":true}`,
+	}}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	result, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID)
+	if apperror.CodeOf(err) != apperror.CodeFailedPrecondition || provider.calls != 2 || result.ModelAttempts != 2 ||
+		result.ProtocolRepairs != 1 || result.ModelOutcome != llm.OutcomeInvalidResponse || result.Checkpoint.Phase != domain.SupervisorTurnFailed ||
+		result.Checkpoint.RepairPhase != domain.ProtocolRepairNone || result.Checkpoint.TotalTokens != 4 {
+		t.Fatalf("second malformed response was not bounded: calls=%d result=%#v code=%s err=%v", provider.calls, result, apperror.CodeOf(err), err)
+	}
+	messages, err := st.ListSessionMessages(ctx, run.SessionID, true)
+	if err != nil || len(messages) != 0 {
+		t.Fatalf("failed repair wrote session messages: %#v err=%v", messages, err)
+	}
+	items, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countEventType(items, events.ModelStartedEvent) != 2 || countEventType(items, events.ModelFailedEvent) != 2 ||
+		countEventType(items, events.ModelCompletedEvent) != 0 || countEventType(items, events.ProtocolRepairRequestedEvent) != 1 ||
+		countEventType(items, events.ProtocolRepairStartedEvent) != 1 || countEventType(items, events.ProtocolRepairCompletedEvent) != 0 ||
+		countEventType(items, events.ProtocolRepairFailedEvent) != 1 {
+		t.Fatalf("unexpected exhausted repair event stream: %#v", items)
+	}
+}
+
+func TestRunSupervisorChargesInvalidResponseBeforeRepairBudgetCheck(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	run := newStartedRunForProvider(t, st, "lifecycle-test", domain.Budget{MaxTurns: 2, MaxTokens: 2})
+	provider := &lifecycleProvider{responses: []string{
+		`{"version":"root_lifecycle.v1","action":"continue","message":"invalid","unknown":true}`,
+		rootActionResponse(domain.RootActionContinue, "must not be called", "", ""),
+	}}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	result, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID)
+	if apperror.CodeOf(err) != apperror.CodeResourceExhausted || provider.calls != 1 || result.ProtocolRepairs != 1 ||
+		result.Checkpoint.Phase != domain.SupervisorTurnFailed || result.Checkpoint.TotalTokens != 2 {
+		t.Fatalf("invalid response did not consume budget before repair: calls=%d result=%#v code=%s err=%v", provider.calls, result, apperror.CodeOf(err), err)
+	}
+	items, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countEventType(items, events.ProtocolRepairRequestedEvent) != 1 || countEventType(items, events.ProtocolRepairStartedEvent) != 0 {
+		t.Fatalf("budget exhaustion started a repair model call: %#v", items)
+	}
+}
+
+func TestRunSupervisorResumesPendingProtocolRepairAfterRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cyberagent.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	run := newStartedRunForProvider(t, st, "lifecycle-test", domain.Budget{MaxTurns: 2, MaxTokens: 10})
+	pending := persistProtocolRepairRequest(t, st, run.ID, "durable repair input", "lifecycle-test")
+	if pending.RepairPhase != domain.ProtocolRepairPending || pending.TotalTokens != 2 {
+		t.Fatalf("repair request was not checkpointed: %#v", pending)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	provider := &lifecycleProvider{responses: []string{
+		rootActionResponse(domain.RootActionContinue, "repaired after restart", "", ""),
+	}}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	result, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Recovered || provider.calls != 1 || result.ModelAttempts != 2 || result.ProtocolRepairs != 1 ||
+		result.UserMessage.Content != "durable repair input" || result.Checkpoint.TotalTokens != 4 {
+		t.Fatalf("pending protocol repair did not resume: calls=%d result=%#v", provider.calls, result)
+	}
+	if provider.requests[0].Metadata["protocol_repair"] != "1" || provider.requests[0].MaxTokens != 8 {
+		t.Fatalf("recovered repair request lost metadata or budget: %#v", provider.requests[0])
+	}
+	items, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countEventType(items, events.ModelStartedEvent) != 2 || countEventType(items, events.ProtocolRepairRequestedEvent) != 1 ||
+		countEventType(items, events.ProtocolRepairStartedEvent) != 1 || countEventType(items, events.ProtocolRepairCompletedEvent) != 1 {
+		t.Fatalf("recovered repair duplicated or lost events: %#v", items)
+	}
+}
+
+func TestRunSupervisorDoesNotRetryExhaustedProtocolRepairAfterRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cyberagent.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	run := newStartedRunForProvider(t, st, "lifecycle-test", domain.Budget{MaxTurns: 2, MaxTokens: 10})
+	pending := persistProtocolRepairRequest(t, st, run.ID, "exhausted repair input", "lifecycle-test")
+	attempt := llm.ModelAttempt{
+		Number: 2, TransportAttempt: 1, MaxAttempts: 3, ProtocolRepair: 1, Provider: "lifecycle-test", Model: "model",
+	}
+	inserted, err := st.RecordSupervisorModelStarted(ctx, pending, attempt)
+	if err != nil || !inserted {
+		t.Fatalf("repair model start inserted=%t err=%v", inserted, err)
+	}
+	exhausted, err := st.RecordSupervisorProtocolFailure(ctx, pending, attempt,
+		llm.ChatResponse{Usage: llm.Usage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}}, "repair response remained invalid", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exhausted.RepairPhase != domain.ProtocolRepairExhausted || exhausted.TotalTokens != 4 {
+		t.Fatalf("exhausted repair was not checkpointed: %#v", exhausted)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	provider := &lifecycleProvider{responses: []string{
+		rootActionResponse(domain.RootActionContinue, "must not run", "", ""),
+	}}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	result, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID)
+	if apperror.CodeOf(err) != apperror.CodeFailedPrecondition || provider.calls != 0 || !result.Recovered ||
+		result.ProtocolRepairs != 1 || result.Checkpoint.Phase != domain.SupervisorTurnFailed || result.Checkpoint.TotalTokens != 4 {
+		t.Fatalf("exhausted repair was retried after restart: calls=%d result=%#v code=%s err=%v", provider.calls, result, apperror.CodeOf(err), err)
+	}
+	items, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countEventType(items, events.ModelStartedEvent) != 2 || countEventType(items, events.ProtocolRepairFailedEvent) != 1 {
+		t.Fatalf("exhausted repair event stream changed on recovery: %#v", items)
+	}
+}
+
+func TestRunSupervisorPersistsProtocolRepairWhenCancelledAfterResponse(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cyberagent.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := newStartedRunForProvider(t, st, "lifecycle-test", domain.Budget{MaxTurns: 2, MaxTokens: 10})
+	ctx, cancel := context.WithCancel(context.Background())
+	provider := &lifecycleProvider{responses: []string{
+		`{"version":"root_lifecycle.v1","action":"continue","message":"invalid","unknown":true}`,
+		rootActionResponse(domain.RootActionContinue, "repaired after cancellation", "", ""),
+	}}
+	provider.afterResponse = func(index int) {
+		if index == 0 {
+			cancel()
+		}
+	}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	first, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID)
+	if apperror.CodeOf(err) != apperror.CodeCancelled || provider.calls != 1 || first.ModelAttempts != 1 ||
+		first.ProtocolRepairs != 1 || first.Checkpoint.Phase != domain.SupervisorTurnStarted ||
+		first.Checkpoint.RepairPhase != domain.ProtocolRepairPending || first.Checkpoint.TotalTokens != 2 {
+		t.Fatalf("cancelled response did not persist repair state: calls=%d result=%#v code=%s err=%v", provider.calls, first, apperror.CodeOf(err), err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	provider.afterResponse = nil
+	resumed, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resumed.Recovered || provider.calls != 2 || resumed.ModelAttempts != 2 || resumed.ProtocolRepairs != 1 ||
+		resumed.UserMessage.Content != "root lifecycle protocol test" || resumed.Checkpoint.TotalTokens != 4 {
+		t.Fatalf("cancelled protocol repair did not resume once: calls=%d result=%#v", provider.calls, resumed)
+	}
+	items, err := st.ListRunEvents(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countEventType(items, events.ProtocolRepairRequestedEvent) != 1 || countEventType(items, events.ProtocolRepairStartedEvent) != 1 ||
+		countEventType(items, events.ProtocolRepairCompletedEvent) != 1 || countEventType(items, events.AgentTurnStartedEvent) != 1 {
+		t.Fatalf("cancelled repair recovery duplicated lifecycle events: %#v", items)
 	}
 }
 
@@ -1205,9 +1518,11 @@ func (nilResponseProvider) SupportsVision(string) bool   { return false }
 func (nilResponseProvider) SupportsJSONMode(string) bool { return false }
 
 type lifecycleProvider struct {
-	responses []string
-	requests  []llm.ChatRequest
-	calls     int
+	responses     []string
+	failures      []error
+	requests      []llm.ChatRequest
+	calls         int
+	afterResponse func(int)
 }
 
 type retrySequenceProvider struct {
@@ -1287,6 +1602,44 @@ func newRetrySupervisor(t *testing.T, provider llm.Provider) (string, *store.SQL
 	return path, st, run, application.NewRunSupervisor(st, router, policy.NewDefaultChecker())
 }
 
+func newStartedRunForProvider(t *testing.T, st *store.SQLiteStore, providerName string, budget domain.Budget) domain.Run {
+	t.Helper()
+	ctx := context.Background()
+	service := application.NewRunService(st)
+	_, run, err := service.Create(ctx, application.CreateRunRequest{
+		Goal: "root lifecycle protocol test", Profile: "review", ModelRoute: providerName + "/model", Budget: budget,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	return run
+}
+
+func persistProtocolRepairRequest(t *testing.T, st *store.SQLiteStore, runID string, input string, providerName string) domain.SupervisorCheckpoint {
+	t.Helper()
+	ctx := context.Background()
+	turn, err := st.BeginSupervisorTurn(ctx, runID, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt := llm.ModelAttempt{
+		Number: 1, TransportAttempt: 1, MaxAttempts: 3, Provider: providerName, Model: "model",
+	}
+	inserted, err := st.RecordSupervisorModelStarted(ctx, turn.Checkpoint, attempt)
+	if err != nil || !inserted {
+		t.Fatalf("primary model start inserted=%t err=%v", inserted, err)
+	}
+	checkpoint, err := st.RecordSupervisorProtocolFailure(ctx, turn.Checkpoint, attempt,
+		llm.ChatResponse{Usage: llm.Usage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}}, "root lifecycle response was invalid", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return checkpoint
+}
+
 func (*lifecycleProvider) Name() string { return "lifecycle-test" }
 
 func (*lifecycleProvider) ListModels(context.Context) ([]llm.ModelInfo, error) {
@@ -1297,12 +1650,22 @@ func (p *lifecycleProvider) Chat(ctx context.Context, req llm.ChatRequest) (*llm
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if p.calls >= len(p.responses) {
+	index := p.calls
+	if index >= len(p.responses) && index >= len(p.failures) {
 		return nil, apperror.New(apperror.CodeFailedPrecondition, "lifecycle test response exhausted")
 	}
-	text := p.responses[p.calls]
 	p.requests = append(p.requests, req)
 	p.calls++
+	if index < len(p.failures) && p.failures[index] != nil {
+		return nil, p.failures[index]
+	}
+	if index >= len(p.responses) {
+		return nil, apperror.New(apperror.CodeFailedPrecondition, "lifecycle test response exhausted")
+	}
+	text := p.responses[index]
+	if p.afterResponse != nil {
+		p.afterResponse(index)
+	}
 	return &llm.ChatResponse{
 		Text: text, Provider: p.Name(), Model: "model",
 		Usage: llm.Usage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2},

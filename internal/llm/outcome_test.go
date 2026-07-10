@@ -73,4 +73,14 @@ func TestModelAttemptValidation(t *testing.T) {
 	if err := failed.ValidateFailed(); err == nil {
 		t.Fatal("failed attempt accepted an empty error")
 	}
+	repair := ModelAttempt{
+		Number: 4, TransportAttempt: 1, MaxAttempts: 3, ProtocolRepair: 1, Provider: "test", Model: "model",
+	}
+	if err := repair.ValidateStarted(); err != nil {
+		t.Fatalf("global attempt number should be independent from transport limit: %v", err)
+	}
+	repair.ProtocolRepair = 2
+	if err := repair.ValidateStarted(); err == nil {
+		t.Fatal("model attempt accepted an unbounded protocol repair number")
+	}
 }

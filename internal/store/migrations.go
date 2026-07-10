@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 7
+const LatestSchemaVersion = 8
 
 type migration struct {
 	Version    int
@@ -129,6 +129,11 @@ var supervisorBudgetStatements = []string{
 
 var supervisorPendingInputStatements = []string{
 	`ALTER TABLE run_supervisor_checkpoints ADD COLUMN pending_input TEXT NOT NULL DEFAULT '';`,
+}
+
+var supervisorProtocolRepairStatements = []string{
+	`ALTER TABLE run_supervisor_checkpoints ADD COLUMN repair_phase TEXT NOT NULL DEFAULT '';`,
+	`ALTER TABLE run_supervisor_checkpoints ADD COLUMN repair_reason TEXT NOT NULL DEFAULT '';`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {

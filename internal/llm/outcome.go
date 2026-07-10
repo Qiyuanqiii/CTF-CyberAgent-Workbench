@@ -125,20 +125,29 @@ func ProviderErrorKind(err error) Outcome {
 }
 
 type ModelAttempt struct {
-	Number       int
-	MaxAttempts  int
-	Provider     string
-	Model        string
-	Outcome      Outcome
-	ErrorText    string
-	RetryAfter   time.Duration
-	Elapsed      time.Duration
-	RetryPlanned bool
+	Number           int
+	TransportAttempt int
+	MaxAttempts      int
+	ProtocolRepair   int
+	Provider         string
+	Model            string
+	Outcome          Outcome
+	ErrorText        string
+	RetryAfter       time.Duration
+	Elapsed          time.Duration
+	RetryPlanned     bool
 }
 
 func (a ModelAttempt) ValidateStarted() error {
-	if a.Number <= 0 || a.MaxAttempts <= 0 || a.Number > a.MaxAttempts {
-		return errors.New("model attempt number must be within its limit")
+	if a.Number <= 0 || a.MaxAttempts <= 0 {
+		return errors.New("model attempt number and transport limit must be positive")
+	}
+	transportAttempt := a.TransportNumber()
+	if transportAttempt <= 0 || transportAttempt > a.MaxAttempts {
+		return errors.New("model transport attempt must be within its limit")
+	}
+	if a.ProtocolRepair < 0 || a.ProtocolRepair > 1 {
+		return errors.New("model protocol repair number must be zero or one")
 	}
 	if strings.TrimSpace(a.Provider) == "" || strings.TrimSpace(a.Model) == "" {
 		return errors.New("model attempt provider and model are required")
@@ -147,6 +156,13 @@ func (a ModelAttempt) ValidateStarted() error {
 		return errors.New("model attempt durations cannot be negative")
 	}
 	return nil
+}
+
+func (a ModelAttempt) TransportNumber() int {
+	if a.TransportAttempt > 0 {
+		return a.TransportAttempt
+	}
+	return a.Number
 }
 
 func (a ModelAttempt) ValidateCompleted() error {

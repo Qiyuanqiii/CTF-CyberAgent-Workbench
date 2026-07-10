@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 63%。
+- 整体产品愿景：约 65%。
 - v0.1 通用 Agent MVP：约 98%。
-- V2 Run-centric Runtime：约 72%。
+- V2 Run-centric Runtime：约 76%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 第五纵向切片已落地：Provider typed outcome、有界退避、限流稳定返回、取消审计、跨重启 model attempt 恢复，以及 `model.started/completed/failed` 事件。下一步实现有界 lifecycle 协议修复和真实 `model.delta` streaming 边界。
+V2 的 P0/P1 已完成，P2 第六纵向切片已落地：无效 `root_lifecycle.v1` 输出只允许一次显式纠错，协议修复与 transport retry 分开计数，修复阶段和预算可跨重启恢复。下一步实现真实 `model.delta` streaming 聚合与取消边界。
 
 ## 二、已完成功能
 
@@ -34,6 +34,8 @@ V2 的 P0/P1 已完成，P2 第五纵向切片已落地：Provider typed outcome
 - Anthropic-compatible Provider 对 429、408/425、5xx/529、永久 4xx、畸形/空响应和 `Retry-After` 进行类型化处理。
 - RunSupervisor 默认最多三次模型尝试，100ms 指数退避且单次最多等待 2s；超长 `Retry-After` 不会被提前重试。
 - 每次模型调用持久化连续编号的 `model.started/completed/failed`，取消与重启后继续编号。
+- 无效 root lifecycle 输出只触发一次纠错提示；不会把原始坏输出回放给模型、写入 Session 或写入事件。
+- transport retry 每个协议阶段独立最多三次，全局 model attempt 编号保持连续；CLI 显示 `protocol_repairs`。
 
 ### 工作区、编辑与工具
 
@@ -61,6 +63,7 @@ V2 的 P0/P1 已完成，P2 第五纵向切片已落地：Provider typed outcome
 - schema v5 持久化 Supervisor phase、next turn、attempt 和脱敏错误。
 - schema v6 在同一 checkpoint 中持久化累计 input/output/total tokens 与模型执行毫秒数。
 - schema v7 在 Provider 调用前持久化脱敏且不超过 64 KiB 的 pending input，完成后原子清空。
+- schema v8 持久化协议修复阶段和脱敏原因，支持 pending/exhausted 状态的进程重启恢复。
 - `run step` 每次只执行一个无工具规划 turn；`run checkpoint` 可观察恢复状态。
 - 模型调用前写 started checkpoint，完成时原子写消息、策略、用量、事件和下一个 checkpoint。
 - 重启会恢复同一 started attempt；已提交完成的 turn 和消息不会重复。
@@ -76,7 +79,9 @@ V2 的 P0/P1 已完成，P2 第五纵向切片已落地：Provider typed outcome
 - pending input 在重启后恢复为同一 attempt；成功时 user/assistant 消息、checkpoint、Run 状态和事件一次事务提交，不会重复写消息。
 - 未绑定 Run 的旧 Session 暂时保留 direct Router 兼容路径；slash command 继续作为显式命令路径。
 - 自动压缩生成的最新 Session summary 会进入后续 Supervisor 模型上下文。
-- 模型终态事件与 execution_millis 在一个事务记账；终态重放不会重复事件或重复扣减预算。
+- 模型终态事件、token 用量与 execution_millis 在一个事务记账；终态重放不会重复事件或重复扣减预算。
+- 首次非法协议响应的用量先持久化再检查剩余预算；修复成功只提交一对合法 Session 消息，二次非法响应直接失败且不会第三次调用。
+- 修复请求、开始、完成和失败分别写入 `supervisor.protocol_repair_*` 事件；父 context 在响应返回时取消也不会丢失终态或修复 checkpoint。
 - 限流耗尽后 checkpoint 保留 pending input；无新输入的 `run step` 会继续原请求而不是退回 Mission goal。
 - Provider 调用中或退避中的 context 取消会停止重试；调用中取消使用短时审计上下文记录 cancelled 事件和耗时，turn 保持可恢复。
 - Run 状态转换与事件写入保持原子性，Store 会拒绝非法或陈旧转换。
@@ -98,7 +103,7 @@ V2 的 P0/P1 已完成，P2 第五纵向切片已落地：Provider typed outcome
 
 ## 四、尚未完成
 
-- 真实 token streaming、`model.delta` 和自动协议修复。
+- 真实 token streaming 与 `model.delta`。
 - Provider 费用预算、工具调用预算和 token-aware Context Builder。
 - 结构化 WorkItem、Notes、Findings、Evidence 与 Report。
 - 跨进程主动取消和实时 TUI 状态体验。
@@ -112,6 +117,7 @@ V2 的 P0/P1 已完成，P2 第五纵向切片已落地：Provider typed outcome
 
 最新审计未发现高严重度问题。主要残余风险：
 
+- `staticcheck ./...` 仅报告 3 个既存 TUI 低严重度问题：`S1008`、`S1011` 和未使用 helper `U1000`；本轮协议修复代码无命中。
 - `script run --local` 仍可在词法策略检查后直接本机执行，应接入统一提案、审批和 Run 事件。
 - 文件写入已二次解析路径并重新校验哈希，但跨平台 `os.WriteFile` 无法完全消除很小的 TOCTOU 窗口。
 - Windows 当前账号不能创建符号链接，真实链接逃逸测试会跳过；运行时仍会解析链接并检查工作区边界。
@@ -124,7 +130,7 @@ V2 的 P0/P1 已完成，P2 第五纵向切片已落地：Provider typed outcome
 - 执行时间当前只统计 Provider 模型调用；一次 Provider 调用可能超过剩余 token，但实际用量会完整记账并阻止下一次调用。
 - 预算边界停止执行后 Run 保持 `running`，需操作者显式 `finish`、`fail` 或 `cancel`；模型输出不能自行终结 Run。
 - 本轮审计已修复 Provider 极端用量导致的累计整数溢出，以及超大 `--max-steps` 触发不受控预分配的问题。
-- 严格协议对不遵循 JSON 指令的 Provider 会返回可审计失败；当前不会自动追加修复提示重试。
+- 严格协议只提供一次自动修复；若 Provider 连续两次不遵循 JSON 契约，本轮失败并等待操作者后续重试，不会无限纠错。
 - `wait` 目前映射为 Run paused 和文本 reason，尚无结构化 dependency/approval 对象。
 - 未绑定 Run 的 Session 仍直连 Router；这是迁移兼容路径，新功能不应继续扩展该旁路。
 - slash command 尚未消耗 Supervisor turn；后续统一 Tool Gateway 时必须保持审批和事件语义，不能直接启用执行。
@@ -132,7 +138,7 @@ V2 的 P0/P1 已完成，P2 第五纵向切片已落地：Provider typed outcome
 - Provider 自动重试目前只在 RunSupervisor 内启用；未绑定 Run 的 legacy Session 虽有 typed error，仍不自动重试。
 - 退避当前无随机抖动；在开放远程并发 worker 前需增加 jitter，避免同一 Provider 同步重试。
 - 超过 2s 的服务端 `Retry-After` 会直接返回限流状态并保留输入，需要后续操作者重试。
-- 若进程在 `model.completed` 后、turn 提交前退出，恢复时可能以新的 model attempt 重发一次无副作用请求；因此工具调用仍关闭。
+- 若进程在 `model.completed` 后、turn 提交前退出，恢复时可能以新的 model attempt 重发一次无副作用请求；前一次 token/耗时已经原子记账，因此不会漏算，但工具调用仍关闭。
 - 已发布 migration 的语句和 checksum 不可修改，后续 schema 变化必须新增版本。
 - v3 会拒绝一个 Session 关联多个 Run；若旧数据库存在重复关联，应先审计，而不是自动丢弃数据。
 - 兼容期仍有普通字符串错误通过 `apperror.Normalize` 分类；新服务必须直接返回 typed error。
@@ -148,14 +154,16 @@ go vet ./...
 
 共享状态、并发或存储变更还要运行相关包的 `go test -race`。CLI 行为变更要在隔离的 `CYBERAGENT_HOME` 中完成 smoke test。提交前扫描凭据前缀，确认本地数据库、工作区、环境文件和 API key 未进入 Git。
 
-最新验证已覆盖严格 action、schema v7、Session/Run 统一路径，并新增 HTTP/网络/取消错误分类、两次瞬态失败后一次提交、永久错误不重试、限流耗尽恢复、超长 Retry-After、调用/退避取消、跨 Store attempt 续号、事件脱敏和 execution ledger 幂等。独立 CLI smoke 已验证 `model_attempts/model_outcome`、唯一 started/completed 事件和 idle checkpoint。
+最新验证已覆盖严格 action、schema v8、Session/Run 统一路径、一次协议修复成功、二次协议失败、坏输出隔离、修复前预算耗尽、修复终态幂等、pending/exhausted 跨 Store 恢复，以及响应后取消恢复。独立 CLI smoke 已验证 `protocol_repairs: 0`、空 repair checkpoint 和唯一 started/completed 事件。
+
+本机 Go 已从 1.26.1 升级到 1.26.5；升级前 `govulncheck` 命中 9 条可达标准库漏洞，升级后复扫为 0。协议修复 transport 测试验证全局 attempt `1/2/3` 与阶段内 transport `1/1/2`，Store 也会拒绝与 durable started event 不一致的终态元数据。
 
 ## 七、下一开发切片
 
-1. 为非法 root lifecycle 输出增加一次有界纠错提示；协议修复与 transport retry 分开计数和审计。
-2. 增加 Supervisor stream aggregator，执行 UTF-8、输出大小、取消和最终 usage 校验。
-3. 对 `model.delta` 做合并/限频后再写事件，禁止逐 token 淹没 SQLite。
-4. 在 application service 层暴露主动取消句柄，UI 不直接持有 Provider context。
+1. 增加 Supervisor stream aggregator，执行 UTF-8、输出大小、取消和最终 usage 校验。
+2. 对 `model.delta` 做合并/限频后再写事件，禁止逐 token 淹没 SQLite。
+3. 在 application service 层暴露主动取消句柄，UI 不直接持有 Provider context。
+4. 保持当前非 streaming Provider 兼容路径，并让 stream/non-stream 共享同一终态与预算事务。
 5. 工具执行和多 Agent 并发继续关闭。
 
 ## 八、仓库同步与恢复约定

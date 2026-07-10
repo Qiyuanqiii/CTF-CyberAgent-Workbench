@@ -9,6 +9,8 @@ import (
 
 type SupervisorPhase string
 
+type ProtocolRepairPhase string
+
 const (
 	SupervisorIdle         SupervisorPhase = "idle"
 	SupervisorTurnStarted  SupervisorPhase = "turn_started"
@@ -16,6 +18,10 @@ const (
 	SupervisorWaiting      SupervisorPhase = "waiting"
 	SupervisorRunCompleted SupervisorPhase = "run_completed"
 	SupervisorRunFailed    SupervisorPhase = "run_failed"
+
+	ProtocolRepairNone      ProtocolRepairPhase = ""
+	ProtocolRepairPending   ProtocolRepairPhase = "pending"
+	ProtocolRepairExhausted ProtocolRepairPhase = "exhausted"
 )
 
 type SupervisorCheckpoint struct {
@@ -24,6 +30,8 @@ type SupervisorCheckpoint struct {
 	Phase           SupervisorPhase
 	AttemptID       string
 	PendingInput    string
+	RepairPhase     ProtocolRepairPhase
+	RepairReason    string
 	LastError       string
 	InputTokens     int64
 	OutputTokens    int64
@@ -54,9 +62,27 @@ func (c SupervisorCheckpoint) Validate() error {
 		if strings.TrimSpace(c.PendingInput) != "" {
 			return fmt.Errorf("checkpoint phase %s cannot have pending input", c.Phase)
 		}
+		if c.RepairPhase != ProtocolRepairNone || strings.TrimSpace(c.RepairReason) != "" {
+			return fmt.Errorf("checkpoint phase %s cannot have protocol repair state", c.Phase)
+		}
 	case SupervisorTurnStarted, SupervisorTurnFailed:
 		if strings.TrimSpace(c.AttemptID) == "" {
 			return fmt.Errorf("checkpoint phase %s requires an attempt id", c.Phase)
+		}
+		if c.Phase == SupervisorTurnFailed && (c.RepairPhase != ProtocolRepairNone || strings.TrimSpace(c.RepairReason) != "") {
+			return errors.New("failed supervisor turn cannot have protocol repair state")
+		}
+		switch c.RepairPhase {
+		case ProtocolRepairNone:
+			if strings.TrimSpace(c.RepairReason) != "" {
+				return errors.New("protocol repair reason requires an active repair phase")
+			}
+		case ProtocolRepairPending, ProtocolRepairExhausted:
+			if strings.TrimSpace(c.RepairReason) == "" {
+				return errors.New("protocol repair phase requires a reason")
+			}
+		default:
+			return fmt.Errorf("invalid protocol repair phase %q", c.RepairPhase)
 		}
 	default:
 		return fmt.Errorf("invalid supervisor checkpoint phase %q", c.Phase)

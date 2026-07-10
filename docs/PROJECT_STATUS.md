@@ -31,9 +31,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 63%.
+- Overall product vision: about 65%.
 - v0.1 generic agent MVP: about 98%.
-- V2 run-centric runtime: about 72%.
+- V2 run-centric runtime: about 76%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -69,7 +69,7 @@ Completed:
 - Reworked `docs/architecture.md` around run-scoped budget, event, sandbox, report, approval, and recovery ownership without copying the reference implementation.
 - Replaced the obsolete README migration/scaffold copy with a bilingual Chinese/English product overview, current capabilities, architecture boundary, and development-scope notice.
 - Added `docs/TASK_BOOK.md` with phased migration tasks, acceptance criteria, compatibility rules, and CTF deferred to the final phase.
-- Versioned SQLite migrations through schema v7: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative budget counters, and durable pending user input; each version is checksummed and transactional.
+- Versioned SQLite migrations through schema v8: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative budget counters, durable pending user input, and restart-safe protocol-repair state; each version is checksummed and transactional.
 - Migration tests cover idempotence, legacy data preservation, checksum history, and failed-migration rollback.
 - Unified `internal/idgen` now backs agent tasks, sessions, tool runs, file edits, Mission/Run, and event IDs.
 - Added pure Go Mission, Scope, Budget, RunConfig, Run status machine, and legal transition checks.
@@ -112,9 +112,14 @@ Completed:
 - Anthropic-compatible HTTP failures classify 429, 408/425, 5xx/529, permanent 4xx, malformed JSON, empty responses, and bounded `Retry-After` without exposing API keys or raw unredacted error text.
 - RunSupervisor now performs at most three side-effect-free model attempts by default with cancellation-aware exponential backoff; long server retry delays are returned rather than shortened.
 - Added durable sequential `model.started`, `model.completed`, and `model.failed` events. Attempt numbering resumes across Store restart and Store rejects stale, duplicate-terminal, or out-of-order writes.
-- Model terminal events and execution-millisecond accounting commit atomically; replay is idempotent and cannot double-charge the budget.
+- Model terminal events, token usage, and execution-millisecond accounting commit atomically; replay is idempotent and cannot double-charge the budget.
 - Parent-context cancellation uses a bounded audit-only context to persist the cancelled model event and elapsed time while leaving the Supervisor turn recoverable.
 - A failed custom pending input survives rate-limit exhaustion and can be resumed by `run step` without being replaced by the Mission goal.
+- Added one explicit `root_lifecycle.v1` repair phase. It has its own bounded transport retry counter while global model attempt numbers remain continuous.
+- Schema v8 persists pending/exhausted repair state and a redacted diagnostic. Restart recovery resumes pending repair once and fails exhausted repair without another Provider call.
+- Invalid protocol output is never copied into the repair prompt, Session history, or events. Only the bounded parser diagnostic is retained.
+- Initial invalid-response usage is charged before the repair budget check; repaired success commits one legal message pair, while a second invalid response records failure and stops.
+- Added `supervisor.protocol_repair_requested/started/completed/failed` events plus CLI `protocol_repairs`, `repair_phase`, and `repair_reason` observability.
 
 Not done yet:
 
@@ -132,6 +137,7 @@ No high-severity issue was found in the latest slice.
 
 Residual risks to address soon:
 
+- `staticcheck ./...` currently reports three pre-existing low-severity TUI findings (`S1008`, `S1011`, and unused helper `U1000`); no finding points into the protocol-repair slice.
 - `script run --local` can execute local commands after only lexical policy checks; it needs explicit approval and workspace scoping.
 - Secret redaction is heuristic, not a full secrets manager; add opt-in raw local inspection later only with clear warnings.
 - Binary or non-UTF-8 files are refused by `read_file`; richer file viewers should stay workspace-scoped and type-aware.
@@ -148,11 +154,11 @@ Residual risks to address soon:
 - ExecutionMillis measures Provider model-call time, not total wall-clock orchestration time.
 - One Provider response can exceed the remaining token allowance; actual usage is committed conservatively and the next call is blocked.
 - Budget exhaustion leaves the Run in `running` until an operator explicitly finishes, fails, or cancels it. Only a validated structured action can change lifecycle state; free-form model text cannot.
-- Strict lifecycle JSON may fail with providers that ignore the response contract; invalid output is audited as `turn_failed` but automatic repair retries are not implemented yet.
+- Strict lifecycle JSON has exactly one automatic repair. A Provider that returns two invalid protocol responses fails the turn without an unbounded correction loop.
 - Provider retry is enabled only inside RunSupervisor; legacy unbound Sessions receive typed errors but still use the direct, non-retrying Router compatibility path.
 - Retry backoff is deterministic and intentionally capped at three attempts/2 seconds for the local single-user runtime. Add jitter before enabling concurrent remote workers.
 - A server `Retry-After` above the local ceiling is not auto-retried; the Run remains running with a failed Supervisor turn and preserved input until a later operator retry.
-- If the process dies after `model.completed` but before the turn transaction, recovery may repeat the side-effect-free model request under the next durable attempt number; tool calls remain disabled for this reason.
+- If the process dies after `model.completed` but before the turn transaction, recovery may repeat the side-effect-free model request under the next durable attempt number. The prior usage is already charged atomically, but tool calls remain disabled for this reason.
 - Root `wait` currently maps to `paused` plus a textual reason; structured dependencies and approvals are future Coordinator/Work Board work.
 - Unbound Sessions still use the direct Router compatibility path. New product flows should create a Run instead of expanding this legacy path.
 - Slash commands are intentionally separate command adapters; they do not consume a Supervisor turn yet, and future Tool Gateway work must unify their approval/event behavior without silently executing tools.
@@ -238,7 +244,7 @@ Expected context behavior:
 - TaskAdapter tests passed for repeated and eight-way concurrent adaptation, event order, unsupported legacy kinds, and a single persisted Run.
 - Isolated adapter CLI smoke passed across separate processes with one three-event timeline and stable exit codes `2` (invalid argument) and `3` (not found).
 - Legacy Task/Event Store-boundary redaction tests passed with runtime-generated token-shaped fixtures.
-- RunSupervisor tests passed for normal completion, strict lifecycle parsing, JSON request metadata, root finish/wait, wait-resume, paused execution, malformed-output rollback, lifecycle replay idempotence, schema v6 checkpoint persistence, cumulative tokens, persisted execution timeout, remaining call deadline, bounded execution, MaxTurns rejection, cancellation before begin, nil response/negative usage rejection, tool-call rejection, and immediate/persisted redaction.
+- RunSupervisor tests passed for normal completion, strict lifecycle parsing, JSON request metadata, root finish/wait, wait-resume, paused execution, lifecycle replay idempotence, schema v8 checkpoint persistence, cumulative tokens, persisted execution timeout, remaining call deadline, bounded execution, MaxTurns rejection, cancellation before begin, nil response/negative usage rejection, tool-call rejection, and immediate/persisted redaction.
 - Restart recovery test persisted `turn_started`, closed and reopened SQLite, resumed the same attempt, and observed one `agent.turn_started` plus one `agent.turn_completed` event.
 - Isolated Supervisor CLI smoke passed across separate processes with two bounded turns, completed/failed finalization, cumulative token exhaustion, and stable exit codes `4` (precondition) and `8` (budget exhausted).
 - Isolated root lifecycle CLI smoke passed with visible `action: continue`, two `supervisor.action_committed` events, one terminal completion event, and token-budget exit code `8`.
@@ -247,14 +253,18 @@ Expected context behavior:
 - Isolated CLI smoke passed across separate processes with Run-bound `session send`, visible action/status metadata, `idle/next_turn=2`, one message pair, one started/completed event pair, and an unbound legacy Session fallback.
 - Provider tests passed for HTTP 429/503/529/401 classification, malformed/empty responses, numeric/date/overflow `Retry-After`, network/cancellation normalization, and redacted error bodies.
 - RunSupervisor retry tests passed for two transient failures then one commit, permanent no-retry, rate-limit exhaustion plus pending-input recovery, long `Retry-After` refusal, cancellation during call/backoff, cross-Store attempt continuation, and idempotent execution-time accounting.
-- Isolated Provider CLI smoke showed `model_attempts: 1`, `model_outcome: success`, one `model.started`, one `model.completed`, no `model.failed`, and an idle next-turn checkpoint.
+- Protocol repair tests passed for repair success, second-invalid failure, raw-output isolation, token-budget blocking, atomic terminal replay, pending/exhausted restart recovery, and cancellation after a returned response.
+- Repair transport tests passed with global model attempts `1/2/3` and phase-local transport attempts `1/1/2`; Store rejects terminal metadata that differs from its durable start event.
+- Isolated Provider CLI smoke showed `model_attempts: 1`, `protocol_repairs: 0`, `model_outcome: success`, one `model.started`, one `model.completed`, no `model.failed`, and an idle next-turn checkpoint with empty repair state.
+- The local Go toolchain was upgraded from 1.26.1 to 1.26.5 after `govulncheck` identified reachable standard-library advisories; the repeated scan reports zero reachable vulnerabilities.
+- Final Go 1.26.5 gates passed: `go test -count=1 ./...`, `go vet ./...`, targeted race tests, isolated CLI smoke, and credential-prefix scanning. `staticcheck` is otherwise clean apart from the three documented pre-existing TUI findings.
 
 ## Recommended Next Slice
 
-Continue P2 with protocol repair and a real streaming boundary:
+Continue P2 with a real streaming boundary:
 
-- Add one bounded root-lifecycle repair attempt with an explicit corrective prompt; keep transport retries and protocol repair as separate counters/events.
 - Introduce a Supervisor stream aggregator with UTF-8/output limits, cancellation, and final usage reconciliation.
 - Persist normalized `model.delta` events only through a bounded/coalesced policy so token streams cannot flood SQLite.
+- Keep stream and non-stream paths on the same model terminal, protocol repair, and budget transactions.
 - Expose live cancellation through the future application service boundary without letting UI code own Provider contexts.
 - Keep tool execution and multi-agent concurrency disabled.
