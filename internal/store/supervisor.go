@@ -928,6 +928,11 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	if err := requireLatestSupervisorModelCompletedTx(ctx, tx, run.ID, checkpoint); err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}
+	if action.Kind == domain.RootActionFinish {
+		if err := requireNoActiveWorkItemsForFinishTx(ctx, tx, run.ID); err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+		}
+	}
 	repairCompleted := current.RepairPhase == domain.ProtocolRepairPending
 	if current.PendingInput == "" {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, apperror.New(apperror.CodeFailedPrecondition, "supervisor turn has no pending input")
@@ -1018,6 +1023,31 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}
 	return run, current, session.TurnMessages{User: userMessage, Assistant: assistantMessage}, nil
+}
+
+func requireNoActiveWorkItemsForFinishTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	result, err := tx.ExecContext(ctx, `UPDATE runs SET updated_at = updated_at WHERE id = ? AND status = ?`, runID, domain.RunRunning)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return apperror.New(apperror.CodeFailedPrecondition, "run stopped before work board completion check")
+	}
+	var active int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM work_items
+		WHERE run_id = ? AND status IN (?, ?, ?)`, runID,
+		domain.WorkItemPending, domain.WorkItemInProgress, domain.WorkItemBlocked).Scan(&active); err != nil {
+		return err
+	}
+	if active > 0 {
+		return apperror.New(apperror.CodeFailedPrecondition,
+			fmt.Sprintf("root lifecycle finish conflicts with %d active work item(s)", active))
+	}
+	return nil
 }
 
 func requireLatestSupervisorModelCompletedTx(ctx context.Context, tx *sql.Tx, runID string, checkpoint domain.SupervisorCheckpoint) error {

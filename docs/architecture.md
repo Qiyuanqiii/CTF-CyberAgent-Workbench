@@ -171,6 +171,8 @@ Conversation history is not enough for long-running work. Each run therefore has
 
 Work items and notes are stored independently from LLM messages. Context construction selects only relevant summaries, active work, recent messages, and explicitly loaded notes.
 
+The current P3 slice implements the WorkItem half as a Run-scoped Go aggregate backed by schema v9. `work_items` and `work_item_dependencies` use optimistic versions, composite foreign keys, cycle checks, legal status transitions, and transactional `work_item.created/changed` events. The CLI exposes the lifecycle through `todo`; model turns receive only a redacted, priority-ordered active set in bounded `work_board.v1` JSON. Model-driven root `finish` is rejected through the protocol-repair path while active work remains and is checked again under the final SQLite write transaction to close concurrent-create races. Notes and model-authored WorkItem tool proposals remain future work.
+
 ## Lifecycle Protocol
 
 Autonomous/headless execution cannot finish with an arbitrary assistant paragraph. The root protocol now validates one versioned JSON lifecycle result:
@@ -265,7 +267,7 @@ model.cancel_requested
 supervisor.protocol_repair_requested / supervisor.protocol_repair_started
 supervisor.protocol_repair_completed / supervisor.protocol_repair_failed
 model.delta (bounded, text-free stream progress)
-work_item.changed
+work_item.created / work_item.changed
 tool.proposed / tool.approved / tool.completed / tool.failed
 file_edit.proposed / file_edit.applied
 finding.changed
@@ -280,12 +282,14 @@ CLI and headless mode print persisted events. Bubble Tea consumes the bounded in
 
 ## Persistence
 
-SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, `v6` adds cumulative token and model-time budget counters, `v7` adds bounded pending input recovery, and `v8` adds protocol-repair phase/reason recovery. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
+SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, `v6` adds cumulative token and model-time budget counters, `v7` adds bounded pending input recovery, `v8` adds protocol-repair phase/reason recovery, and `v9` adds the Run-scoped Work Board plus same-Run dependency constraints. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
 
 ```text
 missions
 runs
 run_events
+work_items
+work_item_dependencies
 ```
 
 Later migrations add:
@@ -293,7 +297,6 @@ Later migrations add:
 ```text
 agent_nodes
 agent_inbox
-work_items
 notes
 findings
 evidence

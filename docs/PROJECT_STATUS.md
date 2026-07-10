@@ -4,7 +4,7 @@ Last updated: 2026-07-10
 
 ## Resume Context
 
-CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The current implementation is a CLI-first scaffold with a mock model provider, persisted sessions, SQLite event/message store, workspace manager, safety policy, sandbox interfaces, and context compaction.
+CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The current implementation is a CLI-first runtime with resumable Runs, streamed model calls, persisted sessions, a transactional SQLite event/message/WorkItem store, workspace manager, safety policy, sandbox interfaces, and context compaction.
 
 Current product priority: migrate the working v0.1 scaffold into the V2 run-centric, resumable agent runtime described in ADR 0002 and `docs/TASK_BOOK.md`. CTF-specific solving logic is intentionally deferred until the generic runtime is stable.
 
@@ -22,18 +22,21 @@ Use these files first when resuming:
 - `internal/app/app.go`
 - `internal/application/run_supervisor.go`
 - `internal/domain/root_action.go`
+- `internal/domain/work_item.go`
+- `internal/application/work_item_service.go`
 - `internal/contextmgr/context.go`
 - `internal/session/session.go`
 - `internal/toolrun/toolrun.go`
 - `internal/tui/model.go`
 - `internal/tui/picker.go`
 - `internal/store/sqlite.go`
+- `internal/store/work_items.go`
 
 ## Progress Review
 
-- Overall product vision: about 69%.
+- Overall product vision: about 72%.
 - v0.1 generic agent MVP: about 98%.
-- V2 run-centric runtime: about 86%.
+- V2 run-centric runtime: about 88%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -69,7 +72,7 @@ Completed:
 - Reworked `docs/architecture.md` around run-scoped budget, event, sandbox, report, approval, and recovery ownership without copying the reference implementation.
 - Replaced the obsolete README migration/scaffold copy with a bilingual Chinese/English product overview, current capabilities, architecture boundary, and development-scope notice.
 - Added `docs/TASK_BOOK.md` with phased migration tasks, acceptance criteria, compatibility rules, and CTF deferred to the final phase.
-- Versioned SQLite migrations through schema v8: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative budget counters, durable pending user input, and restart-safe protocol-repair state; each version is checksummed and transactional.
+- Versioned SQLite migrations through schema v9: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative budget counters, durable pending user input, restart-safe protocol-repair state, and the Run-scoped Work Board; each version is checksummed and transactional.
 - Migration tests cover idempotence, legacy data preservation, checksum history, and failed-migration rollback.
 - Unified `internal/idgen` now backs agent tasks, sessions, tool runs, file edits, Mission/Run, and event IDs.
 - Added pure Go Mission, Scope, Budget, RunConfig, Run status machine, and legal transition checks.
@@ -135,6 +138,13 @@ Completed:
 - `Ctrl+X` invokes the application audit-first cancellation API. Legacy or pre-activation calls fall back to cancelling only the current application request context; the UI never owns a Provider context.
 - Busy chat actions reject `Esc/Ctrl+C` keyboard exit until they complete or receive explicit cancellation. Direct, picker-selected, and picker-created models share the same App-owned registry/controller.
 - Responsive TUI help now includes cancellation without overflowing supported 80/100/120/145-column layouts, and the three previous staticcheck findings were removed.
+- Added a pure-Go WorkItem aggregate with normalized title/description/owner/acceptance/dependencies, legal transitions, blocked/completed invariants, terminal immutability, and optimistic versions.
+- Schema v9 persists `work_items` and same-Run `work_item_dependencies`; composite foreign keys and Store checks reject cross-Run, missing, self, cyclic, and incomplete prerequisite relationships.
+- WorkItem record changes and `work_item.created/changed` Run events commit atomically. Duplicate event failures roll back the record, and stale concurrent writers converge on one version winner.
+- Added `todo create/list/show/update/start/block/reopen/complete/cancel` with repeated acceptance/dependency flags, clear operations, filters, and optional explicit `--version` locking.
+- RunSupervisor loads at most 20 active WorkItems into a redacted `work_board.v1` JSON system message capped at 16 KiB; terminal items are excluded.
+- A model root `finish` conflicts with active work and uses the existing single protocol-repair path. Explicit `run finish` remains the operator override.
+- `CompleteSupervisorTurn` repeats the active-item check under its SQLite write transaction, so a WorkItem created by another process during the model call rolls back a stale finish and leaves the turn recoverable.
 
 Not done yet:
 
@@ -144,7 +154,7 @@ Not done yet:
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
-- Provider cost/tool-call budgets, Work Board, Notes, AgentCoordinator, and Findings/Evidence.
+- Provider cost/tool-call budgets, Notes, AgentCoordinator, and Findings/Evidence; Work Board model tools and dedicated TUI view remain pending.
 
 ## Code Audit Notes
 
@@ -187,6 +197,10 @@ Residual risks to address soon:
 - Applied migration statements are immutable once released because their checksums are verified. Schema changes must always add a new migration version.
 - Schema v3 intentionally rejects duplicate non-empty Run/Session associations. A legacy database containing duplicates must be audited before upgrade instead of silently discarding an association.
 - `apperror.Normalize` includes a transitional text classifier for legacy plain errors. New services must return typed errors directly so future localization cannot affect classification.
+- WorkItems are operator/application managed in this slice. Models receive bounded read-only context and cannot mutate the board until proposal/approval semantics exist in the unified Tool Gateway.
+- The Supervisor context loads at most 20 active items and then applies a 16 KiB JSON cap. SQLite retains all items; later token-aware selection must rank or summarize overflow instead of silently treating the window as the complete board.
+- Explicit `run finish` can close a Run with unfinished WorkItems as an intentional operator override. Future report projections should surface those unfinished records.
+- WorkItem Owner is currently a bounded label, not an AgentNode foreign key. Coordinator identity and per-agent visibility are still future P4 work.
 
 ## Feature Verification
 
@@ -207,6 +221,13 @@ go run ./cmd/cyberagent run resume <run-id>
 go run ./cmd/cyberagent run cancel <run-id>
 go run ./cmd/cyberagent run show <run-id>
 go run ./cmd/cyberagent run events <run-id>
+go run ./cmd/cyberagent todo create <run-id> "inspect parser" --priority high --acceptance "tests pass"
+go run ./cmd/cyberagent todo create <run-id> "write tests" --depends-on <work-id>
+go run ./cmd/cyberagent todo list <run-id> --status pending,blocked
+go run ./cmd/cyberagent todo show <work-id>
+go run ./cmd/cyberagent todo block <work-id> --reason "waiting for fixture"
+go run ./cmd/cyberagent todo reopen <work-id>
+go run ./cmd/cyberagent todo complete <work-id>
 go run ./cmd/cyberagent workspace init demo
 go run ./cmd/cyberagent workspace tree demo --depth 2
 go run ./cmd/cyberagent workspace read demo README.md
@@ -285,13 +306,17 @@ Expected context behavior:
 - A real Run-bound TUI integration test streamed partial output from a blocking Provider, rendered byte progress, cancelled through the shared Supervisor, and observed one durable `model.cancel_requested` plus one `model.failed`.
 - The local Go toolchain was upgraded from 1.26.1 to 1.26.5 after `govulncheck` identified reachable standard-library advisories; the repeated scan reports zero reachable vulnerabilities.
 - Final Go 1.26.5 gates passed: `go test -count=1 ./...`, `go vet ./...`, targeted race tests, isolated CLI/TUI smoke, credential-prefix scanning, and clean `staticcheck ./...`.
+- Work Board gates passed for domain invariants, migration v9 and legacy preservation, dependency/cycle/FK enforcement, transactional rollback, stale/concurrent versions, service and CLI lifecycle, Supervisor context bounds/redaction, and premature model-finish repair.
+- The commit-time completion-race test created a WorkItem during the Provider response, then verified the stale model finish wrote no Session messages or completion events and retained a recoverable started checkpoint.
+- An isolated Work Board CLI smoke completed a two-item dependency chain and observed exactly two `work_item.created` plus five `work_item.changed` events.
+- Final gates passed with uncached full tests, vet, targeted race tests, clean staticcheck, zero reachable govulncheck findings, and `NO_CREDENTIAL_PATTERN_IN_REPO`.
 
 ## Recommended Next Slice
 
-Begin P3 with the Work Board foundation:
+Continue P3 with durable Notes and context selection:
 
-- Define pure-Go WorkItem identity, status, priority, owner, dependencies, acceptance criteria, and legal transitions.
-- Add immutable migration v9 for Run-scoped `work_items` with transactional `work_item.created/changed` events.
-- Implement Store/application boundaries plus minimal `todo create/list/show/update/complete/block` CLI commands.
-- Reject cross-Run ownership and keep model-driven tool execution and multi-agent concurrency disabled.
-- Add Notes and Context Builder selection only after the WorkItem lifecycle is stable.
+- Define pure-Go Note categories, tags, source/evidence references, visibility, and size limits.
+- Add immutable migration v10 plus transactional `note.created/changed` events without editing v1-v9 checksums.
+- Implement Store/application boundaries and `note create/list/show/update` CLI commands.
+- Make Context Builder token-aware across summaries, active WorkItems, and explicitly/relevantly selected Notes.
+- Keep model-authored WorkItem/Note changes behind future proposal and Tool Gateway boundaries.

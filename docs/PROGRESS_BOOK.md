@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 69%。
+- 整体产品愿景：约 72%。
 - v0.1 通用 Agent MVP：约 98%。
-- V2 Run-centric Runtime：约 86%。
+- V2 Run-centric Runtime：约 88%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 第九纵向切片已落地：Bubble Tea 通过窄 application controller 消费 active-call 元数据，实时展示 provider/attempt/chunk/byte/终态，并用 `Ctrl+X` 发起审计取消；busy 状态不会因 `Esc` 意外退出。下一步开始 P3 Work Board 的 domain/schema/store/CLI 基础切片。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming 和进程内主动取消链路。P3 第一批纵向切片已落地：纯 Go WorkItem 状态机、schema v9、同 Run 依赖图、乐观并发、事务事件、完整 `todo` CLI，以及 Supervisor 的有界活跃任务上下文。下一步实现持久化 Notes 和 note-aware Context Builder。
 
 ## 二、已完成功能
 
@@ -67,6 +67,13 @@ V2 的 P0/P1 已完成，P2 第九纵向切片已落地：Bubble Tea 通过窄 a
 - schema v6 在同一 checkpoint 中持久化累计 input/output/total tokens 与模型执行毫秒数。
 - schema v7 在 Provider 调用前持久化脱敏且不超过 64 KiB 的 pending input，完成后原子清空。
 - schema v8 持久化协议修复阶段和脱敏原因，支持 pending/exhausted 状态的进程重启恢复。
+- schema v9 新增 Run-scoped `work_items` 与 `work_item_dependencies`；复合外键拒绝跨 Run 依赖，Store 额外拒绝缺失依赖、自依赖和依赖环。
+- WorkItem 具有 pending/in_progress/blocked/completed/cancelled 状态、四级优先级、Owner、验收条件、依赖、阻塞原因、完成时间和乐观版本。
+- 工作项创建/更新与 `work_item.created/changed` 在同一事务提交；事件失败会回滚记录，陈旧版本只允许一个并发写入者成功。
+- `todo create/list/show/update/start/block/reopen/complete/cancel` 已可用；依赖完成前不能启动或完成下游项，终态 WorkItem 与终态 Run 不可继续修改。
+- 每次 Supervisor 调用只注入最多 20 个活跃 WorkItem，使用不超过 16 KiB 的脱敏 `work_board.v1` JSON；completed/cancelled 不进入模型上下文。
+- 模型在仍有活跃 WorkItem 时返回 `finish` 会进入现有的一次协议修复，不能绕过工作板完成 Run；显式 `run finish` 保留为操作者覆盖。
+- `CompleteSupervisorTurn` 在取得 SQLite 写锁后再次检查活跃任务；模型调用期间由另一进程新建任务时，陈旧 `finish` 会回滚且保留可恢复 checkpoint。
 - `run step` 每次只执行一个无工具规划 turn；`run checkpoint` 可观察恢复状态。
 - 模型调用前写 started checkpoint，完成时原子写消息、策略、用量、事件和下一个 checkpoint。
 - 重启会恢复同一 started attempt；已提交完成的 turn 和消息不会重复。
@@ -116,7 +123,7 @@ V2 的 P0/P1 已完成，P2 第九纵向切片已落地：Bubble Tea 通过窄 a
 
 - 经过生命周期投影和跨 chunk 脱敏的用户可见文本 streaming；当前 TUI 只展示元数据。
 - Provider 费用预算、工具调用预算和 token-aware Context Builder。
-- 结构化 WorkItem、Notes、Findings、Evidence 与 Report。
+- 持久化 Notes、Findings、Evidence 与 Report；WorkItem 基础已完成，模型工具提案和 TUI 视图尚未接入。
 - 跨进程主动取消、WebSocket 推送和经过单独安全设计的用户可见文本 streaming。
 - OpenAI-compatible 与 Ollama Provider。
 - 统一 Tool Gateway 与真实 Docker 隔离。
@@ -159,6 +166,10 @@ V2 的 P0/P1 已完成，P2 第九纵向切片已落地：Bubble Tea 通过窄 a
 - 已发布 migration 的语句和 checksum 不可修改，后续 schema 变化必须新增版本。
 - v3 会拒绝一个 Session 关联多个 Run；若旧数据库存在重复关联，应先审计，而不是自动丢弃数据。
 - 兼容期仍有普通字符串错误通过 `apperror.Normalize` 分类；新服务必须直接返回 typed error。
+- Work Board 当前由 CLI/application service 修改，模型只能读取活跃项，尚不能自动创建或完成任务；这是统一 Tool Gateway 上线前的刻意限制。
+- Supervisor 的 Work Board 是每次调用前的最多 20 项快照并受 16 KiB 上限约束；超出项保留在 SQLite，但需要后续 token-aware Context Builder 做更精细选择。
+- 显式操作者 `run finish` 可以覆盖仍有活跃 WorkItem 的模型完成门禁；该命令是人工终结边界，报告层后续应明确记录未完成项。
+- WorkItem ID 在全库唯一、依赖在同 Run 内；当前没有独立 Session/Agent owner 外键，Owner 仍是受长度约束的标签，等待 AgentCoordinator 建立身份表。
 
 ## 六、验证基线
 
@@ -171,17 +182,19 @@ go vet ./...
 
 共享状态、并发或存储变更还要运行相关包的 `go test -race`。CLI 行为变更要在隔离的 `CYBERAGENT_HOME` 中完成 smoke test。提交前扫描凭据前缀，确认本地数据库、工作区、环境文件和 API key 未进入 Git。
 
-最新验证在 active-call 基线上新增覆盖：Session 到调用的安全关联、Bubble Tea submit/discovery 并行命令、snapshot/progress/terminal 渲染、慢消费者断线、busy 退出保护、`Ctrl+X` 审计取消、legacy 请求 context 兜底、picker 控制器传播、响应式 footer，以及真实 Run-bound Session 阻塞 Provider 的 TUI 端到端取消和持久化事件。
+最新验证在 active-call 基线上新增 Work Board 覆盖：领域状态机、migration v9、旧库升级、复合外键、依赖环/缺失/未完成门禁、事件回滚、并发版本胜者唯一性、CLI 全生命周期、终态不可变、脱敏上下文、16 KiB 上限、终态项排除，以及活跃任务下模型 `finish` 的协议修复。
 
 本机 Go 已从 1.26.1 升级到 1.26.5；升级前 `govulncheck` 命中 9 条可达标准库漏洞，升级后复扫为 0。协议修复 transport 测试验证全局 attempt `1/2/3` 与阶段内 transport `1/1/2`，Store 也会拒绝与 durable started event 不一致的终态元数据。
 
+本轮最终门已通过：`go test -count=1 ./...`、`go vet ./...`、Work Board 相关核心包 `go test -race`、`staticcheck ./...` 和 `govulncheck ./...`；后者报告 0 条可达漏洞。隔离 CLI smoke 完成两项依赖任务的 create/block/reopen/start/complete，并核对 2 条 created 与 5 条 changed 事件。仓库凭据前缀扫描返回 `NO_CREDENTIAL_PATTERN_IN_REPO`。
+
 ## 七、下一开发切片
 
-1. 开始 P3，定义 WorkItem ID、状态、优先级、Owner、依赖和验收条件，保持纯 Go domain 不依赖 SQLite。
-2. 新增只追加 migration v9 的 `work_items` 表与约束，不修改既有 migration checksum。
-3. 实现 Run-scoped WorkItem Store 和 `work_item.created/changed` 事件事务，拒绝跨 Run/Session 所有权。
-4. 增加最小 `todo create/list/show/update/complete/block` CLI，不让模型自动执行工具。
-5. Notes 与 Context Builder 注入放到后续 P3 切片。
+1. 继续 P3，定义纯 Go Note 分类、标签、来源/Evidence 引用、可见性和大小边界。
+2. 新增只追加 migration v10 的 `notes` 与关联表，不修改 v1-v9 migration checksum。
+3. 实现 Run-scoped Note Store、事务化 `note.created/changed` 事件和 `note create/list/show/update` CLI。
+4. 扩展 Context Builder：按 token 预算选择活跃 WorkItem、最新摘要和显式/相关 Notes，并保留来源元数据。
+5. 模型对 WorkItem/Note 的修改继续走显式提案或未来 Tool Gateway，不直接开放自动写入。
 
 ## 八、仓库同步与恢复约定
 

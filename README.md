@@ -13,6 +13,8 @@ CyberAgent Workbench 是一个由 Go 驱动的本地 AI Agent 工作台，面向
 
 项目当前优先完善通用单 Agent 运行时。CTF 将作为后续 Profile 和 Skills 能力接入，而不是另建一套独立运行系统。
 
+当前版本已经提供 Run 级结构化 Work Board：工作项拥有状态、优先级、Owner、依赖和验收条件，所有变更与 Run 事件在同一事务提交。Supervisor 只把有界的活跃工作项加入模型上下文，并在仍有活跃项时拒绝模型自行 `finish`。
+
 ### English
 
 CyberAgent Workbench is a local AI agent workbench powered by Go for coding, code review, security learning, scripting, and controlled cybersecurity analysis. It brings model calls, long-context memory, workspace files, policy checks, approvals, execution budgets, and event history into one resumable runtime, so work can continue after a process restart and every action remains inspectable.
@@ -21,11 +23,14 @@ Each user objective is stored as a `Mission`, while each resumable execution is 
 
 The current priority is the general-purpose single-agent runtime. CTF capabilities will be added later as Profiles and Skills on top of the same foundation rather than as a separate execution system.
 
+The current build includes a structured, Run-scoped Work Board. Work items carry status, priority, owner, dependencies, and acceptance criteria; each mutation commits with its Run event in one transaction. The Supervisor injects only a bounded active set and rejects model-driven `finish` while active work remains.
+
 ## 核心能力 / Core Capabilities
 
 - **可恢复运行 / Resumable runs:** durable checkpoints, bounded execution, restart recovery, graceful terminal cancellation, and explicit lifecycle actions.
 - **统一模型网关 / Model gateway:** route-based providers, Anthropic-compatible SSE streaming, typed failures, application-owned active-call cancellation, bounded live progress, one lifecycle-protocol repair, and durable model events.
 - **长上下文管理 / Long-context memory:** persisted sessions and automatic context compaction inspired by modern coding agents.
+- **结构化任务板 / Structured Work Board:** Run-scoped work items, dependency and cycle checks, optimistic versions, transactional events, and bounded Supervisor context.
 - **本地工作区 / Local workspace:** scoped file access, safe reads, persistent artifacts, and reviewable edit proposals.
 - **安全与审批 / Safety and approval:** policy checks, secret redaction, dry-run tool proposals, and explicit approval boundaries.
 - **完整审计链 / Audit trail:** append-only Run events for messages, bounded text-free stream progress, model calls, policy decisions, tool proposals, and file edits.
@@ -68,6 +73,13 @@ go run ./cmd/cyberagent run execute <run-id> --max-steps 3 --finish --summary "p
 go run ./cmd/cyberagent run finish <run-id> --summary "review complete"
 go run ./cmd/cyberagent run fail <run-id> --reason "blocked by provider"
 go run ./cmd/cyberagent run checkpoint <run-id>
+go run ./cmd/cyberagent todo create <run-id> "inspect parser" --priority high --acceptance "tests pass"
+go run ./cmd/cyberagent todo create <run-id> "write tests" --depends-on <work-id>
+go run ./cmd/cyberagent todo list <run-id> --status pending,blocked
+go run ./cmd/cyberagent todo show <work-id>
+go run ./cmd/cyberagent todo block <work-id> --reason "waiting for fixture"
+go run ./cmd/cyberagent todo reopen <work-id>
+go run ./cmd/cyberagent todo complete <work-id>
 go run ./cmd/cyberagent session create --workspace demo --title "Agent basics" --route learn
 go run ./cmd/cyberagent session send <session-id> "/ls ."
 go run ./cmd/cyberagent session send <session-id> "/read README.md"
@@ -101,7 +113,7 @@ Local runtime databases, workspace data, environment files, API keys, IDE metada
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 now supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, and exactly one restart-safe lifecycle-protocol repair. The next vertical slice begins the structured Work Board foundation before Notes or multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, and exactly one restart-safe lifecycle-protocol repair. P3 is now in progress: migration v9, the WorkItem domain/state machine, transactional dependency graph, `todo` CLI, and bounded active-work injection are complete. The next slice adds durable Notes and note-aware context selection before multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
 TUI quick controls: `cyberagent tui` opens a session picker. In chat, `Tab` switches focus, `PgUp/PgDn` scroll messages, `j/k` select tool runs, `a` approves, `d` denies, `Ctrl+X` requests cancellation of the current model call, `Ctrl+R` refreshes, and `Esc` quits when idle. Busy sends cannot be closed accidentally with `Esc`; cancel or wait first. The status line renders provider/model, attempt, chunk/byte progress, cancellation, disconnect, and terminal state without exposing raw model text. Attached workspaces render in the side panel with local directory counts for attachments, scripts, outputs, logs, and writeups.
 

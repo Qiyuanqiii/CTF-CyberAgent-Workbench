@@ -46,6 +46,8 @@ const (
 	SupervisorRunWaitingEvent    = "supervisor.run_waiting"
 	SupervisorRunCompletedEvent  = "supervisor.run_completed"
 	SupervisorRunFailedEvent     = "supervisor.run_failed"
+	WorkItemCreatedEvent         = "work_item.created"
+	WorkItemChangedEvent         = "work_item.changed"
 )
 
 type Event struct {

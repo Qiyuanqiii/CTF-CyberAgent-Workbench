@@ -77,6 +77,188 @@ func TestRunSupervisorCompletesOneTurnAndEnforcesBudget(t *testing.T) {
 	}
 }
 
+func TestRunSupervisorInjectsOnlyActiveWorkItemsIntoModelContext(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	provider := &lifecycleProvider{responses: []string{
+		rootActionResponse(domain.RootActionContinue, "work board observed", "", ""),
+	}}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	runs := application.NewRunService(st)
+	_, run, err := runs.Create(ctx, application.CreateRunRequest{
+		Goal: "work board context", Profile: "code", ModelRoute: provider.Name() + "/model", Budget: domain.Budget{MaxTurns: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := application.NewWorkItemService(st)
+	testAPIKey := "s" + "k-" + strings.Repeat("a", 26)
+	pending, err := work.Create(ctx, application.CreateWorkItemRequest{
+		RunID: run.ID, Title: "implement parser", Description: "use " + testAPIKey + " safely",
+		Priority: "critical", Owner: "coder", AcceptanceCriteria: []string{"tests pass"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := work.Create(ctx, application.CreateWorkItemRequest{
+		RunID: run.ID, Title: "confirm fixture", Priority: "high",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked, err = work.Transition(ctx, blocked.ID, 0, domain.WorkItemBlocked, "operator must provide fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := work.Create(ctx, application.CreateWorkItemRequest{RunID: run.ID, Title: "obsolete completed context"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err = work.Transition(ctx, completed.ID, 0, domain.WorkItemCompleted, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runs.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.requests) != 1 {
+		t.Fatalf("expected one model request, got %d", len(provider.requests))
+	}
+	request := provider.requests[0]
+	if request.Metadata["active_work_items"] != "2" {
+		t.Fatalf("unexpected active work item metadata: %#v", request.Metadata)
+	}
+	var board string
+	for _, message := range request.Messages {
+		if message.Role == "system" && strings.Contains(message.Content, `"version":"work_board.v1"`) {
+			board = message.Content
+		}
+	}
+	if board == "" || !strings.Contains(board, pending.ID) || !strings.Contains(board, blocked.ID) ||
+		!strings.Contains(board, "operator must provide fixture") || !strings.Contains(board, "[REDACTED:api-key]") {
+		t.Fatalf("active work board context is incomplete: %s", board)
+	}
+	if strings.Contains(board, completed.ID) || strings.Contains(board, completed.Title) || strings.Contains(board, testAPIKey) {
+		t.Fatalf("terminal or sensitive work item data leaked into context: %s", board)
+	}
+}
+
+func TestRunSupervisorRepairsFinishWhileWorkItemsRemainActive(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	provider := &lifecycleProvider{responses: []string{
+		rootActionResponse(domain.RootActionFinish, "premature finish", "done", ""),
+		rootActionResponse(domain.RootActionContinue, "continue active work", "", ""),
+	}}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	runs := application.NewRunService(st)
+	_, run, err := runs.Create(ctx, application.CreateRunRequest{
+		Goal: "reject premature completion", Profile: "code", ModelRoute: provider.Name() + "/model", Budget: domain.Budget{MaxTurns: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.NewWorkItemService(st).Create(ctx, application.CreateWorkItemRequest{
+		RunID: run.ID, Title: "remaining work",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runs.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Action.Kind != domain.RootActionContinue || result.ProtocolRepairs != 1 || result.RunStatus != domain.RunRunning || provider.calls != 2 {
+		t.Fatalf("premature finish was not repaired: %#v calls=%d", result, provider.calls)
+	}
+	repairExplained := false
+	for _, message := range provider.requests[1].Messages {
+		repairExplained = repairExplained || strings.Contains(message.Content, "active work item")
+	}
+	if provider.requests[1].Metadata["protocol_repair"] != "1" || !repairExplained {
+		t.Fatalf("repair request did not explain work board conflict: %#v", provider.requests[1])
+	}
+	timeline, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countEventType(timeline, events.ProtocolRepairRequestedEvent) != 1 || countEventType(timeline, events.SupervisorRunCompletedEvent) != 0 {
+		t.Fatalf("unexpected premature-finish timeline: %#v", timeline)
+	}
+}
+
+func TestRunSupervisorStoreRejectsWorkItemCreatedDuringModelCall(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	var run domain.Run
+	var createErr error
+	work := application.NewWorkItemService(st)
+	provider := &lifecycleProvider{
+		responses: []string{rootActionResponse(domain.RootActionFinish, "stale finish", "done", "")},
+		afterResponse: func(int) {
+			_, createErr = work.Create(ctx, application.CreateWorkItemRequest{RunID: run.ID, Title: "arrived during model call"})
+		},
+	}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	runs := application.NewRunService(st)
+	_, run, err = runs.Create(ctx, application.CreateRunRequest{
+		Goal: "close completion race", Profile: "code", ModelRoute: provider.Name() + "/model", Budget: domain.Budget{MaxTurns: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runs.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID)
+	if createErr != nil {
+		t.Fatalf("concurrent work item was not created: %v", createErr)
+	}
+	if apperror.CodeOf(err) != apperror.CodeFailedPrecondition || !strings.Contains(err.Error(), "active work item") {
+		t.Fatalf("stale finish was not rejected at commit: code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	loaded, err := st.GetRun(ctx, run.ID)
+	if err != nil || loaded.Status != domain.RunRunning {
+		t.Fatalf("stale finish changed run state: %#v err=%v", loaded, err)
+	}
+	messages, err := st.ListSessionMessages(ctx, run.SessionID, true)
+	if err != nil || len(messages) != 0 {
+		t.Fatalf("stale finish committed messages: %#v err=%v", messages, err)
+	}
+	checkpoint, ok, err := st.GetSupervisorCheckpoint(ctx, run.ID)
+	if err != nil || !ok || checkpoint.Phase != domain.SupervisorTurnStarted {
+		t.Fatalf("stale finish lost recoverable checkpoint: %#v ok=%t err=%v", checkpoint, ok, err)
+	}
+	timeline, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countEventType(timeline, events.WorkItemCreatedEvent) != 1 || countEventType(timeline, events.ModelCompletedEvent) != 1 ||
+		countEventType(timeline, events.AgentTurnCompletedEvent) != 0 || countEventType(timeline, events.SupervisorRunCompletedEvent) != 0 {
+		t.Fatalf("unexpected stale-finish timeline: %#v", timeline)
+	}
+}
+
 func TestRunSupervisorRecoversStartedTurnAcrossStoreRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cyberagent.db")
 	st, err := store.Open(path)

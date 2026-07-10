@@ -66,6 +66,13 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 	if !columns["repair_phase"] || !columns["repair_reason"] {
 		t.Fatalf("schema v8 protocol repair columns are missing: %#v", columns)
 	}
+	var workItemTable string
+	if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'work_items'`).Scan(&workItemTable); err != nil {
+		t.Fatal(err)
+	}
+	if workItemTable != "work_items" {
+		t.Fatalf("schema v9 work board table is missing: %q", workItemTable)
+	}
 }
 
 func TestSQLiteStoreUpgradesLegacyDatabaseWithoutLosingData(t *testing.T) {
@@ -110,6 +117,53 @@ func TestSQLiteStoreUpgradesLegacyDatabaseWithoutLosingData(t *testing.T) {
 	}
 	if version != LatestSchemaVersion {
 		t.Fatalf("expected upgraded version %d, got %d", LatestSchemaVersion, version)
+	}
+}
+
+func TestSQLiteStoreUpgradesSchemaV8ToWorkBoardWithoutLosingRun(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v8.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, run, err := application.NewRunService(st).Create(ctx, application.CreateRunRequest{
+		Goal: "preserve this v8 run", Profile: "code", Budget: domain.Budget{MaxTurns: 4},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(ctx, `DROP TABLE work_item_dependencies`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(ctx, `DROP TABLE work_items`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version = 9`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	loaded, err := st.GetRun(ctx, run.ID)
+	if err != nil || loaded.ID != run.ID || loaded.MissionID != run.MissionID {
+		t.Fatalf("v8 run was not preserved: %#v err=%v", loaded, err)
+	}
+	version, err := st.SchemaVersion(ctx)
+	if err != nil || version != LatestSchemaVersion {
+		t.Fatalf("v8 database did not upgrade to v9: version=%d err=%v", version, err)
+	}
+	item, err := application.NewWorkItemService(st).Create(ctx, application.CreateWorkItemRequest{
+		RunID: run.ID, Title: "new v9 item",
+	})
+	if err != nil || item.RunID != run.ID {
+		t.Fatalf("upgraded work board is unusable: %#v err=%v", item, err)
 	}
 }
 

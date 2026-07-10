@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 8
+const LatestSchemaVersion = 9
 
 type migration struct {
 	Version    int
@@ -134,6 +134,45 @@ var supervisorPendingInputStatements = []string{
 var supervisorProtocolRepairStatements = []string{
 	`ALTER TABLE run_supervisor_checkpoints ADD COLUMN repair_phase TEXT NOT NULL DEFAULT '';`,
 	`ALTER TABLE run_supervisor_checkpoints ADD COLUMN repair_reason TEXT NOT NULL DEFAULT '';`,
+}
+
+var workBoardStatements = []string{
+	`CREATE TABLE work_items (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		title TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL,
+		priority TEXT NOT NULL,
+		owner TEXT NOT NULL DEFAULT '',
+		acceptance_json TEXT NOT NULL DEFAULT '[]',
+		blocked_reason TEXT NOT NULL DEFAULT '',
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		completed_at TEXT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		UNIQUE(run_id, id),
+		CHECK(status IN ('pending', 'in_progress', 'blocked', 'completed', 'cancelled')),
+		CHECK(priority IN ('low', 'normal', 'high', 'critical')),
+		CHECK(version > 0),
+		CHECK((status = 'blocked' AND length(trim(blocked_reason)) > 0) OR (status <> 'blocked' AND blocked_reason = '')),
+		CHECK((status = 'completed' AND completed_at IS NOT NULL) OR (status <> 'completed' AND completed_at IS NULL))
+	);`,
+	`CREATE INDEX idx_work_items_run_status_priority
+		ON work_items(run_id, status, priority, updated_at);`,
+	`CREATE TABLE work_item_dependencies (
+		run_id TEXT NOT NULL,
+		work_item_id TEXT NOT NULL,
+		depends_on_id TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		PRIMARY KEY(run_id, work_item_id, depends_on_id),
+		FOREIGN KEY(run_id, work_item_id) REFERENCES work_items(run_id, id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, depends_on_id) REFERENCES work_items(run_id, id) ON DELETE RESTRICT,
+		CHECK(work_item_id <> depends_on_id)
+	) WITHOUT ROWID;`,
+	`CREATE INDEX idx_work_item_dependencies_target
+		ON work_item_dependencies(run_id, depends_on_id, work_item_id);`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {
