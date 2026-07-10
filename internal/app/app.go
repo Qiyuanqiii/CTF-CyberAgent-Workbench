@@ -17,8 +17,10 @@ import (
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
+	"cyberagent-workbench/internal/redact"
 	"cyberagent-workbench/internal/store"
 	"cyberagent-workbench/internal/toolgateway"
 	"cyberagent-workbench/internal/tools"
@@ -464,7 +466,10 @@ func (a *App) scriptRun(ctx context.Context, args []string) error {
 	fs := newFlagSet("script run", a.errOut)
 	workspaceName := fs.String("workspace", "", "workspace containing the script")
 	local := fs.Bool("local", false, "record a local backend request; execution remains disabled")
-	if err := fs.Parse(reorderFlags(args, map[string]bool{"workspace": true, "local": false})); err != nil {
+	operationKey := fs.String("idempotency-key", "", "stable retry key; generated when omitted")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"workspace": true, "local": false, "idempotency-key": true,
+	})); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 || strings.TrimSpace(*workspaceName) == "" {
@@ -493,27 +498,30 @@ func (a *App) scriptRun(ctx context.Context, args []string) error {
 	if _, err := toolgateway.EncodeScriptProcessProposal(processProposal); err != nil {
 		return apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
 	}
-	mission, run, err := application.NewRunService(a.store).Create(ctx, application.CreateRunRequest{
-		Goal: "Review execution of workspace script " + scriptPath, Profile: string(domain.ProfileScript),
-		WorkspaceID: rec.ID, Interactive: true,
+	key := strings.TrimSpace(*operationKey)
+	if key == "" {
+		key = idgen.New("scriptop")
+	}
+	gateway := a.newToolGateway()
+	result, err := application.NewScriptProcessService(a.store, gateway).Create(ctx, application.CreateScriptProcessRunRequest{
+		Run: application.CreateRunRequest{
+			Goal: "Review execution of workspace script " + scriptPath, Profile: string(domain.ProfileScript),
+			WorkspaceID: rec.ID, Interactive: true, Budget: domain.DefaultBudget(),
+		},
+		OperationKey: key, RequestedBy: "script_cli", Process: processProposal,
 	})
 	if err != nil {
 		return err
 	}
-	outcome, err := a.newToolGateway().ProposeScriptProcess(ctx, toolgateway.ToolCall{
-		RunID: run.ID, SessionID: run.SessionID, WorkspaceID: rec.ID, RequestedBy: "script_cli",
-	}, processProposal)
-	if err != nil {
-		return err
-	}
-	if outcome.Proposal == nil {
+	if result.Outcome.Proposal == nil {
 		return errors.New("script run did not create a tool proposal")
 	}
-	fmt.Fprintf(a.out, "script run proposal %s\nmission: %s\nrun: %s\nsession: %s\nworkspace: %s\nscript: %s\nrequested_backend: %s\nstatus: %s\napproval: %s\nexecution: disabled; approval completes as dry run\n",
-		outcome.Proposal.ID, mission.ID, run.ID, run.SessionID, rec.ID, scriptPath, requestedBackend,
-		outcome.Proposal.Status, outcome.Decision.Approval)
-	if !outcome.Decision.Allowed {
-		return apperror.New(apperror.CodePolicyDenied, "policy denied script run: "+outcome.Decision.Reason)
+	fmt.Fprintf(a.out, "script process proposal %s\nmission: %s\nrun: %s\nsession: %s\nworkspace: %s\nscript: %s\nrequested_backend: %s\nstatus: %s\napproval: %s\nreplayed: %t\nidempotency_key: %s\nexecution: disabled; approval completes as dry run\n",
+		result.Process.ID, result.Mission.ID, result.Run.ID, result.Run.SessionID, rec.ID, scriptPath,
+		requestedBackend, result.Outcome.Proposal.Status, result.Outcome.Decision.Approval,
+		result.Replayed, redact.String(key))
+	if !result.Outcome.Decision.Allowed {
+		return apperror.New(apperror.CodePolicyDenied, "policy denied script run: "+result.Outcome.Decision.Reason)
 	}
 	return nil
 }

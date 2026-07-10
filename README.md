@@ -21,6 +21,8 @@ schema v11 新增统一的持久化审批账本。每个 Shell/FileEdit 提案�
 
 schema v12 新增可撤销 Session Grant 和 Run 级工具调用预算。Grant 精确绑定 Run、Session、Workspace、Tool 与 ActionClass，只有仍处于活动状态的匹配授权才能自动满足逐次审批，撤销后立即失效，且永久 Policy 拒绝始终优先。Run 工具调用以 SQLite 原子计数，首次超限写入一次 `tool.budget_exhausted`，并以稳定的 `RESOURCE_EXHAUSTED` 拒绝后续调用；旧 Run 的 `0` 保持无限制兼容，新建 CLI Run 默认上限为 100。
 
+schema v13 将 `script_process.v1` 提升为独立类型化提案。`script run` 会在一个 SQLite 事务内创建 Mission、Session、Run、初始预算扣减、Policy 决策、Process、Approval 与完整事件链；客户端可用 `--idempotency-key` 安全重试，相同意图返回原有对象，不同意图复用同一键会返回冲突。原始幂等键不会写入数据库，脚本路径与参数在持久化前脱敏，审批仍只生成明确的 dry-run 结果。
+
 ### English
 
 CyberAgent Workbench is a local AI agent workbench powered by Go for coding, code review, security learning, scripting, and controlled cybersecurity analysis. It brings model calls, long-context memory, workspace files, policy checks, approvals, execution budgets, and event history into one resumable runtime, so work can continue after a process restart and every action remains inspectable.
@@ -37,6 +39,8 @@ Schema v11 adds a unified durable approval ledger. Each Shell/FileEdit proposal 
 
 Schema v12 adds revocable Session grants and Run-level tool-call budgets. A grant is bound to an exact Run, Session, Workspace, Tool, and ActionClass; only a matching active grant can satisfy per-call review automatically, revocation takes effect immediately, and permanent Policy denial always wins. Tool calls are counted atomically in SQLite. The first rejected over-budget attempt appends one `tool.budget_exhausted` event and later calls return stable `RESOURCE_EXHAUSTED` errors. A zero limit preserves unlimited compatibility for older Runs, while new CLI Runs default to 100 calls.
 
+Schema v13 promotes `script_process.v1` to a first-class typed proposal. `script run` creates its Mission, Session, Run, initial budget charge, Policy decision, Process, Approval, and complete event chain in one SQLite transaction. `--idempotency-key` makes retries recoverable: identical intent returns the original objects, while changed intent under the same key returns a conflict. Raw operation keys are never persisted, script paths and arguments are redacted at the Store boundary, and approval still produces an explicit dry-run result only.
+
 ## 核心能力 / Core Capabilities
 
 - **可恢复运行 / Resumable runs:** durable checkpoints, bounded execution, restart recovery, graceful terminal cancellation, and explicit lifecycle actions.
@@ -44,7 +48,7 @@ Schema v12 adds revocable Session grants and Run-level tool-call budgets. A gran
 - **长上下文与结构化记忆 / Long-context memory:** persisted sessions, automatic compaction, durable categorized Notes, visibility rules, and token-budgeted source selection.
 - **结构化任务板 / Structured Work Board:** Run-scoped work items, dependency and cycle checks, optimistic versions, transactional events, and bounded Supervisor context.
 - **本地工作区 / Local workspace:** scoped file access, safe reads, persistent artifacts, and reviewable edit proposals.
-- **统一工具网关 / Unified Tool Gateway:** normalized calls, trusted workspace binding, policy decisions, shared shell/file approval, non-executable `script_process.v1` payloads, bounded UTF-8 results, MIME metadata, and compatibility adapters.
+- **统一工具网关 / Unified Tool Gateway:** normalized calls, trusted workspace binding, policy decisions, shared review, first-class non-executable `script_process.v1` proposals, bounded UTF-8 results, MIME metadata, and compatibility adapters.
 - **安全与审批 / Safety and approval:** policy checks, secret redaction, automatic low-risk reads, durable per-call approvals, revocable scoped Session grants, atomic Run tool budgets, permanent denial, and dry-run command completion.
 - **完整审计链 / Audit trail:** append-only Run events for messages, context source provenance, bounded text-free stream progress, model calls, Notes, policy decisions, tool proposals, and file edits.
 - **CLI 与 TUI / CLI and TUI:** a scriptable CLI plus a Bubble Tea interface with live model progress and audited cancellation.
@@ -110,7 +114,8 @@ go run ./cmd/cyberagent edit list --workspace demo --status proposed
 go run ./cmd/cyberagent edit show <edit-id>
 go run ./cmd/cyberagent edit approve <edit-id>
 go run ./cmd/cyberagent tool list --session <session-id>
-go run ./cmd/cyberagent tool approve <tool-run-id>
+go run ./cmd/cyberagent tool show <proposal-id>
+go run ./cmd/cyberagent tool approve <proposal-id>
 go run ./cmd/cyberagent approval list --run <run-id> --status pending
 go run ./cmd/cyberagent approval show <approval-id>
 go run ./cmd/cyberagent approval grant create --session <session-id> --tool shell --reason "trusted build commands"
@@ -120,7 +125,7 @@ go run ./cmd/cyberagent tui
 go run ./cmd/cyberagent tui --session <session-id>
 go run ./cmd/cyberagent tui --session <session-id> --print
 go run ./cmd/cyberagent script new "parse pcap http token" --workspace demo
-go run ./cmd/cyberagent script run scripts/<script-name>.py --workspace demo --local
+go run ./cmd/cyberagent script run scripts/<script-name>.py --workspace demo --local --idempotency-key <stable-key>
 go run ./cmd/cyberagent ctf init baby-web --category web
 go run ./cmd/cyberagent context compact --workspace demo --task task-demo --message "user: imported challenge" --message "assistant: summarized plan"
 go run ./cmd/cyberagent context show --task task-demo
@@ -140,13 +145,13 @@ Local runtime databases, workspace data, environment files, API keys, IDE metada
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, and exactly one restart-safe lifecycle-protocol repair. P3 includes migration v9 WorkItems, migration v10 Notes, transactional relationships/events, `todo` and `note` CLI lifecycles, root/owner visibility, token-budgeted memory selection, and durable context provenance. P5 now includes the unified Tool Gateway, trusted workspace scope binding, schema v11 durable per-call approvals, and schema v12 revocable Session grants plus atomic Run tool-call accounting. Artifact capture, a first-class script-process proposal, and real Docker execution remain pending. Real Local/Docker command execution remains disabled. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, and exactly one restart-safe lifecycle-protocol repair. P3 includes migration v9 WorkItems, migration v10 Notes, transactional relationships/events, `todo` and `note` CLI lifecycles, root/owner visibility, token-budgeted memory selection, and durable context provenance. P5 now includes the unified Tool Gateway, trusted workspace scope binding, schema v11 durable per-call approvals, schema v12 revocable Session grants and atomic Run tool-call accounting, plus schema v13 first-class typed script processes with atomic idempotent Run creation. Artifact capture and real Docker execution remain pending. Real Local/Docker command execution remains disabled. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
 TUI quick controls: `cyberagent tui` opens a session picker. In chat, `Tab` switches focus, `PgUp/PgDn` scroll messages, `j/k` select tool runs, `a` approves, `d` denies, `Ctrl+X` requests cancellation of the current model call, `Ctrl+R` refreshes, and `Esc` quits when idle. Busy sends cannot be closed accidentally with `Esc`; cancel or wait first. The status line renders provider/model, attempt, chunk/byte progress, cancellation, disconnect, and terminal state without exposing raw model text. Attached workspaces render in the side panel with local directory counts for attachments, scripts, outputs, logs, and writeups.
 
 Workspace file reads and model-bound messages pass through heuristic secret redaction for common API keys, bearer tokens, GitHub tokens, AWS access keys, JWTs, and private-key blocks.
 
-File changes, Shell proposals, and script-process proposals now enter the same Tool Gateway approval service while retaining their existing SQLite records and Run-event projections. The schema v11 approval ledger is inspectable through `approval list/show`; review idempotency survives restart, while a conflicting reuse of the same key is rejected. Schema v12 Session grants are managed through `approval grant create/list/show/revoke`, and `run usage` exposes durable tool consumption. `edit propose` and session `/write` normally persist a redacted diff without changing the workspace; an explicitly created matching Session grant may authorize and apply the edit immediately, with the grant ID recorded on the approval fact. Shell and script-process approval still produce dry-run output only, even under a grant.
+File changes, Shell proposals, and typed script-process proposals enter the same Tool Gateway review service and Run-event stream. The schema v11 approval ledger is inspectable through `approval list/show`; review idempotency survives restart, while a conflicting reuse of the same key is rejected. Schema v12 Session grants are managed through `approval grant create/list/show/revoke`, and `run usage` exposes durable tool consumption. Schema v13 stores script processes separately from legacy Shell ToolRuns and makes initial Run creation recoverably idempotent. `edit propose` and session `/write` normally persist a redacted diff without changing the workspace; an explicitly created matching Session grant may authorize and apply the edit immediately, with the grant ID recorded on the approval fact. Shell and script-process approval still produce dry-run output only.
 
 ## 可选在线 Provider / Optional Online Providers
 

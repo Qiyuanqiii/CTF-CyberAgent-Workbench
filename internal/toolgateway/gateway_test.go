@@ -14,6 +14,7 @@ import (
 	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/policy"
+	"cyberagent-workbench/internal/scriptprocess"
 	"cyberagent-workbench/internal/toolbudget"
 	"cyberagent-workbench/internal/toolrun"
 )
@@ -24,12 +25,14 @@ type memoryStore struct {
 	edits      map[string]fileedit.Edit
 	approvals  map[string]approval.Record
 	operations map[string]string
+	processes  map[string]scriptprocess.Process
 }
 
 func newMemoryStore() *memoryStore {
 	return &memoryStore{
 		runs: map[string]toolrun.ToolRun{}, edits: map[string]fileedit.Edit{},
 		approvals: map[string]approval.Record{}, operations: map[string]string{},
+		processes: map[string]scriptprocess.Process{},
 	}
 }
 
@@ -231,6 +234,42 @@ func (s *memoryStore) ChargeToolCall(context.Context, toolbudget.ChargeRequest) 
 
 func (s *memoryStore) GetToolCallUsage(context.Context, string) (toolbudget.Usage, error) {
 	return toolbudget.Usage{Remaining: -1}, nil
+}
+
+func (s *memoryStore) SaveScriptProcess(_ context.Context, process scriptprocess.Process) (scriptprocess.Process, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.processes[process.ID] = process
+	return process, nil
+}
+
+func (s *memoryStore) GetScriptProcess(_ context.Context, id string) (scriptprocess.Process, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	process, ok := s.processes[id]
+	if !ok {
+		return scriptprocess.Process{}, errors.New("script process not found")
+	}
+	return process, nil
+}
+
+func (s *memoryStore) ListScriptProcesses(_ context.Context, filter scriptprocess.ListFilter) ([]scriptprocess.Process, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var processes []scriptprocess.Process
+	for _, process := range s.processes {
+		if filter.RunID != "" && process.RunID != filter.RunID ||
+			filter.SessionID != "" && process.SessionID != filter.SessionID ||
+			filter.Status != "" && process.Status != filter.Status {
+			continue
+		}
+		processes = append(processes, process)
+	}
+	return processes, nil
+}
+
+func (s *memoryStore) CreateScriptProcessRun(context.Context, ScriptRunStoreRequest) (ScriptRunStoreResult, error) {
+	return ScriptRunStoreResult{}, errors.New("atomic script Run creation is not supported by this test store")
 }
 
 func TestGatewayExecutesScopedReadsWithRedactionAndLimits(t *testing.T) {

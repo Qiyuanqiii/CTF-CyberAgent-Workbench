@@ -32,6 +32,9 @@ Use these files first when resuming:
 - `internal/toolgateway/model.go`
 - `internal/toolgateway/gateway.go`
 - `internal/toolgateway/script_process.go`
+- `internal/scriptprocess/scriptprocess.go`
+- `internal/application/script_process_service.go`
+- `internal/store/script_processes.go`
 - `internal/approval/grant.go`
 - `internal/store/approval_grants.go`
 - `internal/store/tool_budget.go`
@@ -44,9 +47,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 81%.
+- Overall product vision: about 82%.
 - v0.1 generic agent MVP: about 99%.
-- V2 run-centric runtime: about 96%.
+- V2 run-centric runtime: about 97%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -64,7 +67,9 @@ Completed:
 - Workspace reads, shell proposals, and whole-file replacements now share one Go-owned schema/scope/policy/approval/result pipeline. CLI, Session, and TUI production paths use Gateway adapters rather than constructing legacy managers directly.
 - Production file calls resolve a trusted root from the persisted workspace ID and reject a mismatched supplied directory before filesystem access.
 - Gateway results carry validated MIME, UTF-8 output, explicit truncation, secret redaction, and hard stdout/stderr/preview limits. Shell approval remains dry-run and file edits remain proposal-first.
-- `script run` now requires a persisted workspace and relative existing file, creates a Script Profile Mission/Run/Session, and persists a validated `script_process.v1` Tool Gateway proposal with full Policy/Tool event projection.
+- `script run` now requires a persisted workspace and relative existing file, then atomically creates a Script Profile Mission/Run/Session, initial budget charge, typed `script_process.v1` proposal, durable Approval, and full Policy/Tool event projection.
+- Schema v13 adds first-class `script_process_proposals`, strict Run/Session/Workspace binding, multiple processes per Run, redacted executable/argv fields, and recoverable `--idempotency-key` replay without persisting the raw key.
+- Generic `tool list/show/approve/deny` resolves Shell and ScriptProcess proposals through the durable approval ledger. Script approval advances a recoverable typed state machine and only returns `execution_mode=disabled` dry-run output.
 - `--local` is retained only as requested-backend metadata. Production code has no Local/Noop Sandbox Runner invocation, and tool approval remains dry-run without host side effects.
 - JSON payload redaction is structure-aware: Store code parses JSON with exact numbers, recursively redacts string values, and re-encodes before validation/persistence, preserving nested escaped JSON.
 - Schema v11 adds Run/Session-bound `tool_approvals` and immutable `approval_operations`; proposal creation appends `approval.requested` transactionally, review commits `approval.decided` before compatibility-state execution, and an identical key resumes safely after restart.
@@ -95,7 +100,7 @@ Completed:
 - Reworked `docs/architecture.md` around run-scoped budget, event, sandbox, report, approval, and recovery ownership without copying the reference implementation.
 - Replaced the obsolete README migration/scaffold copy with a bilingual Chinese/English product overview, current capabilities, architecture boundary, and development-scope notice.
 - Added `docs/TASK_BOOK.md` with phased migration tasks, acceptance criteria, compatibility rules, and CTF deferred to the final phase.
-- Versioned SQLite migrations through schema v12: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative model budgets, durable pending input, restart-safe protocol repair, Work Board, Notes, durable per-call approvals, revocable Session grants, and atomic tool budgets; each version is checksummed and transactional.
+- Versioned SQLite migrations through schema v13: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative model budgets, durable pending input, restart-safe protocol repair, Work Board, Notes, durable per-call approvals, revocable Session grants, atomic tool budgets, and typed script processes; each version is checksummed and transactional.
 - Migration tests cover idempotence, legacy data preservation, checksum history, and failed-migration rollback.
 - Unified `internal/idgen` now backs agent tasks, sessions, tool runs, file edits, Mission/Run, and event IDs.
 - Added pure Go Mission, Scope, Budget, RunConfig, Run status machine, and legal transition checks.
@@ -184,7 +189,7 @@ Not done yet:
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
 - Provider cost budgets, AgentCoordinator, and Findings/Evidence/Report; WorkItem/Note model tools and dedicated TUI views remain pending.
-- A first-class script-process proposal type and tool-output Artifact capture.
+- Tool-output Artifact capture with hashes, MIME metadata, truncation linkage, and Run events.
 
 ## Code Audit Notes
 
@@ -198,12 +203,14 @@ The durable-approval audit found and fixed two medium-risk integrity gaps before
 
 The schema v12 audit found and fixed one low-risk observability gap: a rejected over-budget call originally returned a stable typed error but did not record the first exhaustion boundary. `run_tool_usage.exhausted_at` and a single `tool.budget_exhausted` event now preserve that fact without allowing repeated rejected calls to flood the event stream. Grant and budget tests cover restart-style CLI use, idempotency-key conflict, revocation, scope mismatch, terminal Run/archived Session denial, concurrent budget saturation, and Policy precedence.
 
+The schema v13 audit found and fixed three correctness/boundary defects before release. ScriptProcess review dispatch existed but request normalization still rejected the tool; Session stores were accidentally coupled to an unrelated atomic Script Run method; and the initial table made `run_id` unique while failing to enforce the Process Run/Session composite binding. Script capabilities are now optional Gateway Store interfaces, one Run may own multiple processes, and a forged cross-Run binding rolls back. Tests cover 12-way concurrent replay, changed-intent conflict, full event-failure rollback, approval-ledger bypass, v12 Run/Grant migration, redaction, permanent Policy denial, and zero host side effects.
+
 Residual risks to address soon:
 
 - `staticcheck ./...` is clean; the prior TUI `S1008`, `S1011`, and unused-helper `U1000` findings were removed in this slice.
 - `script run --local` no longer executes commands. It creates a workspace-scoped, Run-bound, policy-checked proposal and records `execution_mode=disabled`; LocalSandbox remains disconnected from production.
-- Script Run creation and ToolRun proposal persistence use two transactions. A Store failure in the second transaction can leave a created Run without its expected proposal; durable idempotency/recovery is the next Approval slice.
-- The Gateway still persists shell and file proposals in legacy `tool_runs` and `file_edits`, but schema v11/v12 gate privileged transitions through durable approvals and grants. The next compatibility removal is a first-class typed script-process proposal.
+- Schema v13 removes the former Script Run/ToolRun two-transaction window. Mission, Session, Run, budget, Process, Approval, and initial events now roll back together on any failure.
+- The Gateway still persists Shell and file proposals in legacy `tool_runs` and `file_edits`; typed ScriptProcess persistence is now independent. Future compatibility removal should migrate those older proposal types without changing the approval ledger contract.
 - Automatic workspace read outcomes are normalized but are not independently persisted when invoked by standalone CLI commands; Session slash-command text is still audited through Session messages.
 - Secret redaction is heuristic, not a full secrets manager; add opt-in raw local inspection later only with clear warnings.
 - Binary or non-UTF-8 files are refused by `read_file`; richer file viewers should stay workspace-scoped and type-aware.
@@ -384,12 +391,12 @@ Expected context behavior:
 - Structure-aware Store redaction tests passed for nested JSON strings, exact 64-bit numbers, invalid payloads, 1 MiB size, 64-level depth, and event rollback on failure.
 - The final script slice gate passed with uncached full tests, vet, full-repository race tests, clean staticcheck, zero reachable govulncheck findings, and an isolated real-binary smoke that observed risky exit code 5 with no marker file. Scans returned `NO_PRODUCTION_SANDBOX_RUNNER_CALLS`, `NO_CREDENTIAL_PATTERN_IN_REPO`, and `NO_RUNTIME_OR_SECRET_ARTIFACTS_IN_REPO`.
 - The final schema v12 gate passed with uncached full tests, full-repository race tests, vet, clean staticcheck, and zero reachable govulncheck findings. Repository scans found zero credential-pattern files, zero tracked runtime artifacts, and zero production Sandbox references.
+- The final schema v13 gate passed with uncached full tests, full-repository race tests, vet, clean staticcheck, and zero reachable govulncheck findings. Twelve-way idempotency, rollback, migration, approval-gate, multi-Process, cross-Run binding, CLI conflict/policy, redaction, and no-side-effect tests passed. Isolated real-binary smoke returned conflict exit code 4 and Policy exit code 5, consumed one tool call across replay, completed only as dry-run, and created no marker file. Repository scans returned `NO_USER_TEST_KEYS_IN_REPO`, `NO_CREDENTIAL_PATTERN_IN_REPO`, `NO_TRACKED_RUNTIME_OR_SECRET_ARTIFACTS`, and `NO_PRODUCTION_SANDBOX_RUNNER_CALLS`.
 
 ## Recommended Next Slice
 
-Continue P5 with the next compatibility and evidence slice:
+Continue P5 with the Artifact/evidence slice:
 
-- Promote `script_process.v1` from a legacy Shell ToolRun payload to a first-class typed proposal and make Run-plus-proposal creation recoverably idempotent.
 - Capture oversized or durable tool output as hashed, MIME-labelled Artifacts before enabling Local/Docker execution.
 - Add low-risk structured WorkItem/Note mutation proposals with schema validation, scope checks, policy decisions, tool budgets, durable events, and explicit approval where required.
 - Add TUI “approve once / this session” controls backed exclusively by the persisted Go grant service.

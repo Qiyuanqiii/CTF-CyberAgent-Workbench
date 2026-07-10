@@ -1,6 +1,7 @@
 package toolgateway
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -44,13 +45,36 @@ func TestScriptProcessProposalRejectsUnsafeOrUnboundedFields(t *testing.T) {
 func TestScriptProcessGatewayRejectsCallerGeneratedArguments(t *testing.T) {
 	gateway := New(newMemoryStore(), nil)
 	if _, err := gateway.ProposeScriptProcess(t.Context(), ToolCall{
-		Name: ShellTool, SessionID: "sess-1", Arguments: map[string]string{"command": "echo bypass"},
+		Name: ScriptProcessTool, RunID: "run-1", SessionID: "sess-1", WorkspaceID: "ws-1",
+		Arguments: map[string]string{"command": "echo bypass"},
 	}, ScriptProcessProposal{Executable: "python"}); err == nil {
 		t.Fatal("expected caller-generated command rejection")
 	}
 	if _, err := gateway.ProposeScriptProcess(t.Context(), ToolCall{
-		Name: ReadFileTool, SessionID: "sess-1",
+		Name: ReadFileTool, RunID: "run-1", SessionID: "sess-1", WorkspaceID: "ws-1",
 	}, ScriptProcessProposal{Executable: "python"}); err == nil {
 		t.Fatal("expected mismatched tool rejection")
+	}
+}
+
+func TestScriptProcessGatewayReviewCompletesOnlyAsDryRun(t *testing.T) {
+	ctx := context.Background()
+	store := newMemoryStore()
+	gateway := New(store, nil)
+	outcome, err := gateway.ProposeScriptProcess(ctx, ToolCall{
+		Name: ScriptProcessTool, RunID: "run-1", SessionID: "sess-1", WorkspaceID: "ws-1",
+		WorkspaceRoot: t.TempDir(), RequestedBy: "test",
+	}, ScriptProcessProposal{Executable: "python", Arguments: []string{"scripts/noop.py"}})
+	if err != nil || outcome.Proposal == nil || outcome.Proposal.Tool != ScriptProcessTool ||
+		outcome.Proposal.Status != StatusProposed || outcome.Execution != nil {
+		t.Fatalf("unexpected script process proposal: %#v err=%v", outcome, err)
+	}
+	reviewed, err := gateway.Review(ctx, ReviewRequest{
+		Action: ReviewApprove, Tool: ScriptProcessTool, ProposalID: outcome.Proposal.ID, ReviewedBy: "operator",
+	})
+	if err != nil || reviewed.Proposal == nil || reviewed.Proposal.Status != StatusCompleted ||
+		reviewed.Execution == nil || reviewed.Execution.Backend != "dry_run" || reviewed.Result == nil ||
+		!strings.Contains(reviewed.Result.Stdout, `"execution_mode":"disabled"`) {
+		t.Fatalf("script process approval was not a typed dry run: %#v err=%v", reviewed, err)
 	}
 }

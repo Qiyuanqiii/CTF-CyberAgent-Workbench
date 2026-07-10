@@ -14,6 +14,7 @@ import (
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/redact"
+	"cyberagent-workbench/internal/scriptprocess"
 	"cyberagent-workbench/internal/toolbudget"
 	"cyberagent-workbench/internal/toolrun"
 	"cyberagent-workbench/internal/tools"
@@ -29,6 +30,10 @@ type Store interface {
 	toolbudget.Store
 }
 
+type ScriptRunStore interface {
+	CreateScriptProcessRun(ctx context.Context, request ScriptRunStoreRequest) (ScriptRunStoreResult, error)
+}
+
 type Gateway struct {
 	store                 Store
 	grantStore            approval.GrantStore
@@ -37,6 +42,9 @@ type Gateway struct {
 	workspaceRootResolver WorkspaceRootResolver
 	legacyTools           *toolrun.Manager
 	legacyEdits           *fileedit.Manager
+	scriptStore           scriptprocess.Store
+	scriptRunStore        ScriptRunStore
+	scriptProcesses       *scriptprocess.Manager
 }
 
 type WorkspaceRootResolver func(ctx context.Context, workspaceID string) (string, error)
@@ -46,9 +54,17 @@ func New(store Store, checker policy.Checker) *Gateway {
 		fallback := policy.NewDefaultChecker()
 		checker = fallback
 	}
+	var scriptStore scriptprocess.Store
+	var scriptRunStore ScriptRunStore
+	if store != nil {
+		scriptStore, _ = any(store).(scriptprocess.Store)
+		scriptRunStore, _ = any(store).(ScriptRunStore)
+	}
 	gateway := &Gateway{
 		store: store, grantStore: store, budgetStore: store, checker: checker,
 		legacyTools: toolrun.NewManager(store, checker), legacyEdits: fileedit.NewManager(store),
+		scriptStore: scriptStore, scriptRunStore: scriptRunStore,
+		scriptProcesses: scriptprocess.NewManager(scriptStore),
 	}
 	return gateway
 }
@@ -112,6 +128,8 @@ func (g *Gateway) Review(ctx context.Context, request ReviewRequest) (Outcome, e
 		return g.reviewShell(ctx, normalized)
 	case ReplaceFileTool:
 		return g.reviewFileEdit(ctx, normalized)
+	case ScriptProcessTool:
+		return g.reviewScriptProcess(ctx, normalized)
 	default:
 		return Outcome{}, fmt.Errorf("tool %q does not support review", normalized.Tool)
 	}
@@ -322,6 +340,35 @@ func (g *Gateway) reviewFileEdit(ctx context.Context, request ReviewRequest) (Ou
 	return g.outcomeFromFileEdit(call, after, err)
 }
 
+func (g *Gateway) reviewScriptProcess(ctx context.Context, request ReviewRequest) (Outcome, error) {
+	before, err := g.scriptProcesses.Get(ctx, request.ProposalID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	reason := request.Reason
+	if request.Action == ReviewDeny && reason == "" {
+		reason = "denied by operator"
+	}
+	request.Reason = reason
+	if err := g.persistReviewDecision(ctx, request, approvalProposalFromScriptProcess(before)); err != nil {
+		return Outcome{}, err
+	}
+	var after scriptprocess.Process
+	if request.Action == ReviewApprove {
+		after, err = g.scriptProcesses.Approve(ctx, request.ProposalID)
+	} else {
+		after, err = g.scriptProcesses.Deny(ctx, request.ProposalID, reason)
+	}
+	if after.ID == "" {
+		after = before
+	}
+	call := ToolCall{
+		Name: ScriptProcessTool, RunID: before.RunID, SessionID: before.SessionID,
+		WorkspaceID: before.WorkspaceID, RequestedBy: "approval_service",
+	}
+	return g.outcomeFromScriptProcess(call, after, err)
+}
+
 func (g *Gateway) persistReviewDecision(ctx context.Context, request ReviewRequest, proposal approval.Proposal) error {
 	if _, err := g.store.EnsureApproval(ctx, proposal); err != nil {
 		return err
@@ -387,6 +434,34 @@ func approvalProposalFromFileEdit(edit fileedit.Edit) approval.Proposal {
 		RequestFingerprint: approval.FileEditFingerprint(edit.SessionID, edit.WorkspaceID, edit.Path, edit.ProposedHash),
 		DecisionReason:     edit.Reason, RequestedBy: "tool_gateway", ReviewedBy: reviewer,
 		CreatedAt: edit.CreatedAt, UpdatedAt: edit.UpdatedAt, DecidedAt: decidedAt,
+	}
+}
+
+func approvalProposalFromScriptProcess(process scriptprocess.Process) approval.Proposal {
+	status := approval.StatusPending
+	mode := string(ApprovalPerCall)
+	reviewer := ""
+	var decidedAt *time.Time
+	switch process.Status {
+	case scriptprocess.StatusDenied:
+		status = approval.StatusDenied
+		mode = string(ApprovalNever)
+		reviewer = "policy"
+		decided := process.UpdatedAt
+		decidedAt = &decided
+	case scriptprocess.StatusApproved, scriptprocess.StatusCompleted, scriptprocess.StatusFailed:
+		status = approval.StatusApproved
+		reviewer = "legacy_recovery"
+		decided := process.UpdatedAt
+		decidedAt = &decided
+	}
+	return approval.Proposal{
+		IdempotencyKey: approval.ProposalIdempotencyKey(string(ScriptProcessTool), process.ID),
+		ProposalID:     process.ID, SessionID: process.SessionID, WorkspaceID: process.WorkspaceID,
+		ToolName: string(ScriptProcessTool), ActionClass: string(ClassProcess), Mode: mode, Status: status,
+		RequestFingerprint: process.ApprovalFingerprint, DecisionReason: process.PolicyReason,
+		RequestedBy: process.RequestedBy, ReviewedBy: reviewer, CreatedAt: process.CreatedAt,
+		UpdatedAt: process.UpdatedAt, DecidedAt: decidedAt,
 	}
 }
 

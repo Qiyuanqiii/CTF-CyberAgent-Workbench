@@ -99,6 +99,13 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 			t.Fatalf("schema v12 table is missing: %q", table)
 		}
 	}
+	var scriptProcessTable string
+	if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'script_process_proposals'`).Scan(&scriptProcessTable); err != nil {
+		t.Fatal(err)
+	}
+	if scriptProcessTable != "script_process_proposals" {
+		t.Fatalf("schema v13 typed script process table is missing: %q", scriptProcessTable)
+	}
 	var grantColumn int
 	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('tool_approvals') WHERE name = 'grant_id'`).Scan(&grantColumn); err != nil {
 		t.Fatal(err)
@@ -282,6 +289,8 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE script_process_proposals`,
+		`DELETE FROM schema_migrations WHERE version = 13`,
 		`DROP INDEX idx_tool_approvals_grant_id`,
 		`ALTER TABLE tool_approvals DROP COLUMN grant_id`,
 		`DROP TABLE run_tool_calls`,

@@ -41,13 +41,33 @@ func NewRunService(store RunStore) *RunService {
 	return &RunService{store: store}
 }
 
+type preparedRun struct {
+	Mission       domain.Mission
+	Run           domain.Run
+	Session       session.Session
+	CreateSession bool
+	InitialEvents []events.Event
+}
+
 func (s *RunService) Create(ctx context.Context, req CreateRunRequest) (domain.Mission, domain.Run, error) {
+	prepared, err := s.prepare(ctx, req)
+	if err != nil {
+		return domain.Mission{}, domain.Run{}, err
+	}
+	if err := s.store.CreateMissionRun(ctx, prepared.Mission, prepared.Run, prepared.Session,
+		prepared.CreateSession, prepared.InitialEvents); err != nil {
+		return domain.Mission{}, domain.Run{}, err
+	}
+	return prepared.Mission, prepared.Run, nil
+}
+
+func (s *RunService) prepare(ctx context.Context, req CreateRunRequest) (preparedRun, error) {
 	if s == nil || s.store == nil {
-		return domain.Mission{}, domain.Run{}, errors.New("run store is required")
+		return preparedRun{}, errors.New("run store is required")
 	}
 	goal := redact.String(strings.TrimSpace(req.Goal))
 	if goal == "" {
-		return domain.Mission{}, domain.Run{}, errors.New("mission goal is required")
+		return preparedRun{}, errors.New("mission goal is required")
 	}
 	profileValue := strings.TrimSpace(req.Profile)
 	if profileValue == "" {
@@ -55,7 +75,7 @@ func (s *RunService) Create(ctx context.Context, req CreateRunRequest) (domain.M
 	}
 	profile, err := domain.ParseProfile(profileValue)
 	if err != nil {
-		return domain.Mission{}, domain.Run{}, err
+		return preparedRun{}, err
 	}
 	workspaceID := strings.TrimSpace(req.WorkspaceID)
 	requestedSessionID := strings.TrimSpace(req.SessionID)
@@ -64,13 +84,13 @@ func (s *RunService) Create(ctx context.Context, req CreateRunRequest) (domain.M
 	if !createSession {
 		linkedSession, err = s.store.GetSession(ctx, requestedSessionID)
 		if err != nil {
-			return domain.Mission{}, domain.Run{}, err
+			return preparedRun{}, err
 		}
 		if linkedSession.Status != session.StatusActive {
-			return domain.Mission{}, domain.Run{}, errors.New("run session must be active")
+			return preparedRun{}, errors.New("run session must be active")
 		}
 		if workspaceID != "" && linkedSession.WorkspaceID != "" && workspaceID != linkedSession.WorkspaceID {
-			return domain.Mission{}, domain.Run{}, errors.New("session and requested workspace do not match")
+			return preparedRun{}, errors.New("session and requested workspace do not match")
 		}
 		if workspaceID == "" {
 			workspaceID = linkedSession.WorkspaceID
@@ -89,7 +109,7 @@ func (s *RunService) Create(ctx context.Context, req CreateRunRequest) (domain.M
 		budget.MaxTurns = domain.DefaultBudget().MaxTurns
 	}
 	if err := budget.Validate(); err != nil {
-		return domain.Mission{}, domain.Run{}, err
+		return preparedRun{}, err
 	}
 	now := time.Now().UTC()
 	if createSession {
@@ -101,7 +121,7 @@ func (s *RunService) Create(ctx context.Context, req CreateRunRequest) (domain.M
 	}
 	linkedSession.UpdatedAt = now
 	if err := linkedSession.Validate(); err != nil {
-		return domain.Mission{}, domain.Run{}, err
+		return preparedRun{}, err
 	}
 	mission := domain.Mission{
 		ID:          idgen.New("mission"),
@@ -126,10 +146,10 @@ func (s *RunService) Create(ctx context.Context, req CreateRunRequest) (domain.M
 		UpdatedAt: now,
 	}
 	if err := mission.Validate(); err != nil {
-		return domain.Mission{}, domain.Run{}, err
+		return preparedRun{}, err
 	}
 	if err := run.Validate(); err != nil {
-		return domain.Mission{}, domain.Run{}, err
+		return preparedRun{}, err
 	}
 	createdEvent, err := events.New(run.ID, mission.ID, events.RunCreatedEvent, "run_service", run.ID, map[string]any{
 		"status":       run.Status,
@@ -138,7 +158,7 @@ func (s *RunService) Create(ctx context.Context, req CreateRunRequest) (domain.M
 		"session_id":   run.SessionID,
 	})
 	if err != nil {
-		return domain.Mission{}, domain.Run{}, err
+		return preparedRun{}, err
 	}
 	attachedEvent, err := events.New(run.ID, mission.ID, events.SessionAttachedEvent, "run_service", linkedSession.ID, map[string]any{
 		"created":      createSession,
@@ -146,12 +166,12 @@ func (s *RunService) Create(ctx context.Context, req CreateRunRequest) (domain.M
 		"workspace_id": linkedSession.WorkspaceID,
 	})
 	if err != nil {
-		return domain.Mission{}, domain.Run{}, err
+		return preparedRun{}, err
 	}
-	if err := s.store.CreateMissionRun(ctx, mission, run, linkedSession, createSession, []events.Event{createdEvent, attachedEvent}); err != nil {
-		return domain.Mission{}, domain.Run{}, err
-	}
-	return mission, run, nil
+	return preparedRun{
+		Mission: mission, Run: run, Session: linkedSession, CreateSession: createSession,
+		InitialEvents: []events.Event{createdEvent, attachedEvent},
+	}, nil
 }
 
 func (s *RunService) Start(ctx context.Context, id string) (domain.Run, error) {

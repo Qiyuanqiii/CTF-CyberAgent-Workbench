@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 12
+const LatestSchemaVersion = 13
 
 type migration struct {
 	Version    int
@@ -352,6 +352,51 @@ var sessionGrantAndToolBudgetStatements = []string{
 	);`,
 	`CREATE INDEX idx_run_tool_calls_run_created_at
 		ON run_tool_calls(run_id, created_at);`,
+}
+
+var typedScriptProcessStatements = []string{
+	`CREATE TABLE script_process_proposals (
+		id TEXT PRIMARY KEY,
+		operation_key_digest TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		executable TEXT NOT NULL,
+		arguments_json TEXT NOT NULL,
+		working_directory TEXT NOT NULL,
+		requested_backend TEXT NOT NULL,
+		execution_mode TEXT NOT NULL,
+		status TEXT NOT NULL,
+		risk TEXT NOT NULL,
+		policy_reason TEXT NOT NULL,
+		stdout TEXT NOT NULL DEFAULT '',
+		stderr TEXT NOT NULL DEFAULT '',
+		exit_code INTEGER NOT NULL DEFAULT 0,
+		request_fingerprint TEXT NOT NULL,
+		approval_fingerprint TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+		CHECK(length(operation_key_digest) = 64),
+		CHECK(length(request_fingerprint) = 64),
+		CHECK(length(approval_fingerprint) = 64),
+		CHECK(working_directory = '.'),
+		CHECK(execution_mode = 'disabled'),
+		CHECK(requested_backend IN ('sandbox', 'local')),
+		CHECK(risk IN ('low', 'medium', 'high', 'critical')),
+		CHECK(status IN ('proposed', 'approved', 'denied', 'completed', 'failed')),
+		CHECK(json_valid(arguments_json)),
+		CHECK(version > 0)
+	);`,
+	`CREATE INDEX idx_script_process_run_status_updated_at
+		ON script_process_proposals(run_id, status, updated_at);`,
+	`CREATE INDEX idx_script_process_session_status_updated_at
+		ON script_process_proposals(session_id, status, updated_at);`,
+	`CREATE INDEX idx_script_process_workspace_status_updated_at
+		ON script_process_proposals(workspace_id, status, updated_at);`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {

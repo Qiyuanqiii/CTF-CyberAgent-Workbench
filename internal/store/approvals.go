@@ -14,6 +14,7 @@ import (
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/redact"
+	"cyberagent-workbench/internal/scriptprocess"
 	"cyberagent-workbench/internal/toolrun"
 )
 
@@ -274,6 +275,25 @@ func validateApprovalProposalSourceTx(ctx context.Context, tx *sql.Tx, proposal 
 			proposal.ActionClass != "workspace_write" || proposal.Mode != "per_call" || proposal.Status != expectedStatus ||
 			proposal.RequestFingerprint != approval.FileEditFingerprint(sessionID.String, workspaceID, path, proposedHash) {
 			return errors.New("approval request does not match the stored file edit proposal")
+		}
+	case "script_process":
+		var sessionID, workspaceID, approvalFingerprint, status string
+		if err := tx.QueryRowContext(ctx, `SELECT session_id, workspace_id, approval_fingerprint, status
+			FROM script_process_proposals WHERE id = ?`, proposal.ProposalID).
+			Scan(&sessionID, &workspaceID, &approvalFingerprint, &status); err != nil {
+			return err
+		}
+		expectedStatus, expectedMode, _, _, err := approvalStateForScriptProcess(scriptprocess.Process{Status: scriptprocess.Status(status)}, true)
+		if err != nil {
+			return err
+		}
+		if status == string(scriptprocess.StatusDenied) && proposal.Mode == "never" {
+			expectedMode = "never"
+		}
+		if proposal.SessionID != sessionID || proposal.WorkspaceID != workspaceID ||
+			proposal.ActionClass != "process" || proposal.Mode != expectedMode || proposal.Status != expectedStatus ||
+			proposal.RequestFingerprint != approvalFingerprint {
+			return errors.New("approval request does not match the stored script process proposal")
 		}
 	default:
 		return fmt.Errorf("unsupported approval tool %q", proposal.ToolName)

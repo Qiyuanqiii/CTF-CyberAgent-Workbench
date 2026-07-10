@@ -114,9 +114,12 @@ cyberagent workspace read demo README.md
 cyberagent script new "parse pcap http token" --workspace demo
 cyberagent script run scripts/<script-name>.py --workspace demo
 cyberagent script run scripts/<script-name>.py --workspace demo --local --flag value
+cyberagent script run scripts/<script-name>.py --workspace demo --idempotency-key <stable-key>
 ```
 
-`script new` prints both the absolute artifact path and `script_relative`; pass the latter to `script run`. `script run` no longer executes a Sandbox or host process. It requires a workspace-relative existing file, rejects absolute paths/traversal/symlink escape, creates a Script Profile Mission/Run/Session, and persists a policy-checked Tool Gateway proposal. The structured `script_process.v1` payload contains executable, argv, workspace-relative working directory, requested backend, and the fixed execution mode `disabled`. `--local` records intent for future Sandbox work; it does not execute locally. Use the printed Tool ID with `tool show` or `tool approve`; approval currently completes as dry-run only.
+`script new` prints both the absolute artifact path and `script_relative`; pass the latter to `script run`. `script run` never executes a Sandbox or host process. It requires a workspace-relative existing file, rejects absolute paths/traversal/symlink escape, and atomically persists a Script Profile Mission/Run/Session, initial tool-budget charge, Policy decision, typed Process, Approval, and Run events. The `script_process.v1` payload contains executable, argv, workspace-root working directory, requested backend, and the fixed execution mode `disabled`.
+
+`--idempotency-key` is optional but recommended for retryable clients. Repeating the same key and intent returns the original Mission/Run/Session/Process without a second budget charge or duplicate events. Reusing it with changed path, arguments, backend, scope, budget, or requester returns conflict exit code 4. Only a SHA-256 digest is stored. `--local` records intent for future Sandbox work; it does not execute locally. Use the printed Process ID with `tool show`, `tool approve`, or `tool deny`; approval completes as dry-run only.
 
 ## CTF Mode
 
@@ -200,7 +203,7 @@ Session chat is the main path for generic AI agent features. Ordinary text in a 
 
 ## Unified Tool Gateway
 
-The Gateway validates exact argument schemas, binds calls to a Run/Session/Workspace scope, atomically charges the Run tool-call budget, runs policy checks, selects an approval mode, and normalizes execution results. `read_file` and `list_workspace` use automatic approval only when scope and policy allow them. `replace_file` and `shell` normally use per-call approval. A policy denial is terminal and cannot be converted into approval by a grant or later review. Schema v11 persists each per-call decision with a request fingerprint, Run/Session association, and immutable idempotency operation before the compatibility proposal advances. Schema v12 persists revocable Session grants scoped to one Run, Session, Workspace, Tool, and ActionClass; terminal Runs and archived Sessions cannot create or consume them.
+The Gateway validates exact argument schemas, binds calls to a Run/Session/Workspace scope, atomically charges the Run tool-call budget, runs policy checks, selects an approval mode, and normalizes execution results. `read_file` and `list_workspace` use automatic approval only when scope and policy allow them. `replace_file`, `shell`, and `script_process` normally use per-call approval. A policy denial is terminal and cannot be converted into approval by a grant or later review. Schema v11 persists each per-call decision with a request fingerprint, Run/Session association, and immutable idempotency operation before the compatibility proposal advances. Schema v12 persists revocable Session grants scoped to one Run, Session, Workspace, Tool, and ActionClass; terminal Runs and archived Sessions cannot create or consume them. Schema v13 stores typed script processes and makes initial Script Run creation atomic and recoverably idempotent.
 
 New CLI Runs default to 100 tool calls and may set `--max-tool-calls`; zero means unlimited for compatibility. Every valid Run-bound Gateway invocation consumes one call, including Policy-denied attempts. The first attempted call beyond the limit records one `tool.budget_exhausted` event, subsequent attempts return `RESOURCE_EXHAUSTED` without duplicating that event, and `run usage <run-id>` shows consumed, limit, remaining, and exhaustion time.
 
@@ -228,12 +231,12 @@ Proposals are stored without modifying the workspace. Approval obtains the works
 cyberagent tool list
 cyberagent tool list --session <session-id>
 cyberagent tool list --status proposed
-cyberagent tool show <tool-run-id>
-cyberagent tool approve <tool-run-id>
-cyberagent tool deny <tool-run-id> --reason "not needed"
+cyberagent tool show <proposal-id>
+cyberagent tool approve <proposal-id>
+cyberagent tool deny <proposal-id> --reason "not needed"
 ```
 
-`/run` creates a `tool_runs` proposal through the unified Tool Gateway. `tool approve` and `tool deny` use the same review service as file edits. A matching active Shell Session grant can authorize the proposal automatically, but completion remains dry-run. Real command execution stays disabled until Sandbox isolation and Artifact capture are complete.
+`tool list` combines legacy Shell ToolRuns and typed ScriptProcess proposals and sorts them by update time. `tool show/approve/deny` resolves the proposal type from the durable approval ledger, so callers do not select an implementation-specific manager. `/run` creates a Shell `tool_runs` proposal; `script run` creates a v13 `script_process_proposals` record. A matching active Shell Session grant can authorize Shell automatically, but Shell and ScriptProcess completion remain dry-run. File edits continue to use `edit show/approve/deny`. Real command execution stays disabled until Sandbox isolation and Artifact capture are complete.
 
 ## Approval Ledger
 

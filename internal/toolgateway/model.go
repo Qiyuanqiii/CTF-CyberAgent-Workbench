@@ -35,11 +35,12 @@ const (
 	ListWorkspaceTool ToolName = "list_workspace"
 	ShellTool         ToolName = "shell"
 	ReplaceFileTool   ToolName = "replace_file"
+	ScriptProcessTool ToolName = "script_process"
 )
 
 func (n ToolName) Valid() bool {
 	switch n {
-	case ReadFileTool, ListWorkspaceTool, ShellTool, ReplaceFileTool:
+	case ReadFileTool, ListWorkspaceTool, ShellTool, ReplaceFileTool, ScriptProcessTool:
 		return true
 	default:
 		return false
@@ -52,11 +53,12 @@ const (
 	ClassWorkspaceRead  ActionClass = "workspace_read"
 	ClassWorkspaceWrite ActionClass = "workspace_write"
 	ClassShell          ActionClass = "shell"
+	ClassProcess        ActionClass = "process"
 )
 
 func (c ActionClass) Valid() bool {
 	switch c {
-	case ClassWorkspaceRead, ClassWorkspaceWrite, ClassShell:
+	case ClassWorkspaceRead, ClassWorkspaceWrite, ClassShell, ClassProcess:
 		return true
 	default:
 		return false
@@ -71,6 +73,8 @@ func ClassForTool(name ToolName) (ActionClass, bool) {
 		return ClassWorkspaceWrite, true
 	case ShellTool:
 		return ClassShell, true
+	case ScriptProcessTool:
+		return ClassProcess, true
 	default:
 		return "", false
 	}
@@ -444,7 +448,7 @@ func NormalizeReviewRequest(request ReviewRequest) (ReviewRequest, error) {
 	if request.Action != ReviewApprove && request.Action != ReviewDeny {
 		return ReviewRequest{}, fmt.Errorf("invalid tool review action %q", request.Action)
 	}
-	if request.Tool != ShellTool && request.Tool != ReplaceFileTool {
+	if request.Tool != ShellTool && request.Tool != ReplaceFileTool && request.Tool != ScriptProcessTool {
 		return ReviewRequest{}, fmt.Errorf("tool %q does not support proposal review", request.Tool)
 	}
 	if request.ProposalID == "" || len([]rune(request.ProposalID)) > MaxToolIdentityRunes {
@@ -470,8 +474,8 @@ func NormalizeReviewRequest(request ReviewRequest) (ReviewRequest, error) {
 	if request.Action == ReviewApprove && request.Reason != "" {
 		return ReviewRequest{}, errors.New("tool approval cannot include a denial reason")
 	}
-	if request.Tool == ShellTool && request.WorkspaceRoot != "" {
-		return ReviewRequest{}, errors.New("shell review cannot include a workspace root")
+	if (request.Tool == ShellTool || request.Tool == ScriptProcessTool) && request.WorkspaceRoot != "" {
+		return ReviewRequest{}, errors.New("non-file review cannot include a workspace root")
 	}
 	if request.Action == ReviewDeny && request.WorkspaceRoot != "" {
 		return ReviewRequest{}, errors.New("tool denial cannot include a workspace root")
