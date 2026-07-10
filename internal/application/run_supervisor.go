@@ -18,9 +18,15 @@ import (
 
 const maxSupervisorHistoryMessages = 20
 
+const maxModelRetryAttempts = 5
+
 type SupervisorStore interface {
 	BeginSupervisorTurn(ctx context.Context, runID string, pendingInput string) (domain.SupervisorTurn, error)
 	BindSupervisorTurnInput(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string) (domain.SupervisorCheckpoint, error)
+	NextSupervisorModelAttempt(ctx context.Context, checkpoint domain.SupervisorCheckpoint) (int, error)
+	RecordSupervisorModelStarted(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt) (bool, error)
+	RecordSupervisorModelCompleted(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, response llm.ChatResponse) (domain.SupervisorCheckpoint, error)
+	RecordSupervisorModelFailed(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt) (domain.SupervisorCheckpoint, error)
 	CompleteSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, response llm.ChatResponse, action domain.RootAction, decision policy.Decision, elapsed time.Duration) (domain.Run, domain.SupervisorCheckpoint, session.TurnMessages, error)
 	FailSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, cause string, elapsed time.Duration) (domain.SupervisorCheckpoint, error)
 	FinalizeSupervisorRun(ctx context.Context, runID string, target domain.RunStatus, summary string) (domain.Run, domain.SupervisorCheckpoint, error)
@@ -44,20 +50,22 @@ const (
 )
 
 type LifecycleResult struct {
-	Handle       RunHandle
-	Status       LifecycleStatus
-	Turn         int
-	AttemptID    string
-	Recovered    bool
-	Text         string
-	Provider     string
-	Model        string
-	Usage        llm.Usage
-	Action       domain.RootAction
-	RunStatus    domain.RunStatus
-	UserMessage  session.Message
-	ReplyMessage session.Message
-	Checkpoint   domain.SupervisorCheckpoint
+	Handle        RunHandle
+	Status        LifecycleStatus
+	Turn          int
+	AttemptID     string
+	Recovered     bool
+	Text          string
+	Provider      string
+	Model         string
+	Usage         llm.Usage
+	Action        domain.RootAction
+	RunStatus     domain.RunStatus
+	UserMessage   session.Message
+	ReplyMessage  session.Message
+	Checkpoint    domain.SupervisorCheckpoint
+	ModelAttempts int
+	ModelOutcome  llm.Outcome
 }
 
 type LifecycleOutcome string
@@ -82,13 +90,31 @@ type ExecutionResult struct {
 }
 
 type RunSupervisor struct {
-	store   SupervisorStore
-	router  *llm.Router
-	checker policy.Checker
+	store       SupervisorStore
+	router      *llm.Router
+	checker     policy.Checker
+	retryPolicy ModelRetryPolicy
 }
 
 func NewRunSupervisor(store SupervisorStore, router *llm.Router, checker policy.Checker) *RunSupervisor {
-	return &RunSupervisor{store: store, router: router, checker: checker}
+	return &RunSupervisor{store: store, router: router, checker: checker, retryPolicy: DefaultModelRetryPolicy()}
+}
+
+type ModelRetryPolicy struct {
+	MaxAttempts int
+	BaseDelay   time.Duration
+	MaxDelay    time.Duration
+}
+
+func DefaultModelRetryPolicy() ModelRetryPolicy {
+	return ModelRetryPolicy{MaxAttempts: 3, BaseDelay: 100 * time.Millisecond, MaxDelay: 2 * time.Second}
+}
+
+func (s *RunSupervisor) WithModelRetryPolicy(policy ModelRetryPolicy) *RunSupervisor {
+	if s != nil {
+		s.retryPolicy = normalizeModelRetryPolicy(policy)
+	}
+	return s
 }
 
 func (s *RunSupervisor) Step(ctx context.Context, runID string) (LifecycleResult, error) {
@@ -157,51 +183,104 @@ func (s *RunSupervisor) step(ctx context.Context, runID string, requestedInput s
 		}
 		request.MaxTokens = int(remaining)
 	}
-	callCtx, cancel := supervisorModelContext(ctx, turn.Run.Budget, turn.Checkpoint)
-	startedAt := time.Now()
-	response, err := supervisorChat(callCtx, s.router, turn.Run.Config.ModelRoute, request)
-	elapsed := time.Since(startedAt)
-	cancel()
+	ref, err := supervisorModelRef(s.router, turn.Run.Config.ModelRoute)
 	if err != nil {
-		if ctx.Err() != nil {
-			return result, apperror.Normalize(err)
-		}
-		failure := s.recordFailure(ctx, &result, err, elapsed)
+		failure := s.recordFailure(ctx, &result, err, 0)
 		return result, failure
 	}
+	modelCall, err := s.callModelWithRetry(ctx, turn, ref, request)
+	if modelCall.Checkpoint.RunID != "" {
+		turn.Checkpoint = modelCall.Checkpoint
+		result.Checkpoint = modelCall.Checkpoint
+	}
+	result.ModelAttempts = modelCall.Attempt.Number
+	result.ModelOutcome = modelCall.Attempt.Outcome
+	if err != nil {
+		if ctx.Err() != nil {
+			return result, apperror.Normalize(ctx.Err())
+		}
+		if apperror.CodeOf(apperror.Normalize(err)) == apperror.CodeConflict {
+			return result, apperror.Normalize(err)
+		}
+		failure := s.recordFailure(ctx, &result, err, modelCall.UnpersistedElapsed)
+		return result, failure
+	}
+	response := modelCall.Response
 	if response == nil {
-		err := apperror.New(apperror.CodeFailedPrecondition, "provider returned an empty response")
-		failure := s.recordFailure(ctx, &result, err, elapsed)
+		updated, err := s.recordInvalidModelAttempt(ctx, turn.Checkpoint, &modelCall.Attempt,
+			llm.NewProviderError(llm.OutcomeInvalidResponse, ref.Provider, "returned an empty response", nil))
+		failureElapsed := modelCall.Attempt.Elapsed
+		if updated.RunID != "" {
+			turn.Checkpoint = updated
+			result.Checkpoint = updated
+			failureElapsed = 0
+		}
+		result.ModelOutcome = modelCall.Attempt.Outcome
+		failure := s.recordFailure(ctx, &result, err, failureElapsed)
 		return result, failure
 	}
 	if err := ctx.Err(); err != nil {
 		return result, apperror.Normalize(err)
 	}
 	if len(response.ToolCalls) > 0 {
-		err := apperror.New(apperror.CodeFailedPrecondition, "tool calls are disabled in the P2 supervisor foundation")
-		failure := s.recordFailure(ctx, &result, err, elapsed)
+		updated, err := s.recordInvalidModelAttempt(ctx, turn.Checkpoint, &modelCall.Attempt,
+			llm.NewProviderError(llm.OutcomeInvalidResponse, ref.Provider, "tool calls are disabled in the P2 supervisor foundation", nil))
+		failureElapsed := modelCall.Attempt.Elapsed
+		if updated.RunID != "" {
+			turn.Checkpoint = updated
+			result.Checkpoint = updated
+			failureElapsed = 0
+		}
+		result.ModelOutcome = modelCall.Attempt.Outcome
+		failure := s.recordFailure(ctx, &result, err, failureElapsed)
 		return result, failure
 	}
 	if response.Usage.InputTokens < 0 || response.Usage.OutputTokens < 0 || response.Usage.TotalTokens < 0 {
-		err := apperror.New(apperror.CodeFailedPrecondition, "provider returned negative token usage")
-		failure := s.recordFailure(ctx, &result, err, elapsed)
+		updated, err := s.recordInvalidModelAttempt(ctx, turn.Checkpoint, &modelCall.Attempt,
+			llm.NewProviderError(llm.OutcomeInvalidResponse, ref.Provider, "returned negative token usage", nil))
+		failureElapsed := modelCall.Attempt.Elapsed
+		if updated.RunID != "" {
+			turn.Checkpoint = updated
+			result.Checkpoint = updated
+			failureElapsed = 0
+		}
+		result.ModelOutcome = modelCall.Attempt.Outcome
+		failure := s.recordFailure(ctx, &result, err, failureElapsed)
 		return result, failure
 	}
 	action, err := parseRootAction(response.Text)
 	if err != nil {
-		failure := s.recordFailure(ctx, &result, err, elapsed)
+		providerErr := llm.NewProviderError(llm.OutcomeInvalidResponse, ref.Provider, err.Error(), err)
+		updated, modelErr := s.recordInvalidModelAttempt(ctx, turn.Checkpoint, &modelCall.Attempt, providerErr)
+		failureElapsed := modelCall.Attempt.Elapsed
+		if updated.RunID != "" {
+			turn.Checkpoint = updated
+			result.Checkpoint = updated
+			failureElapsed = 0
+		}
+		result.ModelOutcome = modelCall.Attempt.Outcome
+		failure := s.recordFailure(ctx, &result, modelErr, failureElapsed)
 		return result, failure
 	}
+	modelCall.Attempt.Outcome = llm.OutcomeSuccess
+	updated, err := s.store.RecordSupervisorModelCompleted(ctx, turn.Checkpoint, modelCall.Attempt, *response)
+	if err != nil {
+		failure := s.recordFailure(ctx, &result, err, modelCall.Attempt.Elapsed)
+		return result, failure
+	}
+	turn.Checkpoint = updated
+	result.Checkpoint = updated
+	result.ModelOutcome = llm.OutcomeSuccess
 	decision := s.checker.CheckText("supervisor_assistant_response", rootActionPolicyText(action))
 	if !decision.Allowed {
 		err := apperror.New(apperror.CodePolicyDenied, "policy denied supervisor response: "+decision.Reason)
-		failure := s.recordFailure(ctx, &result, err, elapsed)
+		failure := s.recordFailure(ctx, &result, err, 0)
 		return result, failure
 	}
 	safeAction := redactRootAction(action)
 	safeResponse := *response
 	safeResponse.Text = safeAction.Message
-	updatedRun, checkpoint, messages, err := s.store.CompleteSupervisorTurn(ctx, turn.Checkpoint, safeResponse, safeAction, decision, elapsed)
+	updatedRun, checkpoint, messages, err := s.store.CompleteSupervisorTurn(ctx, turn.Checkpoint, safeResponse, safeAction, decision, 0)
 	if err != nil {
 		return result, apperror.Normalize(err)
 	}
@@ -320,11 +399,207 @@ func (s *RunSupervisor) recordFailure(ctx context.Context, result *LifecycleResu
 	return safeCause
 }
 
-func supervisorModelContext(ctx context.Context, budget domain.Budget, checkpoint domain.SupervisorCheckpoint) (context.Context, context.CancelFunc) {
+type modelCallResult struct {
+	Response           *llm.ChatResponse
+	Attempt            llm.ModelAttempt
+	Checkpoint         domain.SupervisorCheckpoint
+	UnpersistedElapsed time.Duration
+}
+
+func (s *RunSupervisor) callModelWithRetry(ctx context.Context, turn domain.SupervisorTurn, ref llm.ModelRef, request llm.ChatRequest) (modelCallResult, error) {
+	policy := normalizeModelRetryPolicy(s.retryPolicy)
+	nextAttempt, err := s.store.NextSupervisorModelAttempt(ctx, turn.Checkpoint)
+	if err != nil {
+		return modelCallResult{}, apperror.Normalize(err)
+	}
+	if nextAttempt > policy.MaxAttempts {
+		return modelCallResult{
+			Attempt: llm.ModelAttempt{Number: policy.MaxAttempts, MaxAttempts: policy.MaxAttempts, Provider: ref.Provider, Model: ref.Model, Outcome: llm.OutcomeRetryable},
+		}, apperror.New(apperror.CodeUnavailable, "model retry limit was already exhausted for this supervisor turn")
+	}
+	result := modelCallResult{Checkpoint: turn.Checkpoint}
+	for number := nextAttempt; number <= policy.MaxAttempts; number++ {
+		if err := ctx.Err(); err != nil {
+			return result, apperror.Normalize(err)
+		}
+		if supervisorModelBudgetExhausted(turn.Run.Budget, result.Checkpoint, 0) {
+			return result, apperror.New(apperror.CodeDeadlineExceeded, "supervisor model execution timeout was exhausted during retry")
+		}
+		attempt := llm.ModelAttempt{
+			Number: number, MaxAttempts: policy.MaxAttempts, Provider: ref.Provider, Model: ref.Model,
+		}
+		inserted, err := s.store.RecordSupervisorModelStarted(ctx, result.Checkpoint, attempt)
+		if err != nil {
+			return result, apperror.Normalize(err)
+		}
+		if !inserted {
+			return result, apperror.New(apperror.CodeConflict, "model attempt is already active")
+		}
+		callCtx, cancel := supervisorModelContext(ctx, turn.Run.Budget, result.Checkpoint, 0)
+		startedAt := time.Now()
+		response, callErr := s.router.ChatModelRef(callCtx, ref, request)
+		attempt.Elapsed = time.Since(startedAt)
+		cancel()
+		result.Attempt = attempt
+		result.UnpersistedElapsed = attempt.Elapsed
+		if callErr == nil {
+			if response != nil {
+				if strings.TrimSpace(response.Provider) == "" {
+					response.Provider = ref.Provider
+				}
+				if strings.TrimSpace(response.Model) == "" {
+					response.Model = ref.Model
+				}
+			}
+			result.Response = response
+			return result, nil
+		}
+		providerErr := llm.NormalizeProviderError(ref.Provider, callErr)
+		attempt.Outcome = providerErr.Kind
+		attempt.ErrorText = providerErr.Error()
+		attempt.RetryAfter = providerErr.RetryAfter
+		attempt.RetryPlanned = providerErr.Kind.Retryable() && number < policy.MaxAttempts && ctx.Err() == nil &&
+			!supervisorModelBudgetExhausted(turn.Run.Budget, result.Checkpoint, attempt.Elapsed) && policy.allowsRetryAfter(providerErr)
+		result.Attempt = attempt
+		eventCtx, eventCancel := supervisorModelEventContext(ctx)
+		updated, eventErr := s.store.RecordSupervisorModelFailed(eventCtx, result.Checkpoint, attempt)
+		eventCancel()
+		if eventErr != nil {
+			return result, errors.Join(providerApplicationError(providerErr), eventErr)
+		}
+		result.Checkpoint = updated
+		result.UnpersistedElapsed = 0
+		appErr := providerApplicationError(providerErr)
+		if !attempt.RetryPlanned {
+			return result, appErr
+		}
+		if err := waitForModelRetry(ctx, policy.delay(number, providerErr)); err != nil {
+			return result, apperror.Normalize(err)
+		}
+	}
+	return result, apperror.New(apperror.CodeUnavailable, "model retry limit exhausted")
+}
+
+func (s *RunSupervisor) recordInvalidModelAttempt(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt *llm.ModelAttempt, providerErr *llm.ProviderError) (domain.SupervisorCheckpoint, error) {
+	if attempt == nil {
+		return domain.SupervisorCheckpoint{}, providerApplicationError(providerErr)
+	}
+	attempt.Outcome = llm.OutcomeInvalidResponse
+	attempt.ErrorText = providerErr.Error()
+	attempt.RetryAfter = 0
+	attempt.RetryPlanned = false
+	appErr := providerApplicationError(providerErr)
+	updated, err := s.store.RecordSupervisorModelFailed(ctx, checkpoint, *attempt)
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, errors.Join(appErr, err)
+	}
+	return updated, appErr
+}
+
+func providerApplicationError(providerErr *llm.ProviderError) error {
+	if providerErr == nil {
+		return apperror.New(apperror.CodeInternal, "provider failed without an error")
+	}
+	code := apperror.CodeFailedPrecondition
+	switch providerErr.Kind {
+	case llm.OutcomeRetryable:
+		code = apperror.CodeUnavailable
+	case llm.OutcomeRateLimited:
+		code = apperror.CodeResourceExhausted
+	case llm.OutcomeCancelled:
+		if errors.Is(providerErr, context.DeadlineExceeded) {
+			code = apperror.CodeDeadlineExceeded
+		} else {
+			code = apperror.CodeCancelled
+		}
+	case llm.OutcomeInvalidResponse, llm.OutcomePermanent:
+		code = apperror.CodeFailedPrecondition
+	}
+	return apperror.Wrap(code, providerErr.Error(), providerErr)
+}
+
+func normalizeModelRetryPolicy(policy ModelRetryPolicy) ModelRetryPolicy {
+	if policy.MaxAttempts <= 0 {
+		policy.MaxAttempts = 1
+	}
+	if policy.MaxAttempts > maxModelRetryAttempts {
+		policy.MaxAttempts = maxModelRetryAttempts
+	}
+	if policy.BaseDelay < 0 {
+		policy.BaseDelay = 0
+	}
+	if policy.MaxDelay < 0 {
+		policy.MaxDelay = 0
+	}
+	if policy.MaxDelay > 0 && policy.BaseDelay > policy.MaxDelay {
+		policy.BaseDelay = policy.MaxDelay
+	}
+	return policy
+}
+
+func (p ModelRetryPolicy) delay(attempt int, providerErr *llm.ProviderError) time.Duration {
+	p = normalizeModelRetryPolicy(p)
+	delay := p.BaseDelay
+	if providerErr != nil && providerErr.RetryAfter > 0 {
+		delay = providerErr.RetryAfter
+	} else if delay > 0 && attempt > 1 {
+		for range attempt - 1 {
+			if p.MaxDelay > 0 && delay >= p.MaxDelay/2 {
+				delay = p.MaxDelay
+				break
+			}
+			const maxDuration = time.Duration(1<<63 - 1)
+			if delay > maxDuration/2 {
+				delay = maxDuration
+				break
+			}
+			delay *= 2
+		}
+	}
+	if p.MaxDelay > 0 && delay > p.MaxDelay {
+		return p.MaxDelay
+	}
+	return delay
+}
+
+func (p ModelRetryPolicy) allowsRetryAfter(providerErr *llm.ProviderError) bool {
+	p = normalizeModelRetryPolicy(p)
+	if providerErr == nil || providerErr.RetryAfter <= 0 {
+		return true
+	}
+	return p.MaxDelay > 0 && providerErr.RetryAfter <= p.MaxDelay
+}
+
+func waitForModelRetry(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func supervisorModelEventContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx.Err() == nil {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+}
+
+func supervisorModelBudgetExhausted(budget domain.Budget, checkpoint domain.SupervisorCheckpoint, additional time.Duration) bool {
+	return budget.TimeoutSeconds > 0 && checkpoint.ExecutionMillis+additional.Milliseconds() >= budget.TimeoutSeconds*1000
+}
+
+func supervisorModelContext(ctx context.Context, budget domain.Budget, checkpoint domain.SupervisorCheckpoint, additional time.Duration) (context.Context, context.CancelFunc) {
 	if budget.TimeoutSeconds <= 0 {
 		return context.WithCancel(ctx)
 	}
-	remainingMillis := budget.TimeoutSeconds*1000 - checkpoint.ExecutionMillis
+	remainingMillis := budget.TimeoutSeconds*1000 - checkpoint.ExecutionMillis - additional.Milliseconds()
 	if remainingMillis <= 0 {
 		remainingMillis = 1
 	}
@@ -358,14 +633,10 @@ func supervisorMessages(history []session.Message, input string, summary context
 	return append(messages, llm.Message{Role: "user", Content: input})
 }
 
-func supervisorChat(ctx context.Context, router *llm.Router, route string, request llm.ChatRequest) (*llm.ChatResponse, error) {
+func supervisorModelRef(router *llm.Router, route string) (llm.ModelRef, error) {
 	route = strings.TrimSpace(route)
 	if strings.Contains(route, "/") {
-		ref, err := llm.ParseModelRef(route)
-		if err != nil {
-			return nil, err
-		}
-		return router.ChatModelRef(ctx, ref, request)
+		return llm.ParseModelRef(route)
 	}
-	return router.Chat(ctx, route, request)
+	return router.Resolve(route), nil
 }

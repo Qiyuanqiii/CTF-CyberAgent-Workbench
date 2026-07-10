@@ -3,9 +3,12 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestAnthropicCompatibleProviderChat(t *testing.T) {
@@ -69,6 +72,88 @@ func TestAnthropicCompatibleProviderChat(t *testing.T) {
 	}
 	if resp.Text != "hello from provider" || resp.Usage.TotalTokens != 10 {
 		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
+func TestAnthropicCompatibleProviderClassifiesHTTPFailures(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		retryAfter string
+		want       Outcome
+	}{
+		{name: "rate limit", statusCode: http.StatusTooManyRequests, retryAfter: "7", want: OutcomeRateLimited},
+		{name: "unavailable", statusCode: http.StatusServiceUnavailable, want: OutcomeRetryable},
+		{name: "overloaded", statusCode: 529, want: OutcomeRetryable},
+		{name: "auth", statusCode: http.StatusUnauthorized, want: OutcomePermanent},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if test.retryAfter != "" {
+					w.Header().Set("Retry-After", test.retryAfter)
+				}
+				w.WriteHeader(test.statusCode)
+				_, _ = w.Write([]byte(`{"error":"temporary"}`))
+			}))
+			defer server.Close()
+			provider, err := NewAnthropicCompatibleProvider(AnthropicCompatibleConfig{
+				Name: "test", BaseURL: server.URL, APIKey: "secret", DefaultModel: "model",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = provider.Chat(context.Background(), ChatRequest{Messages: []Message{{Role: "user", Content: "hello"}}})
+			var providerErr *ProviderError
+			if !errors.As(err, &providerErr) || providerErr.Kind != test.want || providerErr.StatusCode != test.statusCode {
+				t.Fatalf("unexpected provider error: %#v err=%v", providerErr, err)
+			}
+			if test.retryAfter != "" && providerErr.RetryAfter != 7*time.Second {
+				t.Fatalf("retry after = %s, want 7s", providerErr.RetryAfter)
+			}
+		})
+	}
+}
+
+func TestAnthropicCompatibleProviderRejectsMalformedAndEmptyResponses(t *testing.T) {
+	for _, body := range []string{`not-json`, `{"model":"model","content":[]}`} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(body))
+		}))
+		provider, err := NewAnthropicCompatibleProvider(AnthropicCompatibleConfig{
+			Name: "test", BaseURL: server.URL, APIKey: "secret", DefaultModel: "model",
+		})
+		if err != nil {
+			server.Close()
+			t.Fatal(err)
+		}
+		_, err = provider.Chat(context.Background(), ChatRequest{Messages: []Message{{Role: "user", Content: "hello"}}})
+		server.Close()
+		if ProviderErrorKind(err) != OutcomeInvalidResponse {
+			t.Fatalf("body %q outcome=%s err=%v", body, ProviderErrorKind(err), err)
+		}
+	}
+}
+
+func TestAnthropicHTTPErrorRedactsResponseBody(t *testing.T) {
+	token := "t" + "p-" + strings.Repeat("b", 40)
+	err := anthropicHTTPError("mimo", http.StatusTooManyRequests, "", []byte("MIMO_API_KEY="+token))
+	if strings.Contains(err.Error(), token[:12]) || !strings.Contains(err.Error(), "[REDACTED:") {
+		t.Fatalf("HTTP error leaked response secret: %q", err.Error())
+	}
+}
+
+func TestParseRetryAfterSupportsSecondsAndHTTPDate(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	if got := parseRetryAfter("4", now); got != 4*time.Second {
+		t.Fatalf("seconds retry-after = %s", got)
+	}
+	when := now.Add(5 * time.Second).Format(http.TimeFormat)
+	if got := parseRetryAfter(when, now); got != 5*time.Second {
+		t.Fatalf("date retry-after = %s", got)
+	}
+	if got := parseRetryAfter("9223372036854775807", now); got <= 0 {
+		t.Fatalf("overflow retry-after = %s", got)
 	}
 }
 

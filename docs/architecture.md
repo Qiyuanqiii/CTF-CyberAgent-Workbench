@@ -133,6 +133,8 @@ The supervisor owns process handles and channels only in memory. Durable IDs, st
 
 The current single-Agent slice persists cumulative input/output/total tokens, model-call execution milliseconds, and the redacted pending user input in the Supervisor checkpoint. A bounded executor performs only an operator-selected number of durable steps. Root model output uses strict `root_lifecycle.v1` JSON: `continue` returns to idle, `finish` completes the Run, and `wait` pauses it for explicit resume. Turn data, status, checkpoint, Session messages, and events commit in one transaction; arbitrary assistant text cannot mutate lifecycle state.
 
+Provider calls use typed outcomes: `retryable`, `rate_limited`, `invalid_response`, `cancelled`, or `permanent`. RunSupervisor retries only the first two, at most three attempts by default, with cancellation-aware exponential backoff. Server `Retry-After` is honored only when it is within the local maximum wait; a longer delay returns a stable rate-limit result instead of retrying early. Each attempt receives a durable sequential subject and emits `model.started` plus exactly one terminal model event. Terminal event persistence and model execution-time accounting share one transaction, so restart recovery neither loses nor double-charges completed attempt time.
+
 Ordinary text sent to a Run-bound Session uses this same Supervisor path. A `created` Run starts automatically, a paused Run resumes for follow-up input, and terminal or approval-waiting Runs reject new model turns. The input is checkpointed before the Provider call and is recovered after process restart without duplicating the committed user/assistant pair. Sessions without a Run retain an explicit legacy Router path during migration; slash commands remain command adapters rather than implicit Agent turns.
 
 ## Agent Coordinator
@@ -218,7 +220,7 @@ The initial product remains conservative: real public-network attack automation 
 
 ## LLM, Context, and Skills
 
-The LLM router remains independent from orchestration. Run snapshots record the selected provider/model route without persisting API keys.
+The LLM router remains independent from orchestration. Run snapshots record the selected provider/model route without persisting API keys. Providers normalize HTTP, network, protocol, and cancellation errors into typed outcomes; only RunSupervisor decides whether a side-effect-free model request may be retried. Legacy unbound Session chat receives typed errors through Router but does not gain an implicit retry loop.
 
 Context is assembled from:
 
@@ -248,7 +250,8 @@ run.status_changed
 agent.created
 agent.status_changed
 agent.message
-model.started / model.delta / model.completed / model.failed
+model.started / model.completed / model.failed
+model.delta (future streaming event)
 work_item.changed
 tool.proposed / tool.approved / tool.completed / tool.failed
 file_edit.proposed / file_edit.applied

@@ -16,3 +16,5 @@ CyberAgent Workbench preserves human-readable error text while assigning every f
 | `DEADLINE_EXCEEDED` | 9 | 504 | Operation exceeded its deadline |
 
 `apperror.Normalize` provides a compatibility bridge for legacy plain Go errors. New application services should return typed errors directly and must not branch on human-readable text.
+
+Provider failures use a separate `llm.Outcome` classification before mapping into this contract. Exhausted retryable transport failures map to `UNAVAILABLE`; rate limits map to `RESOURCE_EXHAUSTED`; invalid/permanent responses map to `FAILED_PRECONDITION`; caller cancellation and model deadlines map to `CANCELLED` and `DEADLINE_EXCEEDED`. The original typed Provider error remains available through Go error unwrapping, while persisted and user-facing text is redacted.

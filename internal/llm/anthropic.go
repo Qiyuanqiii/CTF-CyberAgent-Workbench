@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -124,30 +125,33 @@ func (p *AnthropicCompatibleProvider) Chat(ctx context.Context, req ChatRequest)
 	body := p.toRequest(model, req)
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return nil, NewProviderError(OutcomePermanent, p.name, "could not encode request", err)
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint("/v1/messages"), bytes.NewReader(payload))
 	if err != nil {
-		return nil, err
+		return nil, NewProviderError(OutcomePermanent, p.name, "could not create request", err)
 	}
 	p.addHeaders(httpReq)
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return nil, err
+		return nil, NormalizeProviderError(p.name, err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	if err != nil {
-		return nil, err
+		return nil, NormalizeProviderError(p.name, err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("provider %s returned HTTP %d: %s", p.name, resp.StatusCode, trimForError(redact.String(string(raw)), 700))
+		return nil, anthropicHTTPError(p.name, resp.StatusCode, resp.Header.Get("Retry-After"), raw)
 	}
 	var parsed anthropicMessageResponse
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, err
+		return nil, NewProviderError(OutcomeInvalidResponse, p.name, "returned malformed JSON", err)
 	}
 	text := parsed.Text()
+	if strings.TrimSpace(text) == "" {
+		return nil, NewProviderError(OutcomeInvalidResponse, p.name, "returned an empty text response", nil)
+	}
 	return &ChatResponse{
 		Text:     text,
 		Raw:      raw,
@@ -159,6 +163,47 @@ func (p *AnthropicCompatibleProvider) Chat(ctx context.Context, req ChatRequest)
 			TotalTokens:  parsed.Usage.InputTokens + parsed.Usage.OutputTokens,
 		},
 	}, nil
+}
+
+func anthropicHTTPError(provider string, statusCode int, retryAfterHeader string, raw []byte) *ProviderError {
+	kind := OutcomePermanent
+	switch statusCode {
+	case http.StatusTooManyRequests:
+		kind = OutcomeRateLimited
+	case http.StatusRequestTimeout, http.StatusTooEarly, http.StatusInternalServerError,
+		http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout, 529:
+		kind = OutcomeRetryable
+	}
+	message := fmt.Sprintf("returned HTTP %d", statusCode)
+	if detail := trimForError(redact.String(string(raw)), 700); detail != "" {
+		message += ": " + detail
+	}
+	err := NewProviderError(kind, provider, message, nil)
+	err.StatusCode = statusCode
+	err.RetryAfter = parseRetryAfter(retryAfterHeader, time.Now())
+	return err
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		const maxDuration = time.Duration(1<<63 - 1)
+		if seconds > int64(maxDuration/time.Second) {
+			return maxDuration
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	when, err := http.ParseTime(value)
+	if err != nil || !when.After(now) {
+		return 0
+	}
+	return when.Sub(now)
 }
 
 func (p *AnthropicCompatibleProvider) StreamChat(ctx context.Context, req ChatRequest) (<-chan ChatChunk, error) {

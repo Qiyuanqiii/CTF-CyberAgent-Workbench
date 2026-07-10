@@ -31,9 +31,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 61%.
+- Overall product vision: about 63%.
 - v0.1 generic agent MVP: about 98%.
-- V2 run-centric runtime: about 68%.
+- V2 run-centric runtime: about 72%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -107,12 +107,19 @@ Completed:
 - Schema v7 checkpoints redacted, 64 KiB-bounded pending input before the Provider call; restart recovery reuses the authoritative input and commits one exact user/assistant pair atomically with lifecycle state and events.
 - Unbound legacy Sessions retain an explicit direct Router compatibility path, while slash commands remain existing command adapters.
 - RunSupervisor now feeds the latest compacted Session summary back into later model context.
+- Added typed Provider outcomes for retryable transport errors, rate limits, invalid responses, cancellation, and permanent failures; Router preserves those types across provider boundaries.
+- Anthropic-compatible HTTP failures classify 429, 408/425, 5xx/529, permanent 4xx, malformed JSON, empty responses, and bounded `Retry-After` without exposing API keys or raw unredacted error text.
+- RunSupervisor now performs at most three side-effect-free model attempts by default with cancellation-aware exponential backoff; long server retry delays are returned rather than shortened.
+- Added durable sequential `model.started`, `model.completed`, and `model.failed` events. Attempt numbering resumes across Store restart and Store rejects stale, duplicate-terminal, or out-of-order writes.
+- Model terminal events and execution-millisecond accounting commit atomically; replay is idempotent and cannot double-charge the budget.
+- Parent-context cancellation uses a bounded audit-only context to persist the cancelled model event and elapsed time while leaving the Supervisor turn recoverable.
+- A failed custom pending input survives rate-limit exhaustion and can be resumed by `run step` without being replaced by the Mission goal.
 
 Not done yet:
 
 - OpenAI-compatible/Ollama providers.
 - Dedicated TUI file-edit pane with key-driven edit approval/denial.
-- Streaming token updates and provider cancellation.
+- Streaming token updates, `model.delta`, and cross-process active-call cancellation.
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
@@ -141,6 +148,10 @@ Residual risks to address soon:
 - One Provider response can exceed the remaining token allowance; actual usage is committed conservatively and the next call is blocked.
 - Budget exhaustion leaves the Run in `running` until an operator explicitly finishes, fails, or cancels it. Only a validated structured action can change lifecycle state; free-form model text cannot.
 - Strict lifecycle JSON may fail with providers that ignore the response contract; invalid output is audited as `turn_failed` but automatic repair retries are not implemented yet.
+- Provider retry is enabled only inside RunSupervisor; legacy unbound Sessions receive typed errors but still use the direct, non-retrying Router compatibility path.
+- Retry backoff is deterministic and intentionally capped at three attempts/2 seconds for the local single-user runtime. Add jitter before enabling concurrent remote workers.
+- A server `Retry-After` above the local ceiling is not auto-retried; the Run remains running with a failed Supervisor turn and preserved input until a later operator retry.
+- If the process dies after `model.completed` but before the turn transaction, recovery may repeat the side-effect-free model request under the next durable attempt number; tool calls remain disabled for this reason.
 - Root `wait` currently maps to `paused` plus a textual reason; structured dependencies and approvals are future Coordinator/Work Board work.
 - Unbound Sessions still use the direct Router compatibility path. New product flows should create a Run instead of expanding this legacy path.
 - Slash commands are intentionally separate command adapters; they do not consume a Supervisor turn yet, and future Tool Gateway work must unify their approval/event behavior without silently executing tools.
@@ -233,13 +244,16 @@ Expected context behavior:
 - Final gate passed with `go test -count=1 ./...`, `go vet ./...`, and targeted `go test -race` across error, domain, event, application, store, session, LLM, and app packages.
 - Session/Run integration tests passed for automatic start, wait/resume across Store restart, terminal rejection, legacy unbound compatibility, pending-input conflict/size/redaction boundaries, compacted-summary reuse, and exactly-once messages/events.
 - Isolated CLI smoke passed across separate processes with Run-bound `session send`, visible action/status metadata, `idle/next_turn=2`, one message pair, one started/completed event pair, and an unbound legacy Session fallback.
+- Provider tests passed for HTTP 429/503/529/401 classification, malformed/empty responses, numeric/date/overflow `Retry-After`, network/cancellation normalization, and redacted error bodies.
+- RunSupervisor retry tests passed for two transient failures then one commit, permanent no-retry, rate-limit exhaustion plus pending-input recovery, long `Retry-After` refusal, cancellation during call/backoff, cross-Store attempt continuation, and idempotent execution-time accounting.
+- Isolated Provider CLI smoke showed `model_attempts: 1`, `model_outcome: success`, one `model.started`, one `model.completed`, no `model.failed`, and an idle next-turn checkpoint.
 
 ## Recommended Next Slice
 
-Continue P2 with a normalized Provider execution boundary:
+Continue P2 with protocol repair and a real streaming boundary:
 
-- Introduce typed Provider outcomes for retryable transport failure, rate limiting, invalid protocol, cancellation, and permanent failure.
-- Add bounded retry with backoff and durable attempt events; never retry committed turns or tool side effects.
-- Normalize `model.started`, `model.completed`, and `model.failed` events before adding token deltas.
-- Pause or return a stable retry state on rate limits while preserving pending input and remaining budgets.
+- Add one bounded root-lifecycle repair attempt with an explicit corrective prompt; keep transport retries and protocol repair as separate counters/events.
+- Introduce a Supervisor stream aggregator with UTF-8/output limits, cancellation, and final usage reconciliation.
+- Persist normalized `model.delta` events only through a bounded/coalesced policy so token streams cannot flood SQLite.
+- Expose live cancellation through the future application service boundary without letting UI code own Provider contexts.
 - Keep tool execution and multi-agent concurrency disabled.

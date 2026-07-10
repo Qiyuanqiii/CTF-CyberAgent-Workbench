@@ -162,7 +162,7 @@ func TestRunCLISupervisorStepAndCheckpoint(t *testing.T) {
 		t.Fatalf("run start failed: %s", stderr)
 	}
 	stepped, stderr, code := executeTestCommand(t, "run", "step", runID)
-	if code != 0 || !strings.Contains(stepped, "turn 1 completed") || !strings.Contains(stepped, "action: continue") || !strings.Contains(stepped, "run_status: running") || !strings.Contains(stepped, "next_turn: 2") {
+	if code != 0 || !strings.Contains(stepped, "turn 1 completed") || !strings.Contains(stepped, "model_attempts: 1") || !strings.Contains(stepped, "model_outcome: success") || !strings.Contains(stepped, "action: continue") || !strings.Contains(stepped, "run_status: running") || !strings.Contains(stepped, "next_turn: 2") {
 		t.Fatalf("unexpected step output=%s stderr=%s code=%d", stepped, stderr, code)
 	}
 	checkpoint, stderr, code := executeTestCommand(t, "run", "checkpoint", runID)
@@ -174,7 +174,7 @@ func TestRunCLISupervisorStepAndCheckpoint(t *testing.T) {
 		t.Fatalf("unexpected budget result code=%d stderr=%s", code, stderr)
 	}
 	timeline, stderr, code := executeTestCommand(t, "run", "events", runID)
-	if code != 0 || strings.Count(timeline, "agent.turn_started") != 1 || strings.Count(timeline, "agent.turn_completed") != 1 {
+	if code != 0 || strings.Count(timeline, "agent.turn_started") != 1 || strings.Count(timeline, "agent.turn_completed") != 1 || strings.Count(timeline, "model.started") != 1 || strings.Count(timeline, "model.completed") != 1 || strings.Count(timeline, "model.failed") != 0 {
 		t.Fatalf("unexpected supervisor timeline output=%s stderr=%s", timeline, stderr)
 	}
 }

@@ -20,6 +20,8 @@ The v0.1 scaffold focuses on stable boundaries:
 - strict `root_lifecycle.v1` actions with Supervisor-owned `continue`, `finish`, and resumable `wait`
 - ordinary Run-bound Session chat routed through the same RunSupervisor, budgets, policy, and event stream
 - durable, redacted pending user input with restart recovery and exactly-once Session message commit
+- typed Provider outcomes with bounded, cancellation-aware retry and `Retry-After` handling
+- durable `model.started`, `model.completed`, and `model.failed` events with per-attempt execution accounting
 - workspace-scoped list/read commands for safe file context
 - secret redaction before file context, session storage, context summaries, tool runs, and provider calls
 - tool proposal and approval flow for session `/run`
@@ -95,7 +97,7 @@ Local runtime databases, workspace data, environment files, API keys, IDE metada
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 now supports resumable no-tool root Agent turns, cumulative token/model-time accounting, a bounded execution loop, strict Supervisor-owned `continue`, `finish`, and `wait` actions, and one Run execution path for ordinary CLI/TUI Session chat. Next comes typed provider outcomes, bounded retry/rate-limit handling, cancellation, and normalized stream events before structured work items/notes or multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 now supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, and normalized model attempt events. Next comes bounded lifecycle-protocol repair and a real `model.delta` streaming/cancellation path before structured work items/notes or multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
 TUI quick controls: `cyberagent tui` opens a session picker. In chat, `Tab` switches focus, `PgUp/PgDn` scroll messages, `j/k` select tool runs, `a` approves, `d` denies, `Ctrl+R` refreshes, and `Esc` quits. Slow sends, refreshes, and tool approvals run through async commands with visible status text such as `thinking...`, `proposing tool...`, or `approving...`. Attached workspaces render in the side panel with local directory counts for attachments, scripts, outputs, logs, and writeups.
 

@@ -79,13 +79,17 @@ func (r *Router) Chat(ctx context.Context, route string, req ChatRequest) (*Chat
 func (r *Router) ChatModelRef(ctx context.Context, ref ModelRef, req ChatRequest) (*ChatResponse, error) {
 	provider, ok := r.providers[ref.Provider]
 	if !ok {
-		return nil, fmt.Errorf("provider %q is not registered", ref.Provider)
+		return nil, NewProviderError(OutcomePermanent, ref.Provider, fmt.Sprintf("provider %q is not registered", ref.Provider), nil)
 	}
 	if req.Model == "" {
 		req.Model = ref.Model
 	}
 	req = redactRequest(req)
-	return provider.Chat(ctx, req)
+	response, err := provider.Chat(ctx, req)
+	if err != nil {
+		return nil, NormalizeProviderError(ref.Provider, err)
+	}
+	return response, nil
 }
 
 func (r *Router) ListModels(ctx context.Context) ([]ModelInfo, error) {

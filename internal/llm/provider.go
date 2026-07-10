@@ -65,7 +65,7 @@ type ToolCall struct {
 }
 
 type Usage struct {
-	InputTokens  int
-	OutputTokens int
-	TotalTokens  int
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	TotalTokens  int `json:"total_tokens"`
 }
