@@ -27,6 +27,7 @@ type SupervisorStore interface {
 	BindSupervisorTurnInput(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string) (domain.SupervisorCheckpoint, error)
 	NextSupervisorModelAttempt(ctx context.Context, checkpoint domain.SupervisorCheckpoint, protocolRepair int) (int, int, error)
 	RecordSupervisorModelStarted(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt) (bool, error)
+	RecordSupervisorModelCancelRequested(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, reason string) (bool, error)
 	RecordSupervisorModelDelta(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, delta llm.ModelDelta) (bool, error)
 	RecordSupervisorModelCompleted(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, response llm.ChatResponse) (domain.SupervisorCheckpoint, error)
 	RecordSupervisorModelFailed(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt) (domain.SupervisorCheckpoint, error)
@@ -101,10 +102,14 @@ type RunSupervisor struct {
 	router      *llm.Router
 	checker     policy.Checker
 	retryPolicy ModelRetryPolicy
+	activeCalls *ActiveCallRegistry
 }
 
 func NewRunSupervisor(store SupervisorStore, router *llm.Router, checker policy.Checker) *RunSupervisor {
-	return &RunSupervisor{store: store, router: router, checker: checker, retryPolicy: DefaultModelRetryPolicy()}
+	return &RunSupervisor{
+		store: store, router: router, checker: checker, retryPolicy: DefaultModelRetryPolicy(),
+		activeCalls: NewActiveCallRegistry(),
+	}
 }
 
 type ModelRetryPolicy struct {
@@ -124,6 +129,13 @@ func (s *RunSupervisor) WithModelRetryPolicy(policy ModelRetryPolicy) *RunSuperv
 	return s
 }
 
+func (s *RunSupervisor) WithActiveCalls(registry *ActiveCallRegistry) *RunSupervisor {
+	if s != nil && registry != nil {
+		s.activeCalls = registry
+	}
+	return s
+}
+
 func (s *RunSupervisor) Step(ctx context.Context, runID string) (LifecycleResult, error) {
 	return s.step(ctx, runID, "")
 }
@@ -137,7 +149,7 @@ func (s *RunSupervisor) StepWithInput(ctx context.Context, runID string, input s
 }
 
 func (s *RunSupervisor) step(ctx context.Context, runID string, requestedInput string) (LifecycleResult, error) {
-	if s == nil || s.store == nil || s.router == nil || s.checker == nil {
+	if s == nil || s.store == nil || s.router == nil || s.checker == nil || s.activeCalls == nil {
 		return LifecycleResult{}, apperror.New(apperror.CodeFailedPrecondition, "run supervisor dependencies are required")
 	}
 	turn, err := s.store.BeginSupervisorTurn(ctx, runID, requestedInput)
@@ -484,24 +496,39 @@ func (s *RunSupervisor) callModelWithRetry(ctx context.Context, turn domain.Supe
 			ProtocolRepair: protocolRepair, Provider: ref.Provider, Model: ref.Model,
 		}
 		globalAttempt++
-		inserted, err := s.store.RecordSupervisorModelStarted(ctx, result.Checkpoint, attempt)
+		lease, err := s.activeCalls.reserve(ctx, result.Checkpoint, attempt)
 		if err != nil {
 			return result, apperror.Normalize(err)
 		}
+		inserted, err := s.store.RecordSupervisorModelStarted(ctx, result.Checkpoint, attempt)
+		if err != nil {
+			lease.Abort()
+			return result, apperror.Normalize(err)
+		}
 		if !inserted {
+			lease.Abort()
 			return result, apperror.New(apperror.CodeConflict, "model attempt is already active")
 		}
-		callCtx, cancel := supervisorModelContext(ctx, turn.Run.Budget, result.Checkpoint, 0)
+		if err := lease.Activate(); err != nil {
+			lease.Abort()
+			return result, apperror.Normalize(err)
+		}
+		callCtx, budgetCancel := supervisorModelContext(lease.Context(), turn.Run.Budget, result.Checkpoint, 0)
 		startedAt := time.Now()
-		streamed, callErr := s.streamModel(callCtx, result.Checkpoint, attempt, ref, request)
+		streamed, callErr := s.streamModel(callCtx, result.Checkpoint, attempt, ref, request, lease)
 		attempt.Elapsed = time.Since(startedAt)
-		cancel()
 		attempt.StreamEvents = streamed.Events
 		attempt.StreamBytes = streamed.Bytes
 		result.Attempt = attempt
 		result.UnpersistedElapsed = attempt.Elapsed
 		result.StreamEvents += streamed.Events
 		result.StreamBytes += streamed.Bytes
+		liveOutcome := llm.OutcomeSuccess
+		if callErr != nil {
+			liveOutcome = llm.NormalizeProviderError(ref.Provider, callErr).Kind
+		}
+		lease.Finish(liveOutcome)
+		budgetCancel()
 		if callErr == nil {
 			result.Response = streamed.Response
 			return result, nil

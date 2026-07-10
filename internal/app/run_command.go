@@ -64,7 +64,7 @@ func (a *App) runSupervisorStep(ctx context.Context, args []string) error {
 	if fs.NArg() != 1 {
 		return errors.New("usage: cyberagent run step <run-id>")
 	}
-	result, err := application.NewRunSupervisor(a.store, a.router, a.checker).Step(ctx, fs.Arg(0))
+	result, err := a.newRunSupervisor().Step(ctx, fs.Arg(0))
 	if err != nil {
 		return err
 	}
@@ -87,7 +87,7 @@ func (a *App) runSupervisorExecute(ctx context.Context, args []string) error {
 	if fs.NArg() != 1 || *maxSteps <= 0 {
 		return errors.New("usage: cyberagent run execute <run-id> [--max-steps <n>] [--finish] [--summary <text>]")
 	}
-	supervisor := application.NewRunSupervisor(a.store, a.router, a.checker)
+	supervisor := a.newRunSupervisor()
 	result, err := supervisor.Execute(ctx, fs.Arg(0), *maxSteps)
 	for _, step := range result.Steps {
 		fmt.Fprintf(a.out, "turn %d\t%s\t%s/%s\tattempts=%d\trepairs=%d\tstream_events=%d\ttokens=%d\tnext=%d\n",
@@ -131,7 +131,7 @@ func (a *App) runSupervisorFinalize(ctx context.Context, outcome application.Lif
 	if fs.NArg() != 1 {
 		return fmt.Errorf("usage: cyberagent run %s <run-id> [--%s <text>]", name, flagName)
 	}
-	result, err := application.NewRunSupervisor(a.store, a.router, a.checker).Finalize(ctx, fs.Arg(0), outcome, *text)
+	result, err := a.newRunSupervisor().Finalize(ctx, fs.Arg(0), outcome, *text)
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func (a *App) runSupervisorCheckpoint(ctx context.Context, args []string) error 
 	if fs.NArg() != 1 {
 		return errors.New("usage: cyberagent run checkpoint <run-id>")
 	}
-	checkpoint, ok, err := application.NewRunSupervisor(a.store, a.router, a.checker).Checkpoint(ctx, fs.Arg(0))
+	checkpoint, ok, err := a.newRunSupervisor().Checkpoint(ctx, fs.Arg(0))
 	if err != nil {
 		return err
 	}

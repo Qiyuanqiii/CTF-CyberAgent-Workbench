@@ -139,6 +139,10 @@ Every Supervisor model attempt uses `StreamChat`. The stream aggregator reconstr
 
 Incremental persistence is deliberately metadata-only. One attempt may append at most 32 ordered `model.delta` events carrying sequence, chunk count, byte count, cumulative bytes, and completion state. The Store validates idempotent replay, strict ordering, size limits, and exact agreement between the durable delta ledger and the terminal model event. Model text remains in bounded process memory until the validated turn transaction writes the final redacted assistant message.
 
+The Go application layer owns an in-process `ActiveCallRegistry`. A call is reserved before `model.started` to reject concurrent Provider calls for the same Run, but it becomes queryable and cancellable only after that durable start succeeds. Registry entries are keyed by Run plus Supervisor/model-attempt identity, own the Provider cancellation function, and are removed on every Provider terminal path. Explicit cancellation writes one idempotent, redacted `model.cancel_requested` event before signalling the context.
+
+Live call subscribers receive a versioned metadata-only envelope for snapshot, progress, cancellation request, completion, and failure. Each subscriber has a 32-event buffer; a slow subscriber is closed instead of blocking the Provider. This transient stream has no replay guarantee and intentionally has no model-text field. Future user-facing text streaming needs a separate Go-owned redaction and lifecycle-projection boundary.
+
 If a response fails strict `root_lifecycle.v1` parsing, the Supervisor persists a redacted diagnostic and requests exactly one protocol repair without replaying the raw output. Repair transport retries use their own bounded counter. Pending repair resumes after restart, exhausted repair never calls the Provider again, and request/start/completion/failure transitions are append-only Run events. Only a validated repaired response can reach Session history.
 
 Ordinary text sent to a Run-bound Session uses this same Supervisor path. A `created` Run starts automatically, a paused Run resumes for follow-up input, and terminal or approval-waiting Runs reject new model turns. The input is checkpointed before the Provider call and is recovered after process restart without duplicating the committed user/assistant pair. Sessions without a Run retain an explicit legacy Router path during migration; slash commands remain command adapters rather than implicit Agent turns.
@@ -257,6 +261,7 @@ agent.created
 agent.status_changed
 agent.message
 model.started / model.completed / model.failed
+model.cancel_requested
 supervisor.protocol_repair_requested / supervisor.protocol_repair_started
 supervisor.protocol_repair_completed / supervisor.protocol_repair_failed
 model.delta (bounded, text-free stream progress)
@@ -271,7 +276,7 @@ supervisor.action_committed
 supervisor.run_waiting / supervisor.run_completed / supervisor.run_failed
 ```
 
-CLI and headless mode print persisted events. Bubble Tea renders them locally. A future Go application service will publish bounded, redacted live text to in-memory subscribers and expose the normalized envelope over WebSocket to TypeScript. Persisted `model.delta` remains counter-only, and UI clients never own Provider contexts or cancellation functions.
+CLI and headless mode print persisted events. The Go application layer now publishes bounded live call metadata in memory; Bubble Tea does not consume it yet. A future adapter will expose that envelope over WebSocket and add a separately reviewed user-facing text projection. Persisted `model.delta` remains counter-only, and UI clients never own Provider contexts or cancellation functions.
 
 ## Persistence
 

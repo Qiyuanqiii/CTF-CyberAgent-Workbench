@@ -15,6 +15,7 @@ import (
 
 	"cyberagent-workbench/internal/agent"
 	"cyberagent-workbench/internal/apperror"
+	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/sandbox"
@@ -34,25 +35,38 @@ type App struct {
 	router  *llm.Router
 	checker policy.Checker
 	kernel  *agent.Kernel
+	calls   *application.ActiveCallRegistry
 }
 
 func Execute(args []string, out io.Writer, errOut io.Writer) int {
+	return ExecuteContext(context.Background(), args, out, errOut)
+}
+
+func ExecuteContext(ctx context.Context, args []string, out io.Writer, errOut io.Writer) int {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	app := &App{
 		home:    DefaultHome(),
 		out:     out,
 		errOut:  errOut,
 		router:  llm.NewDefaultRouter(),
 		checker: policy.NewDefaultChecker(),
+		calls:   application.NewActiveCallRegistry(),
 	}
 	app.registerEnvProviders()
 	defer app.Close()
 
-	if err := app.dispatch(context.Background(), args); err != nil {
+	if err := app.dispatch(ctx, args); err != nil {
 		classified := apperror.Normalize(err)
 		fmt.Fprintln(errOut, "error:", classified)
 		return apperror.ExitCode(classified)
 	}
 	return 0
+}
+
+func (a *App) newRunSupervisor() *application.RunSupervisor {
+	return application.NewRunSupervisor(a.store, a.router, a.checker).WithActiveCalls(a.calls)
 }
 
 func (a *App) registerEnvProviders() {

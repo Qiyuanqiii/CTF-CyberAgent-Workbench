@@ -30,6 +30,13 @@ func NewSessionRunChatExecutor(store SessionRunStore, router *llm.Router, checke
 	}
 }
 
+func (e *SessionRunChatExecutor) WithActiveCalls(registry *ActiveCallRegistry) *SessionRunChatExecutor {
+	if e != nil && e.supervisor != nil {
+		e.supervisor.WithActiveCalls(registry)
+	}
+	return e
+}
+
 func (e *SessionRunChatExecutor) ExecuteSessionTurn(ctx context.Context, sess session.Session, input string) (session.RunChatResult, bool, error) {
 	if e == nil || e.store == nil || e.runs == nil || e.supervisor == nil {
 		return session.RunChatResult{}, false, apperror.New(apperror.CodeFailedPrecondition, "session run chat dependencies are required")

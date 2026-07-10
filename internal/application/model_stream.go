@@ -28,6 +28,7 @@ type modelStreamAggregator struct {
 	checkpoint domain.SupervisorCheckpoint
 	attempt    llm.ModelAttempt
 	ref        llm.ModelRef
+	live       *activeCallLease
 
 	output        bytes.Buffer
 	pendingChunks int
@@ -36,12 +37,12 @@ type modelStreamAggregator struct {
 	durableBytes  int
 }
 
-func (s *RunSupervisor) streamModel(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, ref llm.ModelRef, request llm.ChatRequest) (modelStreamResult, error) {
+func (s *RunSupervisor) streamModel(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, ref llm.ModelRef, request llm.ChatRequest, live *activeCallLease) (modelStreamResult, error) {
 	chunks, err := s.router.StreamChatModelRef(ctx, ref, request)
 	if err != nil {
 		return modelStreamResult{}, err
 	}
-	aggregator := &modelStreamAggregator{supervisor: s, checkpoint: checkpoint, attempt: attempt, ref: ref}
+	aggregator := &modelStreamAggregator{supervisor: s, checkpoint: checkpoint, attempt: attempt, ref: ref, live: live}
 	return aggregator.consume(ctx, chunks)
 }
 
@@ -144,6 +145,11 @@ func (a *modelStreamAggregator) appendText(text string) error {
 	_, _ = a.output.WriteString(text)
 	a.pendingChunks++
 	a.pendingBytes += len(text)
+	if a.live != nil {
+		if err := a.live.PublishProgress(len(text), a.output.Len()); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

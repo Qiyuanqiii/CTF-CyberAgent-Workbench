@@ -310,6 +310,70 @@ func (s *SQLiteStore) RecordSupervisorModelStarted(ctx context.Context, checkpoi
 	return true, nil
 }
 
+func (s *SQLiteStore) RecordSupervisorModelCancelRequested(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, reason string) (bool, error) {
+	if err := checkpoint.Validate(); err != nil {
+		return false, err
+	}
+	if checkpoint.Phase != domain.SupervisorTurnStarted {
+		return false, apperror.New(apperror.CodeFailedPrecondition, "only a started supervisor turn can cancel a model call")
+	}
+	attempt = sanitizeModelAttempt(attempt)
+	if attempt.Outcome != "" || strings.TrimSpace(attempt.ErrorText) != "" || attempt.StreamEvents != 0 || attempt.StreamBytes != 0 {
+		return false, apperror.New(apperror.CodeInvalidArgument, "model cancellation requires the original started attempt")
+	}
+	if err := attempt.ValidateStarted(); err != nil {
+		return false, apperror.Wrap(apperror.CodeInvalidArgument, "invalid model cancellation attempt", err)
+	}
+	reason = sanitizeSupervisorText(reason)
+	if reason == "" {
+		reason = "active model call cancellation requested"
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	run, _, err := requireActiveSupervisorAttemptTx(ctx, tx, checkpoint)
+	if err != nil {
+		return false, err
+	}
+	subject := supervisorModelSubject(checkpoint, attempt.Number)
+	if err := requireSupervisorModelStartedMatchTx(ctx, tx, run.ID, subject, attempt); err != nil {
+		return false, err
+	}
+	exists, err := supervisorModelEventExistsTx(ctx, tx, run.ID, events.ModelCancelRequestedEvent, subject)
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	for _, terminalType := range []string{events.ModelCompletedEvent, events.ModelFailedEvent} {
+		exists, err := supervisorModelEventExistsTx(ctx, tx, run.ID, terminalType, subject)
+		if err != nil {
+			return false, err
+		}
+		if exists {
+			return false, apperror.New(apperror.CodeFailedPrecondition, "model attempt is already terminal")
+		}
+	}
+	if err := appendSupervisorEventTx(ctx, tx, run, events.ModelCancelRequestedEvent, "run_supervisor", subject, map[string]any{
+		"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
+		"model_attempt": attempt.Number, "transport_attempt": attempt.TransportNumber(),
+		"protocol_repair": attempt.ProtocolRepair, "provider": attempt.Provider, "model": attempt.Model,
+		"reason": reason,
+	}); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *SQLiteStore) RecordSupervisorModelDelta(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, delta llm.ModelDelta) (bool, error) {
 	if err := checkpoint.Validate(); err != nil {
 		return false, err

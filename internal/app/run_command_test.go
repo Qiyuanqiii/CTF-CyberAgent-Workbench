@@ -2,9 +2,13 @@ package app
 
 import (
 	"bytes"
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 var runIDPattern = regexp.MustCompile(`run-[0-9]{14}-[a-f0-9]{12}`)
@@ -18,6 +22,75 @@ func executeTestCommand(t *testing.T, args ...string) (string, string, int) {
 	var errOut bytes.Buffer
 	code := Execute(args, &out, &errOut)
 	return out.String(), errOut.String(), code
+}
+
+func TestExecuteContextCancelsProviderAndPersistsFailure(t *testing.T) {
+	t.Setenv("CYBERAGENT_HOME", t.TempDir())
+	entered := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		close(entered)
+		<-request.Context().Done()
+	}))
+	defer server.Close()
+	t.Setenv("MIMO_API_KEY", "test-provider-key")
+	t.Setenv("MIMO_BASE_URL", server.URL)
+	t.Setenv("MIMO_MODEL", "test-model")
+
+	created, stderr, code := executeTestCommand(t, "run", "create", "signal cancellation", "--profile", "review", "--route", "mimo/test-model")
+	if code != 0 {
+		t.Fatalf("run create failed: %s", stderr)
+	}
+	runID := runIDPattern.FindString(created)
+	if runID == "" {
+		t.Fatalf("missing run id: %s", created)
+	}
+	if _, stderr, code := executeTestCommand(t, "run", "start", runID); code != 0 {
+		t.Fatalf("run start failed: %s", stderr)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	type commandResult struct {
+		stderr string
+		code   int
+	}
+	done := make(chan commandResult, 1)
+	go func() {
+		var out bytes.Buffer
+		var errOut bytes.Buffer
+		code := ExecuteContext(ctx, []string{"run", "step", runID}, &out, &errOut)
+		done <- commandResult{stderr: errOut.String(), code: code}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("streaming provider was not called")
+	}
+	cancel()
+	var result commandResult
+	select {
+	case result = <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("cancelled CLI context did not stop the provider call")
+	}
+	if result.code != 7 || !strings.Contains(result.stderr, "context canceled") {
+		t.Fatalf("unexpected cancelled command result: code=%d stderr=%s", result.code, result.stderr)
+	}
+	timeline, stderr, code := executeTestCommand(t, "run", "events", runID)
+	if code != 0 {
+		t.Fatalf("run events failed: %s", stderr)
+	}
+	if strings.Count(timeline, "model.failed") != 1 || !strings.Contains(timeline, `"outcome":"cancelled"`) {
+		t.Fatalf("provider cancellation was not durably audited: %s", timeline)
+	}
+	checkpoint, stderr, code := executeTestCommand(t, "run", "checkpoint", runID)
+	if code != 0 || !strings.Contains(checkpoint, "phase: turn_started") {
+		t.Fatalf("cancelled turn was not recoverable: code=%d stderr=%s checkpoint=%s", code, stderr, checkpoint)
+	}
 }
 
 func TestRunCLIEndToEndLifecycle(t *testing.T) {

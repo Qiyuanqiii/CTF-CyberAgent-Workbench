@@ -34,7 +34,7 @@ func (a *App) sessionCommand(ctx context.Context, args []string) error {
 }
 
 func (a *App) newSessionManager() *session.Manager {
-	executor := application.NewSessionRunChatExecutor(a.store, a.router, a.checker)
+	executor := application.NewSessionRunChatExecutor(a.store, a.router, a.checker).WithActiveCalls(a.calls)
 	return session.NewManager(a.store, a.router, a.checker).WithRunChatExecutor(executor)
 }
 

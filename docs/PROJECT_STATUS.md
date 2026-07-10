@@ -31,9 +31,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 67%.
+- Overall product vision: about 68%.
 - v0.1 generic agent MVP: about 98%.
-- V2 run-centric runtime: about 80%.
+- V2 run-centric runtime: about 83%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -125,12 +125,17 @@ Completed:
 - The Supervisor stream aggregator accepts UTF-8 code points split across transport chunks, rejects invalid final UTF-8 or output above 64 KiB, preserves cancellation semantics, and feeds the existing retry, repair, budget, and terminal transactions.
 - Each model attempt persists at most 32 ordered `model.delta` records containing only sequence/chunk/byte/done counters. Store validation makes replay idempotent and requires terminal stream counters to match the durable delta ledger.
 - `run step` and `run execute` expose `stream_events` and `stream_bytes` without persisting model text in incremental events.
+- Added an application-owned, concurrency-safe ActiveCallRegistry keyed by Run and attempt identity. Reservations prevent duplicate Provider calls, while public visibility begins only after durable `model.started` persistence.
+- Added in-process active-call lookup/list, idempotent audited cancellation, and a versioned metadata-only subscription envelope for snapshot/progress/cancel/completed/failed states.
+- Each subscriber has a 32-event buffer and is disconnected when slow; Provider execution never waits for a live consumer and persisted `model.delta` remains the only restart-safe progress ledger.
+- Explicit cancellation persists one redacted `model.cancel_requested` before signalling the Go-owned context. All Provider terminal paths remove the active entry, and cancellation races report whether a signal actually reached the call.
+- The CLI entrypoint now propagates Ctrl+C/SIGTERM through `ExecuteContext`, allowing cancelled model usage/events and the recoverable Supervisor checkpoint to be committed before process exit.
 
 Not done yet:
 
 - OpenAI-compatible/Ollama providers.
 - Dedicated TUI file-edit pane with key-driven edit approval/denial.
-- Live in-process stream subscriptions, application-owned active-call cancellation, and cross-process cancellation routing.
+- TUI consumption of live call metadata, user-visible safe text streaming, and cross-process cancellation routing.
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
@@ -142,7 +147,7 @@ No high-severity issue was found in the latest slice.
 
 Residual risks to address soon:
 
-- `staticcheck ./...` currently reports three pre-existing low-severity TUI findings (`S1008`, `S1011`, and unused helper `U1000`); no finding points into the protocol-repair slice.
+- `staticcheck ./...` currently reports three pre-existing low-severity TUI findings (`S1008`, `S1011`, and unused helper `U1000`); no finding points into the active-call slice.
 - `script run --local` can execute local commands after only lexical policy checks; it needs explicit approval and workspace scoping.
 - Secret redaction is heuristic, not a full secrets manager; add opt-in raw local inspection later only with clear warnings.
 - Binary or non-UTF-8 files are refused by `read_file`; richer file viewers should stay workspace-scoped and type-aware.
@@ -164,8 +169,10 @@ Residual risks to address soon:
 - Retry backoff is deterministic and intentionally capped at three attempts/2 seconds for the local single-user runtime. Add jitter before enabling concurrent remote workers.
 - A server `Retry-After` above the local ceiling is not auto-retried; the Run remains running with a failed Supervisor turn and preserved input until a later operator retry.
 - If the process dies after `model.completed` but before the turn transaction, recovery may repeat the side-effect-free model request under the next durable attempt number. The prior usage is already charged atomically, but tool calls remain disabled for this reason.
-- Persisted `model.delta` events intentionally contain counters rather than model text. Historical SQLite replay can reconstruct progress and accounting, not token-by-token content; live text must use a bounded, redacted in-memory subscriber owned by Go.
-- Provider cancellation currently follows the caller context. There is not yet an application-level active-call registry that another CLI/UI request can address while a turn is running.
+- Persisted `model.delta` events intentionally contain counters rather than model text. Historical SQLite replay can reconstruct progress and accounting, not token-by-token content; the current live envelope is also metadata-only until a safe lifecycle/text projection exists.
+- Active-call subscriptions are process-local and non-replayable. A full 32-event buffer closes that subscriber; consumers must inspect `Dropped()` and recover from durable Run events.
+- Application cancellation is audit-first: if SQLite cannot append the request, the registry does not silently signal an unaudited cancellation. Parent process-context cancellation remains the emergency path and still records `model.failed(cancelled)` when possible.
+- Cross-process cancellation is not available until the Go HTTP/WebSocket control plane hosts the shared registry; a second standalone CLI process cannot observe another process's in-memory call.
 - Root `wait` currently maps to `paused` plus a textual reason; structured dependencies and approvals are future Coordinator/Work Board work.
 - Unbound Sessions still use the direct Router compatibility path. New product flows should create a Run instead of expanding this legacy path.
 - Slash commands are intentionally separate command adapters; they do not consume a Supervisor turn yet, and future Tool Gateway work must unify their approval/event behavior without silently executing tools.
@@ -265,15 +272,17 @@ Expected context behavior:
 - Isolated Provider CLI smoke showed `model_attempts: 1`, `protocol_repairs: 0`, `model_outcome: success`, one `model.started`, one `model.completed`, no `model.failed`, and an idle next-turn checkpoint with empty repair state.
 - Streaming tests passed for Anthropic-compatible SSE, Router redaction, split UTF-8, the 64 KiB output ceiling, the 32-event coalescing cap, malformed/missing final metadata, mid-stream retry, cancellation and restart recovery, delta idempotence, and terminal-ledger consistency.
 - Isolated streaming CLI smoke showed one text-free `model.delta`, positive `stream_bytes`, matching terminal counters, and no failed model event.
+- Active-call tests passed for durable-start visibility, duplicate-Run exclusion, ordered snapshot/progress/cancel/terminal envelopes, bounded slow-consumer disconnection, idempotent cancellation, redacted audit reasons, terminal cleanup, and cancellation races.
+- Signal-aware CLI tests repeatedly cancelled a blocking SSE Provider, returned exit code 7, persisted `model.failed` with outcome `cancelled`, and retained a recoverable `turn_started` checkpoint.
 - The local Go toolchain was upgraded from 1.26.1 to 1.26.5 after `govulncheck` identified reachable standard-library advisories; the repeated scan reports zero reachable vulnerabilities.
 - Final Go 1.26.5 gates passed: `go test -count=1 ./...`, `go vet ./...`, targeted race tests, isolated CLI smoke, and credential-prefix scanning. `staticcheck` is otherwise clean apart from the three documented pre-existing TUI findings.
 
 ## Recommended Next Slice
 
-Continue P2 with an application-owned live-call boundary:
+Continue P2 by integrating the live-call boundary into Bubble Tea:
 
-- Add a concurrency-safe active-call registry keyed by Run ID and model-attempt identity; Provider contexts remain owned by Go application services.
-- Expose explicit cancel/query operations through the application layer, with durable cancellation outcome events and idempotent cleanup.
-- Add a bounded in-memory subscriber envelope for redacted stream text and metadata, including slow-consumer and disconnect behavior.
-- Keep persisted `model.delta` counter-only; do not turn SQLite into a token transcript or let CLI/TUI own cancellation functions.
+- Inject a read-only active-call query/subscription controller into the existing TUI without giving the UI Provider contexts or cancel functions.
+- Render provider, attempt, chunk/byte progress, cancellation, slow-consumer disconnect, and terminal states through asynchronous Bubble Tea commands.
+- Add an explicit TUI cancel action that invokes the application audit-first API; closing the UI must not implicitly cancel a background Run.
+- Keep live and persisted envelopes metadata-only while designing a separate lifecycle-aware, cross-chunk-redacted user-text projection.
 - Keep tool execution and multi-agent concurrency disabled.
