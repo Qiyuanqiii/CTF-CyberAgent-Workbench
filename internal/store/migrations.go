@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 10
+const LatestSchemaVersion = 11
 
 type migration struct {
 	Version    int
@@ -230,6 +230,55 @@ var runNotesStatements = []string{
 		FOREIGN KEY(run_id, note_id) REFERENCES notes(run_id, id) ON DELETE CASCADE
 	) WITHOUT ROWID;`,
 	`CREATE INDEX idx_note_evidence_lookup ON note_evidence(run_id, evidence_id, note_id);`,
+}
+
+var durableApprovalStatements = []string{
+	`CREATE TABLE tool_approvals (
+		id TEXT PRIMARY KEY,
+		idempotency_key TEXT NOT NULL UNIQUE,
+		proposal_id TEXT NOT NULL UNIQUE,
+		run_id TEXT,
+		session_id TEXT NOT NULL DEFAULT '',
+		workspace_id TEXT NOT NULL DEFAULT '',
+		tool_name TEXT NOT NULL,
+		action_class TEXT NOT NULL,
+		mode TEXT NOT NULL,
+		status TEXT NOT NULL,
+		request_fingerprint TEXT NOT NULL,
+		decision_reason TEXT NOT NULL DEFAULT '',
+		requested_by TEXT NOT NULL DEFAULT '',
+		reviewed_by TEXT NOT NULL DEFAULT '',
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		decided_at TEXT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		CHECK(mode IN ('automatic', 'per_call', 'session', 'never')),
+		CHECK(status IN ('pending', 'approved', 'denied')),
+		CHECK(version > 0),
+		CHECK(length(request_fingerprint) = 64),
+		CHECK((status = 'pending' AND decided_at IS NULL AND reviewed_by = '') OR
+			(status <> 'pending' AND decided_at IS NOT NULL AND length(trim(reviewed_by)) > 0))
+	);`,
+	`CREATE INDEX idx_tool_approvals_run_status_updated_at
+		ON tool_approvals(run_id, status, updated_at);`,
+	`CREATE INDEX idx_tool_approvals_session_status_updated_at
+		ON tool_approvals(session_id, status, updated_at);`,
+	`CREATE TABLE approval_operations (
+		idempotency_key TEXT PRIMARY KEY,
+		approval_id TEXT NOT NULL,
+		action TEXT NOT NULL,
+		request_fingerprint TEXT NOT NULL,
+		result_status TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(approval_id) REFERENCES tool_approvals(id) ON DELETE CASCADE,
+		CHECK(action IN ('approve', 'deny')),
+		CHECK(result_status IN ('approved', 'denied')),
+		CHECK(length(idempotency_key) = 64),
+		CHECK(length(request_fingerprint) = 64)
+	) WITHOUT ROWID;`,
+	`CREATE INDEX idx_approval_operations_approval_created_at
+		ON approval_operations(approval_id, created_at);`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {

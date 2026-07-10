@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/redact"
@@ -22,6 +23,7 @@ const maxWorkspaceListDepth = 32
 type Store interface {
 	toolrun.Store
 	fileedit.Store
+	approval.Store
 }
 
 type Gateway struct {
@@ -194,14 +196,18 @@ func (g *Gateway) reviewShell(ctx context.Context, request ReviewRequest) (Outco
 	if err != nil {
 		return Outcome{}, err
 	}
+	reason := request.Reason
+	if request.Action == ReviewDeny && reason == "" {
+		reason = "denied by operator"
+	}
+	request.Reason = reason
+	if err := g.persistReviewDecision(ctx, request, approvalProposalFromToolRun(before)); err != nil {
+		return Outcome{}, err
+	}
 	var after toolrun.ToolRun
 	if request.Action == ReviewApprove {
 		after, err = g.legacyTools.Approve(ctx, request.ProposalID)
 	} else {
-		reason := request.Reason
-		if reason == "" {
-			reason = "denied by operator"
-		}
 		after, err = g.legacyTools.Deny(ctx, request.ProposalID, reason)
 	}
 	if after.ID == "" {
@@ -219,18 +225,25 @@ func (g *Gateway) reviewFileEdit(ctx context.Context, request ReviewRequest) (Ou
 	if err != nil {
 		return Outcome{}, err
 	}
+	root := ""
+	if request.Action == ReviewApprove {
+		root, err = g.bindWorkspaceRoot(ctx, before.WorkspaceID, request.WorkspaceRoot)
+		if err != nil {
+			return Outcome{}, err
+		}
+	}
+	reason := request.Reason
+	if request.Action == ReviewDeny && reason == "" {
+		reason = "denied by operator"
+	}
+	request.Reason = reason
+	if err := g.persistReviewDecision(ctx, request, approvalProposalFromFileEdit(before)); err != nil {
+		return Outcome{}, err
+	}
 	var after fileedit.Edit
 	if request.Action == ReviewApprove {
-		root, bindErr := g.bindWorkspaceRoot(ctx, before.WorkspaceID, request.WorkspaceRoot)
-		if bindErr != nil {
-			return Outcome{}, bindErr
-		}
 		after, err = g.legacyEdits.Approve(ctx, request.ProposalID, root)
 	} else {
-		reason := request.Reason
-		if reason == "" {
-			reason = "denied by operator"
-		}
 		after, err = g.legacyEdits.Deny(ctx, request.ProposalID, reason)
 	}
 	if after.ID == "" {
@@ -241,6 +254,74 @@ func (g *Gateway) reviewFileEdit(ctx context.Context, request ReviewRequest) (Ou
 		SessionID: before.SessionID, WorkspaceID: before.WorkspaceID, RequestedBy: "approval_service",
 	}
 	return g.outcomeFromFileEdit(call, after, err)
+}
+
+func (g *Gateway) persistReviewDecision(ctx context.Context, request ReviewRequest, proposal approval.Proposal) error {
+	if _, err := g.store.EnsureApproval(ctx, proposal); err != nil {
+		return err
+	}
+	action := approval.ActionApprove
+	if request.Action == ReviewDeny {
+		action = approval.ActionDeny
+	}
+	_, err := g.store.DecideApproval(ctx, approval.DecisionRequest{
+		ProposalID: proposal.ProposalID, IdempotencyKey: request.IdempotencyKey,
+		Action: action, Reason: request.Reason, ReviewedBy: request.ReviewedBy,
+	})
+	return err
+}
+
+func approvalProposalFromToolRun(run toolrun.ToolRun) approval.Proposal {
+	status := approval.StatusPending
+	mode := string(ApprovalPerCall)
+	reviewer := ""
+	var decidedAt *time.Time
+	switch run.Status {
+	case toolrun.StatusDenied:
+		status = approval.StatusDenied
+		mode = string(ApprovalNever)
+		reviewer = "legacy_recovery"
+		decided := run.UpdatedAt
+		decidedAt = &decided
+	case toolrun.StatusApproved, toolrun.StatusRunning, toolrun.StatusCompleted, toolrun.StatusFailed:
+		status = approval.StatusApproved
+		reviewer = "legacy_recovery"
+		decided := run.UpdatedAt
+		decidedAt = &decided
+	}
+	return approval.Proposal{
+		IdempotencyKey: approval.ProposalIdempotencyKey(string(ShellTool), run.ID), ProposalID: run.ID,
+		SessionID: run.SessionID, WorkspaceID: run.WorkspaceID, ToolName: string(ShellTool), ActionClass: string(ClassShell),
+		Mode: mode, Status: status, RequestFingerprint: approval.ShellFingerprint(run.SessionID, run.WorkspaceID, run.Command),
+		DecisionReason: run.PolicyReason, RequestedBy: "tool_gateway", ReviewedBy: reviewer,
+		CreatedAt: run.CreatedAt, UpdatedAt: run.UpdatedAt, DecidedAt: decidedAt,
+	}
+}
+
+func approvalProposalFromFileEdit(edit fileedit.Edit) approval.Proposal {
+	status := approval.StatusPending
+	reviewer := ""
+	var decidedAt *time.Time
+	switch edit.Status {
+	case fileedit.StatusDenied:
+		status = approval.StatusDenied
+		reviewer = "legacy_recovery"
+		decided := edit.UpdatedAt
+		decidedAt = &decided
+	case fileedit.StatusApproved, fileedit.StatusApplied, fileedit.StatusFailed:
+		status = approval.StatusApproved
+		reviewer = "legacy_recovery"
+		decided := edit.UpdatedAt
+		decidedAt = &decided
+	}
+	return approval.Proposal{
+		IdempotencyKey: approval.ProposalIdempotencyKey(string(ReplaceFileTool), edit.ID), ProposalID: edit.ID,
+		SessionID: edit.SessionID, WorkspaceID: edit.WorkspaceID, ToolName: string(ReplaceFileTool),
+		ActionClass: string(ClassWorkspaceWrite), Mode: string(ApprovalPerCall), Status: status,
+		RequestFingerprint: approval.FileEditFingerprint(edit.SessionID, edit.WorkspaceID, edit.Path, edit.ProposedHash),
+		DecisionReason:     edit.Reason, RequestedBy: "tool_gateway", ReviewedBy: reviewer,
+		CreatedAt: edit.CreatedAt, UpdatedAt: edit.UpdatedAt, DecidedAt: decidedAt,
+	}
 }
 
 func (g *Gateway) outcomeFromToolRun(call ToolCall, run toolrun.ToolRun, operationErr error) (Outcome, error) {

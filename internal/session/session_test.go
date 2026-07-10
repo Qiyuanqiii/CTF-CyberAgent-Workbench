@@ -7,7 +7,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/contextmgr"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/llm"
@@ -21,6 +23,7 @@ type memorySessionStore struct {
 	summaries  []contextmgr.Summary
 	fileEdits  map[string]fileedit.Edit
 	toolRuns   map[string]toolrun.ToolRun
+	approvals  map[string]approval.Record
 	workspaces map[string]WorkspaceInfo
 	nextMsgID  int64
 }
@@ -30,6 +33,7 @@ func newMemorySessionStore() *memorySessionStore {
 		sessions:   map[string]Session{},
 		fileEdits:  map[string]fileedit.Edit{},
 		toolRuns:   map[string]toolrun.ToolRun{},
+		approvals:  map[string]approval.Record{},
 		workspaces: map[string]WorkspaceInfo{},
 	}
 }
@@ -168,6 +172,88 @@ func (m *memorySessionStore) ListToolRuns(ctx context.Context, filter toolrun.Li
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
+}
+
+func (m *memorySessionStore) EnsureApproval(ctx context.Context, proposal approval.Proposal) (approval.Record, error) {
+	if record, ok := m.approvals[proposal.ProposalID]; ok {
+		return record, nil
+	}
+	now := proposal.CreatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	updated := proposal.UpdatedAt
+	if updated.IsZero() {
+		updated = now
+	}
+	record := approval.Record{
+		ID: "approval-" + proposal.ProposalID, IdempotencyKey: proposal.IdempotencyKey, ProposalID: proposal.ProposalID,
+		SessionID: proposal.SessionID, WorkspaceID: proposal.WorkspaceID, ToolName: proposal.ToolName,
+		ActionClass: proposal.ActionClass, Mode: proposal.Mode, Status: proposal.Status,
+		RequestFingerprint: proposal.RequestFingerprint, DecisionReason: proposal.DecisionReason,
+		RequestedBy: proposal.RequestedBy, ReviewedBy: proposal.ReviewedBy, Version: 1,
+		CreatedAt: now, UpdatedAt: updated, DecidedAt: proposal.DecidedAt,
+	}
+	m.approvals[proposal.ProposalID] = record
+	return record, nil
+}
+
+func (m *memorySessionStore) DecideApproval(ctx context.Context, request approval.DecisionRequest) (approval.DecisionResult, error) {
+	normalized, err := request.Normalize()
+	if err != nil {
+		return approval.DecisionResult{}, err
+	}
+	record, ok := m.approvals[normalized.ProposalID]
+	if !ok {
+		return approval.DecisionResult{}, errNotFound("approval")
+	}
+	desired, _ := normalized.Action.Status()
+	if record.Status != approval.StatusPending && record.Status != desired {
+		return approval.DecisionResult{}, errNotFound("compatible approval")
+	}
+	replayed := record.Status == desired
+	if !replayed {
+		now := time.Now().UTC()
+		record.Status = desired
+		record.DecisionReason = normalized.Reason
+		record.ReviewedBy = normalized.ReviewedBy
+		record.DecidedAt = &now
+		record.UpdatedAt = now
+		record.Version++
+		m.approvals[normalized.ProposalID] = record
+	}
+	return approval.DecisionResult{Approval: record, Replayed: replayed}, nil
+}
+
+func (m *memorySessionStore) GetApproval(ctx context.Context, id string) (approval.Record, error) {
+	for _, record := range m.approvals {
+		if record.ID == id {
+			return record, nil
+		}
+	}
+	return approval.Record{}, errNotFound("approval")
+}
+
+func (m *memorySessionStore) GetApprovalByProposal(ctx context.Context, proposalID string) (approval.Record, error) {
+	record, ok := m.approvals[proposalID]
+	if !ok {
+		return approval.Record{}, errNotFound("approval")
+	}
+	return record, nil
+}
+
+func (m *memorySessionStore) ListApprovals(ctx context.Context, filter approval.ListFilter) ([]approval.Record, error) {
+	var records []approval.Record
+	for _, record := range m.approvals {
+		if filter.RunID != "" && record.RunID != filter.RunID ||
+			filter.SessionID != "" && record.SessionID != filter.SessionID ||
+			filter.Status != "" && record.Status != filter.Status ||
+			filter.ToolName != "" && record.ToolName != filter.ToolName {
+			continue
+		}
+		records = append(records, record)
+	}
+	return records, nil
 }
 
 type errNotFound string

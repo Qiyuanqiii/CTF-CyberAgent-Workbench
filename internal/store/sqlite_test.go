@@ -11,6 +11,7 @@ import (
 
 	"cyberagent-workbench/internal/agent"
 	"cyberagent-workbench/internal/application"
+	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/contextmgr"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
@@ -80,6 +81,15 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 	if notesTable != "notes" {
 		t.Fatalf("schema v10 notes table is missing: %q", notesTable)
 	}
+	for _, name := range []string{"tool_approvals", "approval_operations"} {
+		var table string
+		if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, name).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		if table != name {
+			t.Fatalf("schema v11 approval table is missing: %q", table)
+		}
+	}
 }
 
 func TestSQLiteStoreUpgradesLegacyDatabaseWithoutLosingData(t *testing.T) {
@@ -138,6 +148,14 @@ func TestSQLiteStoreUpgradesSchemaV8ToLatestWithoutLosingRun(t *testing.T) {
 		Goal: "preserve this v8 run", Profile: "code", Budget: domain.Budget{MaxTurns: 4},
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"approval_operations", "tool_approvals"} {
+		if _, err := st.db.ExecContext(ctx, `DROP TABLE `+table); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version = 11`); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"note_evidence", "note_sources", "note_tags", "notes"} {
@@ -199,6 +217,14 @@ func TestSQLiteStoreUpgradesSchemaV9ToNotesWithoutLosingWorkItems(t *testing.T) 
 		RunID: run.ID, Title: "preserved work item",
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"approval_operations", "tool_approvals"} {
+		if _, err := st.db.ExecContext(ctx, `DROP TABLE `+table); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version = 11`); err != nil {
 		t.Fatal(err)
 	}
 	for _, table := range []string{"note_evidence", "note_sources", "note_tags", "notes"} {
@@ -334,6 +360,7 @@ func TestSQLiteStoreProjectsRunActivityAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	approveStoredProposal(t, st, tool.ID, "projection-tool")
 	tool, err = toolManager.Approve(ctx, tool.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -352,6 +379,7 @@ func TestSQLiteStoreProjectsRunActivityAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	approveStoredProposal(t, st, edit.ID, "projection-edit")
 	edit.Status = fileedit.StatusApproved
 	edit.UpdatedAt = time.Now().UTC()
 	edit, err = st.SaveFileEdit(ctx, edit)
@@ -387,9 +415,13 @@ func TestSQLiteStoreProjectsRunActivityAtomically(t *testing.T) {
 		events.SessionMessageEvent,
 		events.PolicyDecisionEvent,
 		events.ToolProposedEvent,
+		events.ApprovalRequestedEvent,
+		events.ApprovalDecidedEvent,
 		events.ToolApprovedEvent,
 		events.ToolCompletedEvent,
 		events.FileEditProposedEvent,
+		events.ApprovalRequestedEvent,
+		events.ApprovalDecidedEvent,
 		events.FileEditApprovedEvent,
 		events.FileEditAppliedEvent,
 		events.PolicyDecisionEvent,
@@ -684,6 +716,7 @@ func TestSQLiteStoreToolRuns(t *testing.T) {
 	if loaded.Command != "echo hello" || loaded.Status != toolrun.StatusProposed {
 		t.Fatalf("unexpected loaded run: %#v", loaded)
 	}
+	approveStoredProposal(t, st, loaded.ID, "store-tool")
 	loaded.Status = toolrun.StatusCompleted
 	loaded.Stdout = "dry run: echo hello"
 	if _, err := st.SaveToolRun(ctx, loaded); err != nil {
@@ -730,6 +763,7 @@ func TestSQLiteStoreFileEdits(t *testing.T) {
 	if loaded.Path != "README.md" || loaded.Status != fileedit.StatusProposed {
 		t.Fatalf("unexpected file edit: %#v", loaded)
 	}
+	approveStoredProposal(t, st, loaded.ID, "store-edit")
 	loaded.Status = fileedit.StatusApplied
 	if _, err := st.SaveFileEdit(ctx, loaded); err != nil {
 		t.Fatal(err)
@@ -741,4 +775,16 @@ func TestSQLiteStoreFileEdits(t *testing.T) {
 	if len(edits) != 1 || edits[0].ID != edit.ID {
 		t.Fatalf("unexpected file edit list: %#v", edits)
 	}
+}
+
+func approveStoredProposal(t *testing.T, st *SQLiteStore, proposalID string, suffix string) approval.Record {
+	t.Helper()
+	result, err := st.DecideApproval(context.Background(), approval.DecisionRequest{
+		ProposalID: proposalID, IdempotencyKey: "test-approval:" + suffix,
+		Action: approval.ActionApprove, ReviewedBy: "store_test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result.Approval
 }

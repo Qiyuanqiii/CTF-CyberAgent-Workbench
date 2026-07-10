@@ -142,6 +142,9 @@ func (m *Manager) Approve(ctx context.Context, id string, workspaceRoot string) 
 	if err != nil {
 		return Edit{}, err
 	}
+	if edit.Status == StatusApplied {
+		return edit, nil
+	}
 	if edit.Status != StatusProposed && edit.Status != StatusApproved {
 		return Edit{}, fmt.Errorf("file edit %s is %s, not %s", edit.ID, edit.Status, StatusProposed)
 	}
@@ -220,6 +223,9 @@ func (m *Manager) Deny(ctx context.Context, id string, reason string) (Edit, err
 	edit, err := m.store.GetFileEdit(ctx, strings.TrimSpace(id))
 	if err != nil {
 		return Edit{}, err
+	}
+	if edit.Status == StatusDenied {
+		return edit, nil
 	}
 	if edit.Status != StatusProposed {
 		return Edit{}, fmt.Errorf("file edit %s is %s, not %s", edit.ID, edit.Status, StatusProposed)

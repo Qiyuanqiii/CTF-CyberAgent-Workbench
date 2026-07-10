@@ -200,7 +200,7 @@ Session chat is the main path for generic AI agent features. Ordinary text in a 
 
 ## Unified Tool Gateway
 
-The Gateway validates exact argument schemas, binds production file operations to the Store-owned workspace root, runs policy checks, selects an approval mode, and normalizes execution results. `read_file` and `list_workspace` use automatic approval only when scope and policy allow them. `replace_file` and `shell` use per-call approval. A policy denial is terminal and cannot be converted into approval by a later review request. Session-scoped grants are represented by the domain contract but are not issued or persisted yet.
+The Gateway validates exact argument schemas, binds production file operations to the Store-owned workspace root, runs policy checks, selects an approval mode, and normalizes execution results. `read_file` and `list_workspace` use automatic approval only when scope and policy allow them. `replace_file` and `shell` use per-call approval. A policy denial is terminal and cannot be converted into approval by a later review request. Schema v11 persists each per-call decision with a request fingerprint, Run/Session association, and immutable idempotency operation before the compatibility proposal advances. Session-scoped grants are represented by the domain contract but are not issued or persisted yet.
 
 Text output is valid UTF-8, secret-redacted, MIME-labelled, and bounded to 128 KiB stdout, 32 KiB stderr, and 64 KiB proposal previews. Truncation is explicit. The Gateway does not currently capture oversized output as an Artifact. No production CLI path invokes LocalSandbox; script-process proposals remain deliberately non-executable.
 
@@ -231,7 +231,17 @@ cyberagent tool approve <tool-run-id>
 cyberagent tool deny <tool-run-id> --reason "not needed"
 ```
 
-`/run` creates a `tool_runs` proposal through the unified Tool Gateway. `tool approve` and `tool deny` use the same review service as file edits. Approval completes with dry-run output; real command execution stays disabled until the remaining approval persistence, sandbox, Artifact, and bypass-removal work is complete.
+`/run` creates a `tool_runs` proposal through the unified Tool Gateway. `tool approve` and `tool deny` use the same review service as file edits. Approval completes with dry-run output; real command execution stays disabled until revocable grants, tool budgets, Sandbox isolation, and Artifact capture are complete.
+
+## Approval Ledger
+
+```powershell
+cyberagent approval list --run <run-id> --status pending
+cyberagent approval list --session <session-id> --tool shell
+cyberagent approval show <approval-id>
+```
+
+The approval ledger stores identity, scope, mode, status, reviewer metadata, and a SHA-256 request fingerprint rather than duplicating command or file content. `approval.requested` is committed with the proposal. `approval.decided` and a domain-separated SHA-256 digest of the immutable review key are committed before ToolRun/FileEdit progression, so rerunning the same CLI approval after a process interruption resumes safely without persisting the raw client key. A key cannot be reused for different intent, and an approval cannot be created for a missing or fingerprint-mismatched proposal.
 
 ## Context Compaction
 

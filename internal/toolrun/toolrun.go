@@ -91,15 +91,19 @@ func (m *Manager) Approve(ctx context.Context, id string) (ToolRun, error) {
 	if err != nil {
 		return ToolRun{}, err
 	}
-	if run.Status != StatusProposed {
+	if run.Status == StatusCompleted {
+		return run, nil
+	}
+	if run.Status != StatusProposed && run.Status != StatusApproved {
 		return ToolRun{}, fmt.Errorf("tool run %s is %s, not %s", run.ID, run.Status, StatusProposed)
 	}
-	now := time.Now().UTC()
-	run.Status = StatusApproved
-	run.UpdatedAt = now
-	run, err = m.store.SaveToolRun(ctx, run)
-	if err != nil {
-		return ToolRun{}, err
+	if run.Status == StatusProposed {
+		run.Status = StatusApproved
+		run.UpdatedAt = time.Now().UTC()
+		run, err = m.store.SaveToolRun(ctx, run)
+		if err != nil {
+			return ToolRun{}, err
+		}
 	}
 
 	// v0.1 approval intentionally uses a dry-run completion instead of executing.
@@ -115,6 +119,9 @@ func (m *Manager) Deny(ctx context.Context, id string, reason string) (ToolRun, 
 	run, err := m.store.GetToolRun(ctx, id)
 	if err != nil {
 		return ToolRun{}, err
+	}
+	if run.Status == StatusDenied {
+		return run, nil
 	}
 	if run.Status != StatusProposed {
 		return ToolRun{}, fmt.Errorf("tool run %s is %s, not %s", run.ID, run.Status, StatusProposed)

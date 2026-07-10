@@ -17,6 +17,8 @@ CyberAgent Workbench 是一个由 Go 驱动的本地 AI Agent 工作台，面向
 
 统一 Tool Gateway 的第一条纵向链路也已落地。工作区读取、Shell 提案、整文件替换和脚本进程提案现在共享 Go 定义的 `ToolCall -> Decision -> Proposal -> Execution -> Result` 契约；CLI、Session 与 TUI 都通过同一入口。生产路径会用工作区 ID 解析可信根目录，拒绝伪造路径；读取可在低风险策略下自动执行，Shell 与 `script_process.v1` 审批仍只进行 dry-run，文件写入仍要求显式逐次审批。`script run --local` 只记录期望后端，不会执行宿主机命令。
 
+schema v11 新增统一的持久化审批账本。每个 Shell/FileEdit 提案都会在原业务事务中创建 Run/Session 关联的 `tool_approvals` 记录和 `approval.requested` 事件；审批操作使用不可变幂等键摘要先提交 `approval_operations` 与 `approval.decided`，再推进兼容提案，客户端原始 key 不写入数据库。进程在两步之间退出时，重复同一审批会恢复而不会重复决定或绕过策略。SQLite 会拒绝缺少批准事实的 `approved`、`applied` 或 `completed` 状态。
+
 ### English
 
 CyberAgent Workbench is a local AI agent workbench powered by Go for coding, code review, security learning, scripting, and controlled cybersecurity analysis. It brings model calls, long-context memory, workspace files, policy checks, approvals, execution budgets, and event history into one resumable runtime, so work can continue after a process restart and every action remains inspectable.
@@ -29,6 +31,8 @@ The current build includes a structured, Run-scoped Work Board and durable Notes
 
 The first vertical slice of the unified Tool Gateway is also in place. Workspace reads, shell proposals, whole-file replacements, and script-process proposals now share a Go-owned `ToolCall -> Decision -> Proposal -> Execution -> Result` contract, and the CLI, Session, and TUI use that same boundary. Production calls resolve a trusted root from the workspace ID and reject mismatches. Low-risk reads may execute automatically, while shell and `script_process.v1` approval remain dry-run only and file writes still require explicit per-call approval. `script run --local` records the requested backend but never executes a host command.
 
+Schema v11 adds a unified durable approval ledger. Each Shell/FileEdit proposal creates a Run/Session-bound `tool_approvals` record and `approval.requested` event in the original business transaction. Review operations commit an immutable digest of the client idempotency key, `approval_operations`, and `approval.decided` before advancing the compatibility proposal; the raw client key is not stored. Repeating the same review after a crash resumes convergence without duplicating the decision or bypassing policy, and SQLite rejects `approved`, `applied`, or `completed` states without a persisted approval fact.
+
 ## 核心能力 / Core Capabilities
 
 - **可恢复运行 / Resumable runs:** durable checkpoints, bounded execution, restart recovery, graceful terminal cancellation, and explicit lifecycle actions.
@@ -37,7 +41,7 @@ The first vertical slice of the unified Tool Gateway is also in place. Workspace
 - **结构化任务板 / Structured Work Board:** Run-scoped work items, dependency and cycle checks, optimistic versions, transactional events, and bounded Supervisor context.
 - **本地工作区 / Local workspace:** scoped file access, safe reads, persistent artifacts, and reviewable edit proposals.
 - **统一工具网关 / Unified Tool Gateway:** normalized calls, trusted workspace binding, policy decisions, shared shell/file approval, non-executable `script_process.v1` payloads, bounded UTF-8 results, MIME metadata, and compatibility adapters.
-- **安全与审批 / Safety and approval:** policy checks, secret redaction, automatic low-risk reads, per-call write/shell approval, permanent denial, and dry-run command completion.
+- **安全与审批 / Safety and approval:** policy checks, secret redaction, automatic low-risk reads, Run/Session-bound durable approvals, idempotent review recovery, per-call write/shell approval, permanent denial, and dry-run command completion.
 - **完整审计链 / Audit trail:** append-only Run events for messages, context source provenance, bounded text-free stream progress, model calls, Notes, policy decisions, tool proposals, and file edits.
 - **CLI 与 TUI / CLI and TUI:** a scriptable CLI plus a Bubble Tea interface with live model progress and audited cancellation.
 - **可扩展架构 / Extensible architecture:** Go control plane with planned HTTP/WebSocket, TypeScript UI, Docker sandbox, and Rust analyzer boundaries.
@@ -102,6 +106,8 @@ go run ./cmd/cyberagent edit show <edit-id>
 go run ./cmd/cyberagent edit approve <edit-id>
 go run ./cmd/cyberagent tool list --session <session-id>
 go run ./cmd/cyberagent tool approve <tool-run-id>
+go run ./cmd/cyberagent approval list --run <run-id> --status pending
+go run ./cmd/cyberagent approval show <approval-id>
 go run ./cmd/cyberagent tui
 go run ./cmd/cyberagent tui --session <session-id>
 go run ./cmd/cyberagent tui --session <session-id> --print
@@ -126,13 +132,13 @@ Local runtime databases, workspace data, environment files, API keys, IDE metada
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, and exactly one restart-safe lifecycle-protocol repair. P3 includes migration v9 WorkItems, migration v10 Notes, transactional relationships/events, `todo` and `note` CLI lifecycles, root/owner visibility, token-budgeted memory selection, and durable context provenance. P5 now includes the unified Tool Gateway domain model, trusted workspace scope binding, shared approval adapters, output limits, production-path migration, and a Run-bound script proposal flow with no LocalSandbox bypass. Real Local/Docker command execution remains disabled. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, and exactly one restart-safe lifecycle-protocol repair. P3 includes migration v9 WorkItems, migration v10 Notes, transactional relationships/events, `todo` and `note` CLI lifecycles, root/owner visibility, token-budgeted memory selection, and durable context provenance. P5 now includes the unified Tool Gateway domain model, trusted workspace scope binding, shared approval adapters, output limits, production-path migration, a Run-bound script proposal flow with no LocalSandbox bypass, and schema v11 durable idempotent approvals with restart convergence. Revocable Session grants, tool-call budgets, Artifact capture, and real Docker execution remain pending. Real Local/Docker command execution remains disabled. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
 TUI quick controls: `cyberagent tui` opens a session picker. In chat, `Tab` switches focus, `PgUp/PgDn` scroll messages, `j/k` select tool runs, `a` approves, `d` denies, `Ctrl+X` requests cancellation of the current model call, `Ctrl+R` refreshes, and `Esc` quits when idle. Busy sends cannot be closed accidentally with `Esc`; cancel or wait first. The status line renders provider/model, attempt, chunk/byte progress, cancellation, disconnect, and terminal state without exposing raw model text. Attached workspaces render in the side panel with local directory counts for attachments, scripts, outputs, logs, and writeups.
 
 Workspace file reads and model-bound messages pass through heuristic secret redaction for common API keys, bearer tokens, GitHub tokens, AWS access keys, JWTs, and private-key blocks.
 
-File changes, Shell proposals, and script-process proposals now enter the same Tool Gateway approval service while retaining their existing SQLite records and Run-event projections. `edit propose` and session `/write` persist a redacted diff without changing the workspace. `edit approve` resolves the Store-owned workspace root again and compares the current file hash with the proposal before writing, so a forged root or stale proposal cannot overwrite newer user changes. Shell and script-process approval still produce dry-run output only.
+File changes, Shell proposals, and script-process proposals now enter the same Tool Gateway approval service while retaining their existing SQLite records and Run-event projections. The schema v11 approval ledger is inspectable through `approval list/show`; review idempotency survives restart, while a conflicting reuse of the same key is rejected. `edit propose` and session `/write` persist a redacted diff without changing the workspace. `edit approve` resolves the Store-owned workspace root again and compares the current file hash with the proposal before writing, so a forged root or stale proposal cannot overwrite newer user changes. Shell and script-process approval still produce dry-run output only.
 
 ## 可选在线 Provider / Optional Online Providers
 

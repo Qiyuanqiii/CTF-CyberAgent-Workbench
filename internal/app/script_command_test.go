@@ -59,8 +59,19 @@ func TestScriptRunCreatesAuditedDryRunWithoutLocalExecution(t *testing.T) {
 	}
 	timeline, stderr, code := executeTestCommand(t, "run", "events", runID)
 	if code != 0 || !strings.Contains(timeline, "run.created") || !strings.Contains(timeline, "session.attached") ||
-		!strings.Contains(timeline, "policy.decision") || !strings.Contains(timeline, "tool.proposed") {
+		!strings.Contains(timeline, "policy.decision") || !strings.Contains(timeline, "tool.proposed") ||
+		!strings.Contains(timeline, "approval.requested") {
 		t.Fatalf("script proposal was not fully audited: code=%d stderr=%s events=%s", code, stderr, timeline)
+	}
+	approvals, stderr, code := executeTestCommand(t, "approval", "list", "--run", runID, "--status", "pending")
+	approvalID := approvalIDPattern.FindString(approvals)
+	if code != 0 || approvalID == "" || !strings.Contains(approvals, toolID) || !strings.Contains(approvals, "shell") {
+		t.Fatalf("pending approval was not inspectable: code=%d stderr=%s output=%s", code, stderr, approvals)
+	}
+	shownApproval, stderr, code := executeTestCommand(t, "approval", "show", approvalID)
+	if code != 0 || !strings.Contains(shownApproval, "status: pending") ||
+		!strings.Contains(shownApproval, "proposal: "+toolID) || !strings.Contains(shownApproval, "run: "+runID) {
+		t.Fatalf("approval detail is incomplete: code=%d stderr=%s output=%s", code, stderr, shownApproval)
 	}
 
 	approved, stderr, code := executeTestCommand(t, "tool", "approve", toolID)
@@ -71,8 +82,13 @@ func TestScriptRunCreatesAuditedDryRunWithoutLocalExecution(t *testing.T) {
 		t.Fatalf("approval executed the local script: %v", err)
 	}
 	timeline, stderr, code = executeTestCommand(t, "run", "events", runID)
-	if code != 0 || !strings.Contains(timeline, "tool.approved") || !strings.Contains(timeline, "tool.completed") {
+	if code != 0 || !strings.Contains(timeline, "approval.decided") ||
+		!strings.Contains(timeline, "tool.approved") || !strings.Contains(timeline, "tool.completed") {
 		t.Fatalf("script approval events missing: code=%d stderr=%s events=%s", code, stderr, timeline)
+	}
+	approvals, stderr, code = executeTestCommand(t, "approval", "list", "--run", runID, "--status", "approved")
+	if code != 0 || !strings.Contains(approvals, approvalID) || !strings.Contains(approvals, toolID) {
+		t.Fatalf("approved decision was not recoverable: code=%d stderr=%s output=%s", code, stderr, approvals)
 	}
 }
 
@@ -104,7 +120,8 @@ func TestScriptRunPersistsPolicyDenialWithoutExecution(t *testing.T) {
 		t.Fatalf("policy-denied script executed: %v", err)
 	}
 	timeline, eventErr, eventCode := executeTestCommand(t, "run", "events", runID)
-	if eventCode != 0 || !strings.Contains(timeline, "policy.decision") || !strings.Contains(timeline, "tool.denied") {
+	if eventCode != 0 || !strings.Contains(timeline, "policy.decision") || !strings.Contains(timeline, "tool.denied") ||
+		!strings.Contains(timeline, "approval.requested") || !strings.Contains(timeline, "approval.decided") {
 		t.Fatalf("denial events missing: code=%d stderr=%s events=%s", eventCode, eventErr, timeline)
 	}
 }

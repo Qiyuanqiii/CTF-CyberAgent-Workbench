@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/contextmgr"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/idgen"
@@ -89,6 +90,7 @@ type WorkspaceInfo struct {
 type Store interface {
 	fileedit.Store
 	toolrun.Store
+	approval.Store
 
 	SaveSession(ctx context.Context, session Session) error
 	GetSession(ctx context.Context, id string) (Session, error)

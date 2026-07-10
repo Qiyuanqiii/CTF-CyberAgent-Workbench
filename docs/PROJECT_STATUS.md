@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 ## Resume Context
 
@@ -41,9 +41,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 78%.
+- Overall product vision: about 79%.
 - v0.1 generic agent MVP: about 98%.
-- V2 run-centric runtime: about 93%.
+- V2 run-centric runtime: about 94%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -64,6 +64,9 @@ Completed:
 - `script run` now requires a persisted workspace and relative existing file, creates a Script Profile Mission/Run/Session, and persists a validated `script_process.v1` Tool Gateway proposal with full Policy/Tool event projection.
 - `--local` is retained only as requested-backend metadata. Production code has no Local/Noop Sandbox Runner invocation, and tool approval remains dry-run without host side effects.
 - JSON payload redaction is structure-aware: Store code parses JSON with exact numbers, recursively redacts string values, and re-encodes before validation/persistence, preserving nested escaped JSON.
+- Schema v11 adds Run/Session-bound `tool_approvals` and immutable `approval_operations`; proposal creation appends `approval.requested` transactionally, review commits `approval.decided` before compatibility-state execution, and an identical key resumes safely after restart.
+- A proposal created by an unbound legacy Session is transactionally adopted with `approval.bound` if that Session later becomes attached to a Run.
+- SQLite rejects ghost approvals, changed proposal fingerprints, conflicting idempotency-key intent, and privileged ToolRun/FileEdit states without a matching durable approval. `approval list/show` exposes the ledger without storing raw command/file content there.
 - Secret redaction layer for common API keys, bearer tokens, GitHub tokens, AWS access keys, JWTs, assignment-style secrets, and private-key blocks.
 - Redaction is applied at file reads, session message creation, SQLite session/context/tool-run storage, context prompt construction, and final LLM router dispatch.
 - Automatic context compaction after long active session histories.
@@ -86,7 +89,7 @@ Completed:
 - Reworked `docs/architecture.md` around run-scoped budget, event, sandbox, report, approval, and recovery ownership without copying the reference implementation.
 - Replaced the obsolete README migration/scaffold copy with a bilingual Chinese/English product overview, current capabilities, architecture boundary, and development-scope notice.
 - Added `docs/TASK_BOOK.md` with phased migration tasks, acceptance criteria, compatibility rules, and CTF deferred to the final phase.
-- Versioned SQLite migrations through schema v10: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative budget counters, durable pending user input, restart-safe protocol-repair state, the Run-scoped Work Board, and durable Notes; each version is checksummed and transactional.
+- Versioned SQLite migrations through schema v11: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative budget counters, durable pending user input, restart-safe protocol-repair state, the Run-scoped Work Board, durable Notes, and the idempotent approval ledger; each version is checksummed and transactional.
 - Migration tests cover idempotence, legacy data preservation, checksum history, and failed-migration rollback.
 - Unified `internal/idgen` now backs agent tasks, sessions, tool runs, file edits, Mission/Run, and event IDs.
 - Added pure Go Mission, Scope, Budget, RunConfig, Run status machine, and legal transition checks.
@@ -175,7 +178,7 @@ Not done yet:
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
 - Provider cost/tool-call budgets, AgentCoordinator, and Findings/Evidence/Report; WorkItem/Note model tools and dedicated TUI views remain pending.
-- Persisted session approval grants, a unified durable approval/idempotency record, a first-class script-process ToolRun type, and tool-output Artifact capture.
+- Persisted revocable session approval grants, tool-call budget enforcement, a first-class script-process proposal type, and tool-output Artifact capture.
 
 ## Code Audit Notes
 
@@ -185,12 +188,14 @@ The Tool Gateway audit found and fixed four correctness/security issues: invalid
 
 The script slice removed the direct LocalSandbox execution path. Its audit also found that applying regex redaction to an already serialized Run-event payload could corrupt escaping around a nested JSON command. Store redaction now parses JSON with exact numbers, recursively redacts string values, re-encodes, and enforces 1 MiB, 64-level, and 100,000-node limits. Regression tests cover nested JSON, token-shaped argv, invalid JSON, resource exhaustion, policy denial, and zero host side effects.
 
+The durable-approval audit found and fixed two medium-risk integrity gaps before release: the public adoption path could otherwise create an approval for a nonexistent proposal, and an idempotently re-saved policy denial could drift from `never` to `per_call`. `EnsureApproval` now verifies the persisted ToolRun/FileEdit identity and fingerprint, while Store synchronization preserves the original denial mode. A later robustness pass also stopped persisting raw client review keys; `approval_operations` stores a domain-separated SHA-256 digest instead. Tests prove that a crash after `approval.decided` but before proposal completion can be recovered by replaying the same immutable operation key.
+
 Residual risks to address soon:
 
 - `staticcheck ./...` is clean; the prior TUI `S1008`, `S1011`, and unused-helper `U1000` findings were removed in this slice.
 - `script run --local` no longer executes commands. It creates a workspace-scoped, Run-bound, policy-checked proposal and records `execution_mode=disabled`; LocalSandbox remains disconnected from production.
 - Script Run creation and ToolRun proposal persistence use two transactions. A Store failure in the second transaction can leave a created Run without its expected proposal; durable idempotency/recovery is the next Approval slice.
-- The Gateway still persists shell and file proposals in the legacy `tool_runs` and `file_edits` tables. Their Run-event projection is transactional, but unified approval idempotency and Session grant records do not exist yet.
+- The Gateway still persists shell and file proposals in the legacy `tool_runs` and `file_edits` tables, but schema v11 now gates their privileged transitions through one durable approval ledger. Revocable Session grant records and tool-call budget consumption do not exist yet.
 - Automatic workspace read outcomes are normalized but are not independently persisted when invoked by standalone CLI commands; Session slash-command text is still audited through Session messages.
 - Secret redaction is heuristic, not a full secrets manager; add opt-in raw local inspection later only with clear warnings.
 - Binary or non-UTF-8 files are refused by `read_file`; richer file viewers should stay workspace-scoped and type-aware.
@@ -293,6 +298,8 @@ go run ./cmd/cyberagent session send <session-id> "/model deepseek/deepseek-v4-f
 go run ./cmd/cyberagent session send <session-id> "/run echo hello"
 go run ./cmd/cyberagent tool list --session <session-id>
 go run ./cmd/cyberagent tool show <tool-run-id>
+go run ./cmd/cyberagent approval list --run <run-id> --status pending
+go run ./cmd/cyberagent approval show <approval-id>
 go run ./cmd/cyberagent tool approve <tool-run-id>
 ```
 
@@ -308,6 +315,7 @@ Expected context behavior:
 - MiMo live smoke passed with env-only key and `mimo-v2.5-pro`; no key is stored by the application.
 - DeepSeek live smoke passed with an env-only key and `deepseek-v4-flash` through both non-streaming provider health and RunSupervisor SSE paths; durable events contained model metadata/counters without the key.
 - Tool proposal smoke passed: proposed shell command, dry-run approval completion, policy-denied risky command.
+- Durable approval smoke passed in an isolated `CYBERAGENT_HOME`: pending lookup, approval detail, dry-run completion, approved lookup, and `approval.requested/decided` Run events all matched one proposal. Restart integration tests recover the same immutable review key without duplicate decision events.
 - TUI snapshot smoke passed with existing session history, selected proposed tool run, status line, and keyboard help rendered from SQLite.
 - TUI picker smoke passed for empty state, existing session list, and direct session snapshot.
 - TUI async submit unit test passed: Enter on `/run echo async` enters busy state, returns an async command, and refreshes the proposed tool run after `actionDoneMsg`.

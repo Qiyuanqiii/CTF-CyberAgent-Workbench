@@ -8,21 +8,28 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 
+	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/toolrun"
 )
 
 type memoryStore struct {
-	mu    sync.Mutex
-	runs  map[string]toolrun.ToolRun
-	edits map[string]fileedit.Edit
+	mu         sync.Mutex
+	runs       map[string]toolrun.ToolRun
+	edits      map[string]fileedit.Edit
+	approvals  map[string]approval.Record
+	operations map[string]string
 }
 
 func newMemoryStore() *memoryStore {
-	return &memoryStore{runs: map[string]toolrun.ToolRun{}, edits: map[string]fileedit.Edit{}}
+	return &memoryStore{
+		runs: map[string]toolrun.ToolRun{}, edits: map[string]fileedit.Edit{},
+		approvals: map[string]approval.Record{}, operations: map[string]string{},
+	}
 }
 
 func (s *memoryStore) SaveToolRun(_ context.Context, run toolrun.ToolRun) (toolrun.ToolRun, error) {
@@ -92,6 +99,105 @@ func (s *memoryStore) ListFileEdits(_ context.Context, filter fileedit.ListFilte
 		edits = append(edits, edit)
 	}
 	return edits, nil
+}
+
+func (s *memoryStore) EnsureApproval(_ context.Context, proposal approval.Proposal) (approval.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if record, ok := s.approvals[proposal.ProposalID]; ok {
+		return record, nil
+	}
+	now := proposal.CreatedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	updated := proposal.UpdatedAt
+	if updated.IsZero() {
+		updated = now
+	}
+	record := approval.Record{
+		ID: "approval-" + proposal.ProposalID, IdempotencyKey: proposal.IdempotencyKey, ProposalID: proposal.ProposalID,
+		SessionID: proposal.SessionID, WorkspaceID: proposal.WorkspaceID, ToolName: proposal.ToolName,
+		ActionClass: proposal.ActionClass, Mode: proposal.Mode, Status: proposal.Status,
+		RequestFingerprint: proposal.RequestFingerprint, DecisionReason: proposal.DecisionReason,
+		RequestedBy: proposal.RequestedBy, ReviewedBy: proposal.ReviewedBy, Version: 1,
+		CreatedAt: now, UpdatedAt: updated, DecidedAt: proposal.DecidedAt,
+	}
+	s.approvals[proposal.ProposalID] = record
+	return record, nil
+}
+
+func (s *memoryStore) DecideApproval(_ context.Context, request approval.DecisionRequest) (approval.DecisionResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	normalized, err := request.Normalize()
+	if err != nil {
+		return approval.DecisionResult{}, err
+	}
+	if proposalID, ok := s.operations[normalized.IdempotencyKey]; ok {
+		if proposalID != normalized.ProposalID {
+			return approval.DecisionResult{}, errors.New("idempotency conflict")
+		}
+		return approval.DecisionResult{Approval: s.approvals[proposalID], Replayed: true}, nil
+	}
+	record, ok := s.approvals[normalized.ProposalID]
+	if !ok {
+		return approval.DecisionResult{}, errors.New("approval not found")
+	}
+	desired, _ := normalized.Action.Status()
+	if record.Status != approval.StatusPending && record.Status != desired {
+		return approval.DecisionResult{}, errors.New("approval conflict")
+	}
+	replayed := record.Status == desired
+	if !replayed {
+		now := time.Now().UTC()
+		record.Status = desired
+		record.DecisionReason = normalized.Reason
+		record.ReviewedBy = normalized.ReviewedBy
+		record.DecidedAt = &now
+		record.UpdatedAt = now
+		record.Version++
+		s.approvals[normalized.ProposalID] = record
+	}
+	s.operations[normalized.IdempotencyKey] = normalized.ProposalID
+	return approval.DecisionResult{Approval: record, Replayed: replayed}, nil
+}
+
+func (s *memoryStore) GetApproval(_ context.Context, id string) (approval.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, record := range s.approvals {
+		if record.ID == id {
+			return record, nil
+		}
+	}
+	return approval.Record{}, errors.New("approval not found")
+}
+
+func (s *memoryStore) GetApprovalByProposal(_ context.Context, proposalID string) (approval.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.approvals[proposalID]
+	if !ok {
+		return approval.Record{}, errors.New("approval not found")
+	}
+	return record, nil
+}
+
+func (s *memoryStore) ListApprovals(_ context.Context, filter approval.ListFilter) ([]approval.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var records []approval.Record
+	for _, record := range s.approvals {
+		if filter.RunID != "" && record.RunID != filter.RunID ||
+			filter.SessionID != "" && record.SessionID != filter.SessionID ||
+			filter.Status != "" && record.Status != filter.Status ||
+			filter.ToolName != "" && record.ToolName != filter.ToolName {
+			continue
+		}
+		records = append(records, record)
+	}
+	return records, nil
 }
 
 func TestGatewayExecutesScopedReadsWithRedactionAndLimits(t *testing.T) {

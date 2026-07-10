@@ -424,17 +424,21 @@ const (
 )
 
 type ReviewRequest struct {
-	Action        ReviewAction `json:"action"`
-	Tool          ToolName     `json:"tool"`
-	ProposalID    string       `json:"proposal_id"`
-	WorkspaceRoot string       `json:"-"`
-	Reason        string       `json:"reason,omitempty"`
+	Action         ReviewAction `json:"action"`
+	Tool           ToolName     `json:"tool"`
+	ProposalID     string       `json:"proposal_id"`
+	IdempotencyKey string       `json:"idempotency_key,omitempty"`
+	ReviewedBy     string       `json:"reviewed_by,omitempty"`
+	WorkspaceRoot  string       `json:"-"`
+	Reason         string       `json:"reason,omitempty"`
 }
 
 func NormalizeReviewRequest(request ReviewRequest) (ReviewRequest, error) {
 	request.Action = ReviewAction(strings.TrimSpace(string(request.Action)))
 	request.Tool = ToolName(strings.TrimSpace(string(request.Tool)))
 	request.ProposalID = strings.TrimSpace(request.ProposalID)
+	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
+	request.ReviewedBy = strings.TrimSpace(redact.String(request.ReviewedBy))
 	request.WorkspaceRoot = strings.TrimSpace(request.WorkspaceRoot)
 	request.Reason = strings.TrimSpace(redact.String(request.Reason))
 	if request.Action != ReviewApprove && request.Action != ReviewDeny {
@@ -445,6 +449,17 @@ func NormalizeReviewRequest(request ReviewRequest) (ReviewRequest, error) {
 	}
 	if request.ProposalID == "" || len([]rune(request.ProposalID)) > MaxToolIdentityRunes {
 		return ReviewRequest{}, errors.New("tool review proposal id is required and bounded")
+	}
+	if request.IdempotencyKey == "" {
+		request.IdempotencyKey = fmt.Sprintf("review:%s:%s:%s", request.Tool, request.ProposalID, request.Action)
+	}
+	if request.ReviewedBy == "" {
+		request.ReviewedBy = "operator"
+	}
+	for label, value := range map[string]string{"idempotency key": request.IdempotencyKey, "reviewer": request.ReviewedBy} {
+		if !utf8.ValidString(value) || len([]rune(value)) > MaxToolIdentityRunes {
+			return ReviewRequest{}, fmt.Errorf("tool review %s must be bounded UTF-8", label)
+		}
 	}
 	if !utf8.ValidString(request.WorkspaceRoot) || len([]rune(request.WorkspaceRoot)) > MaxWorkspaceRootPathRunes {
 		return ReviewRequest{}, errors.New("tool review workspace root must be bounded UTF-8")

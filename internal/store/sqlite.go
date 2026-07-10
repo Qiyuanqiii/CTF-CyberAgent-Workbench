@@ -195,6 +195,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 8, Name: "supervisor protocol repair", Statements: supervisorProtocolRepairStatements},
 		{Version: 9, Name: "run work board", Statements: workBoardStatements},
 		{Version: 10, Name: "run notes", Statements: runNotesStatements},
+		{Version: 11, Name: "durable tool approvals", Statements: durableApprovalStatements},
 	})
 }
 
@@ -600,6 +601,9 @@ func (s *SQLiteStore) SaveToolRun(ctx context.Context, run toolrun.ToolRun) (too
 	if err := projectToolRunTx(ctx, tx, run, previousStatus, existed); err != nil {
 		return toolrun.ToolRun{}, err
 	}
+	if err := syncToolApprovalTx(ctx, tx, run, previousStatus, existed); err != nil {
+		return toolrun.ToolRun{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return toolrun.ToolRun{}, err
 	}
@@ -707,6 +711,9 @@ func (s *SQLiteStore) SaveFileEdit(ctx context.Context, edit fileedit.Edit) (fil
 		return fileedit.Edit{}, err
 	}
 	if err := projectFileEditTx(ctx, tx, edit, previousStatus, existed); err != nil {
+		return fileedit.Edit{}, err
+	}
+	if err := syncFileEditApprovalTx(ctx, tx, edit, previousStatus, existed); err != nil {
 		return fileedit.Edit{}, err
 	}
 	if err := tx.Commit(); err != nil {

@@ -13,6 +13,7 @@ import (
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/store"
+	"cyberagent-workbench/internal/toolgateway"
 	"cyberagent-workbench/internal/toolrun"
 	"cyberagent-workbench/internal/workspace"
 )
@@ -25,7 +26,7 @@ func TestModelSubmitCreatesAndApprovesToolRun(t *testing.T) {
 	defer st.Close()
 
 	sessionManager := session.NewManager(st, llm.NewDefaultRouter(), policy.NewDefaultChecker())
-	toolManager := toolrun.NewManager(st, policy.NewDefaultChecker())
+	toolManager := toolgateway.New(st, policy.NewDefaultChecker()).ToolRuns()
 	sess, err := sessionManager.Create(context.Background(), "ws-demo", "demo", "learn")
 	if err != nil {
 		t.Fatal(err)
@@ -59,7 +60,7 @@ func TestModelSelectsAndApprovesFocusedTool(t *testing.T) {
 	defer st.Close()
 
 	sessionManager := session.NewManager(st, llm.NewDefaultRouter(), policy.NewDefaultChecker())
-	toolManager := toolrun.NewManager(st, policy.NewDefaultChecker())
+	toolManager := toolgateway.New(st, policy.NewDefaultChecker()).ToolRuns()
 	sess, err := sessionManager.Create(context.Background(), "ws-demo", "demo", "learn")
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +113,7 @@ func TestModelDeniesSelectedTool(t *testing.T) {
 	defer st.Close()
 
 	sessionManager := session.NewManager(st, llm.NewDefaultRouter(), policy.NewDefaultChecker())
-	toolManager := toolrun.NewManager(st, policy.NewDefaultChecker())
+	toolManager := toolgateway.New(st, policy.NewDefaultChecker()).ToolRuns()
 	sess, err := sessionManager.Create(context.Background(), "ws-demo", "demo", "learn")
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +141,7 @@ func TestModelEnterSubmitsAsyncAction(t *testing.T) {
 	defer st.Close()
 
 	sessionManager := session.NewManager(st, llm.NewDefaultRouter(), policy.NewDefaultChecker())
-	toolManager := toolrun.NewManager(st, policy.NewDefaultChecker())
+	toolManager := toolgateway.New(st, policy.NewDefaultChecker()).ToolRuns()
 	sess, err := sessionManager.Create(context.Background(), "ws-demo", "demo", "learn")
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +202,7 @@ func TestModelRendersWorkspaceContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	sessionManager := session.NewManager(st, llm.NewDefaultRouter(), policy.NewDefaultChecker())
-	toolManager := toolrun.NewManager(st, policy.NewDefaultChecker())
+	toolManager := toolgateway.New(st, policy.NewDefaultChecker()).ToolRuns()
 	sess, err := sessionManager.Create(context.Background(), rec.ID, "demo", "learn")
 	if err != nil {
 		t.Fatal(err)

@@ -1,6 +1,6 @@
 # CyberAgent Workbench 进度书
 
-更新时间：2026-07-10
+更新时间：2026-07-11
 
 ## 一、当前阶段
 
@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 78%。
+- 整体产品愿景：约 79%。
 - v0.1 通用 Agent MVP：约 98%。
-- V2 Run-centric Runtime：约 93%。
+- V2 Run-centric Runtime：约 94%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming 和进程内主动取消链路。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P5 已落地统一 Tool Gateway 并移除 `script run --local` 的宿主机执行旁路，真实命令执行继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming 和进程内主动取消链路。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P5 已落地统一 Tool Gateway、schema v11 持久化幂等审批账本并移除 `script run --local` 的宿主机执行旁路，真实命令执行继续关闭。
 
 ## 二、已完成功能
 
@@ -55,12 +55,16 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - 文件编辑提案、diff 预览、审批、拒绝、失败和已应用状态持久化。
 - 审批前重新解析路径并校验 SHA-256，拒绝覆盖提案后被修改的文件。
 - ToolRun 提案与审批状态机；`/run` 当前只创建提案，批准仍为 dry-run。
+- schema v11 `tool_approvals` 为 Shell/FileEdit 提案记录 Run、Session、Workspace、Tool、ActionClass、模式、状态和 SHA-256 请求指纹，不重复保存原始命令或文件正文。
+- `approval_operations` 以不可变幂等键记录 approve/deny 意图；相同请求可跨重启重放，不同意图复用同一键会被拒绝。
+- 提案事务同时提交 `approval.requested`；审批准入先提交 `approval.decided` 再推进兼容状态，崩溃后重试可收敛。
+- Store 拒绝幽灵审批、提案指纹变化，以及没有匹配批准事实的 `approved`/`applied`/`completed`；`approval list/show` 可检查账本。
 - Policy Checker 拒绝未授权扫描、公网攻击、凭证窃取和明显破坏性命令。
 - Noop、Local 和占位 Docker Runner；Docker 当前只检测并返回明确错误。
 
 ### 存储与 Run 架构
 
-- CGO SQLite 驱动 `github.com/mattn/go-sqlite3`。
+- CGO SQLite 驱动 `github.com/mattn/go-sqlite3`，当前 schema 版本为 v11。
 - checksum 校验的版本化事务 migration，可保留旧库数据原地升级。
 - Mission、Run 和 append-only Run Events 持久化。
 - schema v3 为非空 `session_id` 建立唯一关联并拒绝引用不存在 Session 的 Run。
@@ -141,7 +145,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - Findings、Evidence 实体与 Report；WorkItem/Note 基础已完成，模型工具提案和 TUI 视图尚未接入。
 - 跨进程主动取消、WebSocket 推送和经过单独安全设计的用户可见文本 streaming。
 - OpenAI-compatible 与 Ollama Provider。
-- Tool Gateway 的会话授权持久化、统一幂等审批记录、Artifact 捕获，以及真实 Docker 隔离。
+- Tool Gateway 的可撤销 Session grant、工具调用预算、Artifact 捕获，以及真实 Docker 隔离；统一逐次审批与幂等恢复已完成。
 - Go HTTP/WebSocket API、TypeScript Web UI 和 Rust analyzer 进程。
 - MCP Server、插件系统和远程任务能力。
 - 通用 Agent 稳定后的 CTF 自动分析与求解流程。
@@ -150,9 +154,14 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 
 最新审计未发现高严重度问题。主要残余风险：
 
+- 本轮审批审计在发布前修复两项中风险完整性问题：公开 adoption 路径原本可能为不存在的提案创建幽灵审批，策略直接拒绝记录重复保存时可能从 `never` 漂移到 `per_call`；Store 现会验证真实 ToolRun/FileEdit 及指纹，并保留原拒绝模式。
+- 健壮性复核进一步修复一项低风险隐私问题：未来客户端提供的原始 review key 不再写入 SQLite，`approval_operations` 只保存域分隔 SHA-256 摘要，幂等重放和冲突检测语义保持不变。
+- Approval 的 get/list/adoption 读取入口现与写入模型共享 UTF-8、256-rune identity 和 500-row 列表上限，避免未来 HTTP 控制面放大超大查询参数。
+- schema v11 将审批决定与后续文件/ToolRun 状态推进设计为可恢复的两阶段提交；批准后、执行前崩溃会留下可审计的 approved 决定，重复同一键负责继续收敛。当前只允许 FileEdit 产生真实文件副作用，Shell/Script 仍 dry-run。
+- 兼容 Session 若先有提案、后绑定 Run，下一次审批读取会在事务内补齐 `run_id` 并追加一次 `approval.bound`，避免历史审批永久脱离 Run 时间线。
 - 本轮移除了 `script run --local` 的直接 LocalSandbox 路径；审计同时发现字符串级二次脱敏可破坏事件中的嵌套 JSON 转义，现已改为值级递归脱敏并增加 1 MiB、64 层、100,000 节点限制。
 - 本轮审计修复了截断时非法 UTF-8 被误判成功、极小输出上限溢出、持久化拒绝状态在错误路径下映射不一致，以及文件工具信任调用方 workspace root 的问题；均已增加回归测试。
-- Gateway 已集中现有工作区读、Shell 提案和 FileEdit 生产入口，但仍复用 `tool_runs`/`file_edits` 作为兼容持久化表；尚无统一 Proposal/Decision 表和跨重启 Session grant。
+- Gateway 已集中现有工作区读、Shell 提案和 FileEdit 生产入口，仍复用 `tool_runs`/`file_edits` 作为兼容 Proposal 表；统一逐次 Decision 已由 `tool_approvals`/`approval_operations` 承担，但跨重启 Session grant 尚未实现。
 - `staticcheck ./...` 当前零告警；本轮顺带清理了既存 TUI `S1008`、`S1011` 和未使用 helper `U1000`。
 - `script run --local` 的执行旁路已移除；生产代码扫描中不再存在 Sandbox Runner 调用，LocalSandbox 仅保留为未接线的开发后端。
 - Run 创建与 script ToolRun 提案目前是两个事务；极少数第二事务存储失败会留下可审计但无提案的 created Run，后续统一幂等 Approval transaction 时应收敛。
@@ -228,9 +237,13 @@ Script Gateway 切片新增 workspace/path 前置校验、`script_process.v1` sc
 
 该切片最终门再次通过 `go test -count=1 ./...`、`go vet ./...`、全仓库 `go test -race -count=1 ./...`、`staticcheck ./...` 和 `govulncheck ./...`，可达漏洞为 0。临时构建的真实 CLI 二进制 smoke 返回危险请求退出码 5，审批前后均未创建脚本标记文件；扫描返回 `NO_PRODUCTION_SANDBOX_RUNNER_CALLS`、`NO_CREDENTIAL_PATTERN_IN_REPO` 和 `NO_RUNTIME_OR_SECRET_ARTIFACTS_IN_REPO`。
 
+Durable Approval 切片新增 schema v10->v11 原地升级、Run/Session 绑定与后绑定 adoption、请求指纹、不可变 operation-key 摘要、同键重放/异意图冲突、无批准状态门禁、幽灵提案与指纹篡改拒绝、策略 `never` 幂等保存、Shell/FileEdit 重复审批、并发 approve/deny 单胜者、事件失败事务回滚、读取边界，以及批准后跨 Store 重启继续收敛测试。TUI 测试也改为只通过 Gateway 审批，不再直调 legacy Manager。
+
+该切片发布门通过 `go test -count=1 ./...`、`go vet ./...`、全仓库 `go test -race -count=1 ./...`、`staticcheck ./...` 和 `govulncheck ./...`；可达漏洞为 0。隔离 CLI smoke 验证 pending/approved 查询、审批详情、dry-run 完成和 `approval.requested/decided`。扫描返回 `NO_CREDENTIAL_PATTERN_IN_REPO`、`NO_PRODUCTION_APPROVAL_MANAGER_BYPASS`、`NO_PRODUCTION_SANDBOX_RUNNER_IMPORTS` 与 `NO_RUNTIME_OR_SECRET_ARTIFACTS_IN_REPO`。
+
 ## 七、下一开发切片
 
-1. 为 Approval 增加持久化幂等键、Run/Session 关联、重启恢复和可撤销的 Session grant，随后执行工具调用预算。
+1. 在现有逐次审批账本上增加可撤销 Session grant，精确绑定 Session/Run/Workspace/Tool/ActionClass，并执行 Run 级工具调用预算。
 2. 把 script process 从 legacy Shell ToolRun 升级为独立 typed proposal，并让 Run 创建与提案提交具备幂等恢复语义。
 3. 为 WorkItem/Note 增加低风险结构化工具提案，使模型修改经过 schema、scope、policy、事件和显式控制边界。
 4. 定义工具输出到 Artifact 的捕获阈值、哈希、MIME 和事件投影，避免截断内容静默丢失。
