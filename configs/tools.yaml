@@ -1,0 +1,10 @@
+tools:
+  read_file:
+    enabled: true
+    risk: low
+  sandbox.run:
+    enabled: true
+    default_runner: noop
+  docker:
+    enabled: false
+    note: Enable only when Docker is installed and scoped runner policy exists.

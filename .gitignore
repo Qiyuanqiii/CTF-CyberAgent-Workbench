@@ -1,0 +1,28 @@
+# IDE and operating-system metadata
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Go build and test output
+*.exe
+*.test
+*.out
+coverage.out
+dist/
+build/
+.tmp/
+
+# CyberAgent runtime data must stay local
+.cyberagent-workbench/
+cyberagent.db
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3

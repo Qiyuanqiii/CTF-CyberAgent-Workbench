@@ -1,0 +1,12 @@
+policy:
+  default: allow_scoped_learning
+  deny:
+    - unauthorized public scanning
+    - credential theft or exfiltration
+    - persistence or backdoor behavior
+    - destructive filesystem commands
+    - attempts to disable security tooling
+  require_approval:
+    - scoped network scanning
+    - local script execution
+    - dependency installation

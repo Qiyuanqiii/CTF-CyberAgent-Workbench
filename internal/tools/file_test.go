@@ -1,0 +1,165 @@
+package tools
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestReadFileToolScopesToWorkspace(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "workspace")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("scoped notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(parent, "outside.txt"), []byte("secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewReadFileTool(root)
+	result, err := tool.Run(context.Background(), Call{Args: map[string]string{"path": "notes.txt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Stdout != "scoped notes\n" {
+		t.Fatalf("unexpected stdout: %q", result.Stdout)
+	}
+
+	result, err = tool.Run(context.Background(), Call{Args: map[string]string{"path": "../outside.txt"}})
+	if err == nil {
+		t.Fatal("expected workspace escape to fail")
+	}
+	if !strings.Contains(result.Stderr, "escapes workspace") {
+		t.Fatalf("unexpected stderr: %q", result.Stderr)
+	}
+
+	result, err = tool.Run(context.Background(), Call{Args: map[string]string{"path": filepath.Join(root, "notes.txt")}})
+	if err == nil {
+		t.Fatal("expected absolute path to fail")
+	}
+	if !strings.Contains(result.Stderr, "relative") {
+		t.Fatalf("unexpected stderr: %q", result.Stderr)
+	}
+}
+
+func TestListWorkspaceToolScopesAndLimitsDepth(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "scripts", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("# demo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "scripts", "example.py"), []byte("print('ok')\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "scripts", "nested", "deep.py"), []byte("print('deep')\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tool := NewListWorkspaceTool(root)
+	result, err := tool.Run(context.Background(), Call{Args: map[string]string{"path": ".", "max_depth": "2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"README.md", "scripts", "example.py"} {
+		if !strings.Contains(result.Stdout, want) {
+			t.Fatalf("tree missing %q:\n%s", want, result.Stdout)
+		}
+	}
+	if strings.Contains(result.Stdout, "deep.py") {
+		t.Fatalf("tree exceeded requested depth:\n%s", result.Stdout)
+	}
+}
+
+func TestReadFileToolTruncatesText(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "long.txt"), []byte("abcdef"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := NewReadFileTool(root)
+	result, err := tool.Run(context.Background(), Call{Args: map[string]string{"path": "long.txt", "max_bytes": "3"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Stdout, "abc") || !strings.Contains(result.Stdout, "truncated at 3 bytes") {
+		t.Fatalf("unexpected truncated output: %q", result.Stdout)
+	}
+}
+
+func TestReadFileToolRedactsSecrets(t *testing.T) {
+	root := t.TempDir()
+	mimoToken := "t" + "p-" + strings.Repeat("a", 40)
+	raw := "MIMO_API_KEY=" + mimoToken + "\n"
+	if err := os.WriteFile(filepath.Join(root, "env.txt"), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := NewReadFileTool(root)
+	result, err := tool.Run(context.Background(), Call{Args: map[string]string{"path": "env.txt"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Stdout, mimoToken[:11]) {
+		t.Fatalf("secret was not redacted: %q", result.Stdout)
+	}
+	if !strings.Contains(result.Stdout, "[REDACTED:secret]") {
+		t.Fatalf("expected redaction marker, got %q", result.Stdout)
+	}
+}
+
+func TestWorkspaceFSResolveForWriteScopesExistingAndNewFiles(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "workspace")
+	if err := os.MkdirAll(filepath.Join(root, "scripts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fs := NewWorkspaceFS(root)
+	existing, err := fs.ResolveForWrite("notes.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if existing != filepath.Join(root, "notes.txt") {
+		t.Fatalf("unexpected existing path: %q", existing)
+	}
+	created, err := fs.ResolveForWrite(filepath.Join("scripts", "new.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created != filepath.Join(root, "scripts", "new.go") {
+		t.Fatalf("unexpected new path: %q", created)
+	}
+	if _, err := fs.ResolveForWrite("../outside.txt"); err == nil || !strings.Contains(err.Error(), "escapes workspace") {
+		t.Fatalf("expected traversal rejection, got %v", err)
+	}
+	if _, err := fs.ResolveForWrite(filepath.Join("missing", "new.go")); err == nil || !strings.Contains(err.Error(), "parent directory") {
+		t.Fatalf("expected missing parent rejection, got %v", err)
+	}
+}
+
+func TestWorkspaceFSResolveForWriteRejectsSymlinkEscape(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "workspace")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(parent, "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+	if _, err := NewWorkspaceFS(root).ResolveForWrite("link.txt"); err == nil || !strings.Contains(err.Error(), "escapes workspace") {
+		t.Fatalf("expected symlink escape rejection, got %v", err)
+	}
+}

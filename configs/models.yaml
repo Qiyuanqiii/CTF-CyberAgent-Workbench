@@ -1,0 +1,25 @@
+models:
+  default_provider: mock
+  default_model: mock-cyber-agent
+
+routing:
+  ctf:
+    provider: mock
+    model: mock-cyber-agent
+  script:
+    provider: mock
+    model: mock-code
+  learn:
+    provider: mock
+    model: mock-fast
+  code:
+    provider: mock
+    model: mock-code
+  review:
+    provider: mock
+    model: mock-cyber-agent
+
+providers:
+  mock:
+    type: mock
+    secrets: none
