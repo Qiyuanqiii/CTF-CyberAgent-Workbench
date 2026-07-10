@@ -138,6 +138,61 @@ type ModelAttempt struct {
 	RetryPlanned     bool
 	StreamEvents     int
 	StreamBytes      int
+	Context          *ModelContextAudit
+}
+
+const MaxModelContextSources = 256
+
+type ModelContextSource struct {
+	Kind     string `json:"kind"`
+	SourceID string `json:"source_id"`
+	Tokens   int    `json:"tokens"`
+}
+
+type ModelContextAudit struct {
+	TokenBudget     int                  `json:"token_budget"`
+	EstimatedTokens int                  `json:"estimated_tokens"`
+	Included        []ModelContextSource `json:"included"`
+	Omitted         []ModelContextSource `json:"omitted,omitempty"`
+}
+
+func (a ModelContextAudit) Validate() error {
+	if a.TokenBudget <= 0 {
+		return errors.New("model context token budget must be positive")
+	}
+	if a.EstimatedTokens < 0 || a.EstimatedTokens > a.TokenBudget {
+		return errors.New("model context token estimate must be within budget")
+	}
+	if len(a.Included)+len(a.Omitted) > MaxModelContextSources {
+		return fmt.Errorf("model context source list exceeds %d items", MaxModelContextSources)
+	}
+	seen := make(map[string]struct{}, len(a.Included)+len(a.Omitted))
+	includedTokens := 0
+	for _, group := range [][]ModelContextSource{a.Included, a.Omitted} {
+		for _, source := range group {
+			if strings.TrimSpace(source.Kind) == "" || strings.TrimSpace(source.SourceID) == "" || source.Tokens <= 0 {
+				return errors.New("model context source kind, id, and positive tokens are required")
+			}
+			if len([]rune(source.Kind)) > 64 || len([]rune(source.SourceID)) > 256 {
+				return errors.New("model context source identity is too long")
+			}
+			key := source.Kind + "\x00" + source.SourceID
+			if _, ok := seen[key]; ok {
+				return errors.New("model context source identities must be unique")
+			}
+			seen[key] = struct{}{}
+		}
+	}
+	for _, source := range a.Included {
+		if source.Tokens > a.TokenBudget-includedTokens {
+			return errors.New("model context included source tokens exceed budget")
+		}
+		includedTokens += source.Tokens
+	}
+	if includedTokens != a.EstimatedTokens {
+		return errors.New("model context included source tokens do not match estimate")
+	}
+	return nil
 }
 
 func (a ModelAttempt) ValidateStarted() error {
@@ -159,6 +214,11 @@ func (a ModelAttempt) ValidateStarted() error {
 	}
 	if a.StreamEvents < 0 || a.StreamBytes < 0 {
 		return errors.New("model stream counters cannot be negative")
+	}
+	if a.Context != nil {
+		if err := a.Context.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

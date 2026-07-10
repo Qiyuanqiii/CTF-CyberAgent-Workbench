@@ -194,6 +194,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 7, Name: "supervisor pending input", Statements: supervisorPendingInputStatements},
 		{Version: 8, Name: "supervisor protocol repair", Statements: supervisorProtocolRepairStatements},
 		{Version: 9, Name: "run work board", Statements: workBoardStatements},
+		{Version: 10, Name: "run notes", Statements: runNotesStatements},
 	})
 }
 

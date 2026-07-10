@@ -48,6 +48,8 @@ const (
 	SupervisorRunFailedEvent     = "supervisor.run_failed"
 	WorkItemCreatedEvent         = "work_item.created"
 	WorkItemChangedEvent         = "work_item.changed"
+	NoteCreatedEvent             = "note.created"
+	NoteChangedEvent             = "note.changed"
 )
 
 type Event struct {

@@ -292,7 +292,7 @@ func (s *SQLiteStore) RecordSupervisorModelStarted(ctx context.Context, checkpoi
 		"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
 		"model_attempt": attempt.Number, "transport_attempt": attempt.TransportNumber(),
 		"max_attempts": attempt.MaxAttempts, "protocol_repair": attempt.ProtocolRepair,
-		"provider": attempt.Provider, "model": attempt.Model,
+		"provider": attempt.Provider, "model": attempt.Model, "context": attempt.Context,
 	}); err != nil {
 		return false, err
 	}
@@ -732,12 +732,13 @@ func supervisorModelPurposeCountTx(ctx context.Context, tx *sql.Tx, checkpoint d
 }
 
 type supervisorModelStartedPayload struct {
-	ModelAttempt     int    `json:"model_attempt"`
-	TransportAttempt *int   `json:"transport_attempt"`
-	MaxAttempts      int    `json:"max_attempts"`
-	ProtocolRepair   *int   `json:"protocol_repair"`
-	Provider         string `json:"provider"`
-	Model            string `json:"model"`
+	ModelAttempt     int                    `json:"model_attempt"`
+	TransportAttempt *int                   `json:"transport_attempt"`
+	MaxAttempts      int                    `json:"max_attempts"`
+	ProtocolRepair   *int                   `json:"protocol_repair"`
+	Provider         string                 `json:"provider"`
+	Model            string                 `json:"model"`
+	Context          *llm.ModelContextAudit `json:"context,omitempty"`
 }
 
 func (p supervisorModelStartedPayload) transportAttempt() int {
@@ -764,6 +765,11 @@ func parseSupervisorModelStartedPayload(payloadJSON string) (supervisorModelStar
 	}
 	if payload.transportAttempt() <= 0 || payload.transportAttempt() > payload.MaxAttempts || payload.protocolRepair() < 0 || payload.protocolRepair() > 1 {
 		return supervisorModelStartedPayload{}, apperror.New(apperror.CodeFailedPrecondition, "invalid durable model start counters")
+	}
+	if payload.Context != nil {
+		if err := payload.Context.Validate(); err != nil {
+			return supervisorModelStartedPayload{}, apperror.Wrap(apperror.CodeFailedPrecondition, "invalid durable model context audit", err)
+		}
 	}
 	return payload, nil
 }

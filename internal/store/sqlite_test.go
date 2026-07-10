@@ -73,6 +73,13 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 	if workItemTable != "work_items" {
 		t.Fatalf("schema v9 work board table is missing: %q", workItemTable)
 	}
+	var notesTable string
+	if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'notes'`).Scan(&notesTable); err != nil {
+		t.Fatal(err)
+	}
+	if notesTable != "notes" {
+		t.Fatalf("schema v10 notes table is missing: %q", notesTable)
+	}
 }
 
 func TestSQLiteStoreUpgradesLegacyDatabaseWithoutLosingData(t *testing.T) {
@@ -120,7 +127,7 @@ func TestSQLiteStoreUpgradesLegacyDatabaseWithoutLosingData(t *testing.T) {
 	}
 }
 
-func TestSQLiteStoreUpgradesSchemaV8ToWorkBoardWithoutLosingRun(t *testing.T) {
+func TestSQLiteStoreUpgradesSchemaV8ToLatestWithoutLosingRun(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "v8.db")
 	st, err := Open(path)
 	if err != nil {
@@ -131,6 +138,14 @@ func TestSQLiteStoreUpgradesSchemaV8ToWorkBoardWithoutLosingRun(t *testing.T) {
 		Goal: "preserve this v8 run", Profile: "code", Budget: domain.Budget{MaxTurns: 4},
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"note_evidence", "note_sources", "note_tags", "notes"} {
+		if _, err := st.db.ExecContext(ctx, `DROP TABLE `+table); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version = 10`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.db.ExecContext(ctx, `DROP TABLE work_item_dependencies`); err != nil {
@@ -157,13 +172,63 @@ func TestSQLiteStoreUpgradesSchemaV8ToWorkBoardWithoutLosingRun(t *testing.T) {
 	}
 	version, err := st.SchemaVersion(ctx)
 	if err != nil || version != LatestSchemaVersion {
-		t.Fatalf("v8 database did not upgrade to v9: version=%d err=%v", version, err)
+		t.Fatalf("v8 database did not upgrade to latest: version=%d err=%v", version, err)
 	}
 	item, err := application.NewWorkItemService(st).Create(ctx, application.CreateWorkItemRequest{
 		RunID: run.ID, Title: "new v9 item",
 	})
 	if err != nil || item.RunID != run.ID {
 		t.Fatalf("upgraded work board is unusable: %#v err=%v", item, err)
+	}
+}
+
+func TestSQLiteStoreUpgradesSchemaV9ToNotesWithoutLosingWorkItems(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v9.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	mission, run, err := application.NewRunService(st).Create(ctx, application.CreateRunRequest{
+		Goal: "preserve v9 work board", Profile: "code", Budget: domain.Budget{MaxTurns: 4},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workItem, err := application.NewWorkItemService(st).Create(ctx, application.CreateWorkItemRequest{
+		RunID: run.ID, Title: "preserved work item",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"note_evidence", "note_sources", "note_tags", "notes"} {
+		if _, err := st.db.ExecContext(ctx, `DROP TABLE `+table); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version = 10`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	loaded, err := st.GetWorkItem(ctx, workItem.ID)
+	if err != nil || loaded.ID != workItem.ID || loaded.RunID != run.ID {
+		t.Fatalf("v9 work item was not preserved: %#v err=%v", loaded, err)
+	}
+	note := newNoteTest(run.ID, "new v10 note", "migration is usable")
+	if err := st.CreateNote(ctx, note, newNoteCreatedEvent(t, mission.ID, note)); err != nil {
+		t.Fatalf("upgraded note store is unusable: %v", err)
+	}
+	version, err := st.SchemaVersion(ctx)
+	if err != nil || version != LatestSchemaVersion {
+		t.Fatalf("v9 database did not upgrade to v10: version=%d err=%v", version, err)
 	}
 }
 

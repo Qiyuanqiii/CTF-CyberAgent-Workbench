@@ -162,6 +162,8 @@ func (a *App) dispatch(ctx context.Context, args []string) error {
 		return a.runCommand(ctx, args[1:])
 	case "todo":
 		return a.todoCommand(ctx, args[1:])
+	case "note":
+		return a.noteCommand(ctx, args[1:])
 	case "tui":
 		return a.tuiCommand(ctx, args[1:])
 	default:
@@ -186,6 +188,7 @@ func (a *App) printHelp() {
 	fmt.Fprintln(a.out, "  cyberagent edit propose|list|show|approve|deny")
 	fmt.Fprintln(a.out, "  cyberagent run create|adapt-task|list|show|events|start|step|execute|checkpoint|finish|fail|pause|resume|cancel")
 	fmt.Fprintln(a.out, "  cyberagent todo create|list|show|update|start|block|reopen|complete|cancel")
+	fmt.Fprintln(a.out, "  cyberagent note create|list|show|update|archive|restore")
 	fmt.Fprintln(a.out, "  cyberagent tui")
 }
 

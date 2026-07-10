@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 72%。
+- 整体产品愿景：约 75%。
 - v0.1 通用 Agent MVP：约 98%。
-- V2 Run-centric Runtime：约 88%。
+- V2 Run-centric Runtime：约 90%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming 和进程内主动取消链路。P3 第一批纵向切片已落地：纯 Go WorkItem 状态机、schema v9、同 Run 依赖图、乐观并发、事务事件、完整 `todo` CLI，以及 Supervisor 的有界活跃任务上下文。下一步实现持久化 Notes 和 note-aware Context Builder。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming 和进程内主动取消链路。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。下一步开始统一 Tool Gateway，继续保持提案优先和真实执行关闭。
 
 ## 二、已完成功能
 
@@ -74,6 +74,13 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - 每次 Supervisor 调用只注入最多 20 个活跃 WorkItem，使用不超过 16 KiB 的脱敏 `work_board.v1` JSON；completed/cancelled 不进入模型上下文。
 - 模型在仍有活跃 WorkItem 时返回 `finish` 会进入现有的一次协议修复，不能绕过工作板完成 Run；显式 `run finish` 保留为操作者覆盖。
 - `CompleteSupervisorTurn` 在取得 SQLite 写锁后再次检查活跃任务；模型调用期间由另一进程新建任务时，陈旧 `finish` 会回滚且保留可恢复 checkpoint。
+- schema v10 新增 Run-scoped `notes`、`note_tags`、`note_sources` 与 `note_evidence`；v9 数据库可原地升级并保留 WorkItem。
+- Note 支持 observation/hypothesis/decision/summary/reference、run/root/owner 可见性、Owner、标签、来源、Evidence ID、pin、active/archive 和乐观版本。
+- Note 记录、关系表与 `note.created/changed` 在同一事务提交；事件失败回滚正文和关系，并发陈旧写入只允许一个胜者。
+- `note create/list/show/get/update/archive/restore` 已可用；支持 UTF-8 content-file 的实际读取上限、联合标签过滤、pin/unpin、列表清空和显式 `--version`。
+- root Supervisor 只查询 run/root/`owner=root` 的 active Notes；其他 Owner 和 archived Notes 不进入模型上下文。
+- 通用 Context Section 选择器按优先级在 8192-token 估算预算内选择最新摘要、Work Board 与 Notes，pin 和 decision/summary 类别优先。
+- 每条 `model.started` 持久化 included/omitted 的 kind/source_id/tokens 与总预算，不持久化 Note 正文，重启后仍可审计当次模型上下文来源。
 - `run step` 每次只执行一个无工具规划 turn；`run checkpoint` 可观察恢复状态。
 - 模型调用前写 started checkpoint，完成时原子写消息、策略、用量、事件和下一个 checkpoint。
 - 重启会恢复同一 started attempt；已提交完成的 turn 和消息不会重复。
@@ -122,8 +129,8 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 ## 四、尚未完成
 
 - 经过生命周期投影和跨 chunk 脱敏的用户可见文本 streaming；当前 TUI 只展示元数据。
-- Provider 费用预算、工具调用预算和 token-aware Context Builder。
-- 持久化 Notes、Findings、Evidence 与 Report；WorkItem 基础已完成，模型工具提案和 TUI 视图尚未接入。
+- Provider 费用预算、工具调用预算，以及最近 Session 消息与结构化记忆共用的统一 token 预算。
+- Findings、Evidence 实体与 Report；WorkItem/Note 基础已完成，模型工具提案和 TUI 视图尚未接入。
 - 跨进程主动取消、WebSocket 推送和经过单独安全设计的用户可见文本 streaming。
 - OpenAI-compatible 与 Ollama Provider。
 - 统一 Tool Gateway 与真实 Docker 隔离。
@@ -143,7 +150,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - Docker Runner 还不是真实隔离边界。
 - `run start` 只推进生命周期，`run step` 执行一个模型 turn，`run execute` 只执行操作者指定的有限步数。
 - pre-call checkpoint 后崩溃可能重发一次无副作用模型请求，但已完成 turn 不会重复；工具调用因此继续禁用。
-- Supervisor 历史目前按 20 条消息限制，还不是 token-aware Context Builder。
+- 结构化记忆已有 8192-token 估算预算，但最近 Session 历史仍按 20 条消息限制，尚未纳入同一 token 预算。
 - MaxCostUSD 与工具调用预算尚未执行，因为 Provider 价格元数据和统一 Tool Gateway 尚未建立。
 - 执行时间当前只统计 Provider 模型调用；一次 Provider 调用可能超过剩余 token，但实际用量会完整记账并阻止下一次调用。
 - 预算边界停止执行后 Run 保持 `running`，需操作者显式 `finish`、`fail` 或 `cancel`；模型输出不能自行终结 Run。
@@ -166,10 +173,15 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - 已发布 migration 的语句和 checksum 不可修改，后续 schema 变化必须新增版本。
 - v3 会拒绝一个 Session 关联多个 Run；若旧数据库存在重复关联，应先审计，而不是自动丢弃数据。
 - 兼容期仍有普通字符串错误通过 `apperror.Normalize` 分类；新服务必须直接返回 typed error。
-- Work Board 当前由 CLI/application service 修改，模型只能读取活跃项，尚不能自动创建或完成任务；这是统一 Tool Gateway 上线前的刻意限制。
-- Supervisor 的 Work Board 是每次调用前的最多 20 项快照并受 16 KiB 上限约束；超出项保留在 SQLite，但需要后续 token-aware Context Builder 做更精细选择。
+- Work Board 与 Notes 当前由 CLI/application service 修改，模型只能读取选中的活跃记录；这是统一 Tool Gateway 上线前的刻意限制。
+- Supervisor 的 Work Board 是每次调用前最多 20 项、16 KiB 的候选快照，并作为一个 Context Section 参与 token 选择；超出项保留在 SQLite，后续仍需相关性查询或显式加载协议。
 - 显式操作者 `run finish` 可以覆盖仍有活跃 WorkItem 的模型完成门禁；该命令是人工终结边界，报告层后续应明确记录未完成项。
 - WorkItem ID 在全库唯一、依赖在同 Run 内；当前没有独立 Session/Agent owner 外键，Owner 仍是受长度约束的标签，等待 AgentCoordinator 建立身份表。
+- Note Owner 同样还是受长度约束的身份标签；`root` 是当前 Supervisor 的保留查看者名称，等待 AgentNode 外键替换。
+- Context Builder 的 8192 token 是启发式估算预算，只覆盖摘要/Work Board/Notes；最近 20 条 Session 消息仍使用既有数量上限，Provider usage 才是最终计费依据。
+- Supervisor 最多查询 100 条当前可见 active Notes；更多记录保留在 SQLite，但本轮不会进入候选集，后续需要查询相关性或显式加载协议。
+- Evidence ID 当前是结构化引用而不是外键，因为 Evidence 实体尚未落地；P6 报告阶段必须补引用完整性和失效投影。
+- 模型只能读取选中的 Note，不能直接创建、更新或归档；写入等待统一 Tool Gateway 的提案/审批语义。
 
 ## 六、验证基线
 
@@ -186,15 +198,19 @@ go vet ./...
 
 本机 Go 已从 1.26.1 升级到 1.26.5；升级前 `govulncheck` 命中 9 条可达标准库漏洞，升级后复扫为 0。协议修复 transport 测试验证全局 attempt `1/2/3` 与阶段内 transport `1/1/2`，Store 也会拒绝与 durable started event 不一致的终态元数据。
 
-本轮最终门已通过：`go test -count=1 ./...`、`go vet ./...`、Work Board 相关核心包 `go test -race`、`staticcheck ./...` 和 `govulncheck ./...`；后者报告 0 条可达漏洞。隔离 CLI smoke 完成两项依赖任务的 create/block/reopen/start/complete，并核对 2 条 created 与 5 条 changed 事件。仓库凭据前缀扫描返回 `NO_CREDENTIAL_PATTERN_IN_REPO`。
+本轮最终发布门已通过：`go test -count=1 ./...`、`go vet ./...`、全仓库 `go test -race -count=1 ./...`、`staticcheck ./...` 和 `govulncheck ./...`；后者报告 0 条可达漏洞。仓库扫描返回 `NO_CREDENTIAL_PATTERN_IN_REPO` 与 `NO_RUNTIME_OR_SECRET_ARTIFACTS_IN_REPO`。
+
+Notes/Context Builder 切片新增验证：schema v9->v10 数据保留、分类/可见性/Owner、关系复合外键、标签联合过滤、事件原子回滚、并发版本、content-file 大小与 UTF-8、CLI archive/restore、root 可见 Note 选择、token 预算优先级、敏感文本隔离，以及 `model.started` 仅保存来源元数据。隔离 smoke 核对 1 条 `note.created`、3 条 `note.changed` 和最终 version 4。
+
+发布前人工审计额外修复了三项低风险一致性问题：所有 Note 文本/关系字段现在显式拒绝非法 UTF-8；Store 拒绝负数列表上限；`note.changed` 的 `changed_fields` 只记录规范化后真正变化的字段。三项均有回归测试。
 
 ## 七、下一开发切片
 
-1. 继续 P3，定义纯 Go Note 分类、标签、来源/Evidence 引用、可见性和大小边界。
-2. 新增只追加 migration v10 的 `notes` 与关联表，不修改 v1-v9 migration checksum。
-3. 实现 Run-scoped Note Store、事务化 `note.created/changed` 事件和 `note create/list/show/update` CLI。
-4. 扩展 Context Builder：按 token 预算选择活跃 WorkItem、最新摘要和显式/相关 Notes，并保留来源元数据。
-5. 模型对 WorkItem/Note 的修改继续走显式提案或未来 Tool Gateway，不直接开放自动写入。
+1. 开始 P5 统一 Tool Gateway，定义纯 Go `ToolCall -> Proposal -> Decision -> Execution -> Result` 契约和稳定状态机。
+2. 先把现有只读 workspace 工具、ToolRun shell 提案和 FileEdit 提案适配到统一入口，不启用新的真实执行能力。
+3. 为 WorkItem/Note 增加低风险结构化工具提案，使模型修改也经过 schema、scope、policy、事件和显式控制边界。
+4. 统一审批记录与 Run Event 关联，补幂等键、重启恢复和陈旧提案拒绝测试。
+5. Docker/Local 真实命令执行继续关闭，直到 Tool Gateway、Sandbox 和输出限额同时通过审计。
 
 ## 八、仓库同步与恢复约定
 

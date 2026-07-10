@@ -4,7 +4,7 @@ Last updated: 2026-07-10
 
 ## Resume Context
 
-CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The current implementation is a CLI-first runtime with resumable Runs, streamed model calls, persisted sessions, a transactional SQLite event/message/WorkItem store, workspace manager, safety policy, sandbox interfaces, and context compaction.
+CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The current implementation is a CLI-first runtime with resumable Runs, streamed model calls, persisted sessions, a transactional SQLite event/message/WorkItem/Note store, workspace manager, safety policy, sandbox interfaces, context compaction, and token-aware structured-memory selection.
 
 Current product priority: migrate the working v0.1 scaffold into the V2 run-centric, resumable agent runtime described in ADR 0002 and `docs/TASK_BOOK.md`. CTF-specific solving logic is intentionally deferred until the generic runtime is stable.
 
@@ -23,20 +23,24 @@ Use these files first when resuming:
 - `internal/application/run_supervisor.go`
 - `internal/domain/root_action.go`
 - `internal/domain/work_item.go`
+- `internal/domain/note.go`
 - `internal/application/work_item_service.go`
+- `internal/application/note_service.go`
 - `internal/contextmgr/context.go`
+- `internal/contextmgr/selector.go`
 - `internal/session/session.go`
 - `internal/toolrun/toolrun.go`
 - `internal/tui/model.go`
 - `internal/tui/picker.go`
 - `internal/store/sqlite.go`
 - `internal/store/work_items.go`
+- `internal/store/notes.go`
 
 ## Progress Review
 
-- Overall product vision: about 72%.
+- Overall product vision: about 75%.
 - v0.1 generic agent MVP: about 98%.
-- V2 run-centric runtime: about 88%.
+- V2 run-centric runtime: about 90%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -72,7 +76,7 @@ Completed:
 - Reworked `docs/architecture.md` around run-scoped budget, event, sandbox, report, approval, and recovery ownership without copying the reference implementation.
 - Replaced the obsolete README migration/scaffold copy with a bilingual Chinese/English product overview, current capabilities, architecture boundary, and development-scope notice.
 - Added `docs/TASK_BOOK.md` with phased migration tasks, acceptance criteria, compatibility rules, and CTF deferred to the final phase.
-- Versioned SQLite migrations through schema v9: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative budget counters, durable pending user input, restart-safe protocol-repair state, and the Run-scoped Work Board; each version is checksummed and transactional.
+- Versioned SQLite migrations through schema v10: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative budget counters, durable pending user input, restart-safe protocol-repair state, the Run-scoped Work Board, and durable Notes; each version is checksummed and transactional.
 - Migration tests cover idempotence, legacy data preservation, checksum history, and failed-migration rollback.
 - Unified `internal/idgen` now backs agent tasks, sessions, tool runs, file edits, Mission/Run, and event IDs.
 - Added pure Go Mission, Scope, Budget, RunConfig, Run status machine, and legal transition checks.
@@ -145,6 +149,12 @@ Completed:
 - RunSupervisor loads at most 20 active WorkItems into a redacted `work_board.v1` JSON system message capped at 16 KiB; terminal items are excluded.
 - A model root `finish` conflicts with active work and uses the existing single protocol-repair path. Explicit `run finish` remains the operator override.
 - `CompleteSupervisorTurn` repeats the active-item check under its SQLite write transaction, so a WorkItem created by another process during the model call rolls back a stale finish and leaves the turn recoverable.
+- Added a pure-Go Note aggregate with five categories, run/root/owner visibility, normalized tags and source/Evidence references, pinning, archive/restore, strict size limits, and optimistic versions.
+- Schema v10 persists Notes and normalized relation tables. Composite foreign keys prevent cross-Run relation injection, while Note record changes and `note.created/changed` events commit atomically.
+- Added `note create/list/show/update/archive/restore` with bounded UTF-8 content-file input, exact filters, replace/clear relation operations, and optional explicit `--version` locking.
+- Root Supervisor memory includes only active run-visible, root-visible, and `owner=root` Notes; archived Notes and another owner's Notes are excluded.
+- A generic Context Section selector ranks compacted summary, Work Board, pinned Notes, and category-weighted Notes under an 8,192-token estimate.
+- Every `model.started` event records selected and omitted context source IDs/token estimates without persisting Note bodies, preserving restart-safe context provenance.
 
 Not done yet:
 
@@ -154,11 +164,13 @@ Not done yet:
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
-- Provider cost/tool-call budgets, Notes, AgentCoordinator, and Findings/Evidence; Work Board model tools and dedicated TUI view remain pending.
+- Provider cost/tool-call budgets, AgentCoordinator, and Findings/Evidence/Report; WorkItem/Note model tools and dedicated TUI views remain pending.
 
 ## Code Audit Notes
 
 No high-severity issue was found in the latest slice.
+
+The release audit found and fixed three low-risk consistency issues: Note fields now reject invalid UTF-8 at the domain/Store boundary, negative list limits are rejected instead of defaulted, and `changed_fields` records normalized differences rather than merely requested fields. Regression tests cover all three.
 
 Residual risks to address soon:
 
@@ -174,7 +186,7 @@ Residual risks to address soon:
 - Future Rust and TypeScript modules must not bypass Go for LLM, secrets, policy, workspace permissions, Docker, shell, network scope, or persistence.
 - `run start` advances lifecycle only; `run step` performs one model turn and `run execute` performs only the operator-selected number of durable steps.
 - A crash after the pre-call checkpoint can repeat a side-effect-free model request, but committed messages and completed turns are never duplicated. Tool calls stay disabled until execution idempotency exists.
-- Supervisor history is currently bounded by 20 messages, not a token-aware Context Builder budget.
+- Structured memory now has an 8,192-token estimate, but recent Session history is still bounded by 20 messages rather than sharing that token budget.
 - MaxCostUSD and tool-call budgets are not enforced until provider pricing metadata and the unified Tool Gateway exist.
 - ExecutionMillis measures Provider model-call time, not total wall-clock orchestration time.
 - One Provider response can exceed the remaining token allowance; actual usage is committed conservatively and the next call is blocked.
@@ -197,10 +209,13 @@ Residual risks to address soon:
 - Applied migration statements are immutable once released because their checksums are verified. Schema changes must always add a new migration version.
 - Schema v3 intentionally rejects duplicate non-empty Run/Session associations. A legacy database containing duplicates must be audited before upgrade instead of silently discarding an association.
 - `apperror.Normalize` includes a transitional text classifier for legacy plain errors. New services must return typed errors directly so future localization cannot affect classification.
-- WorkItems are operator/application managed in this slice. Models receive bounded read-only context and cannot mutate the board until proposal/approval semantics exist in the unified Tool Gateway.
-- The Supervisor context loads at most 20 active items and then applies a 16 KiB JSON cap. SQLite retains all items; later token-aware selection must rank or summarize overflow instead of silently treating the window as the complete board.
+- WorkItems and Notes are operator/application managed in this slice. Models receive bounded read-only context and cannot mutate either surface until proposal/approval semantics exist in the unified Tool Gateway.
+- The Supervisor queries at most 20 active WorkItems and 100 visible active Notes before token selection. SQLite retains overflow, but later relevance search or explicit loading must make those records discoverable.
 - Explicit `run finish` can close a Run with unfinished WorkItems as an intentional operator override. Future report projections should surface those unfinished records.
 - WorkItem Owner is currently a bounded label, not an AgentNode foreign key. Coordinator identity and per-agent visibility are still future P4 work.
+- Note Owner is also a bounded label; `root` is the current Supervisor viewer identity until AgentNode-backed identities exist.
+- Note Evidence IDs are structured references rather than foreign keys because the Evidence entity is deferred to the report phase.
+- Context token counts are deterministic estimates for selection. Provider-reported usage remains the authoritative budget and billing value.
 
 ## Feature Verification
 
@@ -228,6 +243,13 @@ go run ./cmd/cyberagent todo show <work-id>
 go run ./cmd/cyberagent todo block <work-id> --reason "waiting for fixture"
 go run ./cmd/cyberagent todo reopen <work-id>
 go run ./cmd/cyberagent todo complete <work-id>
+go run ./cmd/cyberagent note create <run-id> "parser decision" --content "Use strict JSON" --category decision --pin
+go run ./cmd/cyberagent note create <run-id> "fixture evidence" --content-file C:\temp\note.txt --tag parser --source docs/spec.md --evidence evidence-1
+go run ./cmd/cyberagent note list <run-id> --status active --category decision,summary --tag parser
+go run ./cmd/cyberagent note show <note-id>
+go run ./cmd/cyberagent note update <note-id> --content "Revised decision" --version 1
+go run ./cmd/cyberagent note archive <note-id>
+go run ./cmd/cyberagent note restore <note-id>
 go run ./cmd/cyberagent workspace init demo
 go run ./cmd/cyberagent workspace tree demo --depth 2
 go run ./cmd/cyberagent workspace read demo README.md
@@ -309,14 +331,17 @@ Expected context behavior:
 - Work Board gates passed for domain invariants, migration v9 and legacy preservation, dependency/cycle/FK enforcement, transactional rollback, stale/concurrent versions, service and CLI lifecycle, Supervisor context bounds/redaction, and premature model-finish repair.
 - The commit-time completion-race test created a WorkItem during the Provider response, then verified the stale model finish wrote no Session messages or completion events and retained a recoverable started checkpoint.
 - An isolated Work Board CLI smoke completed a two-item dependency chain and observed exactly two `work_item.created` plus five `work_item.changed` events.
-- Final gates passed with uncached full tests, vet, targeted race tests, clean staticcheck, zero reachable govulncheck findings, and `NO_CREDENTIAL_PATTERN_IN_REPO`.
+- Final Notes/Context gates passed with uncached full tests, vet, full-repository race tests, clean staticcheck, zero reachable govulncheck findings, `NO_CREDENTIAL_PATTERN_IN_REPO`, and `NO_RUNTIME_OR_SECRET_ARTIFACTS_IN_REPO`.
+- Note gates passed for domain invariants, invalid UTF-8 rejection, migration v9-to-v10 preservation, relation foreign keys, visibility/tag/limit filters, transactional rollback, exact changed-field audit, stale/concurrent versions, service/CLI lifecycle, bounded content-file input, and terminal-Run rejection.
+- Context selection tests passed for deterministic priority, exact estimate limits, redaction, root visibility, pinned/category priority, overflow provenance, and Note-body isolation from durable events.
+- An isolated Note CLI smoke created, updated, archived, and restored one Note, ending at version 4 with exactly one `note.created` and three `note.changed` events.
 
 ## Recommended Next Slice
 
-Continue P3 with durable Notes and context selection:
+Begin P5 with the unified Tool Gateway:
 
-- Define pure-Go Note categories, tags, source/evidence references, visibility, and size limits.
-- Add immutable migration v10 plus transactional `note.created/changed` events without editing v1-v9 checksums.
-- Implement Store/application boundaries and `note create/list/show/update` CLI commands.
-- Make Context Builder token-aware across summaries, active WorkItems, and explicitly/relevantly selected Notes.
-- Keep model-authored WorkItem/Note changes behind future proposal and Tool Gateway boundaries.
+- Define a pure-Go `ToolCall -> Proposal -> Decision -> Execution -> Result` contract and stable lifecycle.
+- Adapt existing workspace reads, shell ToolRun proposals, and FileEdit proposals behind one Go-owned dispatch boundary without enabling new execution capabilities.
+- Add low-risk structured WorkItem/Note mutation proposals with schema validation, scope checks, policy decisions, durable events, and explicit approval where required.
+- Add idempotency keys, restart recovery, stale-proposal rejection, output limits, and event correlation tests before allowing real Local/Docker execution.
+- Keep TypeScript, Rust, and model providers unable to bypass the Go Tool Gateway or policy boundary.

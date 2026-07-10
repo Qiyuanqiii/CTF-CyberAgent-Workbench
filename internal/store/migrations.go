@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 9
+const LatestSchemaVersion = 10
 
 type migration struct {
 	Version    int
@@ -173,6 +173,63 @@ var workBoardStatements = []string{
 	) WITHOUT ROWID;`,
 	`CREATE INDEX idx_work_item_dependencies_target
 		ON work_item_dependencies(run_id, depends_on_id, work_item_id);`,
+}
+
+var runNotesStatements = []string{
+	`CREATE TABLE notes (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		title TEXT NOT NULL,
+		content TEXT NOT NULL,
+		category TEXT NOT NULL,
+		visibility TEXT NOT NULL,
+		owner TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL,
+		pinned INTEGER NOT NULL DEFAULT 0,
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		archived_at TEXT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		UNIQUE(run_id, id),
+		CHECK(category IN ('observation', 'hypothesis', 'decision', 'summary', 'reference')),
+		CHECK(visibility IN ('run', 'root', 'owner')),
+		CHECK(status IN ('active', 'archived')),
+		CHECK(pinned IN (0, 1)),
+		CHECK(version > 0),
+		CHECK((visibility = 'owner' AND length(trim(owner)) > 0) OR (visibility <> 'owner' AND owner = '')),
+		CHECK((status = 'archived' AND archived_at IS NOT NULL) OR (status = 'active' AND archived_at IS NULL))
+	);`,
+	`CREATE INDEX idx_notes_run_status_pinned
+		ON notes(run_id, status, pinned, updated_at);`,
+	`CREATE INDEX idx_notes_run_category_visibility
+		ON notes(run_id, category, visibility, updated_at);`,
+	`CREATE TABLE note_tags (
+		run_id TEXT NOT NULL,
+		note_id TEXT NOT NULL,
+		tag TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		PRIMARY KEY(run_id, note_id, tag),
+		FOREIGN KEY(run_id, note_id) REFERENCES notes(run_id, id) ON DELETE CASCADE
+	) WITHOUT ROWID;`,
+	`CREATE INDEX idx_note_tags_lookup ON note_tags(run_id, tag, note_id);`,
+	`CREATE TABLE note_sources (
+		run_id TEXT NOT NULL,
+		note_id TEXT NOT NULL,
+		source_ref TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		PRIMARY KEY(run_id, note_id, source_ref),
+		FOREIGN KEY(run_id, note_id) REFERENCES notes(run_id, id) ON DELETE CASCADE
+	) WITHOUT ROWID;`,
+	`CREATE TABLE note_evidence (
+		run_id TEXT NOT NULL,
+		note_id TEXT NOT NULL,
+		evidence_id TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		PRIMARY KEY(run_id, note_id, evidence_id),
+		FOREIGN KEY(run_id, note_id) REFERENCES notes(run_id, id) ON DELETE CASCADE
+	) WITHOUT ROWID;`,
+	`CREATE INDEX idx_note_evidence_lookup ON note_evidence(run_id, evidence_id, note_id);`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {

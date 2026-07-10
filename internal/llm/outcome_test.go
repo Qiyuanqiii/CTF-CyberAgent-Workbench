@@ -89,3 +89,28 @@ func TestModelAttemptValidation(t *testing.T) {
 		t.Fatal("model attempt accepted negative stream counters")
 	}
 }
+
+func TestModelContextAuditValidation(t *testing.T) {
+	audit := ModelContextAudit{
+		TokenBudget: 100, EstimatedTokens: 30,
+		Included: []ModelContextSource{{Kind: "summary", SourceID: "summary-1", Tokens: 10}, {Kind: "note", SourceID: "note-1", Tokens: 20}},
+		Omitted:  []ModelContextSource{{Kind: "note", SourceID: "note-2", Tokens: 90}},
+	}
+	if err := audit.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	mismatch := audit
+	mismatch.EstimatedTokens = 29
+	if err := mismatch.Validate(); err == nil {
+		t.Fatal("context audit accepted a mismatched token estimate")
+	}
+	duplicate := audit
+	duplicate.Omitted = []ModelContextSource{{Kind: "note", SourceID: "note-1", Tokens: 90}}
+	if err := duplicate.Validate(); err == nil {
+		t.Fatal("context audit accepted a duplicate source")
+	}
+	attempt := ModelAttempt{Number: 1, MaxAttempts: 1, Provider: "test", Model: "model", Context: &audit}
+	if err := attempt.ValidateStarted(); err != nil {
+		t.Fatalf("valid context audit rejected by model attempt: %v", err)
+	}
+}

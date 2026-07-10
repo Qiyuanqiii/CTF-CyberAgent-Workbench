@@ -32,7 +32,7 @@ Root actions use `continue`, `finish`, or `wait`. `continue` advances to another
 
 `run execute` repeats that same durable step up to `--max-steps`; it stops immediately on root `finish` or `wait`. `--finish` remains an explicit operator fallback after a normal step limit and cannot complete a waiting Run. `run finish` and `run fail` atomically update the Run, Supervisor checkpoint, and event stream. Repeating the same terminal command or replaying the same committed lifecycle action is idempotent, while a conflicting terminal transition is rejected.
 
-Before each model call, the Supervisor passes the remaining token allowance as the request limit and applies the remaining persisted model-execution deadline. It also loads at most 20 active WorkItems, serializes a redacted `work_board.v1` JSON system context capped at 16 KiB, and excludes completed/cancelled items. A model `finish` action is sent through the existing one-repair protocol when active work remains; `run finish` remains an explicit operator override. Provider-reported usage is authoritative: if one call exceeds the remaining token allowance, its full actual usage is committed and subsequent calls are blocked. `MaxCostUSD` and tool-call budgets are configuration fields only until provider pricing and the unified Tool Gateway are available.
+Before each model call, the Supervisor passes the remaining token allowance as the request limit and applies the remaining persisted model-execution deadline. Its Context Builder considers the latest compacted summary, at most 20 active WorkItems, and at most 100 active Notes visible to the root Agent. It selects those structured sections under a separate 8,192-token estimate, keeps Work Board JSON under 16 KiB, and truncates individual Note context fields. `model.started` persists only included/omitted source IDs and token estimates, never Note bodies. A model `finish` action is sent through the existing one-repair protocol when active work remains; `run finish` remains an explicit operator override. Provider-reported usage is authoritative: if one call exceeds the remaining token allowance, its full actual usage is committed and subsequent calls are blocked. `MaxCostUSD` and tool-call budgets are configuration fields only until provider pricing and the unified Tool Gateway are available.
 
 Provider failures are normalized as `retryable`, `rate_limited`, `invalid_response`, `cancelled`, or `permanent`. RunSupervisor retries only retryable transport/capacity outcomes, with three attempts per protocol phase by default, 100 ms exponential backoff, and a 2 second local wait ceiling. A server `Retry-After` longer than that ceiling is not shortened: the turn returns a rate-limit error and keeps its pending input for a later `run step`. Invalid lifecycle JSON is not transport-retried; instead, it receives exactly one explicit repair phase with its own transport counter. Authentication/configuration failures, policy denial, and tool calls are not repaired.
 
@@ -72,6 +72,28 @@ cyberagent todo cancel <work-id>
 WorkItems belong to exactly one Run. Dependencies must already exist in that same Run, cannot form a cycle, and must be completed before a dependent item starts or completes. Statuses are `pending`, `in_progress`, `blocked`, `completed`, and `cancelled`; priorities are `low`, `normal`, `high`, and `critical`. Blocked items require a reason, while completed and cancelled items are terminal.
 
 Every item starts at version 1. Mutation commands accept optional `--version <n>` optimistic locking; omitting it uses the version read immediately before the transaction, while an explicit stale value returns conflict exit code 4. `--acceptance` and `--depends-on` may be repeated. `--clear-acceptance` and `--clear-dependencies` replace those lists with empty values. WorkItem records and `work_item.created/changed` Run events commit atomically, and terminal Runs reject later board mutation.
+
+## Notes
+
+```powershell
+cyberagent note create <run-id> "parser decision" --content "Use strict JSON" --category decision --pin
+cyberagent note create <run-id> "fixture evidence" --content-file C:\temp\note.txt --tag parser --source docs/spec.md --evidence evidence-1
+cyberagent note create <run-id> "root summary" --content "Current root-only state" --visibility root
+cyberagent note create <run-id> "specialist memory" --content "Private context" --visibility owner --owner specialist
+cyberagent note list <run-id> --status active --category decision,summary --tag parser
+cyberagent note list <run-id> --visibility root --pinned true
+cyberagent note show <note-id>
+cyberagent note update <note-id> --content "Revised decision" --version 1
+cyberagent note update <note-id> --clear-tags --unpin
+cyberagent note archive <note-id>
+cyberagent note restore <note-id>
+```
+
+Categories are `observation`, `hypothesis`, `decision`, `summary`, and `reference`. Visibility is `run`, `root`, or `owner`; owner-visible Notes require an owner label. The root Supervisor receives run-visible, root-visible, and `owner=root` Notes, while Notes owned by another future Agent remain excluded. Operators can still inspect all Notes through the CLI.
+
+Each Note has normalized tags, source references, Evidence IDs, pinned state, active/archived lifecycle, and an optimistic version. `--tag`, `--source`, and `--evidence` may be repeated; update commands replace those lists or clear them explicitly. Archived Notes remain durable but cannot be edited or selected until restored. Terminal Runs reject later Note mutation.
+
+`--content-file` reads valid UTF-8 through a bounded reader and rejects content over 64 KiB even if the file changes while being read. Content, titles, tags, references, Evidence IDs, event payloads, and model context pass through the redaction boundary. Note records and `note.created/changed` events commit together. Models receive selected Notes as untrusted `note_context.v1` JSON and cannot create or modify Notes in this phase.
 
 ## Workspaces
 
@@ -211,3 +233,5 @@ cyberagent context show --task task-demo
 ```
 
 `context compact` is the manual v0.1 version of a Codex-style compaction step. It stores a summary in SQLite and reports how many recent messages remain outside the summary.
+
+Run-scoped WorkItems and Notes are independent from Session compaction, so compacting or replacing conversation history does not remove structured plan or memory records. The Supervisor's token-aware memory selector combines the latest summary with those durable sources before each Run model call.

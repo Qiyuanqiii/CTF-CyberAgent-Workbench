@@ -151,6 +151,115 @@ func TestRunSupervisorInjectsOnlyActiveWorkItemsIntoModelContext(t *testing.T) {
 	}
 }
 
+func TestRunSupervisorInjectsOnlyNotesVisibleToRoot(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	provider := &lifecycleProvider{responses: []string{
+		rootActionResponse(domain.RootActionContinue, "notes observed", "", ""),
+	}}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	runs := application.NewRunService(st)
+	_, run, err := runs.Create(ctx, application.CreateRunRequest{
+		Goal: "note context", Profile: "code", ModelRoute: provider.Name() + "/model", Budget: domain.Budget{MaxTurns: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := application.NewNoteService(st)
+	testAPIKey := "s" + "k-" + strings.Repeat("m", 26)
+	runNote, err := notes.Create(ctx, application.CreateNoteRequest{
+		RunID: run.ID, Title: "durable decision", Content: "Never expose " + testAPIKey,
+		Category: "decision", Visibility: "run", Tags: []string{"security"}, Pinned: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootNote, err := notes.Create(ctx, application.CreateNoteRequest{
+		RunID: run.ID, Title: "root summary", Content: "Root-visible summary", Category: "summary", Visibility: "root",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootOwned, err := notes.Create(ctx, application.CreateNoteRequest{
+		RunID: run.ID, Title: "root private", Content: "Root owner memory", Visibility: "owner", Owner: "root",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	specialistOwned, err := notes.Create(ctx, application.CreateNoteRequest{
+		RunID: run.ID, Title: "specialist private", Content: "Must remain hidden", Visibility: "owner", Owner: "specialist",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived, err := notes.Create(ctx, application.CreateNoteRequest{
+		RunID: run.ID, Title: "archived memory", Content: "Must not be selected", Visibility: "run",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived, err = notes.Transition(ctx, archived.ID, 0, domain.NoteArchived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runs.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.requests) != 1 {
+		t.Fatalf("expected one provider request, got %d", len(provider.requests))
+	}
+	request := provider.requests[0]
+	if request.Metadata["available_notes"] != "3" || request.Metadata["selected_notes"] != "3" ||
+		request.Metadata["memory_omitted"] != "0" {
+		t.Fatalf("unexpected note context metadata: %#v", request.Metadata)
+	}
+	var contextText strings.Builder
+	for _, message := range request.Messages {
+		if strings.Contains(message.Content, `"version":"note_context.v1"`) {
+			contextText.WriteString(message.Content)
+		}
+	}
+	selected := contextText.String()
+	for _, expected := range []string{runNote.ID, rootNote.ID, rootOwned.ID, "[REDACTED:api-key]"} {
+		if !strings.Contains(selected, expected) {
+			t.Fatalf("selected note context missing %q: %s", expected, selected)
+		}
+	}
+	for _, forbidden := range []string{specialistOwned.ID, archived.ID, testAPIKey, "Must remain hidden", "Must not be selected"} {
+		if strings.Contains(selected, forbidden) {
+			t.Fatalf("selected note context leaked %q: %s", forbidden, selected)
+		}
+	}
+	timeline, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var startedPayload string
+	for _, event := range timeline {
+		if event.Type == events.ModelStartedEvent {
+			startedPayload = event.PayloadJSON
+		}
+	}
+	for _, sourceID := range []string{runNote.ID, rootNote.ID, rootOwned.ID} {
+		if !strings.Contains(startedPayload, sourceID) {
+			t.Fatalf("durable context audit missing %s: %s", sourceID, startedPayload)
+		}
+	}
+	for _, forbidden := range []string{specialistOwned.ID, archived.ID, testAPIKey, "Root-visible summary", "Root owner memory"} {
+		if strings.Contains(startedPayload, forbidden) {
+			t.Fatalf("durable context audit leaked %q: %s", forbidden, startedPayload)
+		}
+	}
+}
+
 func TestRunSupervisorRepairsFinishWhileWorkItemsRemainActive(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
 	if err != nil {

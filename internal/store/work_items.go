@@ -37,7 +37,7 @@ func (s *SQLiteStore) CreateWorkItem(ctx context.Context, item domain.WorkItem, 
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	missionID, err := workItemRunMissionTx(ctx, tx, item.RunID)
+	missionID, err := mutableRunMissionTx(ctx, tx, item.RunID)
 	if err != nil {
 		return err
 	}
@@ -191,7 +191,7 @@ func (s *SQLiteStore) UpdateWorkItem(ctx context.Context, item domain.WorkItem, 
 	if err := validateWorkItemReplacement(current, item); err != nil {
 		return err
 	}
-	missionID, err := workItemRunMissionTx(ctx, tx, item.RunID)
+	missionID, err := mutableRunMissionTx(ctx, tx, item.RunID)
 	if err != nil {
 		return err
 	}
@@ -280,7 +280,7 @@ func scanWorkItem(row scanner) (domain.WorkItem, error) {
 	return item, nil
 }
 
-func workItemRunMissionTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+func mutableRunMissionTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
 	var missionID string
 	var status domain.RunStatus
 	if err := tx.QueryRowContext(ctx, `SELECT mission_id, status FROM runs WHERE id = ?`, strings.TrimSpace(runID)).Scan(&missionID, &status); err != nil {

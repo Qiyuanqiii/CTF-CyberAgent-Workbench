@@ -13,7 +13,7 @@ CyberAgent Workbench 是一个由 Go 驱动的本地 AI Agent 工作台，面向
 
 项目当前优先完善通用单 Agent 运行时。CTF 将作为后续 Profile 和 Skills 能力接入，而不是另建一套独立运行系统。
 
-当前版本已经提供 Run 级结构化 Work Board：工作项拥有状态、优先级、Owner、依赖和验收条件，所有变更与 Run 事件在同一事务提交。Supervisor 只把有界的活跃工作项加入模型上下文，并在仍有活跃项时拒绝模型自行 `finish`。
+当前版本已经提供 Run 级结构化 Work Board 与 Notes：工作项负责可执行计划，Note 负责观察、假设、决策、摘要和来源引用，所有变更都与 Run 事件在同一事务提交。Supervisor 使用 8192 token 的独立记忆预算选择摘要、活跃工作项和当前 root 可见 Note，并把来源 ID 与 token 估算记录在 `model.started`；Note 正文不会写入模型事件。仍有活跃工作项时，模型不能自行 `finish`。
 
 ### English
 
@@ -23,17 +23,17 @@ Each user objective is stored as a `Mission`, while each resumable execution is 
 
 The current priority is the general-purpose single-agent runtime. CTF capabilities will be added later as Profiles and Skills on top of the same foundation rather than as a separate execution system.
 
-The current build includes a structured, Run-scoped Work Board. Work items carry status, priority, owner, dependencies, and acceptance criteria; each mutation commits with its Run event in one transaction. The Supervisor injects only a bounded active set and rejects model-driven `finish` while active work remains.
+The current build includes a structured, Run-scoped Work Board and durable Notes. WorkItems hold executable plans, while Notes hold observations, hypotheses, decisions, summaries, and source references. Every mutation commits with its Run event. The Supervisor selects summaries, active work, and root-visible Notes under a separate 8,192-token memory budget, then records source IDs and token estimates in `model.started` without persisting Note bodies there. Model-driven `finish` remains blocked while active work exists.
 
 ## 核心能力 / Core Capabilities
 
 - **可恢复运行 / Resumable runs:** durable checkpoints, bounded execution, restart recovery, graceful terminal cancellation, and explicit lifecycle actions.
 - **统一模型网关 / Model gateway:** route-based providers, Anthropic-compatible SSE streaming, typed failures, application-owned active-call cancellation, bounded live progress, one lifecycle-protocol repair, and durable model events.
-- **长上下文管理 / Long-context memory:** persisted sessions and automatic context compaction inspired by modern coding agents.
+- **长上下文与结构化记忆 / Long-context memory:** persisted sessions, automatic compaction, durable categorized Notes, visibility rules, and token-budgeted source selection.
 - **结构化任务板 / Structured Work Board:** Run-scoped work items, dependency and cycle checks, optimistic versions, transactional events, and bounded Supervisor context.
 - **本地工作区 / Local workspace:** scoped file access, safe reads, persistent artifacts, and reviewable edit proposals.
 - **安全与审批 / Safety and approval:** policy checks, secret redaction, dry-run tool proposals, and explicit approval boundaries.
-- **完整审计链 / Audit trail:** append-only Run events for messages, bounded text-free stream progress, model calls, policy decisions, tool proposals, and file edits.
+- **完整审计链 / Audit trail:** append-only Run events for messages, context source provenance, bounded text-free stream progress, model calls, Notes, policy decisions, tool proposals, and file edits.
 - **CLI 与 TUI / CLI and TUI:** a scriptable CLI plus a Bubble Tea interface with live model progress and audited cancellation.
 - **可扩展架构 / Extensible architecture:** Go control plane with planned HTTP/WebSocket, TypeScript UI, Docker sandbox, and Rust analyzer boundaries.
 
@@ -80,6 +80,13 @@ go run ./cmd/cyberagent todo show <work-id>
 go run ./cmd/cyberagent todo block <work-id> --reason "waiting for fixture"
 go run ./cmd/cyberagent todo reopen <work-id>
 go run ./cmd/cyberagent todo complete <work-id>
+go run ./cmd/cyberagent note create <run-id> "parser decision" --content "Use strict JSON" --category decision --pin
+go run ./cmd/cyberagent note create <run-id> "test evidence" --content-file .\note.txt --source docs/spec.md --evidence evidence-1
+go run ./cmd/cyberagent note list <run-id> --status active --tag parser
+go run ./cmd/cyberagent note show <note-id>
+go run ./cmd/cyberagent note update <note-id> --visibility root --version 1
+go run ./cmd/cyberagent note archive <note-id>
+go run ./cmd/cyberagent note restore <note-id>
 go run ./cmd/cyberagent session create --workspace demo --title "Agent basics" --route learn
 go run ./cmd/cyberagent session send <session-id> "/ls ."
 go run ./cmd/cyberagent session send <session-id> "/read README.md"
@@ -113,7 +120,7 @@ Local runtime databases, workspace data, environment files, API keys, IDE metada
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, and exactly one restart-safe lifecycle-protocol repair. P3 is now in progress: migration v9, the WorkItem domain/state machine, transactional dependency graph, `todo` CLI, and bounded active-work injection are complete. The next slice adds durable Notes and note-aware context selection before multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, and exactly one restart-safe lifecycle-protocol repair. P3 now includes migration v9 WorkItems, migration v10 Notes, transactional relationships/events, `todo` and `note` CLI lifecycles, root/owner visibility, token-budgeted memory selection, and durable context provenance. The next vertical slice begins the unified Tool Gateway while execution remains proposal-first. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
 TUI quick controls: `cyberagent tui` opens a session picker. In chat, `Tab` switches focus, `PgUp/PgDn` scroll messages, `j/k` select tool runs, `a` approves, `d` denies, `Ctrl+X` requests cancellation of the current model call, `Ctrl+R` refreshes, and `Esc` quits when idle. Busy sends cannot be closed accidentally with `Esc`; cancel or wait first. The status line renders provider/model, attempt, chunk/byte progress, cancellation, disconnect, and terminal state without exposing raw model text. Attached workspaces render in the side panel with local directory counts for attachments, scripts, outputs, logs, and writeups.
 
