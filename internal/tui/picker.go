@@ -9,12 +9,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"cyberagent-workbench/internal/session"
-	"cyberagent-workbench/internal/toolrun"
 )
 
 type Picker struct {
 	sessionManager *session.Manager
-	toolManager    *toolrun.Manager
+	toolManager    ToolManager
 	workspaceStore WorkspaceStore
 	activeCalls    ActiveCallController
 	sessions       []session.Session
@@ -34,7 +33,7 @@ func (p *Picker) WithActiveCallController(controller ActiveCallController) *Pick
 	return p
 }
 
-func NewPicker(ctx context.Context, sessionManager *session.Manager, toolManager *toolrun.Manager, workspaceID string, title string, route string, workspaceStores ...WorkspaceStore) (*Picker, error) {
+func NewPicker(ctx context.Context, sessionManager *session.Manager, toolManager ToolManager, workspaceID string, title string, route string, workspaceStores ...WorkspaceStore) (*Picker, error) {
 	var workspaceStore WorkspaceStore
 	if len(workspaceStores) > 0 {
 		workspaceStore = workspaceStores[0]

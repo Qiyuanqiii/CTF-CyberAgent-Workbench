@@ -18,9 +18,11 @@ type Call struct {
 }
 
 type Result struct {
-	Stdout   string
-	Stderr   string
-	ExitCode int
+	Stdout    string
+	Stderr    string
+	ExitCode  int
+	MIME      string
+	Truncated bool
 }
 
 type Tool interface {

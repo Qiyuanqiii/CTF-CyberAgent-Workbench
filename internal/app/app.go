@@ -20,6 +20,7 @@ import (
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/sandbox"
 	"cyberagent-workbench/internal/store"
+	"cyberagent-workbench/internal/toolgateway"
 	"cyberagent-workbench/internal/tools"
 	"cyberagent-workbench/internal/workspace"
 )
@@ -83,6 +84,13 @@ func ExecuteContext(ctx context.Context, args []string, out io.Writer, errOut io
 
 func (a *App) newRunSupervisor() *application.RunSupervisor {
 	return application.NewRunSupervisor(a.store, a.router, a.checker).WithActiveCalls(a.calls)
+}
+
+func (a *App) newToolGateway() *toolgateway.Gateway {
+	return toolgateway.New(a.store, a.checker).WithWorkspaceRootResolver(func(ctx context.Context, workspaceID string) (string, error) {
+		rec, err := a.store.GetWorkspaceByID(ctx, workspaceID)
+		return rec.RootPath, err
+	})
 }
 
 func (a *App) registerEnvProviders() {
@@ -320,19 +328,21 @@ func (a *App) workspaceTree(ctx context.Context, args []string) error {
 	if fs.NArg() == 2 {
 		path = fs.Arg(1)
 	}
-	tool := tools.NewListWorkspaceTool(rec.RootPath)
-	result, err := tool.Run(ctx, tools.Call{
-		Name: "list_workspace",
-		Args: map[string]string{
+	outcome, err := a.newToolGateway().Invoke(ctx, toolgateway.ToolCall{
+		Name: toolgateway.ListWorkspaceTool, WorkspaceID: rec.ID, WorkspaceRoot: rec.RootPath, RequestedBy: "cli",
+		Arguments: map[string]string{
 			"path":      path,
 			"max_depth": strconv.Itoa(*depth),
 		},
 	})
-	if result.Stdout != "" {
-		fmt.Fprintln(a.out, result.Stdout)
+	if outcome.Result != nil && outcome.Result.Stdout != "" {
+		fmt.Fprintln(a.out, outcome.Result.Stdout)
 	}
-	if result.Stderr != "" {
-		fmt.Fprintln(a.errOut, result.Stderr)
+	if outcome.Result != nil && outcome.Result.Stderr != "" {
+		fmt.Fprintln(a.errOut, outcome.Result.Stderr)
+	}
+	if err == nil && !outcome.Decision.Allowed {
+		return apperror.New(apperror.CodePolicyDenied, "policy denied workspace list: "+outcome.Decision.Reason)
 	}
 	return err
 }
@@ -350,19 +360,21 @@ func (a *App) workspaceRead(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	tool := tools.NewReadFileTool(rec.RootPath)
-	result, err := tool.Run(ctx, tools.Call{
-		Name: "read_file",
-		Args: map[string]string{
+	outcome, err := a.newToolGateway().Invoke(ctx, toolgateway.ToolCall{
+		Name: toolgateway.ReadFileTool, WorkspaceID: rec.ID, WorkspaceRoot: rec.RootPath, RequestedBy: "cli",
+		Arguments: map[string]string{
 			"path":      fs.Arg(1),
 			"max_bytes": strconv.Itoa(*maxBytes),
 		},
 	})
-	if result.Stdout != "" {
-		fmt.Fprintln(a.out, result.Stdout)
+	if outcome.Result != nil && outcome.Result.Stdout != "" {
+		fmt.Fprintln(a.out, outcome.Result.Stdout)
 	}
-	if result.Stderr != "" {
-		fmt.Fprintln(a.errOut, result.Stderr)
+	if outcome.Result != nil && outcome.Result.Stderr != "" {
+		fmt.Fprintln(a.errOut, outcome.Result.Stderr)
+	}
+	if err == nil && !outcome.Decision.Allowed {
+		return apperror.New(apperror.CodePolicyDenied, "policy denied workspace read: "+outcome.Decision.Reason)
 	}
 	return err
 }

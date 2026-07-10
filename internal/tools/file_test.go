@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestReadFileToolScopesToWorkspace(t *testing.T) {
@@ -89,6 +90,48 @@ func TestReadFileToolTruncatesText(t *testing.T) {
 	}
 	if !strings.Contains(result.Stdout, "abc") || !strings.Contains(result.Stdout, "truncated at 3 bytes") {
 		t.Fatalf("unexpected truncated output: %q", result.Stdout)
+	}
+}
+
+func TestReadFileToolTruncatesAtUTF8Boundary(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "utf8.txt"), []byte("界面"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewReadFileTool(root).Run(context.Background(), Call{
+		Args: map[string]string{"path": "utf8.txt", "max_bytes": "4"},
+	})
+	if err != nil || !result.Truncated || !utf8.ValidString(result.Stdout) || !strings.Contains(result.Stdout, "界") {
+		t.Fatalf("UTF-8 truncation failed: %#v err=%v", result, err)
+	}
+}
+
+func TestReadFileToolRejectsInvalidUTF8BeforeTruncation(t *testing.T) {
+	root := t.TempDir()
+	data := append([]byte{0xff}, []byte(strings.Repeat("a", 16))...)
+	if err := os.WriteFile(filepath.Join(root, "binary.txt"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewReadFileTool(root).Run(context.Background(), Call{
+		Args: map[string]string{"path": "binary.txt", "max_bytes": "4"},
+	})
+	if err == nil || !strings.Contains(result.Stderr, "not valid UTF-8") {
+		t.Fatalf("invalid UTF-8 prefix was not rejected: %#v err=%v", result, err)
+	}
+}
+
+func TestReadFileToolRejectsInvalidUTF8AtTruncationBoundary(t *testing.T) {
+	root := t.TempDir()
+	data := append([]byte("abc"), 0xff)
+	data = append(data, []byte("more text")...)
+	if err := os.WriteFile(filepath.Join(root, "boundary.bin"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewReadFileTool(root).Run(context.Background(), Call{
+		Args: map[string]string{"path": "boundary.bin", "max_bytes": "4"},
+	})
+	if err == nil || !strings.Contains(result.Stderr, "not valid UTF-8") {
+		t.Fatalf("invalid UTF-8 boundary was not rejected: %#v err=%v", result, err)
 	}
 }
 

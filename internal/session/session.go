@@ -13,8 +13,8 @@ import (
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/redact"
+	"cyberagent-workbench/internal/toolgateway"
 	"cyberagent-workbench/internal/toolrun"
-	"cyberagent-workbench/internal/tools"
 )
 
 const (
@@ -107,8 +107,9 @@ type Manager struct {
 	checker    policy.Checker
 	runChat    RunChatExecutor
 	contextMgr *contextmgr.Manager
-	fileEdits  *fileedit.Manager
-	toolRuns   *toolrun.Manager
+	gateway    *toolgateway.Gateway
+	fileEdits  *toolgateway.FileEditAdapter
+	toolRuns   *toolgateway.ToolRunAdapter
 }
 
 type SendResult struct {
@@ -145,13 +146,18 @@ type RunChatExecutor interface {
 }
 
 func NewManager(store Store, router *llm.Router, checker policy.Checker) *Manager {
+	gateway := toolgateway.New(store, checker).WithWorkspaceRootResolver(func(ctx context.Context, workspaceID string) (string, error) {
+		workspace, err := store.GetWorkspaceInfo(ctx, workspaceID)
+		return workspace.RootPath, err
+	})
 	return &Manager{
 		store:      store,
 		router:     router,
 		checker:    checker,
 		contextMgr: contextmgr.NewManager(store, contextmgr.DefaultConfig()),
-		fileEdits:  fileedit.NewManager(store),
-		toolRuns:   toolrun.NewManager(store, checker),
+		gateway:    gateway,
+		fileEdits:  gateway.FileEdits(),
+		toolRuns:   gateway.ToolRuns(),
 	}
 }
 
@@ -324,18 +330,27 @@ func (m *Manager) handleWorkspaceList(ctx context.Context, sess Session, path st
 	if path == "" {
 		path = "."
 	}
-	tool := tools.NewListWorkspaceTool(workspace.RootPath)
-	result, err := tool.Run(ctx, tools.Call{
-		Name: "list_workspace",
-		Args: map[string]string{
+	outcome, err := m.gateway.Invoke(ctx, toolgateway.ToolCall{
+		Name: toolgateway.ListWorkspaceTool, SessionID: sess.ID, WorkspaceID: workspace.ID,
+		WorkspaceRoot: workspace.RootPath, RequestedBy: "session_slash_command",
+		Arguments: map[string]string{
 			"path":      path,
 			"max_depth": "2",
 		},
 	})
 	if err != nil {
-		return "Workspace list failed: " + result.Stderr
+		if outcome.Result != nil && strings.TrimSpace(outcome.Result.Stderr) != "" {
+			return "Workspace list failed: " + outcome.Result.Stderr
+		}
+		return "Workspace list failed: " + err.Error()
 	}
-	return fmt.Sprintf("Workspace list %s:\n%s", path, result.Stdout)
+	if !outcome.Decision.Allowed {
+		return "Workspace list denied by policy: " + outcome.Decision.Reason
+	}
+	if outcome.Result == nil {
+		return "Workspace list failed: tool gateway returned no result"
+	}
+	return fmt.Sprintf("Workspace list %s:\n%s", path, outcome.Result.Stdout)
 }
 
 func (m *Manager) handleWorkspaceRead(ctx context.Context, sess Session, path string) string {
@@ -350,18 +365,27 @@ func (m *Manager) handleWorkspaceRead(ctx context.Context, sess Session, path st
 	if path == "" {
 		return "Usage: /read <workspace-relative-path>"
 	}
-	tool := tools.NewReadFileTool(workspace.RootPath)
-	result, err := tool.Run(ctx, tools.Call{
-		Name: "read_file",
-		Args: map[string]string{
+	outcome, err := m.gateway.Invoke(ctx, toolgateway.ToolCall{
+		Name: toolgateway.ReadFileTool, SessionID: sess.ID, WorkspaceID: workspace.ID,
+		WorkspaceRoot: workspace.RootPath, RequestedBy: "session_slash_command",
+		Arguments: map[string]string{
 			"path":      path,
 			"max_bytes": "16384",
 		},
 	})
 	if err != nil {
-		return "Workspace read failed: " + result.Stderr
+		if outcome.Result != nil && strings.TrimSpace(outcome.Result.Stderr) != "" {
+			return "Workspace read failed: " + outcome.Result.Stderr
+		}
+		return "Workspace read failed: " + err.Error()
 	}
-	return fmt.Sprintf("Workspace file %s:\n%s", path, result.Stdout)
+	if !outcome.Decision.Allowed {
+		return "Workspace read denied by policy: " + outcome.Decision.Reason
+	}
+	if outcome.Result == nil {
+		return "Workspace read failed: tool gateway returned no result"
+	}
+	return fmt.Sprintf("Workspace file %s:\n%s", path, outcome.Result.Stdout)
 }
 
 func (m *Manager) handleWorkspaceWrite(ctx context.Context, sess Session, path string, content string) (fileedit.Edit, string) {

@@ -173,7 +173,7 @@ Work items and notes are stored independently from LLM messages. Context constru
 
 The current P3 implementation persists both surfaces. Schema v9 WorkItems use optimistic versions, composite same-Run dependency keys, cycle checks, legal transitions, and transactional `work_item.created/changed` events. Schema v10 Notes add category, visibility, Owner, tags, source references, Evidence IDs, pinning, archive/restore, and transactional `note.created/changed` events. Root context includes `run`, `root`, and `owner=root` Notes but excludes another owner's memory.
 
-Before each model call, a generic Context Section selector ranks the latest compacted summary, bounded active Work Board, pinned Notes, and category-weighted Notes under an 8,192-token estimate. `model.started` records included and omitted `kind/source_id/tokens` metadata so provenance survives restart, while Note bodies remain outside the event. Model-driven root `finish` is rejected through protocol repair while active work remains and checked again under the final SQLite write transaction. Model-authored WorkItem/Note mutation remains behind the future Tool Gateway.
+Before each model call, a generic Context Section selector ranks the latest compacted summary, bounded active Work Board, pinned Notes, and category-weighted Notes under an 8,192-token estimate. `model.started` records included and omitted `kind/source_id/tokens` metadata so provenance survives restart, while Note bodies remain outside the event. Model-driven root `finish` is rejected through protocol repair while active work remains and checked again under the final SQLite write transaction. Model-authored WorkItem/Note mutation tools are not yet registered in the current Tool Gateway.
 
 ## Lifecycle Protocol
 
@@ -203,7 +203,11 @@ Model proposal
   -> result returned to agent
 ```
 
-Existing `toolrun` and `fileedit` are retained and gradually adapted behind this gateway. File reads may run automatically when scoped and low risk. Writes, shell commands, network actions, Docker operations, and future analyzer exports use explicit policy classes and approvals.
+The first P5 slice implements this boundary in `internal/toolgateway`. It defines normalized `ToolCall`, `Decision`, `Proposal`, `Execution`, `Result`, and `Outcome` values with bounded UTF-8 fields and legal status combinations. Production CLI, Session, and TUI paths use compatibility adapters over the same Gateway; direct construction of workspace read tools, `toolrun.Manager`, and `fileedit.Manager` is confined to the Gateway.
+
+Workspace IDs are resolved to Store-owned roots before production reads or writes, and a mismatched caller path is rejected before policy or filesystem access. Scoped low-risk reads use automatic approval. Shell and whole-file replacement use per-call approval, while policy rejection maps to permanent denial. Shell completion remains dry-run. The session approval mode exists in the domain contract but has no persisted grant implementation yet.
+
+Existing `tool_runs` and `file_edits` remain the durable compatibility records, so their transactional Run-event projection is preserved. Gateway outputs enforce hard stdout/stderr/preview limits, valid UTF-8, MIME metadata, truncation flags, and secret redaction. A unified durable proposal table, Artifact capture rules, model-authored WorkItem/Note tools, and removal of the legacy local-script bypass remain P5 work.
 
 ## Sandbox
 

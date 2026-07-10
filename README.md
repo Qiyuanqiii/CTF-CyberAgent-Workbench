@@ -15,6 +15,8 @@ CyberAgent Workbench 是一个由 Go 驱动的本地 AI Agent 工作台，面向
 
 当前版本已经提供 Run 级结构化 Work Board 与 Notes：工作项负责可执行计划，Note 负责观察、假设、决策、摘要和来源引用，所有变更都与 Run 事件在同一事务提交。Supervisor 使用 8192 token 的独立记忆预算选择摘要、活跃工作项和当前 root 可见 Note，并把来源 ID 与 token 估算记录在 `model.started`；Note 正文不会写入模型事件。仍有活跃工作项时，模型不能自行 `finish`。
 
+统一 Tool Gateway 的第一条纵向链路也已落地。工作区读取、Shell 提案和整文件替换现在共享 Go 定义的 `ToolCall -> Decision -> Proposal -> Execution -> Result` 契约；CLI、Session 与 TUI 都通过同一入口。生产路径会用工作区 ID 解析可信根目录，拒绝伪造路径；读取可在低风险策略下自动执行，Shell 仍只进行 dry-run，文件写入仍要求显式逐次审批。
+
 ### English
 
 CyberAgent Workbench is a local AI agent workbench powered by Go for coding, code review, security learning, scripting, and controlled cybersecurity analysis. It brings model calls, long-context memory, workspace files, policy checks, approvals, execution budgets, and event history into one resumable runtime, so work can continue after a process restart and every action remains inspectable.
@@ -25,6 +27,8 @@ The current priority is the general-purpose single-agent runtime. CTF capabiliti
 
 The current build includes a structured, Run-scoped Work Board and durable Notes. WorkItems hold executable plans, while Notes hold observations, hypotheses, decisions, summaries, and source references. Every mutation commits with its Run event. The Supervisor selects summaries, active work, and root-visible Notes under a separate 8,192-token memory budget, then records source IDs and token estimates in `model.started` without persisting Note bodies there. Model-driven `finish` remains blocked while active work exists.
 
+The first vertical slice of the unified Tool Gateway is also in place. Workspace reads, shell proposals, and whole-file replacements now share a Go-owned `ToolCall -> Decision -> Proposal -> Execution -> Result` contract, and the CLI, Session, and TUI use that same boundary. Production calls resolve a trusted root from the workspace ID and reject mismatches. Low-risk reads may execute automatically, while shell approval remains a dry run and file writes still require explicit per-call approval.
+
 ## 核心能力 / Core Capabilities
 
 - **可恢复运行 / Resumable runs:** durable checkpoints, bounded execution, restart recovery, graceful terminal cancellation, and explicit lifecycle actions.
@@ -32,7 +36,8 @@ The current build includes a structured, Run-scoped Work Board and durable Notes
 - **长上下文与结构化记忆 / Long-context memory:** persisted sessions, automatic compaction, durable categorized Notes, visibility rules, and token-budgeted source selection.
 - **结构化任务板 / Structured Work Board:** Run-scoped work items, dependency and cycle checks, optimistic versions, transactional events, and bounded Supervisor context.
 - **本地工作区 / Local workspace:** scoped file access, safe reads, persistent artifacts, and reviewable edit proposals.
-- **安全与审批 / Safety and approval:** policy checks, secret redaction, dry-run tool proposals, and explicit approval boundaries.
+- **统一工具网关 / Unified Tool Gateway:** normalized calls, trusted workspace binding, policy decisions, shared shell/file approval, bounded UTF-8 results, MIME metadata, and compatibility adapters.
+- **安全与审批 / Safety and approval:** policy checks, secret redaction, automatic low-risk reads, per-call write/shell approval, permanent denial, and dry-run command completion.
 - **完整审计链 / Audit trail:** append-only Run events for messages, context source provenance, bounded text-free stream progress, model calls, Notes, policy decisions, tool proposals, and file edits.
 - **CLI 与 TUI / CLI and TUI:** a scriptable CLI plus a Bubble Tea interface with live model progress and audited cancellation.
 - **可扩展架构 / Extensible architecture:** Go control plane with planned HTTP/WebSocket, TypeScript UI, Docker sandbox, and Rust analyzer boundaries.
@@ -120,13 +125,13 @@ Local runtime databases, workspace data, environment files, API keys, IDE metada
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, and exactly one restart-safe lifecycle-protocol repair. P3 now includes migration v9 WorkItems, migration v10 Notes, transactional relationships/events, `todo` and `note` CLI lifecycles, root/owner visibility, token-budgeted memory selection, and durable context provenance. The next vertical slice begins the unified Tool Gateway while execution remains proposal-first. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, and exactly one restart-safe lifecycle-protocol repair. P3 includes migration v9 WorkItems, migration v10 Notes, transactional relationships/events, `todo` and `note` CLI lifecycles, root/owner visibility, token-budgeted memory selection, and durable context provenance. P5 has started with the unified Tool Gateway domain model, trusted workspace scope binding, shared approval adapters, output limits, and production-path migration. Real Local/Docker command execution remains disabled. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
 TUI quick controls: `cyberagent tui` opens a session picker. In chat, `Tab` switches focus, `PgUp/PgDn` scroll messages, `j/k` select tool runs, `a` approves, `d` denies, `Ctrl+X` requests cancellation of the current model call, `Ctrl+R` refreshes, and `Esc` quits when idle. Busy sends cannot be closed accidentally with `Esc`; cancel or wait first. The status line renders provider/model, attempt, chunk/byte progress, cancellation, disconnect, and terminal state without exposing raw model text. Attached workspaces render in the side panel with local directory counts for attachments, scripts, outputs, logs, and writeups.
 
 Workspace file reads and model-bound messages pass through heuristic secret redaction for common API keys, bearer tokens, GitHub tokens, AWS access keys, JWTs, and private-key blocks.
 
-File changes use a separate approval boundary. `edit propose` and session `/write` persist a redacted diff without changing the workspace. `edit approve` re-resolves the workspace path and compares the current file hash with the proposal before writing, so stale proposals do not overwrite newer user changes.
+File changes and Shell proposals now enter the same Tool Gateway approval service while retaining their existing SQLite records and Run-event projections. `edit propose` and session `/write` persist a redacted diff without changing the workspace. `edit approve` resolves the Store-owned workspace root again and compares the current file hash with the proposal before writing, so a forged root or stale proposal cannot overwrite newer user changes. Shell approval still produces dry-run output only.
 
 ## 可选在线 Provider / Optional Online Providers
 

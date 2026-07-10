@@ -48,7 +48,10 @@ func (ReadFileTool) Name() string {
 func (ReadFileTool) Schema() Schema {
 	return Schema{
 		Description: "Read a scoped local file.",
-		Parameters:  map[string]string{"path": "Path to read"},
+		Parameters: map[string]string{
+			"path":      "Workspace-relative path to read",
+			"max_bytes": "Maximum UTF-8 content bytes to read",
+		},
 	}
 }
 
@@ -57,21 +60,21 @@ func (t ReadFileTool) Run(ctx context.Context, call Call) (Result, error) {
 	fs := t.FS.withFallback(call.WorkingDir)
 	path, err := fs.resolveExistingFile(call.Args["path"])
 	if err != nil {
-		return Result{Stderr: err.Error(), ExitCode: 1}, err
+		return Result{Stderr: err.Error(), ExitCode: 1, MIME: "text/plain; charset=utf-8"}, err
 	}
 	limit := fs.MaxReadBytes
 	if value := strings.TrimSpace(call.Args["max_bytes"]); value != "" {
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed <= 0 {
-			return Result{Stderr: "max_bytes must be a positive integer", ExitCode: 1}, errors.New("max_bytes must be a positive integer")
+			return Result{Stderr: "max_bytes must be a positive integer", ExitCode: 1, MIME: "text/plain; charset=utf-8"}, errors.New("max_bytes must be a positive integer")
 		}
 		limit = parsed
 	}
-	text, err := readTextLimited(path, limit)
+	text, truncated, err := readTextLimited(path, limit)
 	if err != nil {
-		return Result{Stderr: err.Error(), ExitCode: 1}, err
+		return Result{Stderr: err.Error(), ExitCode: 1, MIME: "text/plain; charset=utf-8"}, err
 	}
-	return Result{Stdout: text, ExitCode: 0}, nil
+	return Result{Stdout: text, ExitCode: 0, MIME: "text/plain; charset=utf-8", Truncated: truncated}, nil
 }
 
 type ListWorkspaceTool struct {
@@ -107,15 +110,15 @@ func (t ListWorkspaceTool) Run(ctx context.Context, call Call) (Result, error) {
 	if value := strings.TrimSpace(call.Args["max_depth"]); value != "" {
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed < 0 {
-			return Result{Stderr: "max_depth must be a non-negative integer", ExitCode: 1}, errors.New("max_depth must be a non-negative integer")
+			return Result{Stderr: "max_depth must be a non-negative integer", ExitCode: 1, MIME: "text/plain; charset=utf-8"}, errors.New("max_depth must be a non-negative integer")
 		}
 		depth = parsed
 	}
-	out, err := fs.list(path, depth)
+	out, truncated, err := fs.list(path, depth)
 	if err != nil {
-		return Result{Stderr: err.Error(), ExitCode: 1}, err
+		return Result{Stderr: err.Error(), ExitCode: 1, MIME: "text/plain; charset=utf-8"}, err
 	}
-	return Result{Stdout: out, ExitCode: 0}, nil
+	return Result{Stdout: out, ExitCode: 0, MIME: "text/plain; charset=utf-8", Truncated: truncated}, nil
 }
 
 func (fs WorkspaceFS) withFallback(root string) WorkspaceFS {
@@ -256,12 +259,13 @@ func (fs WorkspaceFS) resolveExisting(requested string) (string, error) {
 	return candidate, nil
 }
 
-func (fs WorkspaceFS) list(requested string, maxDepth int) (string, error) {
+func (fs WorkspaceFS) list(requested string, maxDepth int) (string, bool, error) {
 	base, err := fs.resolveExistingDir(requested)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	var lines []string
+	truncated := false
 	limit := fs.MaxListEntries
 	err = filepath.WalkDir(base, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -291,41 +295,76 @@ func (fs WorkspaceFS) list(requested string, maxDepth int) (string, error) {
 		lines = append(lines, strings.Repeat("  ", max(0, depth-1))+name)
 		if len(lines) >= limit {
 			lines = append(lines, fmt.Sprintf("... truncated at %d entries", limit))
+			truncated = true
 			return filepath.SkipAll
 		}
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if len(lines) == 0 {
-		return "(empty)", nil
+		return "(empty)", false, nil
 	}
-	return strings.Join(lines, "\n"), nil
+	return strings.Join(lines, "\n"), truncated, nil
 }
 
-func readTextLimited(path string, maxBytes int) (string, error) {
+func readTextLimited(path string, maxBytes int) (string, bool, error) {
+	if maxBytes <= 0 {
+		return "", false, errors.New("max bytes must be positive")
+	}
 	file, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, int64(maxBytes)+1))
+	data, err := io.ReadAll(io.LimitReader(file, int64(maxBytes)+utf8.UTFMax))
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	truncated := len(data) > maxBytes
 	if truncated {
-		data = data[:maxBytes]
+		data, err = validUTF8PrefixAtLimit(data, maxBytes)
+		if err != nil {
+			return "", false, err
+		}
 	}
 	if !utf8.Valid(data) {
-		return "", errors.New("file is not valid UTF-8 text")
+		return "", false, errors.New("file is not valid UTF-8 text")
 	}
 	text := string(data)
 	if truncated {
 		text += fmt.Sprintf("\n[truncated at %d bytes]\n", maxBytes)
 	}
-	return redact.String(text), nil
+	return redact.String(text), truncated, nil
+}
+
+func validUTF8PrefixAtLimit(data []byte, limit int) ([]byte, error) {
+	if len(data) <= limit {
+		if !utf8.Valid(data) {
+			return nil, errors.New("file is not valid UTF-8 text")
+		}
+		return data, nil
+	}
+	prefix := data[:limit]
+	if utf8.Valid(prefix) {
+		return prefix, nil
+	}
+	start := len(prefix) - 1
+	for start > 0 && !utf8.RuneStart(prefix[start]) {
+		start--
+	}
+	if !utf8.Valid(prefix[:start]) {
+		return nil, errors.New("file is not valid UTF-8 text")
+	}
+	current, size := utf8.DecodeRune(data[start:])
+	if current == utf8.RuneError && size == 1 {
+		return nil, errors.New("file is not valid UTF-8 text")
+	}
+	if start+size <= limit {
+		return nil, errors.New("file is not valid UTF-8 text")
+	}
+	return prefix[:start], nil
 }
 
 func withinRoot(root string, candidate string) bool {

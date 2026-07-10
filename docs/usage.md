@@ -196,7 +196,13 @@ cyberagent session history <session-id>
 cyberagent session history <session-id> --all
 ```
 
-Session chat is the main path for generic AI agent features. Ordinary text in a Run-bound Session is supervised and consumes that Run's turn, token, and model-time budgets. Older Sessions created directly with `session create` have no Run and temporarily retain the legacy direct Router path for compatibility. Slash commands remain explicit command paths: `/ls`, `/read`, and `/write` require an attached workspace; `/read` responses are redacted before persistence or model use; `/write <path> <content>` creates a persisted file edit proposal and never writes before approval; `/run` records a dry-run tool proposal without executing commands.
+Session chat is the main path for generic AI agent features. Ordinary text in a Run-bound Session is supervised and consumes that Run's turn, token, and model-time budgets. Older Sessions created directly with `session create` have no Run and temporarily retain the legacy direct Router path for compatibility. Slash commands remain explicit command paths, but `/ls`, `/read`, `/write`, and `/run` now enter the same Go Tool Gateway used by the CLI and TUI. Workspace commands require an attached workspace; `/read` responses are bounded and redacted before persistence or model use; `/write <path> <content>` creates a persisted file edit proposal and never writes before approval; `/run` records a dry-run shell proposal without executing commands.
+
+## Unified Tool Gateway
+
+The Gateway validates exact argument schemas, binds production file operations to the Store-owned workspace root, runs policy checks, selects an approval mode, and normalizes execution results. `read_file` and `list_workspace` use automatic approval only when scope and policy allow them. `replace_file` and `shell` use per-call approval. A policy denial is terminal and cannot be converted into approval by a later review request. Session-scoped grants are represented by the domain contract but are not issued or persisted yet.
+
+Text output is valid UTF-8, secret-redacted, MIME-labelled, and bounded to 128 KiB stdout, 32 KiB stderr, and 64 KiB proposal previews. Truncation is explicit. The Gateway does not currently capture oversized output as an Artifact, and `script run --local` is still a documented compatibility bypass scheduled for the next P5 slice.
 
 ## File Edit Proposals
 
@@ -212,7 +218,7 @@ cyberagent edit deny <edit-id> --reason "not needed"
 
 File edits replace the complete text content of one file. Existing files and new files under an existing workspace directory are supported. Absolute paths, `..` traversal, directory targets, symlink escapes, non-UTF-8 content, missing parent directories, and content over 256 KiB are rejected.
 
-Proposals are stored without modifying the workspace. Approval compares the current file SHA-256 hash with the proposal's original hash, re-resolves the workspace path immediately before writing, and refuses stale changes. Proposed secrets are replaced with redaction markers before persistence and before any approved write. For exact multiline or whitespace-sensitive content, prefer `--content-file`; session `/write` trims the outer message whitespace.
+Proposals are stored without modifying the workspace. Approval obtains the workspace root from the Store, rejects a mismatched supplied root, compares the current file SHA-256 hash with the proposal's original hash, re-resolves the target immediately before writing, and refuses stale changes. Proposed secrets are replaced with redaction markers before persistence and before any approved write. For exact multiline or whitespace-sensitive content, prefer `--content-file`; session `/write` trims the outer message whitespace.
 
 ## Tool Proposals
 
@@ -225,7 +231,7 @@ cyberagent tool approve <tool-run-id>
 cyberagent tool deny <tool-run-id> --reason "not needed"
 ```
 
-`/run` creates a `tool_runs` proposal. Approval completes with dry-run output in v0.1; real command execution stays disabled until approval, sandbox, workspace scoping, and event logging are stricter.
+`/run` creates a `tool_runs` proposal through the unified Tool Gateway. `tool approve` and `tool deny` use the same review service as file edits. Approval completes with dry-run output; real command execution stays disabled until the remaining approval persistence, sandbox, Artifact, and bypass-removal work is complete.
 
 ## Context Compaction
 

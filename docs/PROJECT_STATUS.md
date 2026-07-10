@@ -4,7 +4,7 @@ Last updated: 2026-07-10
 
 ## Resume Context
 
-CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The current implementation is a CLI-first runtime with resumable Runs, streamed model calls, persisted sessions, a transactional SQLite event/message/WorkItem/Note store, workspace manager, safety policy, sandbox interfaces, context compaction, and token-aware structured-memory selection.
+CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The current implementation is a CLI-first runtime with resumable Runs, streamed model calls, persisted sessions, a transactional SQLite event/message/WorkItem/Note store, a unified Tool Gateway, workspace manager, safety policy, sandbox interfaces, context compaction, and token-aware structured-memory selection.
 
 Current product priority: migrate the working v0.1 scaffold into the V2 run-centric, resumable agent runtime described in ADR 0002 and `docs/TASK_BOOK.md`. CTF-specific solving logic is intentionally deferred until the generic runtime is stable.
 
@@ -29,6 +29,8 @@ Use these files first when resuming:
 - `internal/contextmgr/context.go`
 - `internal/contextmgr/selector.go`
 - `internal/session/session.go`
+- `internal/toolgateway/model.go`
+- `internal/toolgateway/gateway.go`
 - `internal/toolrun/toolrun.go`
 - `internal/tui/model.go`
 - `internal/tui/picker.go`
@@ -38,9 +40,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 75%.
+- Overall product vision: about 77%.
 - v0.1 generic agent MVP: about 98%.
-- V2 run-centric runtime: about 90%.
+- V2 run-centric runtime: about 92%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -54,6 +56,10 @@ Completed:
 - Slash commands: `/help`, `/compact`, `/model`, `/workspace`, `/ls`, `/read`, `/run`.
 - Workspace-scoped file context tools: `list_workspace` and `read_file` reject absolute paths and traversal outside the workspace root.
 - CLI workspace file commands: `workspace tree <name> [path]` and `workspace read <name> <path>`.
+- Added `internal/toolgateway` with normalized ToolCall, Decision, Proposal, Execution, Result, Outcome, approval modes, action classes, hard bounds, and cross-object lifecycle invariants.
+- Workspace reads, shell proposals, and whole-file replacements now share one Go-owned schema/scope/policy/approval/result pipeline. CLI, Session, and TUI production paths use Gateway adapters rather than constructing legacy managers directly.
+- Production file calls resolve a trusted root from the persisted workspace ID and reject a mismatched supplied directory before filesystem access.
+- Gateway results carry validated MIME, UTF-8 output, explicit truncation, secret redaction, and hard stdout/stderr/preview limits. Shell approval remains dry-run and file edits remain proposal-first.
 - Secret redaction layer for common API keys, bearer tokens, GitHub tokens, AWS access keys, JWTs, assignment-style secrets, and private-key blocks.
 - Redaction is applied at file reads, session message creation, SQLite session/context/tool-run storage, context prompt construction, and final LLM router dispatch.
 - Automatic context compaction after long active session histories.
@@ -165,17 +171,20 @@ Not done yet:
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
 - Provider cost/tool-call budgets, AgentCoordinator, and Findings/Evidence/Report; WorkItem/Note model tools and dedicated TUI views remain pending.
+- Persisted session approval grants, a unified durable approval/idempotency record, tool-output Artifact capture, and removal of the `script run --local` compatibility bypass.
 
 ## Code Audit Notes
 
 No high-severity issue was found in the latest slice.
 
-The release audit found and fixed three low-risk consistency issues: Note fields now reject invalid UTF-8 at the domain/Store boundary, negative list limits are rejected instead of defaulted, and `changed_fields` records normalized differences rather than merely requested fields. Regression tests cover all three.
+The Tool Gateway audit found and fixed four correctness/security issues: invalid UTF-8 before a truncation boundary could be deleted and misreported as valid text; a tiny output limit could overflow its truncation marker; a persisted shell denial could be mapped inconsistently when a later Store operation also returned an error; and production file calls trusted a caller-supplied workspace root. Regression tests cover each case, and production roots are now bound to the workspace Store record.
 
 Residual risks to address soon:
 
 - `staticcheck ./...` is clean; the prior TUI `S1008`, `S1011`, and unused-helper `U1000` findings were removed in this slice.
 - `script run --local` can execute local commands after only lexical policy checks; it needs explicit approval and workspace scoping.
+- The Gateway still persists shell and file proposals in the legacy `tool_runs` and `file_edits` tables. Their Run-event projection is transactional, but unified approval idempotency and Session grant records do not exist yet.
+- Automatic workspace read outcomes are normalized but are not independently persisted when invoked by standalone CLI commands; Session slash-command text is still audited through Session messages.
 - Secret redaction is heuristic, not a full secrets manager; add opt-in raw local inspection later only with clear warnings.
 - Binary or non-UTF-8 files are refused by `read_file`; richer file viewers should stay workspace-scoped and type-aware.
 - File edit writes re-resolve and re-hash immediately before `os.WriteFile`, but portable Go cannot fully eliminate filesystem TOCTOU races without OS-specific no-follow/open-handle code. Keep workspace permissions as the primary local boundary.
@@ -205,7 +214,7 @@ Residual risks to address soon:
 - When no active registry item exists, `Ctrl+X` cancels the current application request context after a bounded lookup. This covers legacy/pre-activation calls without fabricating an audited Run cancellation event.
 - Root `wait` currently maps to `paused` plus a textual reason; structured dependencies and approvals are future Coordinator/Work Board work.
 - Unbound Sessions still use the direct Router compatibility path. New product flows should create a Run instead of expanding this legacy path.
-- Slash commands are intentionally separate command adapters; they do not consume a Supervisor turn yet, and future Tool Gateway work must unify their approval/event behavior without silently executing tools.
+- Slash commands remain separate command adapters and do not consume a Supervisor turn, but `/ls`, `/read`, `/write`, and `/run` now share the Tool Gateway approval/event behavior. Future model-authored calls must use that same boundary without silently enabling execution.
 - Pending input is redacted but otherwise stored as Session/model content; this is not a secrets vault. The CLI checkpoint view intentionally omits it.
 - Applied migration statements are immutable once released because their checksums are verified. Schema changes must always add a new migration version.
 - Schema v3 intentionally rejects duplicate non-empty Run/Session associations. A legacy database containing duplicates must be audited before upgrade instead of silently discarding an association.
@@ -340,13 +349,16 @@ Expected context behavior:
 - Context selection tests passed for deterministic priority, exact estimate limits, redaction, root visibility, pinned/category priority, overflow provenance, and Note-body isolation from durable events.
 - An isolated Note CLI smoke created, updated, archived, and restored one Note, ending at version 4 with exactly one `note.created` and three `note.changed` events.
 - DeepSeek adapter tests passed for env-only registration, no-key exclusion, default model selection, Anthropic request path/header shape, and CLI key non-disclosure. Live `deepseek-v4-flash` health and Supervisor SSE smoke both succeeded with positive stream bytes and durable started/delta/completed events.
+- Tool Gateway tests passed for exact schemas, lifecycle invariants, approval modes, workspace-root binding, secret redaction, hard output bounds, MIME/UTF-8 validation, valid multibyte truncation, invalid bytes at and before the boundary, policy denial, dry-run shell review, file approval, and legacy adapter compatibility.
+- Production-path regression tests passed for CLI, Run-bound and legacy Session slash commands, SQLite ToolRun/FileEdit Run-event projection, and Bubble Tea tool review after direct manager construction was centralized behind the Gateway.
+- The final Tool Gateway gate passed with uncached full tests, vet, full-repository race tests, clean staticcheck, zero reachable govulncheck findings, isolated CLI approval/denial smoke, `NO_CREDENTIAL_PATTERN_IN_REPO`, and `NO_RUNTIME_OR_SECRET_ARTIFACTS_IN_REPO`.
 
 ## Recommended Next Slice
 
-Begin P5 with the unified Tool Gateway:
+Continue P5 after the first unified Tool Gateway slice:
 
-- Define a pure-Go `ToolCall -> Proposal -> Decision -> Execution -> Result` contract and stable lifecycle.
-- Adapt existing workspace reads, shell ToolRun proposals, and FileEdit proposals behind one Go-owned dispatch boundary without enabling new execution capabilities.
+- Route `script run --local` through a proposal-first Gateway path and keep real execution disabled by default.
+- Add durable approval idempotency, Run/Session correlation, restart recovery, revocable Session grants, and tool-call budget accounting.
 - Add low-risk structured WorkItem/Note mutation proposals with schema validation, scope checks, policy decisions, durable events, and explicit approval where required.
-- Add idempotency keys, restart recovery, stale-proposal rejection, output limits, and event correlation tests before allowing real Local/Docker execution.
+- Capture oversized or durable tool output as hashed, MIME-labelled Artifacts before enabling Local/Docker execution.
 - Keep TypeScript, Rust, and model providers unable to bypass the Go Tool Gateway or policy boundary.

@@ -9,6 +9,13 @@ import (
 	"cyberagent-workbench/internal/toolrun"
 )
 
+type toolRunManager interface {
+	Get(context.Context, string) (toolrun.ToolRun, error)
+	List(context.Context, toolrun.ListFilter) ([]toolrun.ToolRun, error)
+	Approve(context.Context, string) (toolrun.ToolRun, error)
+	Deny(context.Context, string, string) (toolrun.ToolRun, error)
+}
+
 func (a *App) toolCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("tool subcommand is required")
@@ -16,7 +23,7 @@ func (a *App) toolCommand(ctx context.Context, args []string) error {
 	if err := a.ensureStore(); err != nil {
 		return err
 	}
-	manager := toolrun.NewManager(a.store, a.checker)
+	manager := a.newToolGateway().ToolRuns()
 	switch args[0] {
 	case "list":
 		return a.toolList(ctx, manager, args[1:])
@@ -31,7 +38,7 @@ func (a *App) toolCommand(ctx context.Context, args []string) error {
 	}
 }
 
-func (a *App) toolList(ctx context.Context, manager *toolrun.Manager, args []string) error {
+func (a *App) toolList(ctx context.Context, manager toolRunManager, args []string) error {
 	fs := newFlagSet("tool list", a.errOut)
 	sessionID := fs.String("session", "", "session id")
 	status := fs.String("status", "", "tool run status")
@@ -52,7 +59,7 @@ func (a *App) toolList(ctx context.Context, manager *toolrun.Manager, args []str
 	return nil
 }
 
-func (a *App) toolShow(ctx context.Context, manager *toolrun.Manager, args []string) error {
+func (a *App) toolShow(ctx context.Context, manager toolRunManager, args []string) error {
 	fs := newFlagSet("tool show", a.errOut)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -68,7 +75,7 @@ func (a *App) toolShow(ctx context.Context, manager *toolrun.Manager, args []str
 	return nil
 }
 
-func (a *App) toolApprove(ctx context.Context, manager *toolrun.Manager, args []string) error {
+func (a *App) toolApprove(ctx context.Context, manager toolRunManager, args []string) error {
 	fs := newFlagSet("tool approve", a.errOut)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -90,7 +97,7 @@ func (a *App) toolApprove(ctx context.Context, manager *toolrun.Manager, args []
 	return nil
 }
 
-func (a *App) toolDeny(ctx context.Context, manager *toolrun.Manager, args []string) error {
+func (a *App) toolDeny(ctx context.Context, manager toolRunManager, args []string) error {
 	fs := newFlagSet("tool deny", a.errOut)
 	reason := fs.String("reason", "", "denial reason")
 	if err := fs.Parse(reorderFlags(args, map[string]bool{"reason": true})); err != nil {

@@ -14,6 +14,14 @@ import (
 	"cyberagent-workbench/internal/workspace"
 )
 
+type fileEditManager interface {
+	Propose(context.Context, fileedit.Proposal) (fileedit.Edit, error)
+	Get(context.Context, string) (fileedit.Edit, error)
+	List(context.Context, fileedit.ListFilter) ([]fileedit.Edit, error)
+	Approve(context.Context, string, string) (fileedit.Edit, error)
+	Deny(context.Context, string, string) (fileedit.Edit, error)
+}
+
 func (a *App) editCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("edit subcommand is required")
@@ -21,7 +29,7 @@ func (a *App) editCommand(ctx context.Context, args []string) error {
 	if err := a.ensureStore(); err != nil {
 		return err
 	}
-	manager := fileedit.NewManager(a.store)
+	manager := a.newToolGateway().FileEdits()
 	switch args[0] {
 	case "propose":
 		return a.editPropose(ctx, manager, args[1:])
@@ -38,7 +46,7 @@ func (a *App) editCommand(ctx context.Context, args []string) error {
 	}
 }
 
-func (a *App) editPropose(ctx context.Context, manager *fileedit.Manager, args []string) error {
+func (a *App) editPropose(ctx context.Context, manager fileEditManager, args []string) error {
 	fs := newFlagSet("edit propose", a.errOut)
 	workspaceName := fs.String("workspace", "", "workspace name")
 	path := fs.String("path", "", "workspace-relative file path")
@@ -86,7 +94,7 @@ func (a *App) editPropose(ctx context.Context, manager *fileedit.Manager, args [
 	return nil
 }
 
-func (a *App) editList(ctx context.Context, manager *fileedit.Manager, args []string) error {
+func (a *App) editList(ctx context.Context, manager fileEditManager, args []string) error {
 	fs := newFlagSet("edit list", a.errOut)
 	workspaceName := fs.String("workspace", "", "workspace name")
 	sessionID := fs.String("session", "", "session id")
@@ -116,7 +124,7 @@ func (a *App) editList(ctx context.Context, manager *fileedit.Manager, args []st
 	return nil
 }
 
-func (a *App) editShow(ctx context.Context, manager *fileedit.Manager, args []string) error {
+func (a *App) editShow(ctx context.Context, manager fileEditManager, args []string) error {
 	fs := newFlagSet("edit show", a.errOut)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -132,7 +140,7 @@ func (a *App) editShow(ctx context.Context, manager *fileedit.Manager, args []st
 	return nil
 }
 
-func (a *App) editApprove(ctx context.Context, manager *fileedit.Manager, args []string) error {
+func (a *App) editApprove(ctx context.Context, manager fileEditManager, args []string) error {
 	fs := newFlagSet("edit approve", a.errOut)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -156,7 +164,7 @@ func (a *App) editApprove(ctx context.Context, manager *fileedit.Manager, args [
 	return nil
 }
 
-func (a *App) editDeny(ctx context.Context, manager *fileedit.Manager, args []string) error {
+func (a *App) editDeny(ctx context.Context, manager fileEditManager, args []string) error {
 	fs := newFlagSet("edit deny", a.errOut)
 	reason := fs.String("reason", "", "denial reason")
 	if err := fs.Parse(reorderFlags(args, map[string]bool{"reason": true})); err != nil {

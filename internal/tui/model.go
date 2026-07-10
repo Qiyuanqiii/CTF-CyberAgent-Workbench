@@ -19,7 +19,7 @@ import (
 type Model struct {
 	session            session.Session
 	sessionManager     *session.Manager
-	toolManager        *toolrun.Manager
+	toolManager        ToolManager
 	workspaceStore     WorkspaceStore
 	activeCalls        ActiveCallController
 	input              textinput.Model
@@ -60,6 +60,12 @@ type WorkspaceStore interface {
 	GetWorkspaceByID(ctx context.Context, id string) (store.WorkspaceRecord, error)
 }
 
+type ToolManager interface {
+	List(context.Context, toolrun.ListFilter) ([]toolrun.ToolRun, error)
+	Approve(context.Context, string) (toolrun.ToolRun, error)
+	Deny(context.Context, string, string) (toolrun.ToolRun, error)
+}
+
 type workspaceContext struct {
 	ID       string
 	Name     string
@@ -82,7 +88,7 @@ const (
 	focusTools focusArea = "tools"
 )
 
-func NewModel(ctx context.Context, sess session.Session, sessionManager *session.Manager, toolManager *toolrun.Manager, workspaceStores ...WorkspaceStore) (*Model, error) {
+func NewModel(ctx context.Context, sess session.Session, sessionManager *session.Manager, toolManager ToolManager, workspaceStores ...WorkspaceStore) (*Model, error) {
 	input := textinput.New()
 	input.Placeholder = "Message or slash command"
 	input.Prompt = ""
