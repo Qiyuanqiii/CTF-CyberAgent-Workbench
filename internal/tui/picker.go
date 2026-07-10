@@ -16,6 +16,7 @@ type Picker struct {
 	sessionManager *session.Manager
 	toolManager    *toolrun.Manager
 	workspaceStore WorkspaceStore
+	activeCalls    ActiveCallController
 	sessions       []session.Session
 	selected       int
 	workspaceID    string
@@ -24,6 +25,13 @@ type Picker struct {
 	status         string
 	width          int
 	height         int
+}
+
+func (p *Picker) WithActiveCallController(controller ActiveCallController) *Picker {
+	if p != nil {
+		p.activeCalls = controller
+	}
+	return p
 }
 
 func NewPicker(ctx context.Context, sessionManager *session.Manager, toolManager *toolrun.Manager, workspaceID string, title string, route string, workspaceStores ...WorkspaceStore) (*Picker, error) {
@@ -149,7 +157,11 @@ func (p *Picker) SelectedSessionModel(ctx context.Context) (*Model, error) {
 		return nil, fmt.Errorf("no sessions to open; press n to create one")
 	}
 	p.normalizeSelection()
-	return NewModel(ctx, p.sessions[p.selected], p.sessionManager, p.toolManager, p.workspaceStore)
+	model, err := NewModel(ctx, p.sessions[p.selected], p.sessionManager, p.toolManager, p.workspaceStore)
+	if err != nil {
+		return nil, err
+	}
+	return model.WithActiveCallController(p.activeCalls), nil
 }
 
 func (p *Picker) NewSessionModel(ctx context.Context) (*Model, error) {
@@ -157,7 +169,11 @@ func (p *Picker) NewSessionModel(ctx context.Context) (*Model, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewModel(ctx, sess, p.sessionManager, p.toolManager, p.workspaceStore)
+	model, err := NewModel(ctx, sess, p.sessionManager, p.toolManager, p.workspaceStore)
+	if err != nil {
+		return nil, err
+	}
+	return model.WithActiveCallController(p.activeCalls), nil
 }
 
 func (p *Picker) renderSessions(width int, height int) string {

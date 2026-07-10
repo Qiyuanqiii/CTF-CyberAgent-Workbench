@@ -40,7 +40,7 @@ Every call attempt emits `model.started` and then `model.completed` or `model.fa
 
 During an attempt, `run events` may contain at most 32 ordered `model.delta` records. These events contain only chunk and byte counters, sequence, and completion state; they never store model text. The terminal event must match those counters. Model terminal events, token usage, and `execution_millis` commit together, and replaying the same terminal event cannot double-charge the budget. Repair transitions emit `supervisor.protocol_repair_requested/started/completed/failed`. The raw invalid output is never copied into the repair prompt, Session, or event payload. `run step` prints `model_attempts`, `protocol_repairs`, `model_outcome`, `stream_events`, and `stream_bytes`. Exhausted transient retries return unavailable exit code 6, rate limits return resource-exhausted exit code 8, cancellation returns 7, and deadline expiration returns 9.
 
-The application service exposes in-process active-call query, bounded metadata subscription, and idempotent cancellation operations. An explicit application cancellation first appends a redacted `model.cancel_requested` event and then signals the Go-owned Provider context. Subscribers receive no raw model text and are disconnected if their 32-event buffer fills. This control plane is not yet reachable from a second CLI process; cross-process cancellation waits for the local Go HTTP/WebSocket service.
+The application service exposes in-process active-call query, bounded metadata subscription, and idempotent cancellation operations. An explicit application cancellation first appends a redacted `model.cancel_requested` event and then signals the Go-owned Provider context. Subscribers receive no raw model text and are disconnected if their 32-event buffer fills. Bubble Tea consumes this interface through an adapter; the control plane is not yet reachable from a second CLI process, so cross-process cancellation still waits for the local Go HTTP/WebSocket service.
 
 The `cyberagent` process handles `Ctrl+C` and termination signals through its command context. An interrupted Provider call records `model.failed` with a cancelled outcome and keeps the started Supervisor checkpoint recoverable instead of abandoning an unaccounted request.
 
@@ -123,12 +123,13 @@ j / k            select next/previous tool when tool runs are focused
 a                approve selected proposed tool when tool runs are focused
 d                deny selected proposed tool when tool runs are focused
 Ctrl+R           refresh session/tool state
-Esc              quit
+Ctrl+X           request audited cancellation of the current model call
+Esc              quit when idle; a busy action must finish or be cancelled first
 ```
 
 `--print` renders one snapshot and exits, which is useful for non-interactive verification.
 
-Message sends, refreshes, and tool approval/deny actions run asynchronously. While one is in flight, the status line shows loading text such as `thinking...`, `proposing tool...`, `refreshing...`, `approving...`, or `denying...`, and additional input is held until the current action finishes.
+Message sends, live-call discovery, refreshes, cancellation, and tool approval/deny actions run asynchronously. During a Run-bound model call, the status line shows provider/model, attempt, chunk/byte progress, cancellation, slow-consumer disconnect, and terminal state. `Ctrl+X` prefers the application audit-first cancellation API; if a legacy or not-yet-active request has no registry entry, it cancels the current application request context instead. Additional input is held until the current action finishes, and raw model text is never included in the live envelope.
 
 When a session has an attached workspace, the TUI side panel shows workspace identity, root path, and lightweight counts for `attachments`, `scripts`, `outputs`, `logs`, and `writeups`. This is metadata only; the panel does not read file contents.
 

@@ -17,22 +17,29 @@ import (
 )
 
 type Model struct {
-	session        session.Session
-	sessionManager *session.Manager
-	toolManager    *toolrun.Manager
-	workspaceStore WorkspaceStore
-	input          textinput.Model
-	messages       []session.Message
-	toolRuns       []toolrun.ToolRun
-	workspace      workspaceContext
-	status         string
-	busy           bool
-	width          int
-	height         int
-	focus          focusArea
-	messageScroll  int
-	selectedTool   int
-	toolScroll     int
+	session            session.Session
+	sessionManager     *session.Manager
+	toolManager        *toolrun.Manager
+	workspaceStore     WorkspaceStore
+	activeCalls        ActiveCallController
+	input              textinput.Model
+	messages           []session.Message
+	toolRuns           []toolrun.ToolRun
+	workspace          workspaceContext
+	status             string
+	busy               bool
+	width              int
+	height             int
+	focus              focusArea
+	messageScroll      int
+	selectedTool       int
+	toolScroll         int
+	live               activeCallView
+	liveGeneration     uint64
+	liveDiscoverCancel context.CancelFunc
+	actionCancel       context.CancelFunc
+	liveSubscription   ActiveCallSubscription
+	cancelPending      bool
 }
 
 type actionDoneMsg struct {
@@ -111,7 +118,15 @@ func (m *Model) Init() tea.Cmd {
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
+	case activeCallSubscribedMsg:
+		return m, m.handleActiveCallSubscribed(msg)
+	case activeCallEventMsg:
+		return m, m.handleActiveCallEvent(msg)
+	case activeCallCancelDoneMsg:
+		m.handleActiveCallCancelDone(msg)
+		return m, nil
 	case actionDoneMsg:
+		m.stopLiveTracking(msg.err)
 		m.busy = false
 		if msg.err != nil {
 			m.status = "error: " + msg.err.Error()
@@ -126,7 +141,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "esc":
+			if m.busy {
+				m.status = "action running; Ctrl+X cancels the model call"
+				return m, nil
+			}
 			return m, tea.Quit
+		case "ctrl+x":
+			if m.activeCalls == nil {
+				m.status = "active call control unavailable"
+				return m, nil
+			}
+			if m.cancelPending {
+				m.status = "model cancellation already pending"
+				return m, nil
+			}
+			m.cancelPending = true
+			m.status = "requesting model cancellation..."
+			return m, m.cancelActiveCallCmd(m.liveGeneration, m.session.ID)
 		}
 		if m.busy {
 			m.status = "busy; waiting for current action"
@@ -180,7 +211,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if value == "/quit" || value == "/exit" {
 				return m, tea.Quit
 			}
-			return m.startAction(statusForInput(value), m.submitCmd(value))
+			return m.startSubmitAction(statusForInput(value), value)
 		}
 	}
 	if m.focus == focusInput {
@@ -221,7 +252,7 @@ func (m *Model) Snapshot() string {
 	}
 	input := inputStyle.Width(width).Render(inputPrefix + m.input.View())
 	status := statusStyle.Width(width).Render(m.statusLine())
-	footer := footerStyle.Width(width).Render("Tab focus | Enter send/approve | PgUp/PgDn scroll | tools: j/k select, a approve, d deny | Ctrl+R refresh | Esc quit")
+	footer := footerStyle.Width(width).Render(footerHelp(width))
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, input, status, footer)
 }
 
@@ -415,9 +446,13 @@ func (m *Model) denyAction(ctx context.Context, sess session.Session, id string,
 }
 
 func (m *Model) submitCmd(input string) tea.Cmd {
+	return m.submitCmdContext(context.Background(), input)
+}
+
+func (m *Model) submitCmdContext(ctx context.Context, input string) tea.Cmd {
 	sess := m.session
 	return func() tea.Msg {
-		result, err := m.submitAction(context.Background(), sess, input)
+		result, err := m.submitAction(ctx, sess, input)
 		return actionDoneMsg{result: result, err: err}
 	}
 }
@@ -494,9 +529,7 @@ func (m *Model) messageLines(width int) []string {
 	var lines []string
 	for _, msg := range m.messages {
 		prefix := msg.Role + ": "
-		for _, line := range wrap(prefix+singleLine(msg.Content), width) {
-			lines = append(lines, line)
-		}
+		lines = append(lines, wrap(prefix+singleLine(msg.Content), width)...)
 	}
 	if len(lines) == 0 {
 		return []string{"no messages"}
@@ -586,10 +619,24 @@ func (m *Model) toolTitle() string {
 }
 
 func (m *Model) statusLine() string {
+	parts := []string{m.status, "focus=" + string(m.focus)}
 	if m.busy {
-		return fmt.Sprintf("%s | focus=%s | busy", m.status, m.focus)
+		parts = append(parts, "busy")
 	}
-	return fmt.Sprintf("%s | focus=%s", m.status, m.focus)
+	if live := m.live.summary(); live != "" {
+		parts = append(parts, live)
+	}
+	return truncate(strings.Join(parts, " | "), max(20, m.width-2))
+}
+
+func footerHelp(width int) string {
+	if width < 100 {
+		return "Tab | Enter | PgUp/PgDn | j/k tools | Ctrl+X cancel | Ctrl+R | Esc quit"
+	}
+	if width < 145 {
+		return "Tab focus | Enter act | PgUp/PgDn | j/k tools | a/d decision | Ctrl+X cancel | Ctrl+R | Esc quit"
+	}
+	return "Tab focus | Enter send/approve | PgUp/PgDn scroll | tools: j/k select, a approve, d deny | Ctrl+X cancel call | Ctrl+R refresh | Esc quit"
 }
 
 func (m *Model) selectedToolRun() (toolrun.ToolRun, bool) {
@@ -695,16 +742,6 @@ func wrap(value string, width int) []string {
 		lines = append(lines, value)
 	}
 	return lines
-}
-
-func tail(lines []string, maxLines int) string {
-	if maxLines <= 0 {
-		return ""
-	}
-	if len(lines) > maxLines {
-		lines = lines[len(lines)-maxLines:]
-	}
-	return strings.Join(lines, "\n")
 }
 
 func windowFromBottom(lines []string, maxLines int, scroll int) []string {

@@ -31,9 +31,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 68%.
+- Overall product vision: about 69%.
 - v0.1 generic agent MVP: about 98%.
-- V2 run-centric runtime: about 83%.
+- V2 run-centric runtime: about 86%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -130,12 +130,17 @@ Completed:
 - Each subscriber has a 32-event buffer and is disconnected when slow; Provider execution never waits for a live consumer and persisted `model.delta` remains the only restart-safe progress ledger.
 - Explicit cancellation persists one redacted `model.cancel_requested` before signalling the Go-owned context. All Provider terminal paths remove the active entry, and cancellation races report whether a signal actually reached the call.
 - The CLI entrypoint now propagates Ctrl+C/SIGTERM through `ExecuteContext`, allowing cancelled model usage/events and the recoverable Supervisor checkpoint to be committed before process exit.
+- ActiveCallInfo now carries the Store-bound Session identity, allowing Bubble Tea to discover the correct Run call before the Session send returns.
+- Bubble Tea runs submit and active-call discovery concurrently, renders provider/model, attempt, chunk/byte, cancellation, disconnect, and terminal metadata, and never receives raw stream text.
+- `Ctrl+X` invokes the application audit-first cancellation API. Legacy or pre-activation calls fall back to cancelling only the current application request context; the UI never owns a Provider context.
+- Busy chat actions reject `Esc/Ctrl+C` keyboard exit until they complete or receive explicit cancellation. Direct, picker-selected, and picker-created models share the same App-owned registry/controller.
+- Responsive TUI help now includes cancellation without overflowing supported 80/100/120/145-column layouts, and the three previous staticcheck findings were removed.
 
 Not done yet:
 
 - OpenAI-compatible/Ollama providers.
 - Dedicated TUI file-edit pane with key-driven edit approval/denial.
-- TUI consumption of live call metadata, user-visible safe text streaming, and cross-process cancellation routing.
+- User-visible safe text streaming and cross-process cancellation routing.
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
@@ -147,7 +152,7 @@ No high-severity issue was found in the latest slice.
 
 Residual risks to address soon:
 
-- `staticcheck ./...` currently reports three pre-existing low-severity TUI findings (`S1008`, `S1011`, and unused helper `U1000`); no finding points into the active-call slice.
+- `staticcheck ./...` is clean; the prior TUI `S1008`, `S1011`, and unused-helper `U1000` findings were removed in this slice.
 - `script run --local` can execute local commands after only lexical policy checks; it needs explicit approval and workspace scoping.
 - Secret redaction is heuristic, not a full secrets manager; add opt-in raw local inspection later only with clear warnings.
 - Binary or non-UTF-8 files are refused by `read_file`; richer file viewers should stay workspace-scoped and type-aware.
@@ -173,6 +178,8 @@ Residual risks to address soon:
 - Active-call subscriptions are process-local and non-replayable. A full 32-event buffer closes that subscriber; consumers must inspect `Dropped()` and recover from durable Run events.
 - Application cancellation is audit-first: if SQLite cannot append the request, the registry does not silently signal an unaudited cancellation. Parent process-context cancellation remains the emergency path and still records `model.failed(cancelled)` when possible.
 - Cross-process cancellation is not available until the Go HTTP/WebSocket control plane hosts the shared registry; a second standalone CLI process cannot observe another process's in-memory call.
+- TUI live state is transient metadata, not a durable transcript. Disconnect or process exit must recover from SQLite Run events, and user-visible text streaming remains disabled.
+- When no active registry item exists, `Ctrl+X` cancels the current application request context after a bounded lookup. This covers legacy/pre-activation calls without fabricating an audited Run cancellation event.
 - Root `wait` currently maps to `paused` plus a textual reason; structured dependencies and approvals are future Coordinator/Work Board work.
 - Unbound Sessions still use the direct Router compatibility path. New product flows should create a Run instead of expanding this legacy path.
 - Slash commands are intentionally separate command adapters; they do not consume a Supervisor turn yet, and future Tool Gateway work must unify their approval/event behavior without silently executing tools.
@@ -274,15 +281,17 @@ Expected context behavior:
 - Isolated streaming CLI smoke showed one text-free `model.delta`, positive `stream_bytes`, matching terminal counters, and no failed model event.
 - Active-call tests passed for durable-start visibility, duplicate-Run exclusion, ordered snapshot/progress/cancel/terminal envelopes, bounded slow-consumer disconnection, idempotent cancellation, redacted audit reasons, terminal cleanup, and cancellation races.
 - Signal-aware CLI tests repeatedly cancelled a blocking SSE Provider, returned exit code 7, persisted `model.failed` with outcome `cancelled`, and retained a recoverable `turn_started` checkpoint.
+- TUI tests passed for parallel submit/discovery commands, live snapshot/progress/terminal rendering, slow-consumer disconnect, busy-exit protection, `Ctrl+X` audited cancellation, request-context fallback, picker propagation, and responsive help widths.
+- A real Run-bound TUI integration test streamed partial output from a blocking Provider, rendered byte progress, cancelled through the shared Supervisor, and observed one durable `model.cancel_requested` plus one `model.failed`.
 - The local Go toolchain was upgraded from 1.26.1 to 1.26.5 after `govulncheck` identified reachable standard-library advisories; the repeated scan reports zero reachable vulnerabilities.
-- Final Go 1.26.5 gates passed: `go test -count=1 ./...`, `go vet ./...`, targeted race tests, isolated CLI smoke, and credential-prefix scanning. `staticcheck` is otherwise clean apart from the three documented pre-existing TUI findings.
+- Final Go 1.26.5 gates passed: `go test -count=1 ./...`, `go vet ./...`, targeted race tests, isolated CLI/TUI smoke, credential-prefix scanning, and clean `staticcheck ./...`.
 
 ## Recommended Next Slice
 
-Continue P2 by integrating the live-call boundary into Bubble Tea:
+Begin P3 with the Work Board foundation:
 
-- Inject a read-only active-call query/subscription controller into the existing TUI without giving the UI Provider contexts or cancel functions.
-- Render provider, attempt, chunk/byte progress, cancellation, slow-consumer disconnect, and terminal states through asynchronous Bubble Tea commands.
-- Add an explicit TUI cancel action that invokes the application audit-first API; closing the UI must not implicitly cancel a background Run.
-- Keep live and persisted envelopes metadata-only while designing a separate lifecycle-aware, cross-chunk-redacted user-text projection.
-- Keep tool execution and multi-agent concurrency disabled.
+- Define pure-Go WorkItem identity, status, priority, owner, dependencies, acceptance criteria, and legal transitions.
+- Add immutable migration v9 for Run-scoped `work_items` with transactional `work_item.created/changed` events.
+- Implement Store/application boundaries plus minimal `todo create/list/show/update/complete/block` CLI commands.
+- Reject cross-Run ownership and keep model-driven tool execution and multi-agent concurrency disabled.
+- Add Notes and Context Builder selection only after the WorkItem lifecycle is stable.

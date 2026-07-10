@@ -276,7 +276,7 @@ supervisor.action_committed
 supervisor.run_waiting / supervisor.run_completed / supervisor.run_failed
 ```
 
-CLI and headless mode print persisted events. The Go application layer now publishes bounded live call metadata in memory; Bubble Tea does not consume it yet. A future adapter will expose that envelope over WebSocket and add a separately reviewed user-facing text projection. Persisted `model.delta` remains counter-only, and UI clients never own Provider contexts or cancellation functions.
+CLI and headless mode print persisted events. Bubble Tea consumes the bounded in-memory call envelope through a narrow controller, renders provider/attempt/chunk/byte and terminal state, and requests audited cancellation through the application service. Its request-context cancellation is used only as a fallback for legacy or not-yet-active calls; it never receives a Provider context. A future adapter will expose the metadata envelope over WebSocket and add a separately reviewed user-facing text projection. Persisted `model.delta` remains counter-only.
 
 ## Persistence
 

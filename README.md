@@ -29,7 +29,7 @@ The current priority is the general-purpose single-agent runtime. CTF capabiliti
 - **本地工作区 / Local workspace:** scoped file access, safe reads, persistent artifacts, and reviewable edit proposals.
 - **安全与审批 / Safety and approval:** policy checks, secret redaction, dry-run tool proposals, and explicit approval boundaries.
 - **完整审计链 / Audit trail:** append-only Run events for messages, bounded text-free stream progress, model calls, policy decisions, tool proposals, and file edits.
-- **CLI 与 TUI / CLI and TUI:** a scriptable `cyberagent` CLI plus a Bubble Tea terminal interface.
+- **CLI 与 TUI / CLI and TUI:** a scriptable CLI plus a Bubble Tea interface with live model progress and audited cancellation.
 - **可扩展架构 / Extensible architecture:** Go control plane with planned HTTP/WebSocket, TypeScript UI, Docker sandbox, and Rust analyzer boundaries.
 
 > [!NOTE]
@@ -101,9 +101,9 @@ Local runtime databases, workspace data, environment files, API keys, IDE metada
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 now supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, bounded metadata-only live subscribers, durable model events, and exactly one restart-safe lifecycle-protocol repair. Next comes TUI consumption of that live control boundary before structured work items/notes or multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 now supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, and exactly one restart-safe lifecycle-protocol repair. The next vertical slice begins the structured Work Board foundation before Notes or multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
-TUI quick controls: `cyberagent tui` opens a session picker. In chat, `Tab` switches focus, `PgUp/PgDn` scroll messages, `j/k` select tool runs, `a` approves, `d` denies, `Ctrl+R` refreshes, and `Esc` quits. Slow sends, refreshes, and tool approvals run through async commands with visible status text such as `thinking...`, `proposing tool...`, or `approving...`. Attached workspaces render in the side panel with local directory counts for attachments, scripts, outputs, logs, and writeups.
+TUI quick controls: `cyberagent tui` opens a session picker. In chat, `Tab` switches focus, `PgUp/PgDn` scroll messages, `j/k` select tool runs, `a` approves, `d` denies, `Ctrl+X` requests cancellation of the current model call, `Ctrl+R` refreshes, and `Esc` quits when idle. Busy sends cannot be closed accidentally with `Esc`; cancel or wait first. The status line renders provider/model, attempt, chunk/byte progress, cancellation, disconnect, and terminal state without exposing raw model text. Attached workspaces render in the side panel with local directory counts for attachments, scripts, outputs, logs, and writeups.
 
 Workspace file reads and model-bound messages pass through heuristic secret redaction for common API keys, bearer tokens, GitHub tokens, AWS access keys, JWTs, and private-key blocks.
 

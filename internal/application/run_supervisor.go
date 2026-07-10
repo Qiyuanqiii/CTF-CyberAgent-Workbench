@@ -496,7 +496,7 @@ func (s *RunSupervisor) callModelWithRetry(ctx context.Context, turn domain.Supe
 			ProtocolRepair: protocolRepair, Provider: ref.Provider, Model: ref.Model,
 		}
 		globalAttempt++
-		lease, err := s.activeCalls.reserve(ctx, result.Checkpoint, attempt)
+		lease, err := s.activeCalls.reserve(ctx, result.Checkpoint, attempt, turn.Run.SessionID)
 		if err != nil {
 			return result, apperror.Normalize(err)
 		}

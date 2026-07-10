@@ -32,6 +32,7 @@ const (
 
 type ActiveCallInfo struct {
 	RunID            string    `json:"run_id"`
+	SessionID        string    `json:"session_id"`
 	AttemptID        string    `json:"attempt_id"`
 	ModelAttempt     int       `json:"model_attempt"`
 	TransportAttempt int       `json:"transport_attempt"`
@@ -46,8 +47,8 @@ type ActiveCallInfo struct {
 }
 
 func (i ActiveCallInfo) Validate() error {
-	if strings.TrimSpace(i.RunID) == "" || strings.TrimSpace(i.AttemptID) == "" {
-		return errors.New("active call run and attempt ids are required")
+	if strings.TrimSpace(i.RunID) == "" || strings.TrimSpace(i.SessionID) == "" || strings.TrimSpace(i.AttemptID) == "" {
+		return errors.New("active call run, session, and attempt ids are required")
 	}
 	if i.ModelAttempt <= 0 || i.TransportAttempt <= 0 || i.MaxAttempts <= 0 || i.TransportAttempt > i.MaxAttempts {
 		return errors.New("active call attempt counters are invalid")
@@ -220,6 +221,24 @@ func (r *ActiveCallRegistry) Lookup(runID string) (ActiveCallInfo, bool) {
 	return entry.info, true
 }
 
+func (r *ActiveCallRegistry) LookupSession(sessionID string) (ActiveCallInfo, bool) {
+	if r == nil {
+		return ActiveCallInfo{}, false
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ActiveCallInfo{}, false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, entry := range r.calls {
+		if entry.started && entry.info.SessionID == sessionID {
+			return entry.info, true
+		}
+	}
+	return ActiveCallInfo{}, false
+}
+
 func (r *ActiveCallRegistry) List() []ActiveCallInfo {
 	if r == nil {
 		return nil
@@ -266,7 +285,7 @@ func (r *ActiveCallRegistry) Subscribe(runID string) (*ActiveCallSubscription, e
 	}, nil
 }
 
-func (r *ActiveCallRegistry) reserve(parent context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt) (*activeCallLease, error) {
+func (r *ActiveCallRegistry) reserve(parent context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, sessionID string) (*activeCallLease, error) {
 	if r == nil {
 		return nil, apperror.New(apperror.CodeFailedPrecondition, "active call registry is required")
 	}
@@ -285,12 +304,16 @@ func (r *ActiveCallRegistry) reserve(parent context.Context, checkpoint domain.S
 	if err := attempt.ValidateStarted(); err != nil {
 		return nil, apperror.Wrap(apperror.CodeInvalidArgument, "invalid active model attempt", err)
 	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, apperror.New(apperror.CodeInvalidArgument, "active model call session id is required")
+	}
 	key := activeCallKey{runID: checkpoint.RunID, attemptID: checkpoint.AttemptID, modelAttempt: attempt.Number}
 	callCtx, cancel := context.WithCancel(parent)
 	entry := &activeCallEntry{
 		key: key, checkpoint: checkpoint, attempt: attempt, cancel: cancel,
 		info: ActiveCallInfo{
-			RunID: checkpoint.RunID, AttemptID: checkpoint.AttemptID,
+			RunID: checkpoint.RunID, SessionID: sessionID, AttemptID: checkpoint.AttemptID,
 			ModelAttempt: attempt.Number, TransportAttempt: attempt.TransportNumber(), MaxAttempts: attempt.MaxAttempts,
 			ProtocolRepair: attempt.ProtocolRepair, Provider: redact.String(strings.TrimSpace(attempt.Provider)),
 			Model: redact.String(strings.TrimSpace(attempt.Model)),
@@ -523,6 +546,13 @@ func (s *RunSupervisor) ActiveCall(runID string) (ActiveCallInfo, bool) {
 		return ActiveCallInfo{}, false
 	}
 	return s.activeCalls.Lookup(runID)
+}
+
+func (s *RunSupervisor) ActiveCallForSession(sessionID string) (ActiveCallInfo, bool) {
+	if s == nil || s.activeCalls == nil {
+		return ActiveCallInfo{}, false
+	}
+	return s.activeCalls.LookupSession(sessionID)
 }
 
 func (s *RunSupervisor) ActiveCalls() []ActiveCallInfo {

@@ -15,7 +15,7 @@ import (
 func TestActiveCallRegistryLifecycleAndIdempotentCancellation(t *testing.T) {
 	registry := NewActiveCallRegistry()
 	checkpoint, attempt := activeCallTestIdentity()
-	lease, err := registry.reserve(context.Background(), checkpoint, attempt)
+	lease, err := registry.reserve(context.Background(), checkpoint, attempt, "session-live")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,8 +26,11 @@ func TestActiveCallRegistryLifecycleAndIdempotentCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	info, ok := registry.Lookup(checkpoint.RunID)
-	if !ok || info.ModelAttempt != 1 || info.StreamBytes != 0 {
+	if !ok || info.SessionID != "session-live" || info.ModelAttempt != 1 || info.StreamBytes != 0 {
 		t.Fatalf("unexpected active call info: %#v ok=%t", info, ok)
+	}
+	if bySession, ok := registry.LookupSession("session-live"); !ok || bySession.RunID != checkpoint.RunID {
+		t.Fatalf("unexpected session active call lookup: %#v ok=%t", bySession, ok)
 	}
 	if listed := registry.List(); len(listed) != 1 || listed[0].RunID != checkpoint.RunID {
 		t.Fatalf("unexpected active call list: %#v", listed)
@@ -105,14 +108,14 @@ func TestActiveCallRegistryLifecycleAndIdempotentCancellation(t *testing.T) {
 func TestActiveCallRegistryRejectsDuplicateRunAndDropsSlowSubscriber(t *testing.T) {
 	registry := newActiveCallRegistry(1)
 	checkpoint, attempt := activeCallTestIdentity()
-	lease, err := registry.reserve(context.Background(), checkpoint, attempt)
+	lease, err := registry.reserve(context.Background(), checkpoint, attempt, "session-live")
 	if err != nil {
 		t.Fatal(err)
 	}
 	duplicate := attempt
 	duplicate.Number = 2
 	duplicate.TransportAttempt = 2
-	if _, err := registry.reserve(context.Background(), checkpoint, duplicate); apperror.CodeOf(err) != apperror.CodeConflict {
+	if _, err := registry.reserve(context.Background(), checkpoint, duplicate, "session-live"); apperror.CodeOf(err) != apperror.CodeConflict {
 		t.Fatalf("duplicate active run should conflict, got %v", err)
 	}
 	if err := lease.Activate(); err != nil {
@@ -141,7 +144,7 @@ func TestActiveCallRegistryRejectsDuplicateRunAndDropsSlowSubscriber(t *testing.
 	newAttempt := attempt
 	newAttempt.Number = 2
 	newAttempt.TransportAttempt = 2
-	replacement, err := registry.reserve(context.Background(), newCheckpoint, newAttempt)
+	replacement, err := registry.reserve(context.Background(), newCheckpoint, newAttempt, "session-live")
 	if err != nil {
 		t.Fatalf("completed call prevented a later call for the same run: %v", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/toolrun"
 	"cyberagent-workbench/internal/tui"
 	"cyberagent-workbench/internal/workspace"
@@ -33,6 +34,7 @@ func (a *App) tuiCommand(ctx context.Context, args []string) error {
 	}
 
 	sessionManager := a.newSessionManager()
+	activeCalls := &tuiActiveCallController{supervisor: a.newRunSupervisor()}
 	toolManager := toolrun.NewManager(a.store, a.checker)
 	workspaceID := ""
 	if strings.TrimSpace(*workspaceName) != "" {
@@ -53,6 +55,7 @@ func (a *App) tuiCommand(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		model.WithActiveCallController(activeCalls)
 		if *printOnly {
 			fmt.Fprintln(a.out, model.Snapshot())
 			return nil
@@ -72,6 +75,7 @@ func (a *App) tuiCommand(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
+		model.WithActiveCallController(activeCalls)
 		fmt.Fprintln(a.out, model.Snapshot())
 		return nil
 	}
@@ -80,6 +84,7 @@ func (a *App) tuiCommand(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	picker.WithActiveCallController(activeCalls)
 	if !isInteractive() {
 		fmt.Fprintln(a.out, picker.Snapshot())
 		return nil
@@ -87,9 +92,31 @@ func (a *App) tuiCommand(ctx context.Context, args []string) error {
 	return tui.RunPicker(picker)
 }
 
-func isInteractive() bool {
-	if os.Getenv("CI") != "" {
-		return false
+type tuiActiveCallController struct {
+	supervisor *application.RunSupervisor
+}
+
+func (c *tuiActiveCallController) ActiveCallForSession(sessionID string) (application.ActiveCallInfo, bool) {
+	if c == nil || c.supervisor == nil {
+		return application.ActiveCallInfo{}, false
 	}
-	return true
+	return c.supervisor.ActiveCallForSession(sessionID)
+}
+
+func (c *tuiActiveCallController) SubscribeActiveCall(runID string) (tui.ActiveCallSubscription, error) {
+	if c == nil || c.supervisor == nil {
+		return nil, errors.New("active call controller is unavailable")
+	}
+	return c.supervisor.SubscribeActiveCall(runID)
+}
+
+func (c *tuiActiveCallController) CancelActiveCall(ctx context.Context, request application.ActiveCallCancelRequest) (application.ActiveCallCancelResult, error) {
+	if c == nil || c.supervisor == nil {
+		return application.ActiveCallCancelResult{}, errors.New("active call controller is unavailable")
+	}
+	return c.supervisor.CancelActiveCall(ctx, request)
+}
+
+func isInteractive() bool {
+	return os.Getenv("CI") == ""
 }

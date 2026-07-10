@@ -30,6 +30,8 @@ func TestPickerSnapshotAndOpenSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	controller := &fakeActiveCallController{}
+	picker.WithActiveCallController(controller)
 	snapshot := picker.Snapshot()
 	if !strings.Contains(snapshot, "Sessions") || !strings.Contains(snapshot, "demo") {
 		t.Fatalf("unexpected picker snapshot:\n%s", snapshot)
@@ -40,6 +42,9 @@ func TestPickerSnapshotAndOpenSession(t *testing.T) {
 	}
 	if model.session.Title != "demo" {
 		t.Fatalf("expected selected session, got %#v", model.session)
+	}
+	if model.activeCalls != controller {
+		t.Fatal("picker did not pass its active-call controller to the selected session")
 	}
 }
 
