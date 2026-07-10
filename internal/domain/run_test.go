@@ -63,3 +63,11 @@ func TestBudgetRejectsTimeoutDurationOverflow(t *testing.T) {
 		t.Fatal("expected oversized timeout to be rejected")
 	}
 }
+
+func TestBudgetRejectsNegativeToolCallLimit(t *testing.T) {
+	budget := DefaultBudget()
+	budget.MaxToolCalls = -1
+	if err := budget.Validate(); err == nil {
+		t.Fatal("expected negative tool-call budget to be rejected")
+	}
+}

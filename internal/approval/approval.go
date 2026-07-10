@@ -55,6 +55,7 @@ type Record struct {
 	ID                 string
 	IdempotencyKey     string
 	ProposalID         string
+	GrantID            string
 	RunID              string
 	SessionID          string
 	WorkspaceID        string
@@ -74,7 +75,7 @@ type Record struct {
 
 func (r Record) Validate() error {
 	for label, value := range map[string]string{
-		"id": r.ID, "idempotency key": r.IdempotencyKey, "proposal id": r.ProposalID,
+		"id": r.ID, "idempotency key": r.IdempotencyKey, "proposal id": r.ProposalID, "grant id": r.GrantID,
 		"run id": r.RunID, "session id": r.SessionID, "workspace id": r.WorkspaceID,
 		"tool name": r.ToolName, "action class": r.ActionClass, "mode": r.Mode,
 		"requested by": r.RequestedBy, "reviewed by": r.ReviewedBy,
@@ -99,11 +100,14 @@ func (r Record) Validate() error {
 		return errors.New("approval version and timestamps are invalid")
 	}
 	if r.Status == StatusPending {
-		if r.DecidedAt != nil || r.ReviewedBy != "" {
+		if r.DecidedAt != nil || r.ReviewedBy != "" || r.GrantID != "" {
 			return errors.New("pending approval cannot have decision metadata")
 		}
 	} else if r.DecidedAt == nil || r.DecidedAt.Before(r.CreatedAt) || r.ReviewedBy == "" {
 		return errors.New("decided approval requires reviewer and decision time")
+	}
+	if r.GrantID != "" && r.Status != StatusApproved {
+		return errors.New("session grant can only authorize an approved request")
 	}
 	return nil
 }

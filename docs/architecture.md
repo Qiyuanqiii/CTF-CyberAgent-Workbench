@@ -194,6 +194,7 @@ Every tool invocation uses one pipeline:
 Model proposal
   -> schema validation
   -> scope resolution
+  -> Run tool-call budget charge
   -> policy decision
   -> approval classification
   -> sandbox/runtime execution
@@ -205,13 +206,17 @@ Model proposal
 
 The first P5 slice implements this boundary in `internal/toolgateway`. It defines normalized `ToolCall`, `Decision`, `Proposal`, `Execution`, `Result`, and `Outcome` values with bounded UTF-8 fields and legal status combinations. Production CLI, Session, and TUI paths use compatibility adapters over the same Gateway; direct construction of workspace read tools, `toolrun.Manager`, and `fileedit.Manager` is confined to the Gateway.
 
-Workspace IDs are resolved to Store-owned roots before production reads or writes, and a mismatched caller path is rejected before policy or filesystem access. Scoped low-risk reads use automatic approval. Shell and whole-file replacement use per-call approval, while policy rejection maps to permanent denial. Shell completion remains dry-run. The session approval mode exists in the domain contract but has no persisted grant implementation yet.
+Workspace IDs are resolved to Store-owned roots before production reads or writes, and a mismatched caller path is rejected before policy or filesystem access. Run-bound calls are atomically charged against `MaxToolCalls`; legacy unbound Sessions remain untracked for compatibility. Scoped low-risk reads use automatic approval. Shell and whole-file replacement normally use per-call approval, while policy rejection maps to permanent denial. Shell completion remains dry-run.
 
 Schema v11 makes per-call review a durable two-phase operation. Creating a Shell or FileEdit proposal inserts one fingerprint-bound `tool_approvals` record in the same SQLite transaction as the compatibility proposal and appends `approval.requested`. Review first commits an immutable domain-separated SHA-256 digest of the client key in `approval_operations` plus `approval.decided`, then advances the ToolRun/FileEdit state. The raw client key is not persisted. If the process exits between those commits, replaying the same key resumes the proposal transition. A legacy approval created before its Session gains a Run is transactionally adopted later with `approval.bound`. Reusing a key with different intent, changing a proposal fingerprint, creating a ghost approval, or writing `approved`/`applied`/`completed` without the matching durable decision is rejected at the Store boundary.
 
+Schema v12 adds `approval_session_grants`, grant-operation idempotency, `run_tool_usage`, and ordered `run_tool_calls`. A grant is exact-scope authorization over Run, active Session, Workspace, Tool, and ActionClass. Gateway proposal creation still runs Policy first; only an allowed proposal may consume a matching active grant, and `tool_approvals.grant_id` records that authorization fact. Revocation is optimistic, durable, and immediately removes the grant from lookup while leaving already completed actions auditable. Tool charging uses a transactionally serialized counter and ordered event. The first rejected call beyond the limit records one `tool.budget_exhausted`; repeated rejection does not duplicate that terminal budget fact.
+
+`toolgateway.Store` requires both the grant and tool-budget Store contracts at compile time. A future storage backend cannot register with the Gateway while silently omitting either control; tests that use in-memory stores must provide explicit no-grant/untracked implementations.
+
 `script run` now requires a persisted workspace and a workspace-relative existing file. It creates a Script Profile Mission/Run/Session and submits executable/argv through the Gateway as a validated `script_process.v1` JSON envelope whose execution mode is fixed to `disabled`. `--local` changes only the recorded requested backend. The CLI never constructs a Local/Noop runner, and approval still completes through the legacy dry-run ToolRun state machine.
 
-Existing `tool_runs` and `file_edits` remain the durable compatibility proposal records, while `tool_approvals` is the single authorization fact used to gate their privileged transitions. Their transactional Run-event projection is preserved. Gateway outputs enforce hard stdout/stderr/preview limits, valid UTF-8, MIME metadata, truncation flags, and secret redaction. Store JSON redaction parses payloads with exact numbers, redacts string values recursively, and re-encodes them so escaped nested JSON cannot be corrupted. Payloads are capped at 1 MiB, 64 levels, and 100,000 nodes. Revocable Session grants, a first-class typed script-process proposal, Artifact capture rules, and model-authored WorkItem/Note tools remain P5 work.
+Existing `tool_runs` and `file_edits` remain the durable compatibility proposal records, while `tool_approvals` is the single authorization fact used to gate their privileged transitions. Their transactional Run-event projection is preserved. Gateway outputs enforce hard stdout/stderr/preview limits, valid UTF-8, MIME metadata, truncation flags, and secret redaction. Store JSON redaction parses payloads with exact numbers, redacts string values recursively, and re-encodes them so escaped nested JSON cannot be corrupted. Payloads are capped at 1 MiB, 64 levels, and 100,000 nodes. A first-class typed script-process proposal, Artifact capture rules, and model-authored WorkItem/Note tools remain P5 work.
 
 ## Sandbox
 
@@ -282,7 +287,10 @@ model.delta (bounded, text-free stream progress)
 work_item.created / work_item.changed
 note.created / note.changed
 tool.proposed / tool.approved / tool.completed / tool.failed
+tool.budget_charged / tool.budget_exhausted
 file_edit.proposed / file_edit.applied
+approval.requested / approval.decided
+approval.grant_created / approval.grant_revoked
 finding.changed
 artifact.created
 policy.decided

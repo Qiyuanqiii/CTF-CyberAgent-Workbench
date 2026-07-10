@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 11
+const LatestSchemaVersion = 12
 
 type migration struct {
 	Version    int
@@ -279,6 +279,79 @@ var durableApprovalStatements = []string{
 	) WITHOUT ROWID;`,
 	`CREATE INDEX idx_approval_operations_approval_created_at
 		ON approval_operations(approval_id, created_at);`,
+}
+
+var sessionGrantAndToolBudgetStatements = []string{
+	`CREATE TABLE approval_session_grants (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL DEFAULT '',
+		tool_name TEXT NOT NULL,
+		action_class TEXT NOT NULL,
+		status TEXT NOT NULL,
+		request_fingerprint TEXT NOT NULL,
+		reason TEXT NOT NULL DEFAULT '',
+		revocation_reason TEXT NOT NULL DEFAULT '',
+		granted_by TEXT NOT NULL,
+		revoked_by TEXT NOT NULL DEFAULT '',
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		revoked_at TEXT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+		CHECK(status IN ('active', 'revoked')),
+		CHECK(version > 0),
+		CHECK(length(request_fingerprint) = 64),
+		CHECK((status = 'active' AND revoked_at IS NULL AND revoked_by = '' AND revocation_reason = '') OR
+			(status = 'revoked' AND revoked_at IS NOT NULL AND length(trim(revoked_by)) > 0))
+	);`,
+	`CREATE UNIQUE INDEX idx_approval_session_grants_active_scope
+		ON approval_session_grants(session_id, workspace_id, tool_name, action_class)
+		WHERE status = 'active';`,
+	`CREATE INDEX idx_approval_session_grants_run_status_updated_at
+		ON approval_session_grants(run_id, status, updated_at);`,
+	`CREATE TABLE approval_grant_operations (
+		operation_key TEXT PRIMARY KEY,
+		grant_id TEXT NOT NULL,
+		action TEXT NOT NULL,
+		request_fingerprint TEXT NOT NULL,
+		result_status TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(grant_id) REFERENCES approval_session_grants(id) ON DELETE CASCADE,
+		CHECK(action IN ('grant', 'revoke')),
+		CHECK(result_status IN ('active', 'revoked')),
+		CHECK(length(operation_key) = 64),
+		CHECK(length(request_fingerprint) = 64)
+	) WITHOUT ROWID;`,
+	`CREATE INDEX idx_approval_grant_operations_grant_created_at
+		ON approval_grant_operations(grant_id, created_at);`,
+	`ALTER TABLE tool_approvals ADD COLUMN grant_id TEXT REFERENCES approval_session_grants(id);`,
+	`CREATE INDEX idx_tool_approvals_grant_id ON tool_approvals(grant_id);`,
+	`CREATE TABLE run_tool_usage (
+		run_id TEXT PRIMARY KEY,
+		consumed INTEGER NOT NULL DEFAULT 0,
+		updated_at TEXT NOT NULL,
+		exhausted_at TEXT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		CHECK(consumed >= 0)
+	) WITHOUT ROWID;`,
+	`CREATE TABLE run_tool_calls (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		session_id TEXT NOT NULL DEFAULT '',
+		workspace_id TEXT NOT NULL DEFAULT '',
+		tool_name TEXT NOT NULL,
+		action_class TEXT NOT NULL,
+		sequence INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		UNIQUE(run_id, sequence),
+		CHECK(sequence > 0)
+	);`,
+	`CREATE INDEX idx_run_tool_calls_run_created_at
+		ON run_tool_calls(run_id, created_at);`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {

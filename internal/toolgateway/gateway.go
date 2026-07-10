@@ -14,6 +14,7 @@ import (
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/redact"
+	"cyberagent-workbench/internal/toolbudget"
 	"cyberagent-workbench/internal/toolrun"
 	"cyberagent-workbench/internal/tools"
 )
@@ -24,10 +25,14 @@ type Store interface {
 	toolrun.Store
 	fileedit.Store
 	approval.Store
+	approval.GrantStore
+	toolbudget.Store
 }
 
 type Gateway struct {
 	store                 Store
+	grantStore            approval.GrantStore
+	budgetStore           toolbudget.Store
 	checker               policy.Checker
 	workspaceRootResolver WorkspaceRootResolver
 	legacyTools           *toolrun.Manager
@@ -41,10 +46,11 @@ func New(store Store, checker policy.Checker) *Gateway {
 		fallback := policy.NewDefaultChecker()
 		checker = fallback
 	}
-	return &Gateway{
-		store: store, checker: checker,
+	gateway := &Gateway{
+		store: store, grantStore: store, budgetStore: store, checker: checker,
 		legacyTools: toolrun.NewManager(store, checker), legacyEdits: fileedit.NewManager(store),
 	}
+	return gateway
 }
 
 func (g *Gateway) WithWorkspaceRootResolver(resolver WorkspaceRootResolver) *Gateway {
@@ -64,6 +70,22 @@ func (g *Gateway) Invoke(ctx context.Context, call ToolCall) (Outcome, error) {
 	}
 	if err := validateToolArguments(normalized); err != nil {
 		return Outcome{}, err
+	}
+	class, ok := ClassForTool(normalized.Name)
+	if !ok {
+		return Outcome{}, fmt.Errorf("unsupported tool %q", normalized.Name)
+	}
+	if g.budgetStore != nil {
+		usage, err := g.budgetStore.ChargeToolCall(ctx, toolbudget.ChargeRequest{
+			RunID: normalized.RunID, SessionID: normalized.SessionID, WorkspaceID: normalized.WorkspaceID,
+			ToolName: string(normalized.Name), ActionClass: string(class),
+		})
+		if err != nil {
+			return Outcome{}, err
+		}
+		if usage.Tracked {
+			normalized.RunID = usage.RunID
+		}
 	}
 	switch normalized.Name {
 	case ReadFileTool, ListWorkspaceTool:
@@ -160,6 +182,20 @@ func (g *Gateway) invokeShellProposal(ctx context.Context, call ToolCall) (Outco
 	if err != nil {
 		return Outcome{}, err
 	}
+	if run.Status == toolrun.StatusProposed {
+		grant, found, grantErr := g.activeSessionGrant(ctx, call, ClassShell)
+		if grantErr != nil {
+			return g.outcomeFromToolRun(call, run, grantErr)
+		}
+		if found {
+			if _, grantErr = g.grantStore.AuthorizeApprovalWithSessionGrant(ctx, run.ID, grant.ID); grantErr != nil {
+				return g.outcomeFromToolRun(call, run, grantErr)
+			}
+			run, err = g.legacyTools.Approve(ctx, run.ID)
+			outcome, mappedErr := g.outcomeFromToolRun(call, run, err)
+			return outcomeAuthorizedBySessionGrant(outcome, mappedErr)
+		}
+	}
 	return g.outcomeFromToolRun(call, run, nil)
 }
 
@@ -188,7 +224,37 @@ func (g *Gateway) invokeFileEditProposal(ctx context.Context, call ToolCall) (Ou
 	if err != nil {
 		return Outcome{}, err
 	}
+	grant, found, grantErr := g.activeSessionGrant(ctx, call, ClassWorkspaceWrite)
+	if grantErr != nil {
+		return g.outcomeFromFileEdit(call, edit, grantErr)
+	}
+	if found {
+		if _, grantErr = g.grantStore.AuthorizeApprovalWithSessionGrant(ctx, edit.ID, grant.ID); grantErr != nil {
+			return g.outcomeFromFileEdit(call, edit, grantErr)
+		}
+		edit, err = g.legacyEdits.Approve(ctx, edit.ID, root)
+		outcome, mappedErr := g.outcomeFromFileEdit(call, edit, err)
+		return outcomeAuthorizedBySessionGrant(outcome, mappedErr)
+	}
 	return g.outcomeFromFileEdit(call, edit, nil)
+}
+
+func (g *Gateway) activeSessionGrant(ctx context.Context, call ToolCall, class ActionClass) (approval.SessionGrant, bool, error) {
+	if g.grantStore == nil || call.SessionID == "" {
+		return approval.SessionGrant{}, false, nil
+	}
+	return g.grantStore.FindActiveSessionGrant(ctx, approval.GrantQuery{
+		RunID: call.RunID, SessionID: call.SessionID, WorkspaceID: call.WorkspaceID,
+		ToolName: string(call.Name), ActionClass: string(class),
+	})
+}
+
+func outcomeAuthorizedBySessionGrant(outcome Outcome, operationErr error) (Outcome, error) {
+	if outcome.Decision.Allowed {
+		outcome.Decision.Approval = ApprovalSession
+		outcome.Decision.Reason = "authorized by active session grant"
+	}
+	return validateOutcome(outcome, operationErr)
 }
 
 func (g *Gateway) reviewShell(ctx context.Context, request ReviewRequest) (Outcome, error) {

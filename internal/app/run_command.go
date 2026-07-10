@@ -39,6 +39,8 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runSupervisorExecute(ctx, args[1:])
 	case "checkpoint":
 		return a.runSupervisorCheckpoint(ctx, args[1:])
+	case "usage":
+		return a.runUsage(ctx, service, args[1:])
 	case "finish":
 		return a.runSupervisorFinalize(ctx, application.LifecycleOutcomeCompleted, args[1:])
 	case "fail":
@@ -54,6 +56,37 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown run subcommand %q", args[0])
 	}
+}
+
+func (a *App) runUsage(ctx context.Context, service *application.RunService, args []string) error {
+	fs := newFlagSet("run usage", a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run usage <run-id>")
+	}
+	_, run, err := service.Get(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	toolUsage, err := a.store.GetToolCallUsage(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "run: %s\nstatus: %s\ntool_calls: %d\ntool_call_limit: %d\ntool_calls_remaining: %d\n",
+		run.ID, run.Status, toolUsage.Consumed, toolUsage.Limit, toolUsage.Remaining)
+	if toolUsage.ExhaustedAt != nil {
+		fmt.Fprintf(a.out, "tool_budget_exhausted_at: %s\n", toolUsage.ExhaustedAt.Format(time.RFC3339))
+	}
+	if checkpoint, ok, err := a.newRunSupervisor().Checkpoint(ctx, run.ID); err != nil {
+		return err
+	} else if ok {
+		fmt.Fprintf(a.out, "turns_completed: %d\ninput_tokens: %d\noutput_tokens: %d\ntotal_tokens: %d\nexecution_millis: %d\n",
+			checkpoint.NextTurn-1, checkpoint.InputTokens, checkpoint.OutputTokens,
+			checkpoint.TotalTokens, checkpoint.ExecutionMillis)
+	}
+	return nil
 }
 
 func (a *App) runSupervisorStep(ctx context.Context, args []string) error {
@@ -157,10 +190,15 @@ func (a *App) runSupervisorCheckpoint(ctx context.Context, args []string) error 
 		fmt.Fprintf(a.out, "run %s has no supervisor checkpoint\n", fs.Arg(0))
 		return nil
 	}
-	fmt.Fprintf(a.out, "run: %s\nphase: %s\nnext_turn: %d\nattempt: %s\nrepair_phase: %s\nrepair_reason: %s\nlast_error: %s\ninput_tokens: %d\noutput_tokens: %d\ntotal_tokens: %d\nexecution_millis: %d\nupdated_at: %s\n",
+	toolUsage, err := a.store.GetToolCallUsage(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "run: %s\nphase: %s\nnext_turn: %d\nattempt: %s\nrepair_phase: %s\nrepair_reason: %s\nlast_error: %s\ninput_tokens: %d\noutput_tokens: %d\ntotal_tokens: %d\ntool_calls: %d\ntool_call_limit: %d\ntool_calls_remaining: %d\nexecution_millis: %d\nupdated_at: %s\n",
 		checkpoint.RunID, checkpoint.Phase, checkpoint.NextTurn, checkpoint.AttemptID,
 		checkpoint.RepairPhase, checkpoint.RepairReason, checkpoint.LastError, checkpoint.InputTokens, checkpoint.OutputTokens,
-		checkpoint.TotalTokens, checkpoint.ExecutionMillis, checkpoint.UpdatedAt.Format(time.RFC3339))
+		checkpoint.TotalTokens, toolUsage.Consumed, toolUsage.Limit, toolUsage.Remaining,
+		checkpoint.ExecutionMillis, checkpoint.UpdatedAt.Format(time.RFC3339))
 	return nil
 }
 
@@ -194,18 +232,20 @@ func (a *App) runCreate(ctx context.Context, service *application.RunService, ar
 	interactive := fs.Bool("interactive", false, "mark run as interactive")
 	maxTurns := fs.Int("max-turns", domain.DefaultBudget().MaxTurns, "maximum agent turns")
 	maxTokens := fs.Int64("max-tokens", 0, "maximum model tokens; zero means unset")
+	maxToolCalls := fs.Int64("max-tool-calls", domain.DefaultBudget().MaxToolCalls, "maximum tool calls; zero means unlimited")
 	maxCostUSD := fs.Float64("max-cost-usd", 0, "maximum model cost in USD; zero means unset")
 	timeout := fs.Duration("timeout", 0, "run timeout; zero means unset")
 	if err := fs.Parse(reorderFlags(args, map[string]bool{
-		"workspace":    true,
-		"profile":      true,
-		"route":        true,
-		"session":      true,
-		"interactive":  false,
-		"max-turns":    true,
-		"max-tokens":   true,
-		"max-cost-usd": true,
-		"timeout":      true,
+		"workspace":      true,
+		"profile":        true,
+		"route":          true,
+		"session":        true,
+		"interactive":    false,
+		"max-turns":      true,
+		"max-tokens":     true,
+		"max-tool-calls": true,
+		"max-cost-usd":   true,
+		"timeout":        true,
 	})); err != nil {
 		return err
 	}
@@ -242,6 +282,7 @@ func (a *App) runCreate(ctx context.Context, service *application.RunService, ar
 		Budget: domain.Budget{
 			MaxTurns:       *maxTurns,
 			MaxTokens:      *maxTokens,
+			MaxToolCalls:   *maxToolCalls,
 			MaxCostUSD:     *maxCostUSD,
 			TimeoutSeconds: int64(timeout.Seconds()),
 		},

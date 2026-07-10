@@ -14,6 +14,7 @@ import (
 	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/policy"
+	"cyberagent-workbench/internal/toolbudget"
 	"cyberagent-workbench/internal/toolrun"
 )
 
@@ -198,6 +199,38 @@ func (s *memoryStore) ListApprovals(_ context.Context, filter approval.ListFilte
 		records = append(records, record)
 	}
 	return records, nil
+}
+
+func (s *memoryStore) CreateSessionGrant(context.Context, approval.CreateGrantRequest) (approval.GrantResult, error) {
+	return approval.GrantResult{}, errors.New("session grants are not supported by this test store")
+}
+
+func (s *memoryStore) RevokeSessionGrant(context.Context, approval.RevokeGrantRequest) (approval.GrantResult, error) {
+	return approval.GrantResult{}, errors.New("session grants are not supported by this test store")
+}
+
+func (s *memoryStore) AuthorizeApprovalWithSessionGrant(context.Context, string, string) (approval.DecisionResult, error) {
+	return approval.DecisionResult{}, errors.New("session grants are not supported by this test store")
+}
+
+func (s *memoryStore) FindActiveSessionGrant(context.Context, approval.GrantQuery) (approval.SessionGrant, bool, error) {
+	return approval.SessionGrant{}, false, nil
+}
+
+func (s *memoryStore) GetSessionGrant(context.Context, string) (approval.SessionGrant, error) {
+	return approval.SessionGrant{}, errors.New("session grant not found")
+}
+
+func (s *memoryStore) ListSessionGrants(context.Context, approval.GrantListFilter) ([]approval.SessionGrant, error) {
+	return nil, nil
+}
+
+func (s *memoryStore) ChargeToolCall(context.Context, toolbudget.ChargeRequest) (toolbudget.Usage, error) {
+	return toolbudget.Usage{Remaining: -1}, nil
+}
+
+func (s *memoryStore) GetToolCallUsage(context.Context, string) (toolbudget.Usage, error) {
+	return toolbudget.Usage{Remaining: -1}, nil
 }
 
 func TestGatewayExecutesScopedReadsWithRedactionAndLimits(t *testing.T) {

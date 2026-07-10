@@ -196,6 +196,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 9, Name: "run work board", Statements: workBoardStatements},
 		{Version: 10, Name: "run notes", Statements: runNotesStatements},
 		{Version: 11, Name: "durable tool approvals", Statements: durableApprovalStatements},
+		{Version: 12, Name: "session grants and tool budgets", Statements: sessionGrantAndToolBudgetStatements},
 	})
 }
 

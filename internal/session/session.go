@@ -14,6 +14,7 @@ import (
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/redact"
+	"cyberagent-workbench/internal/toolbudget"
 	"cyberagent-workbench/internal/toolgateway"
 	"cyberagent-workbench/internal/toolrun"
 )
@@ -91,6 +92,8 @@ type Store interface {
 	fileedit.Store
 	toolrun.Store
 	approval.Store
+	approval.GrantStore
+	toolbudget.Store
 
 	SaveSession(ctx context.Context, session Session) error
 	GetSession(ctx context.Context, id string) (Session, error)
@@ -242,7 +245,7 @@ func (m *Manager) handleSlash(ctx context.Context, sess Session, userMsg Message
 	var toolRunID string
 	switch command {
 	case "help":
-		text = "Commands: /help, /compact, /model, /model <route>, /workspace, /ls [path], /read <path>, /write <path> <content>, /run <command>. /write and /run create proposals for explicit approval."
+		text = "Commands: /help, /compact, /model, /model <route>, /workspace, /ls [path], /read <path>, /write <path> <content>, /run <command>. /write and /run require explicit approval unless an active scoped Session grant applies."
 	case "compact":
 		result, err := m.compactActiveMessages(ctx, sess)
 		if err != nil {
@@ -296,6 +299,10 @@ func (m *Manager) handleSlash(ctx context.Context, sess Session, userMsg Message
 		toolRunID = run.ID
 		if run.Status == toolrun.StatusDenied {
 			text = fmt.Sprintf("Tool run %s denied by policy: %s", run.ID, run.PolicyReason)
+			break
+		}
+		if run.Status == toolrun.StatusCompleted {
+			text = fmt.Sprintf("Tool run %s authorized by an active Session grant and completed as a dry run: %s", run.ID, requested)
 			break
 		}
 		text = fmt.Sprintf("Tool run %s proposed: %s. Review with `cyberagent tool show %s`, approve with `cyberagent tool approve %s`, or deny with `cyberagent tool deny %s`.", run.ID, requested, run.ID, run.ID, run.ID)
@@ -407,6 +414,13 @@ func (m *Manager) handleWorkspaceWrite(ctx context.Context, sess Session, path s
 	})
 	if err != nil {
 		return fileedit.Edit{}, "File edit proposal failed: " + err.Error()
+	}
+	if edit.Status == fileedit.StatusApplied {
+		response := fmt.Sprintf("File edit %s for %s was authorized by an active Session grant and applied.", edit.ID, edit.Path)
+		if edit.SecretsRedacted {
+			response += " Sensitive values were redacted before the edit was stored."
+		}
+		return edit, response
 	}
 	response := fmt.Sprintf("File edit %s proposed for %s. Review with `cyberagent edit show %s`, approve with `cyberagent edit approve %s`, or deny with `cyberagent edit deny %s`.\n\n%s",
 		edit.ID, edit.Path, edit.ID, edit.ID, edit.ID, edit.Diff)

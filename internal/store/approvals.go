@@ -470,7 +470,7 @@ func approvalIdentityMatches(existing approval.Record, expected approval.Record)
 
 func appendApprovalEventTx(ctx context.Context, tx *sql.Tx, record approval.Record, eventType string) error {
 	return appendRunEventForSessionTx(ctx, tx, record.SessionID, eventType, "approval_store", record.ID, map[string]any{
-		"approval_id": record.ID, "proposal_id": record.ProposalID, "run_id": record.RunID,
+		"approval_id": record.ID, "proposal_id": record.ProposalID, "grant_id": record.GrantID, "run_id": record.RunID,
 		"session_id": record.SessionID, "workspace_id": record.WorkspaceID, "tool_name": record.ToolName,
 		"action_class": record.ActionClass, "mode": record.Mode, "status": record.Status,
 		"request_fingerprint": record.RequestFingerprint, "reason": record.DecisionReason,
@@ -478,7 +478,7 @@ func appendApprovalEventTx(ctx context.Context, tx *sql.Tx, record approval.Reco
 	})
 }
 
-const approvalSelect = `SELECT id, idempotency_key, proposal_id, run_id, session_id, workspace_id,
+const approvalSelect = `SELECT id, idempotency_key, proposal_id, grant_id, run_id, session_id, workspace_id,
 	tool_name, action_class, mode, status, request_fingerprint, decision_reason, requested_by,
 	reviewed_by, version, created_at, updated_at, decided_at FROM tool_approvals`
 
@@ -491,15 +491,16 @@ func getApprovalTx(ctx context.Context, tx *sql.Tx, id string, proposalID string
 
 func getApprovalRow(row scanner) (approval.Record, error) {
 	var record approval.Record
-	var runID sql.NullString
+	var grantID, runID sql.NullString
 	var createdAt, updatedAt string
 	var decidedAt sql.NullString
-	if err := row.Scan(&record.ID, &record.IdempotencyKey, &record.ProposalID, &runID, &record.SessionID,
+	if err := row.Scan(&record.ID, &record.IdempotencyKey, &record.ProposalID, &grantID, &runID, &record.SessionID,
 		&record.WorkspaceID, &record.ToolName, &record.ActionClass, &record.Mode, &record.Status,
 		&record.RequestFingerprint, &record.DecisionReason, &record.RequestedBy, &record.ReviewedBy,
 		&record.Version, &createdAt, &updatedAt, &decidedAt); err != nil {
 		return approval.Record{}, err
 	}
+	record.GrantID = grantID.String
 	record.RunID = runID.String
 	record.CreatedAt = parseTS(createdAt)
 	record.UpdatedAt = parseTS(updatedAt)

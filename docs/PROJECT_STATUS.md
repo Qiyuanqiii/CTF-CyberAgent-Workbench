@@ -32,6 +32,9 @@ Use these files first when resuming:
 - `internal/toolgateway/model.go`
 - `internal/toolgateway/gateway.go`
 - `internal/toolgateway/script_process.go`
+- `internal/approval/grant.go`
+- `internal/store/approval_grants.go`
+- `internal/store/tool_budget.go`
 - `internal/toolrun/toolrun.go`
 - `internal/tui/model.go`
 - `internal/tui/picker.go`
@@ -41,9 +44,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 79%.
-- v0.1 generic agent MVP: about 98%.
-- V2 run-centric runtime: about 94%.
+- Overall product vision: about 81%.
+- v0.1 generic agent MVP: about 99%.
+- V2 run-centric runtime: about 96%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -67,6 +70,9 @@ Completed:
 - Schema v11 adds Run/Session-bound `tool_approvals` and immutable `approval_operations`; proposal creation appends `approval.requested` transactionally, review commits `approval.decided` before compatibility-state execution, and an identical key resumes safely after restart.
 - A proposal created by an unbound legacy Session is transactionally adopted with `approval.bound` if that Session later becomes attached to a Run.
 - SQLite rejects ghost approvals, changed proposal fingerprints, conflicting idempotency-key intent, and privileged ToolRun/FileEdit states without a matching durable approval. `approval list/show` exposes the ledger without storing raw command/file content there.
+- Schema v12 adds revocable `approval_session_grants` bound to one Run, active Session, Workspace, Tool, and ActionClass. Grant create/revoke operations persist domain-separated key digests and project durable events; `approval grant create/list/show/revoke` exposes the lifecycle.
+- Matching active grants may authorize allowed Shell/FileEdit proposals automatically. Revocation takes effect for future proposals, while terminal Runs, archived Sessions, scope mismatch, and permanent Policy denial fail closed. Shell still completes as dry-run only.
+- Schema v12 atomically accounts every valid Run-bound Gateway call through `run_tool_usage` and ordered `run_tool_calls`. The first over-budget attempt appends one `tool.budget_exhausted`; subsequent attempts return typed resource exhaustion without duplicating that event. `run usage` exposes counters.
 - Secret redaction layer for common API keys, bearer tokens, GitHub tokens, AWS access keys, JWTs, assignment-style secrets, and private-key blocks.
 - Redaction is applied at file reads, session message creation, SQLite session/context/tool-run storage, context prompt construction, and final LLM router dispatch.
 - Automatic context compaction after long active session histories.
@@ -74,7 +80,7 @@ Completed:
 - `provider test` and session `/model` both support direct `provider/model` references.
 - Tool proposal and approval flow: `/run` creates `tool_runs`; `tool approve` completes dry-run; `tool deny` records denial.
 - Persisted file edit lifecycle: `edit propose/list/show/approve/deny` stores redacted whole-file replacements and unified-style diffs in `file_edits`.
-- Session `/write <path> <content>` creates a file edit proposal attached to the current session and renders the diff in session history/TUI messages.
+- Session `/write <path> <content>` normally creates a reviewable file edit proposal; a matching active Session grant may apply it immediately, and Session/TUI text reflects the persisted outcome.
 - File edit approval re-resolves workspace paths, rejects traversal/symlink escape, verifies original/proposed SHA-256 hashes, refuses stale proposals, and supports resumable `approved` state.
 - Existing text files and new text files under existing workspace directories are supported; non-UTF-8 content, missing parents, directories, and files over 256 KiB are rejected.
 - Bubble Tea TUI shell with session messages, input, tool run pane, snapshot mode, `/approve`/`/deny` input commands, message scrollback, tool selection, and key-driven approve/deny.
@@ -89,7 +95,7 @@ Completed:
 - Reworked `docs/architecture.md` around run-scoped budget, event, sandbox, report, approval, and recovery ownership without copying the reference implementation.
 - Replaced the obsolete README migration/scaffold copy with a bilingual Chinese/English product overview, current capabilities, architecture boundary, and development-scope notice.
 - Added `docs/TASK_BOOK.md` with phased migration tasks, acceptance criteria, compatibility rules, and CTF deferred to the final phase.
-- Versioned SQLite migrations through schema v11: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative budget counters, durable pending user input, restart-safe protocol-repair state, the Run-scoped Work Board, durable Notes, and the idempotent approval ledger; each version is checksummed and transactional.
+- Versioned SQLite migrations through schema v12: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative model budgets, durable pending input, restart-safe protocol repair, Work Board, Notes, durable per-call approvals, revocable Session grants, and atomic tool budgets; each version is checksummed and transactional.
 - Migration tests cover idempotence, legacy data preservation, checksum history, and failed-migration rollback.
 - Unified `internal/idgen` now backs agent tasks, sessions, tool runs, file edits, Mission/Run, and event IDs.
 - Added pure Go Mission, Scope, Budget, RunConfig, Run status machine, and legal transition checks.
@@ -177,8 +183,8 @@ Not done yet:
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
-- Provider cost/tool-call budgets, AgentCoordinator, and Findings/Evidence/Report; WorkItem/Note model tools and dedicated TUI views remain pending.
-- Persisted revocable session approval grants, tool-call budget enforcement, a first-class script-process proposal type, and tool-output Artifact capture.
+- Provider cost budgets, AgentCoordinator, and Findings/Evidence/Report; WorkItem/Note model tools and dedicated TUI views remain pending.
+- A first-class script-process proposal type and tool-output Artifact capture.
 
 ## Code Audit Notes
 
@@ -190,12 +196,14 @@ The script slice removed the direct LocalSandbox execution path. Its audit also 
 
 The durable-approval audit found and fixed two medium-risk integrity gaps before release: the public adoption path could otherwise create an approval for a nonexistent proposal, and an idempotently re-saved policy denial could drift from `never` to `per_call`. `EnsureApproval` now verifies the persisted ToolRun/FileEdit identity and fingerprint, while Store synchronization preserves the original denial mode. A later robustness pass also stopped persisting raw client review keys; `approval_operations` stores a domain-separated SHA-256 digest instead. Tests prove that a crash after `approval.decided` but before proposal completion can be recovered by replaying the same immutable operation key.
 
+The schema v12 audit found and fixed one low-risk observability gap: a rejected over-budget call originally returned a stable typed error but did not record the first exhaustion boundary. `run_tool_usage.exhausted_at` and a single `tool.budget_exhausted` event now preserve that fact without allowing repeated rejected calls to flood the event stream. Grant and budget tests cover restart-style CLI use, idempotency-key conflict, revocation, scope mismatch, terminal Run/archived Session denial, concurrent budget saturation, and Policy precedence.
+
 Residual risks to address soon:
 
 - `staticcheck ./...` is clean; the prior TUI `S1008`, `S1011`, and unused-helper `U1000` findings were removed in this slice.
 - `script run --local` no longer executes commands. It creates a workspace-scoped, Run-bound, policy-checked proposal and records `execution_mode=disabled`; LocalSandbox remains disconnected from production.
 - Script Run creation and ToolRun proposal persistence use two transactions. A Store failure in the second transaction can leave a created Run without its expected proposal; durable idempotency/recovery is the next Approval slice.
-- The Gateway still persists shell and file proposals in the legacy `tool_runs` and `file_edits` tables, but schema v11 now gates their privileged transitions through one durable approval ledger. Revocable Session grant records and tool-call budget consumption do not exist yet.
+- The Gateway still persists shell and file proposals in legacy `tool_runs` and `file_edits`, but schema v11/v12 gate privileged transitions through durable approvals and grants. The next compatibility removal is a first-class typed script-process proposal.
 - Automatic workspace read outcomes are normalized but are not independently persisted when invoked by standalone CLI commands; Session slash-command text is still audited through Session messages.
 - Secret redaction is heuristic, not a full secrets manager; add opt-in raw local inspection later only with clear warnings.
 - Binary or non-UTF-8 files are refused by `read_file`; richer file viewers should stay workspace-scoped and type-aware.
@@ -209,7 +217,7 @@ Residual risks to address soon:
 - `run start` advances lifecycle only; `run step` performs one model turn and `run execute` performs only the operator-selected number of durable steps.
 - A crash after the pre-call checkpoint can repeat a side-effect-free model request, but committed messages and completed turns are never duplicated. Tool calls stay disabled until execution idempotency exists.
 - Structured memory now has an 8,192-token estimate, but recent Session history is still bounded by 20 messages rather than sharing that token budget.
-- MaxCostUSD and tool-call budgets are not enforced until provider pricing metadata and the unified Tool Gateway exist.
+- MaxCostUSD is not enforced until provider pricing metadata exists. Tool-call budgets are enforced by the Gateway; zero remains unlimited for older/API-created Runs unless a caller supplies a limit.
 - ExecutionMillis measures Provider model-call time, not total wall-clock orchestration time.
 - One Provider response can exceed the remaining token allowance; actual usage is committed conservatively and the next call is blocked.
 - Budget exhaustion leaves the Run in `running` until an operator explicitly finishes, fails, or cancels it. Only a validated structured action can change lifecycle state; free-form model text cannot.
@@ -253,6 +261,7 @@ go run ./cmd/cyberagent run execute <run-id> --max-steps 2 --finish --summary "p
 go run ./cmd/cyberagent run finish <run-id> --summary "review complete"
 go run ./cmd/cyberagent run fail <run-id> --reason "blocked by provider"
 go run ./cmd/cyberagent run checkpoint <run-id>
+go run ./cmd/cyberagent run usage <run-id>
 go run ./cmd/cyberagent run pause <run-id>
 go run ./cmd/cyberagent run resume <run-id>
 go run ./cmd/cyberagent run cancel <run-id>
@@ -300,6 +309,9 @@ go run ./cmd/cyberagent tool list --session <session-id>
 go run ./cmd/cyberagent tool show <tool-run-id>
 go run ./cmd/cyberagent approval list --run <run-id> --status pending
 go run ./cmd/cyberagent approval show <approval-id>
+go run ./cmd/cyberagent approval grant create --session <session-id> --tool shell --reason "trusted build commands"
+go run ./cmd/cyberagent approval grant list --run <run-id> --status active
+go run ./cmd/cyberagent approval grant revoke <grant-id> --reason "phase complete"
 go run ./cmd/cyberagent tool approve <tool-run-id>
 ```
 
@@ -316,6 +328,7 @@ Expected context behavior:
 - DeepSeek live smoke passed with an env-only key and `deepseek-v4-flash` through both non-streaming provider health and RunSupervisor SSE paths; durable events contained model metadata/counters without the key.
 - Tool proposal smoke passed: proposed shell command, dry-run approval completion, policy-denied risky command.
 - Durable approval smoke passed in an isolated `CYBERAGENT_HOME`: pending lookup, approval detail, dry-run completion, approved lookup, and `approval.requested/decided` Run events all matched one proposal. Restart integration tests recover the same immutable review key without duplicate decision events.
+- Session Grant/tool-budget smoke passed across separate CLI processes: active Shell authorization completed as dry-run, revocation restored per-call proposals, a new grant did not override dangerous-command Policy denial, and `run usage` reached the configured limit. Store tests prove exact scope, terminal/archived denial, grant-key conflict, v11-to-v12 preservation, atomic concurrent saturation, and one exhaustion event.
 - TUI snapshot smoke passed with existing session history, selected proposed tool run, status line, and keyboard help rendered from SQLite.
 - TUI picker smoke passed for empty state, existing session list, and direct session snapshot.
 - TUI async submit unit test passed: Enter on `/run echo async` enters busy state, returns an async command, and refreshes the proposed tool run after `actionDoneMsg`.
@@ -370,13 +383,14 @@ Expected context behavior:
 - Script Gateway tests passed for required workspace scope, relative-file resolution, absolute/traversal rejection before Run creation, deterministic `script_process.v1` encoding, backend/argv/size constraints, token redaction, policy-denied persistence, Run-event projection, and no local side effects before or after approval.
 - Structure-aware Store redaction tests passed for nested JSON strings, exact 64-bit numbers, invalid payloads, 1 MiB size, 64-level depth, and event rollback on failure.
 - The final script slice gate passed with uncached full tests, vet, full-repository race tests, clean staticcheck, zero reachable govulncheck findings, and an isolated real-binary smoke that observed risky exit code 5 with no marker file. Scans returned `NO_PRODUCTION_SANDBOX_RUNNER_CALLS`, `NO_CREDENTIAL_PATTERN_IN_REPO`, and `NO_RUNTIME_OR_SECRET_ARTIFACTS_IN_REPO`.
+- The final schema v12 gate passed with uncached full tests, full-repository race tests, vet, clean staticcheck, and zero reachable govulncheck findings. Repository scans found zero credential-pattern files, zero tracked runtime artifacts, and zero production Sandbox references.
 
 ## Recommended Next Slice
 
-Continue P5 after removing the final known execution bypass:
+Continue P5 with the next compatibility and evidence slice:
 
-- Add durable approval idempotency, Run/Session correlation, restart recovery, revocable Session grants, and tool-call budget accounting.
 - Promote `script_process.v1` from a legacy Shell ToolRun payload to a first-class typed proposal and make Run-plus-proposal creation recoverably idempotent.
-- Add low-risk structured WorkItem/Note mutation proposals with schema validation, scope checks, policy decisions, durable events, and explicit approval where required.
 - Capture oversized or durable tool output as hashed, MIME-labelled Artifacts before enabling Local/Docker execution.
+- Add low-risk structured WorkItem/Note mutation proposals with schema validation, scope checks, policy decisions, tool budgets, durable events, and explicit approval where required.
+- Add TUI “approve once / this session” controls backed exclusively by the persisted Go grant service.
 - Keep TypeScript, Rust, and model providers unable to bypass the Go Tool Gateway or policy boundary.

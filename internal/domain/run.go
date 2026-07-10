@@ -61,19 +61,20 @@ func (c RunConfig) Validate() error {
 type Budget struct {
 	MaxTurns       int     `json:"max_turns"`
 	MaxTokens      int64   `json:"max_tokens,omitempty"`
+	MaxToolCalls   int64   `json:"max_tool_calls,omitempty"`
 	MaxCostUSD     float64 `json:"max_cost_usd,omitempty"`
 	TimeoutSeconds int64   `json:"timeout_seconds,omitempty"`
 }
 
 func DefaultBudget() Budget {
-	return Budget{MaxTurns: 100}
+	return Budget{MaxTurns: 100, MaxToolCalls: 100}
 }
 
 func (b Budget) Validate() error {
 	if b.MaxTurns <= 0 {
 		return errors.New("max turns must be positive")
 	}
-	if b.MaxTokens < 0 || b.MaxCostUSD < 0 || b.TimeoutSeconds < 0 {
+	if b.MaxTokens < 0 || b.MaxToolCalls < 0 || b.MaxCostUSD < 0 || b.TimeoutSeconds < 0 {
 		return errors.New("budget limits cannot be negative")
 	}
 	if b.TimeoutSeconds > int64((1<<63-1)/int64(time.Second)) {

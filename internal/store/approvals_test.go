@@ -359,6 +359,7 @@ func TestSchemaV10UpgradeCreatesEmptyApprovalLedgerAndPreservesProposal(t *testi
 	if _, err := st.SaveToolRun(ctx, run); err != nil {
 		t.Fatal(err)
 	}
+	removeSchemaV12ForTest(t, st, ctx)
 	for _, table := range []string{"approval_operations", "tool_approvals"} {
 		if _, err := st.db.ExecContext(ctx, `DROP TABLE `+table); err != nil {
 			t.Fatal(err)
@@ -390,5 +391,54 @@ func TestSchemaV10UpgradeCreatesEmptyApprovalLedgerAndPreservesProposal(t *testi
 	})
 	if err != nil || record.Status != approval.StatusPending {
 		t.Fatalf("legacy proposal could not be adopted: %#v err=%v", record, err)
+	}
+}
+
+func TestSchemaV11UpgradePreservesApprovalAndEnablesSessionGrant(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v11.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, run, err := application.NewRunService(st).Create(ctx, application.CreateRunRequest{
+		Goal: "preserve v11 approval", Profile: "code", WorkspaceID: "ws-v11",
+		Budget: domain.Budget{MaxTurns: 3, MaxToolCalls: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal := toolrun.ToolRun{
+		ID: "tool-v11-preserved", SessionID: run.SessionID, WorkspaceID: "ws-v11",
+		ToolName: toolrun.ShellTool, Command: "echo preserved", Status: toolrun.StatusProposed,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if _, err := st.SaveToolRun(ctx, proposal); err != nil {
+		t.Fatal(err)
+	}
+	removeSchemaV12ForTest(t, st, ctx)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	record, err := st.GetApprovalByProposal(ctx, proposal.ID)
+	if err != nil || record.Status != approval.StatusPending || record.RunID != run.ID || record.GrantID != "" {
+		t.Fatalf("v11 approval was not preserved: %#v err=%v", record, err)
+	}
+	grant, err := st.CreateSessionGrant(ctx, approval.CreateGrantRequest{
+		SessionID: run.SessionID, ToolName: "shell", ActionClass: "shell", GrantedBy: "migration_test",
+		IdempotencyKey: "v11-upgrade-grant",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision, err := st.AuthorizeApprovalWithSessionGrant(ctx, proposal.ID, grant.Grant.ID)
+	if err != nil || decision.Approval.GrantID != grant.Grant.ID || decision.Approval.Status != approval.StatusApproved {
+		t.Fatalf("upgraded approval could not use a session grant: %#v err=%v", decision, err)
 	}
 }

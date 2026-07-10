@@ -90,6 +90,22 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 			t.Fatalf("schema v11 approval table is missing: %q", table)
 		}
 	}
+	for _, name := range []string{"approval_session_grants", "approval_grant_operations", "run_tool_usage", "run_tool_calls"} {
+		var table string
+		if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, name).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		if table != name {
+			t.Fatalf("schema v12 table is missing: %q", table)
+		}
+	}
+	var grantColumn int
+	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('tool_approvals') WHERE name = 'grant_id'`).Scan(&grantColumn); err != nil {
+		t.Fatal(err)
+	}
+	if grantColumn != 1 {
+		t.Fatal("schema v12 tool_approvals.grant_id column is missing")
+	}
 }
 
 func TestSQLiteStoreUpgradesLegacyDatabaseWithoutLosingData(t *testing.T) {
@@ -150,6 +166,7 @@ func TestSQLiteStoreUpgradesSchemaV8ToLatestWithoutLosingRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	removeSchemaV12ForTest(t, st, ctx)
 	for _, table := range []string{"approval_operations", "tool_approvals"} {
 		if _, err := st.db.ExecContext(ctx, `DROP TABLE `+table); err != nil {
 			t.Fatal(err)
@@ -219,6 +236,7 @@ func TestSQLiteStoreUpgradesSchemaV9ToNotesWithoutLosingWorkItems(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	removeSchemaV12ForTest(t, st, ctx)
 	for _, table := range []string{"approval_operations", "tool_approvals"} {
 		if _, err := st.db.ExecContext(ctx, `DROP TABLE `+table); err != nil {
 			t.Fatal(err)
@@ -255,6 +273,29 @@ func TestSQLiteStoreUpgradesSchemaV9ToNotesWithoutLosingWorkItems(t *testing.T) 
 	version, err := st.SchemaVersion(ctx)
 	if err != nil || version != LatestSchemaVersion {
 		t.Fatalf("v9 database did not upgrade to v10: version=%d err=%v", version, err)
+	}
+}
+
+func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) {
+	t.Helper()
+	if _, err := st.db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`DROP INDEX idx_tool_approvals_grant_id`,
+		`ALTER TABLE tool_approvals DROP COLUMN grant_id`,
+		`DROP TABLE run_tool_calls`,
+		`DROP TABLE run_tool_usage`,
+		`DROP TABLE approval_grant_operations`,
+		`DROP TABLE approval_session_grants`,
+		`DELETE FROM schema_migrations WHERE version = 12`,
+	} {
+		if _, err := st.db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("remove schema v12 with %q: %v", statement, err)
+		}
+	}
+	if _, err := st.db.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+		t.Fatal(err)
 	}
 }
 

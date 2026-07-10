@@ -14,6 +14,7 @@ import (
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
+	"cyberagent-workbench/internal/toolbudget"
 	"cyberagent-workbench/internal/toolrun"
 )
 
@@ -254,6 +255,38 @@ func (m *memorySessionStore) ListApprovals(ctx context.Context, filter approval.
 		records = append(records, record)
 	}
 	return records, nil
+}
+
+func (m *memorySessionStore) CreateSessionGrant(context.Context, approval.CreateGrantRequest) (approval.GrantResult, error) {
+	return approval.GrantResult{}, errNotFound("session grant")
+}
+
+func (m *memorySessionStore) RevokeSessionGrant(context.Context, approval.RevokeGrantRequest) (approval.GrantResult, error) {
+	return approval.GrantResult{}, errNotFound("session grant")
+}
+
+func (m *memorySessionStore) AuthorizeApprovalWithSessionGrant(context.Context, string, string) (approval.DecisionResult, error) {
+	return approval.DecisionResult{}, errNotFound("session grant")
+}
+
+func (m *memorySessionStore) FindActiveSessionGrant(context.Context, approval.GrantQuery) (approval.SessionGrant, bool, error) {
+	return approval.SessionGrant{}, false, nil
+}
+
+func (m *memorySessionStore) GetSessionGrant(context.Context, string) (approval.SessionGrant, error) {
+	return approval.SessionGrant{}, errNotFound("session grant")
+}
+
+func (m *memorySessionStore) ListSessionGrants(context.Context, approval.GrantListFilter) ([]approval.SessionGrant, error) {
+	return nil, nil
+}
+
+func (m *memorySessionStore) ChargeToolCall(context.Context, toolbudget.ChargeRequest) (toolbudget.Usage, error) {
+	return toolbudget.Usage{Remaining: -1}, nil
+}
+
+func (m *memorySessionStore) GetToolCallUsage(context.Context, string) (toolbudget.Usage, error) {
+	return toolbudget.Usage{Remaining: -1}, nil
 }
 
 type errNotFound string
