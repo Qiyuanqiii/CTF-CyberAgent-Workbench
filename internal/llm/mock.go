@@ -62,8 +62,9 @@ func (m MockProvider) StreamChat(ctx context.Context, req ChatRequest) (<-chan C
 	if err != nil {
 		return nil, err
 	}
-	ch := make(chan ChatChunk, 1)
-	ch <- ChatChunk{Text: resp.Text, Done: true}
+	ch := make(chan ChatChunk, 2)
+	ch <- ChatChunk{Text: resp.Text}
+	ch <- FinalChatChunk(resp)
 	close(ch)
 	return ch, nil
 }

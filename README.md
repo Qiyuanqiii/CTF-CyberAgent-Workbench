@@ -24,11 +24,11 @@ The current priority is the general-purpose single-agent runtime. CTF capabiliti
 ## 核心能力 / Core Capabilities
 
 - **可恢复运行 / Resumable runs:** durable checkpoints, bounded execution, restart recovery, and explicit lifecycle actions.
-- **统一模型网关 / Model gateway:** route-based providers, typed failures, cancellation-aware transport retry, one bounded lifecycle-protocol repair, and durable model events.
+- **统一模型网关 / Model gateway:** route-based providers, Anthropic-compatible SSE streaming, typed failures, cancellation-aware transport retry, one bounded lifecycle-protocol repair, and durable model events.
 - **长上下文管理 / Long-context memory:** persisted sessions and automatic context compaction inspired by modern coding agents.
 - **本地工作区 / Local workspace:** scoped file access, safe reads, persistent artifacts, and reviewable edit proposals.
 - **安全与审批 / Safety and approval:** policy checks, secret redaction, dry-run tool proposals, and explicit approval boundaries.
-- **完整审计链 / Audit trail:** append-only Run events for messages, model calls, policy decisions, tool proposals, and file edits.
+- **完整审计链 / Audit trail:** append-only Run events for messages, bounded text-free stream progress, model calls, policy decisions, tool proposals, and file edits.
 - **CLI 与 TUI / CLI and TUI:** a scriptable `cyberagent` CLI plus a Bubble Tea terminal interface.
 - **可扩展架构 / Extensible architecture:** Go control plane with planned HTTP/WebSocket, TypeScript UI, Docker sandbox, and Rust analyzer boundaries.
 
@@ -101,7 +101,7 @@ Local runtime databases, workspace data, environment files, API keys, IDE metada
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 now supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, durable model attempt events, and exactly one restart-safe lifecycle-protocol repair. Next comes a real `model.delta` streaming/cancellation path before structured work items/notes or multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 now supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, durable model attempt events, and exactly one restart-safe lifecycle-protocol repair. Next comes an application-owned active-call cancellation and live subscriber boundary before structured work items/notes or multi-agent coordination. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
 TUI quick controls: `cyberagent tui` opens a session picker. In chat, `Tab` switches focus, `PgUp/PgDn` scroll messages, `j/k` select tool runs, `a` approves, `d` denies, `Ctrl+R` refreshes, and `Esc` quits. Slow sends, refreshes, and tool approvals run through async commands with visible status text such as `thinking...`, `proposing tool...`, or `approving...`. Attached workspaces render in the side panel with local directory counts for attachments, scripts, outputs, logs, and writeups.
 

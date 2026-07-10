@@ -240,6 +240,9 @@ func (s *SQLiteStore) RecordSupervisorModelStarted(ctx context.Context, checkpoi
 	if attempt.Outcome != "" || strings.TrimSpace(attempt.ErrorText) != "" {
 		return false, apperror.New(apperror.CodeInvalidArgument, "started model attempt cannot have an outcome or error")
 	}
+	if attempt.StreamEvents != 0 || attempt.StreamBytes != 0 {
+		return false, apperror.New(apperror.CodeInvalidArgument, "started model attempt cannot have stream counters")
+	}
 	if err := attempt.ValidateStarted(); err != nil {
 		return false, apperror.Wrap(apperror.CodeInvalidArgument, "invalid started model attempt", err)
 	}
@@ -307,6 +310,95 @@ func (s *SQLiteStore) RecordSupervisorModelStarted(ctx context.Context, checkpoi
 	return true, nil
 }
 
+func (s *SQLiteStore) RecordSupervisorModelDelta(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, delta llm.ModelDelta) (bool, error) {
+	if err := checkpoint.Validate(); err != nil {
+		return false, err
+	}
+	if checkpoint.Phase != domain.SupervisorTurnStarted {
+		return false, apperror.New(apperror.CodeFailedPrecondition, "only a started supervisor turn can record model deltas")
+	}
+	attempt = sanitizeModelAttempt(attempt)
+	if attempt.Outcome != "" || strings.TrimSpace(attempt.ErrorText) != "" || attempt.StreamEvents != 0 || attempt.StreamBytes != 0 {
+		return false, apperror.New(apperror.CodeInvalidArgument, "model delta requires the original started attempt")
+	}
+	if err := attempt.ValidateStarted(); err != nil {
+		return false, apperror.Wrap(apperror.CodeInvalidArgument, "invalid model delta attempt", err)
+	}
+	if err := delta.Validate(llm.MaxModelDeltaEvents, llm.MaxModelOutputBytes); err != nil {
+		return false, apperror.Wrap(apperror.CodeInvalidArgument, "invalid model delta", err)
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	run, _, err := requireActiveSupervisorAttemptTx(ctx, tx, checkpoint)
+	if err != nil {
+		return false, err
+	}
+	modelSubject := supervisorModelSubject(checkpoint, attempt.Number)
+	if err := requireSupervisorModelStartedMatchTx(ctx, tx, run.ID, modelSubject, attempt); err != nil {
+		return false, err
+	}
+	for _, terminalType := range []string{events.ModelCompletedEvent, events.ModelFailedEvent} {
+		exists, err := supervisorModelEventExistsTx(ctx, tx, run.ID, terminalType, modelSubject)
+		if err != nil {
+			return false, err
+		}
+		if exists {
+			return false, apperror.New(apperror.CodeConflict, "model attempt is already terminal")
+		}
+	}
+	deltaSubject := supervisorModelDeltaSubject(checkpoint, attempt.Number, delta.Sequence)
+	exists, err := supervisorModelEventExistsTx(ctx, tx, run.ID, events.ModelDeltaEvent, deltaSubject)
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		var payloadJSON string
+		if err := tx.QueryRowContext(ctx, `SELECT payload_json FROM run_events
+			WHERE run_id = ? AND type = ? AND source = ? AND subject_id = ?`, run.ID,
+			events.ModelDeltaEvent, "model_gateway", deltaSubject).Scan(&payloadJSON); err != nil {
+			return false, err
+		}
+		var payload supervisorModelDeltaPayload
+		if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+			return false, apperror.Wrap(apperror.CodeFailedPrecondition, "invalid durable model delta payload", err)
+		}
+		if payload.Sequence != delta.Sequence || payload.ChunkCount != delta.ChunkCount || payload.ByteCount != delta.ByteCount ||
+			payload.TotalBytes != delta.TotalBytes || payload.Done != delta.Done {
+			return false, apperror.New(apperror.CodeConflict, "model delta replay does not match its durable event")
+		}
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	state, err := supervisorModelDeltaStateTx(ctx, tx, run.ID, modelSubject)
+	if err != nil {
+		return false, err
+	}
+	if state.Done {
+		return false, apperror.New(apperror.CodeConflict, "model stream was already completed")
+	}
+	if delta.Sequence != state.Count+1 || delta.TotalBytes != state.TotalBytes+delta.ByteCount {
+		return false, apperror.New(apperror.CodeConflict, "model delta is not the next durable stream update")
+	}
+	if err := appendSupervisorEventTx(ctx, tx, run, events.ModelDeltaEvent, "model_gateway", deltaSubject, map[string]any{
+		"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
+		"model_attempt": attempt.Number, "transport_attempt": attempt.TransportNumber(),
+		"protocol_repair": attempt.ProtocolRepair, "delta_sequence": delta.Sequence,
+		"chunk_count": delta.ChunkCount, "delta_bytes": delta.ByteCount,
+		"total_bytes": delta.TotalBytes, "done": delta.Done,
+	}); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *SQLiteStore) RecordSupervisorModelCompleted(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, response llm.ChatResponse) (domain.SupervisorCheckpoint, error) {
 	attempt = sanitizeModelAttempt(attempt)
 	if err := attempt.ValidateCompleted(); err != nil {
@@ -321,6 +413,7 @@ func (s *SQLiteStore) RecordSupervisorModelCompleted(ctx context.Context, checkp
 		"max_attempts": attempt.MaxAttempts, "protocol_repair": attempt.ProtocolRepair,
 		"provider": attempt.Provider, "model": attempt.Model, "outcome": attempt.Outcome,
 		"elapsed_millis": attempt.Elapsed.Milliseconds(), "usage": response.Usage,
+		"stream_events": attempt.StreamEvents, "stream_bytes": attempt.StreamBytes,
 	}
 	return s.recordSupervisorModelTerminal(ctx, checkpoint, attempt, events.ModelCompletedEvent, payload, supervisorModelTerminalOptions{Usage: &response.Usage})
 }
@@ -337,6 +430,7 @@ func (s *SQLiteStore) RecordSupervisorModelFailed(ctx context.Context, checkpoin
 		"provider": attempt.Provider, "model": attempt.Model, "outcome": attempt.Outcome,
 		"error": attempt.ErrorText, "elapsed_millis": attempt.Elapsed.Milliseconds(),
 		"retry_after_millis": attempt.RetryAfter.Milliseconds(), "retry_planned": attempt.RetryPlanned,
+		"stream_events": attempt.StreamEvents, "stream_bytes": attempt.StreamBytes,
 	}
 	return s.recordSupervisorModelTerminal(ctx, checkpoint, attempt, events.ModelFailedEvent, payload, supervisorModelTerminalOptions{})
 }
@@ -375,6 +469,7 @@ func (s *SQLiteStore) RecordSupervisorProtocolFailure(ctx context.Context, check
 		"provider": attempt.Provider, "model": attempt.Model, "outcome": attempt.Outcome,
 		"error": attempt.ErrorText, "elapsed_millis": attempt.Elapsed.Milliseconds(),
 		"retry_after_millis": 0, "retry_planned": false, "usage": response.Usage,
+		"stream_events": attempt.StreamEvents, "stream_bytes": attempt.StreamBytes,
 	}
 	return s.recordSupervisorModelTerminal(ctx, checkpoint, attempt, events.ModelFailedEvent, payload, supervisorModelTerminalOptions{
 		Usage: &response.Usage, RepairPhase: phase, RepairReason: reason, RepairEvent: eventType,
@@ -414,6 +509,16 @@ func (s *SQLiteStore) recordSupervisorModelTerminal(ctx context.Context, checkpo
 	}
 	if err := requireSupervisorModelStartedMatchTx(ctx, tx, run.ID, subject, attempt); err != nil {
 		return domain.SupervisorCheckpoint{}, err
+	}
+	deltaState, err := supervisorModelDeltaStateTx(ctx, tx, run.ID, subject)
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
+	if attempt.StreamEvents != deltaState.Count || attempt.StreamBytes != deltaState.TotalBytes {
+		return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeConflict, "model terminal stream counters do not match durable deltas")
+	}
+	if eventType == events.ModelCompletedEvent && deltaState.Count > 0 && !deltaState.Done {
+		return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeFailedPrecondition, "completed model attempt requires a completed stream")
 	}
 	completed, err := supervisorModelEventExistsTx(ctx, tx, run.ID, events.ModelCompletedEvent, subject)
 	if err != nil {
@@ -623,6 +728,66 @@ func supervisorModelSubjectPrefix(checkpoint domain.SupervisorCheckpoint) string
 
 func supervisorModelSubject(checkpoint domain.SupervisorCheckpoint, number int) string {
 	return fmt.Sprintf("%s%d", supervisorModelSubjectPrefix(checkpoint), number)
+}
+
+func supervisorModelDeltaSubject(checkpoint domain.SupervisorCheckpoint, number int, sequence int) string {
+	return fmt.Sprintf("%s/delta/%d", supervisorModelSubject(checkpoint, number), sequence)
+}
+
+type supervisorModelDeltaPayload struct {
+	Sequence   int  `json:"delta_sequence"`
+	ChunkCount int  `json:"chunk_count"`
+	ByteCount  int  `json:"delta_bytes"`
+	TotalBytes int  `json:"total_bytes"`
+	Done       bool `json:"done"`
+}
+
+type supervisorModelDeltaState struct {
+	Count      int
+	TotalBytes int
+	Done       bool
+}
+
+func supervisorModelDeltaStateTx(ctx context.Context, tx *sql.Tx, runID string, modelSubject string) (supervisorModelDeltaState, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT payload_json FROM run_events
+		WHERE run_id = ? AND type = ? AND source = ? AND subject_id LIKE ? ORDER BY sequence`,
+		runID, events.ModelDeltaEvent, "model_gateway", modelSubject+"/delta/%")
+	if err != nil {
+		return supervisorModelDeltaState{}, err
+	}
+	defer rows.Close()
+	state := supervisorModelDeltaState{}
+	for rows.Next() {
+		var payloadJSON string
+		if err := rows.Scan(&payloadJSON); err != nil {
+			return supervisorModelDeltaState{}, err
+		}
+		var payload supervisorModelDeltaPayload
+		if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+			return supervisorModelDeltaState{}, apperror.Wrap(apperror.CodeFailedPrecondition, "invalid durable model delta payload", err)
+		}
+		delta := llm.ModelDelta{
+			Sequence: payload.Sequence, ChunkCount: payload.ChunkCount, ByteCount: payload.ByteCount,
+			TotalBytes: payload.TotalBytes, Done: payload.Done,
+		}
+		if err := delta.Validate(llm.MaxModelDeltaEvents, llm.MaxModelOutputBytes); err != nil {
+			return supervisorModelDeltaState{}, apperror.Wrap(apperror.CodeFailedPrecondition, "invalid durable model delta counters", err)
+		}
+		if payload.Sequence != state.Count+1 || payload.ChunkCount < 0 || payload.ByteCount < 0 ||
+			payload.TotalBytes != state.TotalBytes+payload.ByteCount || state.Done {
+			return supervisorModelDeltaState{}, apperror.New(apperror.CodeFailedPrecondition, "inconsistent durable model delta sequence")
+		}
+		state.Count++
+		state.TotalBytes = payload.TotalBytes
+		state.Done = payload.Done
+	}
+	if err := rows.Err(); err != nil {
+		return supervisorModelDeltaState{}, err
+	}
+	if state.Count > llm.MaxModelDeltaEvents || state.TotalBytes > llm.MaxModelOutputBytes {
+		return supervisorModelDeltaState{}, apperror.New(apperror.CodeFailedPrecondition, "durable model delta limits were exceeded")
+	}
+	return state, nil
 }
 
 func sanitizeModelAttempt(attempt llm.ModelAttempt) llm.ModelAttempt {

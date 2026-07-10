@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -72,6 +73,82 @@ func TestAnthropicCompatibleProviderChat(t *testing.T) {
 	}
 	if resp.Text != "hello from provider" || resp.Usage.TotalTokens != 10 {
 		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
+func TestAnthropicCompatibleProviderStreamsSSEWithFinalUsage(t *testing.T) {
+	var captured anthropicMessageRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		if r.Header.Get("Accept") != "text/event-stream" {
+			t.Errorf("missing streaming accept header: %q", r.Header.Get("Accept"))
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("test server does not support flushing")
+		}
+		for _, payload := range []string{
+			`{"type":"message_start","message":{"model":"stream-model","usage":{"input_tokens":7,"output_tokens":0}}}`,
+			`{"type":"content_block_delta","delta":{"type":"text_delta","text":"hello "}}`,
+			`{"type":"content_block_delta","delta":{"type":"text_delta","text":"world"}}`,
+			`{"type":"message_delta","usage":{"output_tokens":2}}`,
+			`{"type":"message_stop"}`,
+		} {
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+	provider, err := NewAnthropicCompatibleProvider(AnthropicCompatibleConfig{
+		Name: "test", BaseURL: server.URL, APIKey: "secret", DefaultModel: "fallback-model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks, err := provider.StreamChat(context.Background(), ChatRequest{Messages: []Message{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var text strings.Builder
+	var final ChatChunk
+	for chunk := range chunks {
+		if chunk.Err != nil {
+			t.Fatal(chunk.Err)
+		}
+		text.WriteString(chunk.Text)
+		if chunk.Done {
+			final = chunk
+		}
+	}
+	if !captured.Stream || text.String() != "hello world" || !final.Done || final.Usage == nil ||
+		final.Usage.InputTokens != 7 || final.Usage.OutputTokens != 2 || final.Usage.TotalTokens != 9 ||
+		final.Provider != "test" || final.Model != "stream-model" {
+		t.Fatalf("unexpected stream captured=%#v text=%q final=%#v", captured, text.String(), final)
+	}
+}
+
+func TestAnthropicCompatibleProviderReportsMalformedStreamEvent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: not-json\n\n"))
+	}))
+	defer server.Close()
+	provider, err := NewAnthropicCompatibleProvider(AnthropicCompatibleConfig{
+		Name: "test", BaseURL: server.URL, APIKey: "secret", DefaultModel: "model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks, err := provider.StreamChat(context.Background(), ChatRequest{Messages: []Message{{Role: "user", Content: "hello"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk, ok := <-chunks
+	if !ok || ProviderErrorKind(chunk.Err) != OutcomeInvalidResponse {
+		t.Fatalf("malformed SSE was not typed: ok=%t chunk=%#v", ok, chunk)
 	}
 }
 

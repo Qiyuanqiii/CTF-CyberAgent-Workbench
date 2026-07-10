@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -207,14 +208,107 @@ func parseRetryAfter(value string, now time.Time) time.Duration {
 }
 
 func (p *AnthropicCompatibleProvider) StreamChat(ctx context.Context, req ChatRequest) (<-chan ChatChunk, error) {
-	resp, err := p.Chat(ctx, req)
-	if err != nil {
-		return nil, err
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		model = p.defaultModel
 	}
-	ch := make(chan ChatChunk, 1)
-	ch <- ChatChunk{Text: resp.Text, Done: true}
-	close(ch)
+	body := p.toRequest(model, req)
+	body.Stream = true
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, NewProviderError(OutcomePermanent, p.name, "could not encode streaming request", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.endpoint("/v1/messages"), bytes.NewReader(payload))
+	if err != nil {
+		return nil, NewProviderError(OutcomePermanent, p.name, "could not create streaming request", err)
+	}
+	p.addHeaders(httpReq)
+	httpReq.Header.Set("Accept", "text/event-stream")
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return nil, NormalizeProviderError(p.name, err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		defer resp.Body.Close()
+		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
+		if readErr != nil {
+			return nil, NormalizeProviderError(p.name, readErr)
+		}
+		return nil, anthropicHTTPError(p.name, resp.StatusCode, resp.Header.Get("Retry-After"), raw)
+	}
+	ch := make(chan ChatChunk, 8)
+	go p.readStream(ctx, resp.Body, model, ch)
 	return ch, nil
+}
+
+func (p *AnthropicCompatibleProvider) readStream(ctx context.Context, body io.ReadCloser, defaultModel string, chunks chan<- ChatChunk) {
+	defer close(chunks)
+	defer body.Close()
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 64*1024), 1<<20)
+	state := anthropicStreamState{model: defaultModel}
+	dataLines := make([]string, 0, 1)
+	stopped := false
+	flush := func() bool {
+		if len(dataLines) == 0 {
+			return true
+		}
+		payload := strings.Join(dataLines, "\n")
+		dataLines = dataLines[:0]
+		if payload == "[DONE]" {
+			stopped = true
+			chunk := state.finalChunk()
+			if err := chunk.Usage.Validate(); err != nil {
+				return p.sendStreamChunk(ctx, chunks, ChatChunk{Err: NewProviderError(OutcomeInvalidResponse, p.name, "returned invalid stream usage", err)})
+			}
+			return p.sendStreamChunk(ctx, chunks, chunk)
+		}
+		chunk, done, err := state.consume([]byte(payload), p.name)
+		if err != nil {
+			_ = p.sendStreamChunk(ctx, chunks, ChatChunk{Err: err})
+			return false
+		}
+		if chunk != nil && !p.sendStreamChunk(ctx, chunks, *chunk) {
+			return false
+		}
+		if done {
+			stopped = true
+			return false
+		}
+		return true
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			if !flush() {
+				return
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+		}
+	}
+	if !flush() || stopped || ctx.Err() != nil {
+		return
+	}
+	if err := scanner.Err(); err != nil {
+		_ = p.sendStreamChunk(ctx, chunks, ChatChunk{Err: NewProviderError(OutcomeInvalidResponse, p.name, "stream read failed", err)})
+		return
+	}
+	_ = p.sendStreamChunk(ctx, chunks, ChatChunk{Err: NewProviderError(OutcomeInvalidResponse, p.name, "stream ended before message_stop", io.ErrUnexpectedEOF)})
+}
+
+func (p *AnthropicCompatibleProvider) sendStreamChunk(ctx context.Context, chunks chan<- ChatChunk, chunk ChatChunk) bool {
+	if chunk.Done && strings.TrimSpace(chunk.Provider) == "" {
+		chunk.Provider = p.name
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case chunks <- chunk:
+		return true
+	}
 }
 
 func (p *AnthropicCompatibleProvider) SupportsTools(model string) bool {
@@ -291,6 +385,94 @@ type anthropicMessageRequest struct {
 	Messages    []anthropicMessage `json:"messages"`
 	MaxTokens   int                `json:"max_tokens"`
 	Temperature *float64           `json:"temperature,omitempty"`
+	Stream      bool               `json:"stream,omitempty"`
+}
+
+type anthropicStreamEvent struct {
+	Type    string `json:"type"`
+	Message struct {
+		Model string `json:"model"`
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+	} `json:"message"`
+	ContentBlock struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content_block"`
+	Delta struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"delta"`
+	Usage struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
+	Error struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+type anthropicStreamState struct {
+	model        string
+	inputTokens  int
+	outputTokens int
+}
+
+func (s *anthropicStreamState) consume(payload []byte, provider string) (*ChatChunk, bool, error) {
+	var event anthropicStreamEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return nil, false, NewProviderError(OutcomeInvalidResponse, provider, "returned malformed stream event", err)
+	}
+	switch event.Type {
+	case "message_start":
+		if strings.TrimSpace(event.Message.Model) != "" {
+			s.model = event.Message.Model
+		}
+		s.inputTokens = event.Message.Usage.InputTokens
+		s.outputTokens = event.Message.Usage.OutputTokens
+	case "content_block_start":
+		if event.ContentBlock.Type == "text" && event.ContentBlock.Text != "" {
+			return &ChatChunk{Text: event.ContentBlock.Text}, false, nil
+		}
+	case "content_block_delta":
+		if event.Delta.Type == "text_delta" && event.Delta.Text != "" {
+			return &ChatChunk{Text: event.Delta.Text}, false, nil
+		}
+	case "message_delta":
+		if event.Usage.InputTokens != 0 {
+			s.inputTokens = event.Usage.InputTokens
+		}
+		s.outputTokens = event.Usage.OutputTokens
+	case "message_stop":
+		chunk := s.finalChunk()
+		if err := chunk.Usage.Validate(); err != nil {
+			return nil, false, NewProviderError(OutcomeInvalidResponse, provider, "returned invalid stream usage", err)
+		}
+		return &chunk, true, nil
+	case "error":
+		kind := OutcomePermanent
+		switch event.Error.Type {
+		case "rate_limit_error":
+			kind = OutcomeRateLimited
+		case "overloaded_error", "api_error":
+			kind = OutcomeRetryable
+		}
+		return nil, false, NewProviderError(kind, provider, event.Error.Message, nil)
+	}
+	return nil, false, nil
+}
+
+func (s anthropicStreamState) finalChunk() ChatChunk {
+	totalTokens := -1
+	maxInt := int(^uint(0) >> 1)
+	if s.inputTokens >= 0 && s.outputTokens >= 0 && s.inputTokens <= maxInt-s.outputTokens {
+		totalTokens = s.inputTokens + s.outputTokens
+	}
+	usage := Usage{InputTokens: s.inputTokens, OutputTokens: s.outputTokens, TotalTokens: totalTokens}
+	return ChatChunk{Done: true, Usage: &usage, Model: s.model}
 }
 
 type anthropicMessage struct {

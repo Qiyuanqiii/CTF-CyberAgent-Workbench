@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 65%。
+- 整体产品愿景：约 67%。
 - v0.1 通用 Agent MVP：约 98%。
-- V2 Run-centric Runtime：约 76%。
+- V2 Run-centric Runtime：约 80%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 第六纵向切片已落地：无效 `root_lifecycle.v1` 输出只允许一次显式纠错，协议修复与 transport retry 分开计数，修复阶段和预算可跨重启恢复。下一步实现真实 `model.delta` streaming 聚合与取消边界。
+V2 的 P0/P1 已完成，P2 第七纵向切片已落地：RunSupervisor 全面走 StreamChat，Anthropic-compatible Provider 支持真实 SSE，流聚合执行 UTF-8、64 KiB、final usage 和取消校验，并把每次调用压缩为最多 32 条无文本 `model.delta`。下一步实现 application-owned 主动取消与实时订阅边界。
 
 ## 二、已完成功能
 
@@ -36,6 +36,9 @@ V2 的 P0/P1 已完成，P2 第六纵向切片已落地：无效 `root_lifecycle
 - 每次模型调用持久化连续编号的 `model.started/completed/failed`，取消与重启后继续编号。
 - 无效 root lifecycle 输出只触发一次纠错提示；不会把原始坏输出回放给模型、写入 Session 或写入事件。
 - transport retry 每个协议阶段独立最多三次，全局 model attempt 编号保持连续；CLI 显示 `protocol_repairs`。
+- Router 的 StreamChat 与 Chat 共用模型解析和请求脱敏；RunSupervisor 不再旁路 streaming 接口。
+- Anthropic-compatible Provider 解析 `message_start/content_block_delta/message_delta/message_stop/error` SSE，并在 final chunk 返回模型与 usage。
+- Stream aggregator 支持跨 chunk UTF-8，拒绝超 64 KiB、缺失 Done/usage、负数或溢出 usage、ToolCall、畸形流和中途取消。
 
 ### 工作区、编辑与工具
 
@@ -82,6 +85,7 @@ V2 的 P0/P1 已完成，P2 第六纵向切片已落地：无效 `root_lifecycle
 - 模型终态事件、token 用量与 execution_millis 在一个事务记账；终态重放不会重复事件或重复扣减预算。
 - 首次非法协议响应的用量先持久化再检查剩余预算；修复成功只提交一对合法 Session 消息，二次非法响应直接失败且不会第三次调用。
 - 修复请求、开始、完成和失败分别写入 `supervisor.protocol_repair_*` 事件；父 context 在响应返回时取消也不会丢失终态或修复 checkpoint。
+- 每次模型调用最多持久化 32 条 `model.delta`，只包含 chunk/byte/sequence/done 计数，不包含模型文本；终态必须与 delta 账本一致。
 - 限流耗尽后 checkpoint 保留 pending input；无新输入的 `run step` 会继续原请求而不是退回 Mission goal。
 - Provider 调用中或退避中的 context 取消会停止重试；调用中取消使用短时审计上下文记录 cancelled 事件和耗时，turn 保持可恢复。
 - Run 状态转换与事件写入保持原子性，Store 会拒绝非法或陈旧转换。
@@ -103,7 +107,7 @@ V2 的 P0/P1 已完成，P2 第六纵向切片已落地：无效 `root_lifecycle
 
 ## 四、尚未完成
 
-- 真实 token streaming 与 `model.delta`。
+- application-owned 主动取消句柄、实时内存订阅与 WebSocket 推送；当前已聚合真实 Provider stream，但 CLI/TUI 只在 turn 完成后展示文本。
 - Provider 费用预算、工具调用预算和 token-aware Context Builder。
 - 结构化 WorkItem、Notes、Findings、Evidence 与 Report。
 - 跨进程主动取消和实时 TUI 状态体验。
@@ -131,6 +135,7 @@ V2 的 P0/P1 已完成，P2 第六纵向切片已落地：无效 `root_lifecycle
 - 预算边界停止执行后 Run 保持 `running`，需操作者显式 `finish`、`fail` 或 `cancel`；模型输出不能自行终结 Run。
 - 本轮审计已修复 Provider 极端用量导致的累计整数溢出，以及超大 `--max-steps` 触发不受控预分配的问题。
 - 严格协议只提供一次自动修复；若 Provider 连续两次不遵循 JSON 契约，本轮失败并等待操作者后续重试，不会无限纠错。
+- 持久化 `model.delta` 故意不含文本，因此不能从 SQLite 重放逐 token 内容；未来实时 UI 必须消费 Go 控制的短生命周期订阅，并继续经过脱敏/背压边界。
 - `wait` 目前映射为 Run paused 和文本 reason，尚无结构化 dependency/approval 对象。
 - 未绑定 Run 的 Session 仍直连 Router；这是迁移兼容路径，新功能不应继续扩展该旁路。
 - slash command 尚未消耗 Supervisor turn；后续统一 Tool Gateway 时必须保持审批和事件语义，不能直接启用执行。
@@ -154,16 +159,16 @@ go vet ./...
 
 共享状态、并发或存储变更还要运行相关包的 `go test -race`。CLI 行为变更要在隔离的 `CYBERAGENT_HOME` 中完成 smoke test。提交前扫描凭据前缀，确认本地数据库、工作区、环境文件和 API key 未进入 Git。
 
-最新验证已覆盖严格 action、schema v8、Session/Run 统一路径、一次协议修复成功、二次协议失败、坏输出隔离、修复前预算耗尽、修复终态幂等、pending/exhausted 跨 Store 恢复，以及响应后取消恢复。独立 CLI smoke 已验证 `protocol_repairs: 0`、空 repair checkpoint 和唯一 started/completed 事件。
+最新验证已覆盖严格 action、schema v8、Session/Run 统一路径、一次协议修复成功、二次协议失败、跨 chunk UTF-8、接近 64 KiB 的 32 条 delta 上限、流中瞬态重试、超限/坏 UTF-8/缺 Done/缺 usage、delta 幂等与终态一致性，以及流中取消后恢复。独立 CLI smoke 已验证 `stream_events/stream_bytes`、单条 text-free `model.delta` 与匹配的模型终态计数。
 
 本机 Go 已从 1.26.1 升级到 1.26.5；升级前 `govulncheck` 命中 9 条可达标准库漏洞，升级后复扫为 0。协议修复 transport 测试验证全局 attempt `1/2/3` 与阶段内 transport `1/1/2`，Store 也会拒绝与 durable started event 不一致的终态元数据。
 
 ## 七、下一开发切片
 
-1. 增加 Supervisor stream aggregator，执行 UTF-8、输出大小、取消和最终 usage 校验。
-2. 对 `model.delta` 做合并/限频后再写事件，禁止逐 token 淹没 SQLite。
-3. 在 application service 层暴露主动取消句柄，UI 不直接持有 Provider context。
-4. 保持当前非 streaming Provider 兼容路径，并让 stream/non-stream 共享同一终态与预算事务。
+1. 在 application service 层建立 active-call registry，按 Run/attempt 暴露幂等取消句柄，UI 不直接持有 Provider context。
+2. 增加有界实时订阅接口，只发送经过 Go 脱敏和背压控制的临时文本 delta；SQLite 继续只存无文本进度。
+3. 让 CLI/TUI 可选择消费实时状态，同时关闭 UI 不取消后台 Run。
+4. 为未来 HTTP/WebSocket 固化 stream envelope、慢消费者策略和断线恢复语义。
 5. 工具执行和多 Agent 并发继续关闭。
 
 ## 八、仓库同步与恢复约定

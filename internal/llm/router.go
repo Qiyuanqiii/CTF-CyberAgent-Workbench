@@ -92,6 +92,29 @@ func (r *Router) ChatModelRef(ctx context.Context, ref ModelRef, req ChatRequest
 	return response, nil
 }
 
+func (r *Router) StreamChat(ctx context.Context, route string, req ChatRequest) (<-chan ChatChunk, error) {
+	return r.StreamChatModelRef(ctx, r.Resolve(route), req)
+}
+
+func (r *Router) StreamChatModelRef(ctx context.Context, ref ModelRef, req ChatRequest) (<-chan ChatChunk, error) {
+	provider, ok := r.providers[ref.Provider]
+	if !ok {
+		return nil, NewProviderError(OutcomePermanent, ref.Provider, fmt.Sprintf("provider %q is not registered", ref.Provider), nil)
+	}
+	if req.Model == "" {
+		req.Model = ref.Model
+	}
+	req = redactRequest(req)
+	chunks, err := provider.StreamChat(ctx, req)
+	if err != nil {
+		return nil, NormalizeProviderError(ref.Provider, err)
+	}
+	if chunks == nil {
+		return nil, NewProviderError(OutcomeInvalidResponse, ref.Provider, "returned a nil stream", nil)
+	}
+	return chunks, nil
+}
+
 func (r *Router) ListModels(ctx context.Context) ([]ModelInfo, error) {
 	var all []ModelInfo
 	for _, name := range r.ProviderNames() {

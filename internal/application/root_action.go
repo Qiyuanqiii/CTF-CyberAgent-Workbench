@@ -9,10 +9,11 @@ import (
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/redact"
 )
 
-const maxRootActionJSONBytes = 64 * 1024
+const maxRootActionJSONBytes = llm.MaxModelOutputBytes
 
 func parseRootAction(raw string) (domain.RootAction, error) {
 	if len(raw) > maxRootActionJSONBytes {

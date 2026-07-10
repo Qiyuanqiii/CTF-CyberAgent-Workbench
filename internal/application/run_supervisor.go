@@ -27,6 +27,7 @@ type SupervisorStore interface {
 	BindSupervisorTurnInput(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string) (domain.SupervisorCheckpoint, error)
 	NextSupervisorModelAttempt(ctx context.Context, checkpoint domain.SupervisorCheckpoint, protocolRepair int) (int, int, error)
 	RecordSupervisorModelStarted(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt) (bool, error)
+	RecordSupervisorModelDelta(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, delta llm.ModelDelta) (bool, error)
 	RecordSupervisorModelCompleted(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, response llm.ChatResponse) (domain.SupervisorCheckpoint, error)
 	RecordSupervisorModelFailed(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt) (domain.SupervisorCheckpoint, error)
 	RecordSupervisorProtocolFailure(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, response llm.ChatResponse, reason string, requestRepair bool) (domain.SupervisorCheckpoint, error)
@@ -69,6 +70,8 @@ type LifecycleResult struct {
 	Checkpoint      domain.SupervisorCheckpoint
 	ModelAttempts   int
 	ProtocolRepairs int
+	StreamEvents    int
+	StreamBytes     int
 	ModelOutcome    llm.Outcome
 }
 
@@ -220,6 +223,8 @@ func (s *RunSupervisor) step(ctx context.Context, runID string, requestedInput s
 		if modelCall.Attempt.Outcome != "" {
 			result.ModelOutcome = modelCall.Attempt.Outcome
 		}
+		result.StreamEvents += modelCall.StreamEvents
+		result.StreamBytes += modelCall.StreamBytes
 		if err != nil {
 			if ctx.Err() != nil {
 				return result, apperror.Normalize(ctx.Err())
@@ -447,6 +452,8 @@ type modelCallResult struct {
 	Attempt            llm.ModelAttempt
 	Checkpoint         domain.SupervisorCheckpoint
 	UnpersistedElapsed time.Duration
+	StreamEvents       int
+	StreamBytes        int
 }
 
 func (s *RunSupervisor) callModelWithRetry(ctx context.Context, turn domain.SupervisorTurn, ref llm.ModelRef, request llm.ChatRequest, protocolRepair int) (modelCallResult, error) {
@@ -486,21 +493,17 @@ func (s *RunSupervisor) callModelWithRetry(ctx context.Context, turn domain.Supe
 		}
 		callCtx, cancel := supervisorModelContext(ctx, turn.Run.Budget, result.Checkpoint, 0)
 		startedAt := time.Now()
-		response, callErr := s.router.ChatModelRef(callCtx, ref, request)
+		streamed, callErr := s.streamModel(callCtx, result.Checkpoint, attempt, ref, request)
 		attempt.Elapsed = time.Since(startedAt)
 		cancel()
+		attempt.StreamEvents = streamed.Events
+		attempt.StreamBytes = streamed.Bytes
 		result.Attempt = attempt
 		result.UnpersistedElapsed = attempt.Elapsed
+		result.StreamEvents += streamed.Events
+		result.StreamBytes += streamed.Bytes
 		if callErr == nil {
-			if response != nil {
-				if strings.TrimSpace(response.Provider) == "" {
-					response.Provider = ref.Provider
-				}
-				if strings.TrimSpace(response.Model) == "" {
-					response.Model = ref.Model
-				}
-			}
-			result.Response = response
+			result.Response = streamed.Response
 			return result, nil
 		}
 		providerErr := llm.NormalizeProviderError(ref.Provider, callErr)

@@ -83,4 +83,9 @@ func TestModelAttemptValidation(t *testing.T) {
 	if err := repair.ValidateStarted(); err == nil {
 		t.Fatal("model attempt accepted an unbounded protocol repair number")
 	}
+	stream := base
+	stream.StreamEvents = -1
+	if err := stream.ValidateStarted(); err == nil {
+		t.Fatal("model attempt accepted negative stream counters")
+	}
 }

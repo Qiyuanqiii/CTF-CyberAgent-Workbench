@@ -56,6 +56,20 @@ type ChatChunk struct {
 	Text      string
 	Done      bool
 	ToolCalls []ToolCall
+	Usage     *Usage
+	Model     string
+	Provider  string
+	Err       error
+}
+
+func FinalChatChunk(response *ChatResponse) ChatChunk {
+	if response == nil {
+		return ChatChunk{Done: true}
+	}
+	usage := response.Usage
+	return ChatChunk{
+		Done: true, ToolCalls: response.ToolCalls, Usage: &usage, Model: response.Model, Provider: response.Provider,
+	}
 }
 
 type ToolCall struct {

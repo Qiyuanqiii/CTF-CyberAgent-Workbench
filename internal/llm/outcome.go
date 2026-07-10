@@ -136,6 +136,8 @@ type ModelAttempt struct {
 	RetryAfter       time.Duration
 	Elapsed          time.Duration
 	RetryPlanned     bool
+	StreamEvents     int
+	StreamBytes      int
 }
 
 func (a ModelAttempt) ValidateStarted() error {
@@ -154,6 +156,9 @@ func (a ModelAttempt) ValidateStarted() error {
 	}
 	if a.RetryAfter < 0 || a.Elapsed < 0 {
 		return errors.New("model attempt durations cannot be negative")
+	}
+	if a.StreamEvents < 0 || a.StreamBytes < 0 {
+		return errors.New("model stream counters cannot be negative")
 	}
 	return nil
 }

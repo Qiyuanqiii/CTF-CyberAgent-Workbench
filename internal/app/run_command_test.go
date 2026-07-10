@@ -162,7 +162,7 @@ func TestRunCLISupervisorStepAndCheckpoint(t *testing.T) {
 		t.Fatalf("run start failed: %s", stderr)
 	}
 	stepped, stderr, code := executeTestCommand(t, "run", "step", runID)
-	if code != 0 || !strings.Contains(stepped, "turn 1 completed") || !strings.Contains(stepped, "model_attempts: 1") || !strings.Contains(stepped, "protocol_repairs: 0") || !strings.Contains(stepped, "model_outcome: success") || !strings.Contains(stepped, "action: continue") || !strings.Contains(stepped, "run_status: running") || !strings.Contains(stepped, "next_turn: 2") {
+	if code != 0 || !strings.Contains(stepped, "turn 1 completed") || !strings.Contains(stepped, "model_attempts: 1") || !strings.Contains(stepped, "protocol_repairs: 0") || !strings.Contains(stepped, "stream_events: 1") || !strings.Contains(stepped, "stream_bytes:") || !strings.Contains(stepped, "model_outcome: success") || !strings.Contains(stepped, "action: continue") || !strings.Contains(stepped, "run_status: running") || !strings.Contains(stepped, "next_turn: 2") {
 		t.Fatalf("unexpected step output=%s stderr=%s code=%d", stepped, stderr, code)
 	}
 	checkpoint, stderr, code := executeTestCommand(t, "run", "checkpoint", runID)

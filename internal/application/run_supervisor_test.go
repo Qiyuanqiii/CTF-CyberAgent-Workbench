@@ -1399,8 +1399,9 @@ func (p toolCallProvider) StreamChat(ctx context.Context, req llm.ChatRequest) (
 	if err != nil {
 		return nil, err
 	}
-	chunks := make(chan llm.ChatChunk, 1)
-	chunks <- llm.ChatChunk{Text: response.Text, ToolCalls: response.ToolCalls, Done: true}
+	chunks := make(chan llm.ChatChunk, 2)
+	chunks <- llm.ChatChunk{Text: response.Text}
+	chunks <- llm.FinalChatChunk(response)
 	close(chunks)
 	return chunks, nil
 }
@@ -1428,8 +1429,9 @@ func (p secretResponseProvider) StreamChat(ctx context.Context, req llm.ChatRequ
 	if err != nil {
 		return nil, err
 	}
-	chunks := make(chan llm.ChatChunk, 1)
-	chunks <- llm.ChatChunk{Text: response.Text, Done: true}
+	chunks := make(chan llm.ChatChunk, 2)
+	chunks <- llm.ChatChunk{Text: response.Text}
+	chunks <- llm.FinalChatChunk(response)
 	close(chunks)
 	return chunks, nil
 }
@@ -1465,8 +1467,9 @@ func (p *fixedUsageProvider) StreamChat(ctx context.Context, req llm.ChatRequest
 	if err != nil {
 		return nil, err
 	}
-	chunks := make(chan llm.ChatChunk, 1)
-	chunks <- llm.ChatChunk{Text: response.Text, Done: true}
+	chunks := make(chan llm.ChatChunk, 2)
+	chunks <- llm.ChatChunk{Text: response.Text}
+	chunks <- llm.FinalChatChunk(response)
 	close(chunks)
 	return chunks, nil
 }
@@ -1568,8 +1571,9 @@ func (p *retrySequenceProvider) StreamChat(ctx context.Context, req llm.ChatRequ
 	if err != nil {
 		return nil, err
 	}
-	chunks := make(chan llm.ChatChunk, 1)
-	chunks <- llm.ChatChunk{Text: response.Text, Done: true}
+	chunks := make(chan llm.ChatChunk, 2)
+	chunks <- llm.ChatChunk{Text: response.Text}
+	chunks <- llm.FinalChatChunk(response)
 	close(chunks)
 	return chunks, nil
 }
@@ -1677,8 +1681,9 @@ func (p *lifecycleProvider) StreamChat(ctx context.Context, req llm.ChatRequest)
 	if err != nil {
 		return nil, err
 	}
-	chunks := make(chan llm.ChatChunk, 1)
-	chunks <- llm.ChatChunk{Text: response.Text, Done: true}
+	chunks := make(chan llm.ChatChunk, 2)
+	chunks <- llm.ChatChunk{Text: response.Text}
+	chunks <- llm.FinalChatChunk(response)
 	close(chunks)
 	return chunks, nil
 }
