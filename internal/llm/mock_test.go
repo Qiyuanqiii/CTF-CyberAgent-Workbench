@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,29 @@ func TestMockProviderDeterministicResponse(t *testing.T) {
 	}
 	if first.Model != "mock-code" || first.Provider != "mock" {
 		t.Fatalf("unexpected model/provider: %s/%s", first.Provider, first.Model)
+	}
+}
+
+func TestMockProviderRootLifecycleResponse(t *testing.T) {
+	provider := NewMockProvider()
+	response, err := provider.Chat(context.Background(), ChatRequest{
+		Model: "mock-code", JSONMode: true,
+		Messages: []Message{{Role: "user", Content: "review code"}},
+		Metadata: map[string]string{"response_schema": "root_lifecycle.v1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var action struct {
+		Version string `json:"version"`
+		Action  string `json:"action"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(response.Text), &action); err != nil {
+		t.Fatalf("mock lifecycle response is not JSON: %v", err)
+	}
+	if action.Version != "root_lifecycle.v1" || action.Action != "continue" || action.Message == "" {
+		t.Fatalf("unexpected mock lifecycle response: %#v", action)
 	}
 }
 

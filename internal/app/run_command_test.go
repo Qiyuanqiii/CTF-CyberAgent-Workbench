@@ -158,7 +158,7 @@ func TestRunCLISupervisorStepAndCheckpoint(t *testing.T) {
 		t.Fatalf("run start failed: %s", stderr)
 	}
 	stepped, stderr, code := executeTestCommand(t, "run", "step", runID)
-	if code != 0 || !strings.Contains(stepped, "turn 1 completed") || !strings.Contains(stepped, "next_turn: 2") {
+	if code != 0 || !strings.Contains(stepped, "turn 1 completed") || !strings.Contains(stepped, "action: continue") || !strings.Contains(stepped, "run_status: running") || !strings.Contains(stepped, "next_turn: 2") {
 		t.Fatalf("unexpected step output=%s stderr=%s code=%d", stepped, stderr, code)
 	}
 	checkpoint, stderr, code := executeTestCommand(t, "run", "checkpoint", runID)
@@ -189,7 +189,7 @@ func TestRunCLIExecuteAndFinalize(t *testing.T) {
 		t.Fatalf("run start failed: %s", stderr)
 	}
 	executed, stderr, code := executeTestCommand(t, "run", "execute", runID, "--max-steps", "2", "--finish", "--summary", "operator verified")
-	if code != 0 || strings.Count(executed, "turn ") != 2 || !strings.Contains(executed, "finalized: completed") {
+	if code != 0 || strings.Count(executed, "turn ") != 2 || strings.Count(executed, "\tcontinue\t") != 2 || !strings.Contains(executed, "finalized: completed") {
 		t.Fatalf("unexpected execute output=%s stderr=%s code=%d", executed, stderr, code)
 	}
 	shown, stderr, code := executeTestCommand(t, "run", "show", runID)

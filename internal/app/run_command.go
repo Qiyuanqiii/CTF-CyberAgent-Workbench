@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/workspace"
@@ -67,8 +68,9 @@ func (a *App) runSupervisorStep(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(a.out, "run %s turn %d completed\nattempt: %s\nrecovered: %t\nprovider: %s\nmodel: %s\nusage: input=%d output=%d total=%d\ncumulative_tokens: %d\nexecution_millis: %d\nnext_turn: %d\nresponse: %s\n",
-		result.Handle.RunID, result.Turn, result.AttemptID, result.Recovered, result.Provider, result.Model,
+	fmt.Fprintf(a.out, "run %s turn %d completed\nattempt: %s\nrecovered: %t\naction: %s\nrun_status: %s\nprovider: %s\nmodel: %s\nusage: input=%d output=%d total=%d\ncumulative_tokens: %d\nexecution_millis: %d\nnext_turn: %d\nresponse: %s\n",
+		result.Handle.RunID, result.Turn, result.AttemptID, result.Recovered, result.Action.Kind, result.RunStatus,
+		result.Provider, result.Model,
 		result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.TotalTokens,
 		result.Checkpoint.TotalTokens, result.Checkpoint.ExecutionMillis, result.Checkpoint.NextTurn, result.Text)
 	return nil
@@ -88,14 +90,17 @@ func (a *App) runSupervisorExecute(ctx context.Context, args []string) error {
 	supervisor := application.NewRunSupervisor(a.store, a.router, a.checker)
 	result, err := supervisor.Execute(ctx, fs.Arg(0), *maxSteps)
 	for _, step := range result.Steps {
-		fmt.Fprintf(a.out, "turn %d\t%s/%s\ttokens=%d\tnext=%d\n",
-			step.Turn, step.Provider, step.Model, step.Usage.TotalTokens, step.Checkpoint.NextTurn)
+		fmt.Fprintf(a.out, "turn %d\t%s\t%s/%s\ttokens=%d\tnext=%d\n",
+			step.Turn, step.Action.Kind, step.Provider, step.Model, step.Usage.TotalTokens, step.Checkpoint.NextTurn)
 	}
 	if err != nil {
 		fmt.Fprintf(a.out, "execution stopped: %s\n", result.StopReason)
 		return err
 	}
 	if *finish {
+		if result.RunStatus == domain.RunPaused || result.RunStatus == domain.RunWaitingApproval {
+			return apperror.New(apperror.CodeFailedPrecondition, "cannot finalize a waiting run with --finish; resume it or use run fail")
+		}
 		completionSummary := strings.TrimSpace(*summary)
 		if completionSummary == "" {
 			completionSummary = fmt.Sprintf("operator finalized after %d supervised turn(s)", len(result.Steps))

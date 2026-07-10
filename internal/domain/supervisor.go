@@ -13,6 +13,7 @@ const (
 	SupervisorIdle         SupervisorPhase = "idle"
 	SupervisorTurnStarted  SupervisorPhase = "turn_started"
 	SupervisorTurnFailed   SupervisorPhase = "turn_failed"
+	SupervisorWaiting      SupervisorPhase = "waiting"
 	SupervisorRunCompleted SupervisorPhase = "run_completed"
 	SupervisorRunFailed    SupervisorPhase = "run_failed"
 )
@@ -45,7 +46,7 @@ func (c SupervisorCheckpoint) Validate() error {
 		return errors.New("checkpoint next turn must be positive")
 	}
 	switch c.Phase {
-	case SupervisorIdle, SupervisorRunCompleted, SupervisorRunFailed:
+	case SupervisorIdle, SupervisorWaiting, SupervisorRunCompleted, SupervisorRunFailed:
 		if strings.TrimSpace(c.AttemptID) != "" {
 			return fmt.Errorf("checkpoint phase %s cannot have an active attempt", c.Phase)
 		}

@@ -131,7 +131,7 @@ Transitions are checked in Go domain services and written with an event. UI code
 
 The supervisor owns process handles and channels only in memory. Durable IDs, statuses, inbox messages, checkpoints, and events live in SQLite so a process restart can reconstruct the run.
 
-The current single-Agent slice persists cumulative input/output/total tokens and model-call execution milliseconds in the Supervisor checkpoint. A bounded executor performs only an operator-selected number of durable steps. Completion and failure are explicit lifecycle operations that update the Run, checkpoint, and events in one transaction; arbitrary assistant text cannot finalize a Run.
+The current single-Agent slice persists cumulative input/output/total tokens and model-call execution milliseconds in the Supervisor checkpoint. A bounded executor performs only an operator-selected number of durable steps. Root model output uses strict `root_lifecycle.v1` JSON: `continue` returns to idle, `finish` completes the Run, and `wait` pauses it for explicit resume. Turn data, status, checkpoint, and events commit in one transaction; arbitrary assistant text cannot mutate lifecycle state.
 
 ## Agent Coordinator
 
@@ -159,14 +159,14 @@ Work items and notes are stored independently from LLM messages. Context constru
 
 ## Lifecycle Protocol
 
-Autonomous/headless execution cannot finish with an arbitrary assistant paragraph. It must issue a lifecycle result:
+Autonomous/headless execution cannot finish with an arbitrary assistant paragraph. The root protocol now validates one versioned JSON lifecycle result:
 
-- root: `run.finish` with summary, completed work, unresolved work, and report references;
+- root: `continue`, `finish`, or `wait`; `finish` includes a summary and `wait` includes a reason;
 - child: `agent.finish` with structured completion report for its parent;
 - blocked agent: `agent.wait` with reason and awaited dependency;
 - cancellation: coordinator-owned transition, never model-owned.
 
-Interactive sessions may park after a normal turn. Headless runs require a lifecycle action or enter bounded recovery before failing.
+The current root implementation maps `wait` to a durable paused Run and resumes at the next turn. Child actions, dependency records, and bounded automatic protocol repair remain future Coordinator work.
 
 ## Tool Gateway
 
@@ -254,6 +254,8 @@ finding.changed
 artifact.created
 policy.decided
 budget.changed
+supervisor.action_committed
+supervisor.run_waiting / supervisor.run_completed / supervisor.run_failed
 ```
 
 CLI and headless mode print events. Bubble Tea renders them locally. The future Go API streams the same event envelope over WebSocket to TypeScript.

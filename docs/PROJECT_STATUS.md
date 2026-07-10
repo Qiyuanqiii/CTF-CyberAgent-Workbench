@@ -20,6 +20,8 @@ Use these files first when resuming:
 - `docs/architecture.md`
 - `docs/usage.md`
 - `internal/app/app.go`
+- `internal/application/run_supervisor.go`
+- `internal/domain/root_action.go`
 - `internal/contextmgr/context.go`
 - `internal/session/session.go`
 - `internal/toolrun/toolrun.go`
@@ -29,9 +31,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 57%.
+- Overall product vision: about 59%.
 - v0.1 generic agent MVP: about 98%.
-- V2 run-centric runtime: about 58%.
+- V2 run-centric runtime: about 63%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -95,6 +97,11 @@ Completed:
 - Added atomic, idempotent operator-controlled `run finish` and `run fail` transitions across Run status, Supervisor checkpoint, and event stream.
 - Provider nil responses and negative token usage are rejected and checkpointed instead of reaching persistence.
 - Counter accumulation rejects integer overflow, and bounded execution no longer preallocates memory from an untrusted `--max-steps` value.
+- Added the strict `root_lifecycle.v1` domain contract and decoder with UTF-8, 64 KiB, unknown-field, trailing-data, and action-specific validation.
+- RunSupervisor requests JSON lifecycle output and is the only layer that interprets `continue`, `finish`, or `wait`.
+- Model `finish` atomically commits the turn and completed Run; `wait` atomically commits the turn and paused Run, then resumes at the next turn.
+- Raw lifecycle JSON is excluded from Session history; redacted message, summary/reason, and normalized Supervisor events are persisted.
+- Lifecycle completion replay is idempotent, and bounded execution stops cleanly on root finish, root wait, or an already paused Run.
 
 Not done yet:
 
@@ -104,7 +111,7 @@ Not done yet:
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
-- Structured model-driven root lifecycle actions, provider cost/tool-call budgets, Work Board, Notes, AgentCoordinator, and Findings/Evidence.
+- Session chat routing through RunSupervisor, provider cost/tool-call budgets, Work Board, Notes, AgentCoordinator, and Findings/Evidence.
 
 ## Code Audit Notes
 
@@ -127,7 +134,10 @@ Residual risks to address soon:
 - MaxCostUSD and tool-call budgets are not enforced until provider pricing metadata and the unified Tool Gateway exist.
 - ExecutionMillis measures Provider model-call time, not total wall-clock orchestration time.
 - One Provider response can exceed the remaining token allowance; actual usage is committed conservatively and the next call is blocked.
-- Budget exhaustion leaves the Run in `running` until an operator explicitly finishes, fails, or cancels it. Model text cannot self-finalize a Run.
+- Budget exhaustion leaves the Run in `running` until an operator explicitly finishes, fails, or cancels it. Only a validated structured action can change lifecycle state; free-form model text cannot.
+- Strict lifecycle JSON may fail with providers that ignore the response contract; invalid output is audited as `turn_failed` but automatic repair retries are not implemented yet.
+- Root `wait` currently maps to `paused` plus a textual reason; structured dependencies and approvals are future Coordinator/Work Board work.
+- Ordinary Session chat still calls Router directly. The next slice must introduce a cycle-free Run chat executor and avoid duplicate user messages.
 - Applied migration statements are immutable once released because their checksums are verified. Schema changes must always add a new migration version.
 - Schema v3 intentionally rejects duplicate non-empty Run/Session associations. A legacy database containing duplicates must be audited before upgrade instead of silently discarding an association.
 - `apperror.Normalize` includes a transitional text classifier for legacy plain errors. New services must return typed errors directly so future localization cannot affect classification.
@@ -209,17 +219,18 @@ Expected context behavior:
 - TaskAdapter tests passed for repeated and eight-way concurrent adaptation, event order, unsupported legacy kinds, and a single persisted Run.
 - Isolated adapter CLI smoke passed across separate processes with one three-event timeline and stable exit codes `2` (invalid argument) and `3` (not found).
 - Legacy Task/Event Store-boundary redaction tests passed with runtime-generated token-shaped fixtures.
-- RunSupervisor tests passed for normal completion, schema v6 checkpoint persistence, cumulative tokens, persisted execution timeout, remaining call deadline, bounded execution, atomic/idempotent finalization, MaxTurns rejection, cancellation before begin, nil response/negative usage rejection, tool-call rejection, and immediate/persisted redaction.
+- RunSupervisor tests passed for normal completion, strict lifecycle parsing, JSON request metadata, root finish/wait, wait-resume, paused execution, malformed-output rollback, lifecycle replay idempotence, schema v6 checkpoint persistence, cumulative tokens, persisted execution timeout, remaining call deadline, bounded execution, MaxTurns rejection, cancellation before begin, nil response/negative usage rejection, tool-call rejection, and immediate/persisted redaction.
 - Restart recovery test persisted `turn_started`, closed and reopened SQLite, resumed the same attempt, and observed one `agent.turn_started` plus one `agent.turn_completed` event.
 - Isolated Supervisor CLI smoke passed across separate processes with two bounded turns, completed/failed finalization, cumulative token exhaustion, and stable exit codes `4` (precondition) and `8` (budget exhausted).
+- Isolated root lifecycle CLI smoke passed with visible `action: continue`, two `supervisor.action_committed` events, one terminal completion event, and token-budget exit code `8`.
 - Final gate passed with `go test -count=1 ./...`, `go vet ./...`, and targeted `go test -race` across error, domain, event, application, store, session, LLM, and app packages.
 
 ## Recommended Next Slice
 
-Continue P2 with a structured root lifecycle protocol and one execution path:
+Continue P2 by routing Session chat through one Run execution path:
 
-- Define schema-validated root actions for `continue`, `finish`, and `wait`.
-- Let only RunSupervisor interpret lifecycle actions and transition durable state.
-- Route existing Session chat model turns through RunSupervisor instead of calling Router directly.
-- Normalize provider retryability, rate-limit pauses, stream events, and cancellation behavior.
+- Define a cycle-free Run chat executor interface owned below the application package.
+- Route ordinary messages for Run-bound Sessions through RunSupervisor without writing duplicate user messages.
+- Preserve an explicit compatibility path for legacy Sessions that are not attached to a Run.
+- Align CLI/TUI chat policy, budget, lifecycle action, and event behavior with headless Runs.
 - Keep tool execution and multi-agent concurrency disabled.

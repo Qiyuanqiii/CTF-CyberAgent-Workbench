@@ -19,7 +19,7 @@ const maxSupervisorHistoryMessages = 20
 
 type SupervisorStore interface {
 	BeginSupervisorTurn(ctx context.Context, runID string) (domain.SupervisorTurn, error)
-	CompleteSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string, response llm.ChatResponse, decision policy.Decision, elapsed time.Duration) (domain.SupervisorCheckpoint, error)
+	CompleteSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string, response llm.ChatResponse, action domain.RootAction, decision policy.Decision, elapsed time.Duration) (domain.Run, domain.SupervisorCheckpoint, error)
 	FailSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, cause string, elapsed time.Duration) (domain.SupervisorCheckpoint, error)
 	FinalizeSupervisorRun(ctx context.Context, runID string, target domain.RunStatus, summary string) (domain.Run, domain.SupervisorCheckpoint, error)
 	GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error)
@@ -50,6 +50,8 @@ type LifecycleResult struct {
 	Provider   string
 	Model      string
 	Usage      llm.Usage
+	Action     domain.RootAction
+	RunStatus  domain.RunStatus
 	Checkpoint domain.SupervisorCheckpoint
 }
 
@@ -108,9 +110,11 @@ func (s *RunSupervisor) Step(ctx context.Context, runID string) (LifecycleResult
 	input := supervisorTurnInput(turn.Mission.Goal, turn.Checkpoint.NextTurn)
 	request := llm.ChatRequest{
 		Messages: supervisorMessages(history, input),
+		JSONMode: true,
 		Metadata: map[string]string{
 			"run_id": turn.Run.ID, "mission_id": turn.Mission.ID, "session_id": turn.Run.SessionID,
 			"turn": fmt.Sprint(turn.Checkpoint.NextTurn), "attempt_id": turn.Checkpoint.AttemptID,
+			"response_schema": domain.RootLifecycleVersion,
 		},
 	}
 	if turn.Run.Budget.MaxTokens > 0 {
@@ -151,23 +155,31 @@ func (s *RunSupervisor) Step(ctx context.Context, runID string) (LifecycleResult
 		failure := s.recordFailure(ctx, &result, err, elapsed)
 		return result, failure
 	}
-	decision := s.checker.CheckText("supervisor_assistant_response", response.Text)
+	action, err := parseRootAction(response.Text)
+	if err != nil {
+		failure := s.recordFailure(ctx, &result, err, elapsed)
+		return result, failure
+	}
+	decision := s.checker.CheckText("supervisor_assistant_response", rootActionPolicyText(action))
 	if !decision.Allowed {
 		err := apperror.New(apperror.CodePolicyDenied, "policy denied supervisor response: "+decision.Reason)
 		failure := s.recordFailure(ctx, &result, err, elapsed)
 		return result, failure
 	}
+	safeAction := redactRootAction(action)
 	safeResponse := *response
-	safeResponse.Text = redact.String(response.Text)
-	checkpoint, err := s.store.CompleteSupervisorTurn(ctx, turn.Checkpoint, input, safeResponse, decision, elapsed)
+	safeResponse.Text = safeAction.Message
+	updatedRun, checkpoint, err := s.store.CompleteSupervisorTurn(ctx, turn.Checkpoint, input, safeResponse, safeAction, decision, elapsed)
 	if err != nil {
 		return result, apperror.Normalize(err)
 	}
 	result.Status = LifecycleTurnCompleted
-	result.Text = safeResponse.Text
+	result.Text = safeAction.Message
 	result.Provider = response.Provider
 	result.Model = response.Model
 	result.Usage = response.Usage
+	result.Action = safeAction
+	result.RunStatus = updatedRun.Status
 	result.Checkpoint = checkpoint
 	return result, nil
 }
@@ -190,6 +202,14 @@ func (s *RunSupervisor) Execute(ctx context.Context, runID string, maxSteps int)
 			result.StopReason = "run_terminal"
 			return result, nil
 		}
+		if run.Status == domain.RunPaused {
+			result.StopReason = "run_paused"
+			return result, nil
+		}
+		if run.Status == domain.RunWaitingApproval {
+			result.StopReason = "waiting_approval"
+			return result, nil
+		}
 		step, err := s.Step(ctx, result.RunID)
 		if step.Turn > 0 {
 			result.Steps = append(result.Steps, step)
@@ -197,6 +217,15 @@ func (s *RunSupervisor) Execute(ctx context.Context, runID string, maxSteps int)
 		if err != nil {
 			result.StopReason = strings.ToLower(string(apperror.CodeOf(err)))
 			return result, err
+		}
+		result.RunStatus = step.RunStatus
+		switch step.Action.Kind {
+		case domain.RootActionFinish:
+			result.StopReason = "root_finish"
+			return result, nil
+		case domain.RootActionWait:
+			result.StopReason = "root_wait"
+			return result, nil
 		}
 	}
 	run, err := s.store.GetRun(ctx, result.RunID)
@@ -282,7 +311,7 @@ func supervisorMessages(history []session.Message, input string) []llm.Message {
 	}
 	messages := make([]llm.Message, 0, len(history)+2)
 	messages = append(messages, llm.Message{
-		Role: "system", Content: "You are the CyberAgent Workbench root agent. Produce one safe, concise planning turn. Do not call tools in this supervisor foundation.",
+		Role: "system", Content: `You are the CyberAgent Workbench root agent. Do not call tools in this supervisor foundation. Return exactly one JSON object and no markdown using this schema: {"version":"root_lifecycle.v1","action":"continue|finish|wait","message":"user-facing result","summary":"required only for finish","reason":"required only for wait"}. Use continue when more work remains, finish only when the mission is complete without tool execution, and wait only when external input or a dependency is required.`,
 	})
 	for _, message := range history {
 		if message.Role == "user" || message.Role == "assistant" || message.Role == "system" {
