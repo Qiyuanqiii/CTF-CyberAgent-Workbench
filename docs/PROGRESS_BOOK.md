@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 59%。
+- 整体产品愿景：约 61%。
 - v0.1 通用 Agent MVP：约 98%。
-- V2 Run-centric Runtime：约 63%。
+- V2 Run-centric Runtime：约 68%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 第三纵向切片已落地：严格 `root_lifecycle.v1`、Supervisor-owned `continue/finish/wait`、模型终态原子提交和可恢复等待。下一步将现有 Session chat 统一接入 RunSupervisor，消除普通消息直连 Router 的旁路。
+V2 的 P0/P1 已完成，P2 第四纵向切片已落地：Run-bound Session 普通消息统一进入 RunSupervisor，支持自动启动/恢复、输入检查点、重启恢复、上下文摘要回注和消息原子提交。下一步统一 Provider 错误、重试、限流、取消与流事件边界。
 
 ## 二、已完成功能
 
@@ -56,6 +56,7 @@ V2 的 P0/P1 已完成，P2 第三纵向切片已落地：严格 `root_lifecycle
 - 旧 Task Goal 与旧 Event 内容补齐 Store 级脱敏。
 - schema v5 持久化 Supervisor phase、next turn、attempt 和脱敏错误。
 - schema v6 在同一 checkpoint 中持久化累计 input/output/total tokens 与模型执行毫秒数。
+- schema v7 在 Provider 调用前持久化脱敏且不超过 64 KiB 的 pending input，完成后原子清空。
 - `run step` 每次只执行一个无工具规划 turn；`run checkpoint` 可观察恢复状态。
 - 模型调用前写 started checkpoint，完成时原子写消息、策略、用量、事件和下一个 checkpoint。
 - 重启会恢复同一 started attempt；已提交完成的 turn 和消息不会重复。
@@ -66,6 +67,11 @@ V2 的 P0/P1 已完成，P2 第三纵向切片已落地：严格 `root_lifecycle
 - `continue` 回到 idle；`finish` 原子提交 turn 与 completed；`wait` 原子提交 turn 与 paused，`run resume` 后从下一 turn 继续。
 - 原始 lifecycle JSON 不进入 Session history；只持久化脱敏后的用户可见 message、summary/reason 与审计事件。
 - 即时 CLI 模型回复和持久化回复都经过同一脱敏边界。
+- `session.RunChatExecutor` 以无包循环接口连接 Session Manager 和 application 层 RunSupervisor。
+- Run-bound Session 的普通 CLI/TUI 消息自动启动 created Run、自动恢复 paused Run，并返回 action/status；终态或 waiting-approval Run 拒绝新 turn。
+- pending input 在重启后恢复为同一 attempt；成功时 user/assistant 消息、checkpoint、Run 状态和事件一次事务提交，不会重复写消息。
+- 未绑定 Run 的旧 Session 暂时保留 direct Router 兼容路径；slash command 继续作为显式命令路径。
+- 自动压缩生成的最新 Session summary 会进入后续 Supervisor 模型上下文。
 - Run 状态转换与事件写入保持原子性，Store 会拒绝非法或陈旧转换。
 - `run create/list/show/events/start/pause/resume/cancel` 已可使用。
 - `Run` 是可恢复的执行实例，不是编程语言；Go 负责控制，TypeScript 负责界面，Rust 负责确定性分析。
@@ -85,7 +91,6 @@ V2 的 P0/P1 已完成，P2 第三纵向切片已落地：严格 `root_lifecycle
 
 ## 四、尚未完成
 
-- 现有 Session chat 的 RunSupervisor 接入；普通消息当前仍直接调用 Router。
 - Provider 限流/可重试错误、流式事件和自动协议修复。
 - Provider 费用预算、工具调用预算和 token-aware Context Builder。
 - 结构化 WorkItem、Notes、Findings、Evidence 与 Report。
@@ -114,6 +119,9 @@ V2 的 P0/P1 已完成，P2 第三纵向切片已落地：严格 `root_lifecycle
 - 本轮审计已修复 Provider 极端用量导致的累计整数溢出，以及超大 `--max-steps` 触发不受控预分配的问题。
 - 严格协议对不遵循 JSON 指令的 Provider 会返回可审计失败；当前不会自动追加修复提示重试。
 - `wait` 目前映射为 Run paused 和文本 reason，尚无结构化 dependency/approval 对象。
+- 未绑定 Run 的 Session 仍直连 Router；这是迁移兼容路径，新功能不应继续扩展该旁路。
+- slash command 尚未消耗 Supervisor turn；后续统一 Tool Gateway 时必须保持审批和事件语义，不能直接启用执行。
+- pending input 虽已脱敏并限制大小，仍属于会话内容而非 Secrets Manager；`run checkpoint` 不回显原文。
 - 已发布 migration 的语句和 checksum 不可修改，后续 schema 变化必须新增版本。
 - v3 会拒绝一个 Session 关联多个 Run；若旧数据库存在重复关联，应先审计，而不是自动丢弃数据。
 - 兼容期仍有普通字符串错误通过 `apperror.Normalize` 分类；新服务必须直接返回 typed error。
@@ -129,14 +137,14 @@ go vet ./...
 
 共享状态、并发或存储变更还要运行相关包的 `go test -race`。CLI 行为变更要在隔离的 `CYBERAGENT_HOME` 中完成 smoke test。提交前扫描凭据前缀，确认本地数据库、工作区、环境文件和 API key 未进入 Git。
 
-最新验证已覆盖严格 action 解码、mock JSON 模式、continue、原子 finish、wait/park/跨 Store 重启恢复、无效协议不写消息、终态重放幂等、action/event 脱敏，以及原有 schema v6、预算、审批、上下文、TUI 和安全边界。独立 CLI smoke 已验证 action 输出、两次 action 事件、显式终态与 token 预算退出码 8。
+最新验证已覆盖严格 action 解码、mock JSON 模式、continue、原子 finish、wait/park/跨 Store 重启恢复、无效协议不写消息、终态重放幂等、action/event 脱敏，以及 schema v7 pending input、Session 自动启动/恢复、冲突/大小/脱敏边界、压缩摘要回注、终态拒绝和旧 Session 兼容。独立 CLI smoke 已验证 Run-bound `session send`、action/status 输出、`idle/next_turn=2`、唯一消息/事件对和 unbound fallback。
 
 ## 七、下一开发切片
 
-1. 为 Session Manager 定义不依赖 application 包的 Run chat executor 接口。
-2. 普通 Session 消息通过已绑定 Run 的 Supervisor 执行，避免重复 user message 和包循环依赖。
-3. 未绑定 Run 的旧 Session 保留明确兼容路径，并记录迁移边界。
-4. 统一普通 CLI/TUI chat 与 headless Run 的 policy、budget、action 和事件行为。
+1. 定义 Provider 的 retryable、rate-limited、invalid-protocol、cancelled 和 permanent typed outcome。
+2. 增加有界退避重试和 durable attempt events，禁止重试已提交 turn 或任何有副作用动作。
+3. 先统一 `model.started/completed/failed` 事件，再接入 token delta stream。
+4. 限流时保留 pending input 和预算，返回稳定暂停/重试状态。
 5. 工具执行和多 Agent 并发继续关闭。
 
 ## 八、仓库同步与恢复约定

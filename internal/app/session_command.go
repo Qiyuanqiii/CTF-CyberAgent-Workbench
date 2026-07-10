@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/workspace"
 )
@@ -17,7 +18,7 @@ func (a *App) sessionCommand(ctx context.Context, args []string) error {
 	if err := a.ensureStore(); err != nil {
 		return err
 	}
-	manager := session.NewManager(a.store, a.router, a.checker)
+	manager := a.newSessionManager()
 	switch args[0] {
 	case "create":
 		return a.sessionCreate(ctx, manager, args[1:])
@@ -30,6 +31,11 @@ func (a *App) sessionCommand(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown session subcommand %q", args[0])
 	}
+}
+
+func (a *App) newSessionManager() *session.Manager {
+	executor := application.NewSessionRunChatExecutor(a.store, a.router, a.checker)
+	return session.NewManager(a.store, a.router, a.checker).WithRunChatExecutor(executor)
 }
 
 func (a *App) sessionCreate(ctx context.Context, manager *session.Manager, args []string) error {
@@ -87,6 +93,9 @@ func (a *App) sessionSend(ctx context.Context, manager *session.Manager, args []
 		return err
 	}
 	fmt.Fprintln(a.out, result.Text)
+	if result.RunID != "" {
+		fmt.Fprintf(a.out, "\n[run %s: action=%s status=%s]\n", result.RunID, result.RunAction, result.RunStatus)
+	}
 	if result.Compacted {
 		fmt.Fprintf(a.out, "\n[context compacted: summary=%d]\n", result.SummaryID)
 	}

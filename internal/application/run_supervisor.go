@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cyberagent-workbench/internal/apperror"
+	"cyberagent-workbench/internal/contextmgr"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
@@ -18,13 +19,15 @@ import (
 const maxSupervisorHistoryMessages = 20
 
 type SupervisorStore interface {
-	BeginSupervisorTurn(ctx context.Context, runID string) (domain.SupervisorTurn, error)
-	CompleteSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string, response llm.ChatResponse, action domain.RootAction, decision policy.Decision, elapsed time.Duration) (domain.Run, domain.SupervisorCheckpoint, error)
+	BeginSupervisorTurn(ctx context.Context, runID string, pendingInput string) (domain.SupervisorTurn, error)
+	BindSupervisorTurnInput(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string) (domain.SupervisorCheckpoint, error)
+	CompleteSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, response llm.ChatResponse, action domain.RootAction, decision policy.Decision, elapsed time.Duration) (domain.Run, domain.SupervisorCheckpoint, session.TurnMessages, error)
 	FailSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, cause string, elapsed time.Duration) (domain.SupervisorCheckpoint, error)
 	FinalizeSupervisorRun(ctx context.Context, runID string, target domain.RunStatus, summary string) (domain.Run, domain.SupervisorCheckpoint, error)
 	GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error)
 	GetRun(ctx context.Context, id string) (domain.Run, error)
 	ListSessionMessages(ctx context.Context, sessionID string, includeCompacted bool) ([]session.Message, error)
+	LatestContextSummary(ctx context.Context, taskID string) (contextmgr.Summary, bool, error)
 }
 
 type RunHandle struct {
@@ -41,18 +44,20 @@ const (
 )
 
 type LifecycleResult struct {
-	Handle     RunHandle
-	Status     LifecycleStatus
-	Turn       int
-	AttemptID  string
-	Recovered  bool
-	Text       string
-	Provider   string
-	Model      string
-	Usage      llm.Usage
-	Action     domain.RootAction
-	RunStatus  domain.RunStatus
-	Checkpoint domain.SupervisorCheckpoint
+	Handle       RunHandle
+	Status       LifecycleStatus
+	Turn         int
+	AttemptID    string
+	Recovered    bool
+	Text         string
+	Provider     string
+	Model        string
+	Usage        llm.Usage
+	Action       domain.RootAction
+	RunStatus    domain.RunStatus
+	UserMessage  session.Message
+	ReplyMessage session.Message
+	Checkpoint   domain.SupervisorCheckpoint
 }
 
 type LifecycleOutcome string
@@ -87,10 +92,22 @@ func NewRunSupervisor(store SupervisorStore, router *llm.Router, checker policy.
 }
 
 func (s *RunSupervisor) Step(ctx context.Context, runID string) (LifecycleResult, error) {
+	return s.step(ctx, runID, "")
+}
+
+func (s *RunSupervisor) StepWithInput(ctx context.Context, runID string, input string) (LifecycleResult, error) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return LifecycleResult{}, apperror.New(apperror.CodeInvalidArgument, "supervisor input is required")
+	}
+	return s.step(ctx, runID, input)
+}
+
+func (s *RunSupervisor) step(ctx context.Context, runID string, requestedInput string) (LifecycleResult, error) {
 	if s == nil || s.store == nil || s.router == nil || s.checker == nil {
 		return LifecycleResult{}, apperror.New(apperror.CodeFailedPrecondition, "run supervisor dependencies are required")
 	}
-	turn, err := s.store.BeginSupervisorTurn(ctx, runID)
+	turn, err := s.store.BeginSupervisorTurn(ctx, runID, requestedInput)
 	if err != nil {
 		return LifecycleResult{}, apperror.Normalize(err)
 	}
@@ -102,14 +119,29 @@ func (s *RunSupervisor) Step(ctx context.Context, runID string) (LifecycleResult
 	if err := ctx.Err(); err != nil {
 		return result, apperror.Normalize(err)
 	}
+	input := turn.Checkpoint.PendingInput
+	if input == "" {
+		input = supervisorTurnInput(turn.Mission.Goal, turn.Checkpoint.NextTurn)
+		checkpoint, err := s.store.BindSupervisorTurnInput(ctx, turn.Checkpoint, input)
+		if err != nil {
+			failure := s.recordFailure(ctx, &result, err, 0)
+			return result, failure
+		}
+		turn.Checkpoint = checkpoint
+		result.Checkpoint = checkpoint
+	}
 	history, err := s.store.ListSessionMessages(ctx, turn.Run.SessionID, false)
 	if err != nil {
 		failure := s.recordFailure(ctx, &result, err, 0)
 		return result, failure
 	}
-	input := supervisorTurnInput(turn.Mission.Goal, turn.Checkpoint.NextTurn)
+	summary, hasSummary, err := s.store.LatestContextSummary(ctx, turn.Run.SessionID)
+	if err != nil {
+		failure := s.recordFailure(ctx, &result, err, 0)
+		return result, failure
+	}
 	request := llm.ChatRequest{
-		Messages: supervisorMessages(history, input),
+		Messages: supervisorMessages(history, input, summary, hasSummary),
 		JSONMode: true,
 		Metadata: map[string]string{
 			"run_id": turn.Run.ID, "mission_id": turn.Mission.ID, "session_id": turn.Run.SessionID,
@@ -169,7 +201,7 @@ func (s *RunSupervisor) Step(ctx context.Context, runID string) (LifecycleResult
 	safeAction := redactRootAction(action)
 	safeResponse := *response
 	safeResponse.Text = safeAction.Message
-	updatedRun, checkpoint, err := s.store.CompleteSupervisorTurn(ctx, turn.Checkpoint, input, safeResponse, safeAction, decision, elapsed)
+	updatedRun, checkpoint, messages, err := s.store.CompleteSupervisorTurn(ctx, turn.Checkpoint, safeResponse, safeAction, decision, elapsed)
 	if err != nil {
 		return result, apperror.Normalize(err)
 	}
@@ -180,6 +212,8 @@ func (s *RunSupervisor) Step(ctx context.Context, runID string) (LifecycleResult
 	result.Usage = response.Usage
 	result.Action = safeAction
 	result.RunStatus = updatedRun.Status
+	result.UserMessage = messages.User
+	result.ReplyMessage = messages.Assistant
 	result.Checkpoint = checkpoint
 	return result, nil
 }
@@ -305,7 +339,7 @@ func supervisorTurnInput(goal string, turn int) string {
 	return fmt.Sprintf("Continue mission at turn %d without executing tools: %s", turn, goal)
 }
 
-func supervisorMessages(history []session.Message, input string) []llm.Message {
+func supervisorMessages(history []session.Message, input string, summary contextmgr.Summary, hasSummary bool) []llm.Message {
 	if len(history) > maxSupervisorHistoryMessages {
 		history = history[len(history)-maxSupervisorHistoryMessages:]
 	}
@@ -313,6 +347,9 @@ func supervisorMessages(history []session.Message, input string) []llm.Message {
 	messages = append(messages, llm.Message{
 		Role: "system", Content: `You are the CyberAgent Workbench root agent. Do not call tools in this supervisor foundation. Return exactly one JSON object and no markdown using this schema: {"version":"root_lifecycle.v1","action":"continue|finish|wait","message":"user-facing result","summary":"required only for finish","reason":"required only for wait"}. Use continue when more work remains, finish only when the mission is complete without tool execution, and wait only when external input or a dependency is required.`,
 	})
+	if hasSummary && strings.TrimSpace(summary.Content) != "" {
+		messages = append(messages, llm.Message{Role: "system", Content: "Compacted session context:\n" + summary.Content})
+	}
 	for _, message := range history {
 		if message.Role == "user" || message.Role == "assistant" || message.Role == "system" {
 			messages = append(messages, llm.Message{Role: message.Role, Content: message.Content})

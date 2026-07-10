@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 
-	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/toolrun"
 	"cyberagent-workbench/internal/tui"
 	"cyberagent-workbench/internal/workspace"
@@ -33,7 +32,7 @@ func (a *App) tuiCommand(ctx context.Context, args []string) error {
 		return err
 	}
 
-	sessionManager := session.NewManager(a.store, a.router, a.checker)
+	sessionManager := a.newSessionManager()
 	toolManager := toolrun.NewManager(a.store, a.checker)
 	workspaceID := ""
 	if strings.TrimSpace(*workspaceName) != "" {

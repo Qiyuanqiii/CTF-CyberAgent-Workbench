@@ -270,6 +270,11 @@ func (m *Model) submitAction(ctx context.Context, sess session.Session, input st
 		if result.ToolRunID != "" {
 			status = "tool proposed: " + result.ToolRunID
 			selectedID = result.ToolRunID
+		} else if result.RunID != "" {
+			status = fmt.Sprintf("run %s: %s -> %s", result.RunID, result.RunAction, result.RunStatus)
+			if result.Compacted {
+				status += fmt.Sprintf("; context compacted: summary=%d", result.SummaryID)
+			}
 		} else if result.Compacted {
 			status = fmt.Sprintf("context compacted: summary=%d", result.SummaryID)
 		}

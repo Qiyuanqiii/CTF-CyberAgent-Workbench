@@ -34,6 +34,8 @@ Root actions use `continue`, `finish`, or `wait`. `continue` advances to another
 
 Before each model call, the Supervisor passes the remaining token allowance as the request limit and applies the remaining persisted model-execution deadline. Provider-reported usage is authoritative: if one call exceeds the remaining token allowance, its full actual usage is committed and subsequent calls are blocked. `MaxCostUSD` and tool-call budgets are configuration fields only until provider pricing and the unified Tool Gateway are available.
 
+Ordinary text sent to a Run-created Session uses the same RunSupervisor path as `run step`. The first message automatically starts a `created` Run, a follow-up to a model `wait` automatically resumes its paused Run, and the CLI prints `[run <id>: action=<action> status=<status>]`. Pending input is redacted, limited to 64 KiB, and stored before the Provider call; after restart the same attempt can recover it, while the committed user/assistant pair and lifecycle events are written exactly once. Completed, failed, cancelled, or approval-waiting Runs reject ordinary input instead of falling back to an unsupervised model call.
+
 `run adapt-task` converts a v0.1 `agent.Task` into a new Mission, Run, and Session. The mapping is transactional and keyed by Task ID, so repeated or concurrent calls return the same Run and append only one `legacy.task_adapted` event. Historical task status is recorded for audit, but the new Run always starts at `created` and never executes implicitly. Legacy CTF tasks map to the safe generic `review` profile until the dedicated CTF phase.
 
 CLI errors keep their existing text and use stable exit codes documented in [errors.md](errors.md).
@@ -138,7 +140,7 @@ cyberagent session history <session-id>
 cyberagent session history <session-id> --all
 ```
 
-Session chat is the main path for generic AI agent features. `/ls`, `/read`, and `/write` require an attached workspace. `/read` responses are redacted before they are persisted in history or sent to a model. `/write <path> <content>` creates a persisted file edit proposal and includes its diff in the assistant response; it never writes before approval. `/run` is dry-run only in v0.1 and records intent without executing commands.
+Session chat is the main path for generic AI agent features. Ordinary text in a Run-bound Session is supervised and consumes that Run's turn, token, and model-time budgets. Older Sessions created directly with `session create` have no Run and temporarily retain the legacy direct Router path for compatibility. Slash commands remain explicit command paths: `/ls`, `/read`, and `/write` require an attached workspace; `/read` responses are redacted before persistence or model use; `/write <path> <content>` creates a persisted file edit proposal and never writes before approval; `/run` records a dry-run tool proposal without executing commands.
 
 ## File Edit Proposals
 

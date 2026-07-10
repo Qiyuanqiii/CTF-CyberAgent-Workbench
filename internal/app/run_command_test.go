@@ -38,8 +38,12 @@ func TestRunCLIEndToEndLifecycle(t *testing.T) {
 	if code != 0 || !strings.Contains(initialEvents, "run.created") || !strings.Contains(initialEvents, "session.attached") {
 		t.Fatalf("unexpected initial events output=%s stderr=%s", initialEvents, stderr)
 	}
-	if _, stderr, code := executeTestCommand(t, "session", "send", sessionID, "hello run timeline"); code != 0 {
+	chatOutput, stderr, code := executeTestCommand(t, "session", "send", sessionID, "hello run timeline")
+	if code != 0 {
 		t.Fatalf("session send failed: %s", stderr)
+	}
+	if !strings.Contains(chatOutput, "[run "+runID+": action=continue status=running]") {
+		t.Fatalf("session send did not expose supervised run state: %s", chatOutput)
 	}
 	toolOutput, stderr, code := executeTestCommand(t, "session", "send", sessionID, "/run echo hello")
 	if code != 0 {

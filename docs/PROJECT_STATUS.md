@@ -31,9 +31,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 59%.
+- Overall product vision: about 61%.
 - v0.1 generic agent MVP: about 98%.
-- V2 run-centric runtime: about 63%.
+- V2 run-centric runtime: about 68%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -68,7 +68,7 @@ Completed:
 - Accepted ADR 0002: Mission/Run aggregates, RunSupervisor, a single AgentCoordinator, structured WorkItems/Notes/Findings, lifecycle actions, and a unified event stream.
 - Reworked `docs/architecture.md` around run-scoped budget, event, sandbox, report, approval, and recovery ownership without copying the reference implementation.
 - Added `docs/TASK_BOOK.md` with phased migration tasks, acceptance criteria, compatibility rules, and CTF deferred to the final phase.
-- Versioned SQLite migrations through schema v6: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, and cumulative budget counters; each version is checksummed and transactional.
+- Versioned SQLite migrations through schema v7: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative budget counters, and durable pending user input; each version is checksummed and transactional.
 - Migration tests cover idempotence, legacy data preservation, checksum history, and failed-migration rollback.
 - Unified `internal/idgen` now backs agent tasks, sessions, tool runs, file edits, Mission/Run, and event IDs.
 - Added pure Go Mission, Scope, Budget, RunConfig, Run status machine, and legal transition checks.
@@ -102,6 +102,11 @@ Completed:
 - Model `finish` atomically commits the turn and completed Run; `wait` atomically commits the turn and paused Run, then resumes at the next turn.
 - Raw lifecycle JSON is excluded from Session history; redacted message, summary/reason, and normalized Supervisor events are persisted.
 - Lifecycle completion replay is idempotent, and bounded execution stops cleanly on root finish, root wait, or an already paused Run.
+- Added a cycle-free `session.RunChatExecutor` boundary and an application adapter that routes ordinary Run-bound Session input through RunSupervisor.
+- Ordinary CLI/TUI chat automatically starts a created Run or resumes a paused Run, returns normalized action/status metadata, and rejects terminal or approval-waiting Runs.
+- Schema v7 checkpoints redacted, 64 KiB-bounded pending input before the Provider call; restart recovery reuses the authoritative input and commits one exact user/assistant pair atomically with lifecycle state and events.
+- Unbound legacy Sessions retain an explicit direct Router compatibility path, while slash commands remain existing command adapters.
+- RunSupervisor now feeds the latest compacted Session summary back into later model context.
 
 Not done yet:
 
@@ -111,7 +116,7 @@ Not done yet:
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
 - Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
-- Session chat routing through RunSupervisor, provider cost/tool-call budgets, Work Board, Notes, AgentCoordinator, and Findings/Evidence.
+- Provider cost/tool-call budgets, Work Board, Notes, AgentCoordinator, and Findings/Evidence.
 
 ## Code Audit Notes
 
@@ -137,7 +142,9 @@ Residual risks to address soon:
 - Budget exhaustion leaves the Run in `running` until an operator explicitly finishes, fails, or cancels it. Only a validated structured action can change lifecycle state; free-form model text cannot.
 - Strict lifecycle JSON may fail with providers that ignore the response contract; invalid output is audited as `turn_failed` but automatic repair retries are not implemented yet.
 - Root `wait` currently maps to `paused` plus a textual reason; structured dependencies and approvals are future Coordinator/Work Board work.
-- Ordinary Session chat still calls Router directly. The next slice must introduce a cycle-free Run chat executor and avoid duplicate user messages.
+- Unbound Sessions still use the direct Router compatibility path. New product flows should create a Run instead of expanding this legacy path.
+- Slash commands are intentionally separate command adapters; they do not consume a Supervisor turn yet, and future Tool Gateway work must unify their approval/event behavior without silently executing tools.
+- Pending input is redacted but otherwise stored as Session/model content; this is not a secrets vault. The CLI checkpoint view intentionally omits it.
 - Applied migration statements are immutable once released because their checksums are verified. Schema changes must always add a new migration version.
 - Schema v3 intentionally rejects duplicate non-empty Run/Session associations. A legacy database containing duplicates must be audited before upgrade instead of silently discarding an association.
 - `apperror.Normalize` includes a transitional text classifier for legacy plain errors. New services must return typed errors directly so future localization cannot affect classification.
@@ -194,7 +201,7 @@ Expected context behavior:
 - Recent messages are preserved outside the summary according to `contextmgr.DefaultConfig`.
 - Explicit `context compact` always moves at least one message into the summary when messages exist.
 - `context show --task <id>` prints the latest summary for that task.
-- `session send` persists user and assistant messages.
+- `session send` on a Run-bound Session auto-starts/resumes the Run, applies Supervisor policy/budgets/actions, and persists one user/assistant pair; unbound Sessions retain legacy behavior.
 - Slash commands are persisted as normal session turns.
 - Long session histories automatically compact older active messages into `context_summaries`.
 - MiMo live smoke passed with env-only key and `mimo-v2.5-pro`; no key is stored by the application.
@@ -224,13 +231,15 @@ Expected context behavior:
 - Isolated Supervisor CLI smoke passed across separate processes with two bounded turns, completed/failed finalization, cumulative token exhaustion, and stable exit codes `4` (precondition) and `8` (budget exhausted).
 - Isolated root lifecycle CLI smoke passed with visible `action: continue`, two `supervisor.action_committed` events, one terminal completion event, and token-budget exit code `8`.
 - Final gate passed with `go test -count=1 ./...`, `go vet ./...`, and targeted `go test -race` across error, domain, event, application, store, session, LLM, and app packages.
+- Session/Run integration tests passed for automatic start, wait/resume across Store restart, terminal rejection, legacy unbound compatibility, pending-input conflict/size/redaction boundaries, compacted-summary reuse, and exactly-once messages/events.
+- Isolated CLI smoke passed across separate processes with Run-bound `session send`, visible action/status metadata, `idle/next_turn=2`, one message pair, one started/completed event pair, and an unbound legacy Session fallback.
 
 ## Recommended Next Slice
 
-Continue P2 by routing Session chat through one Run execution path:
+Continue P2 with a normalized Provider execution boundary:
 
-- Define a cycle-free Run chat executor interface owned below the application package.
-- Route ordinary messages for Run-bound Sessions through RunSupervisor without writing duplicate user messages.
-- Preserve an explicit compatibility path for legacy Sessions that are not attached to a Run.
-- Align CLI/TUI chat policy, budget, lifecycle action, and event behavior with headless Runs.
+- Introduce typed Provider outcomes for retryable transport failure, rate limiting, invalid protocol, cancellation, and permanent failure.
+- Add bounded retry with backoff and durable attempt events; never retry committed turns or tool side effects.
+- Normalize `model.started`, `model.completed`, and `model.failed` events before adding token deltas.
+- Pause or return a stable retry state on rate limits while preserving pending input and remaining budgets.
 - Keep tool execution and multi-agent concurrency disabled.

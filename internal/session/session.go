@@ -105,6 +105,7 @@ type Manager struct {
 	store      Store
 	router     *llm.Router
 	checker    policy.Checker
+	runChat    RunChatExecutor
 	contextMgr *contextmgr.Manager
 	fileEdits  *fileedit.Manager
 	toolRuns   *toolrun.Manager
@@ -120,6 +121,27 @@ type SendResult struct {
 	SummaryID    int64
 	FileEditID   string
 	ToolRunID    string
+	RunID        string
+	RunAction    string
+	RunStatus    string
+}
+
+type RunChatResult struct {
+	RunID        string
+	UserMessage  Message
+	ReplyMessage Message
+	Text         string
+	Action       string
+	RunStatus    string
+}
+
+type TurnMessages struct {
+	User      Message
+	Assistant Message
+}
+
+type RunChatExecutor interface {
+	ExecuteSessionTurn(ctx context.Context, sess Session, input string) (RunChatResult, bool, error)
 }
 
 func NewManager(store Store, router *llm.Router, checker policy.Checker) *Manager {
@@ -131,6 +153,13 @@ func NewManager(store Store, router *llm.Router, checker policy.Checker) *Manage
 		fileEdits:  fileedit.NewManager(store),
 		toolRuns:   toolrun.NewManager(store, checker),
 	}
+}
+
+func (m *Manager) WithRunChatExecutor(executor RunChatExecutor) *Manager {
+	if m != nil {
+		m.runChat = executor
+	}
+	return m
 }
 
 func (m *Manager) Create(ctx context.Context, workspaceID string, title string, route string) (Session, error) {
@@ -154,13 +183,33 @@ func (m *Manager) Send(ctx context.Context, sessionID string, input string) (Sen
 		return SendResult{}, fmt.Errorf("session %s is not active", sess.ID)
 	}
 
+	if strings.HasPrefix(input, "/") {
+		userMsg, err := m.store.SaveSessionMessage(ctx, NewMessage(sess.ID, "user", input))
+		if err != nil {
+			return SendResult{}, err
+		}
+		return m.handleSlash(ctx, sess, userMsg, input)
+	}
+	if m.runChat != nil {
+		runResult, handled, err := m.runChat.ExecuteSessionTurn(ctx, sess, input)
+		if err != nil {
+			return SendResult{}, err
+		}
+		if handled {
+			compacted, summaryID, err := m.compactAfterTurn(ctx, sess)
+			if err != nil {
+				return SendResult{}, err
+			}
+			return SendResult{
+				Session: sess, UserMessage: runResult.UserMessage, ReplyMessage: runResult.ReplyMessage,
+				Text: runResult.Text, Compacted: compacted, SummaryID: summaryID,
+				RunID: runResult.RunID, RunAction: runResult.Action, RunStatus: runResult.RunStatus,
+			}, nil
+		}
+	}
 	userMsg, err := m.store.SaveSessionMessage(ctx, NewMessage(sess.ID, "user", input))
 	if err != nil {
 		return SendResult{}, err
-	}
-
-	if strings.HasPrefix(input, "/") {
-		return m.handleSlash(ctx, sess, userMsg, input)
 	}
 	return m.chat(ctx, sess, userMsg)
 }
@@ -401,21 +450,9 @@ func (m *Manager) chat(ctx context.Context, sess Session, userMsg Message) (Send
 		return SendResult{}, err
 	}
 
-	active, err = m.store.ListSessionMessages(ctx, sess.ID, false)
+	compacted, summaryID, err := m.compactAfterTurn(ctx, sess)
 	if err != nil {
 		return SendResult{}, err
-	}
-	compactResult, err := m.contextMgr.MaybeCompact(ctx, sess.ID, sess.WorkspaceID, toContextMessages(active))
-	if err != nil {
-		return SendResult{}, err
-	}
-	var summaryID int64
-	if compactResult.Compacted && compactResult.RemovedMessages > 0 {
-		through := active[compactResult.RemovedMessages-1].ID
-		if _, err := m.store.MarkSessionMessagesCompacted(ctx, sess.ID, through); err != nil {
-			return SendResult{}, err
-		}
-		summaryID = compactResult.Summary.ID
 	}
 
 	return SendResult{
@@ -423,9 +460,28 @@ func (m *Manager) chat(ctx context.Context, sess Session, userMsg Message) (Send
 		UserMessage:  userMsg,
 		ReplyMessage: reply,
 		Text:         resp.Text,
-		Compacted:    compactResult.Compacted,
+		Compacted:    compacted,
 		SummaryID:    summaryID,
 	}, nil
+}
+
+func (m *Manager) compactAfterTurn(ctx context.Context, sess Session) (bool, int64, error) {
+	active, err := m.store.ListSessionMessages(ctx, sess.ID, false)
+	if err != nil {
+		return false, 0, err
+	}
+	result, err := m.contextMgr.MaybeCompact(ctx, sess.ID, sess.WorkspaceID, toContextMessages(active))
+	if err != nil {
+		return false, 0, err
+	}
+	if !result.Compacted || result.RemovedMessages <= 0 {
+		return result.Compacted, 0, nil
+	}
+	through := active[result.RemovedMessages-1].ID
+	if _, err := m.store.MarkSessionMessagesCompacted(ctx, sess.ID, through); err != nil {
+		return false, 0, err
+	}
+	return true, result.Summary.ID, nil
 }
 
 func (m *Manager) compactActiveMessages(ctx context.Context, sess Session) (contextmgr.Result, error) {

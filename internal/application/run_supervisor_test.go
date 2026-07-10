@@ -93,7 +93,7 @@ func TestRunSupervisorRecoversStartedTurnAcrossStoreRestart(t *testing.T) {
 	if _, err := service.Start(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	started, err := st.BeginSupervisorTurn(ctx, run.ID)
+	started, err := st.BeginSupervisorTurn(ctx, run.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestRunSupervisorRecoversStartedTurnAcrossStoreRestart(t *testing.T) {
 	if countEventType(before, events.AgentTurnStartedEvent) != 1 || countEventType(before, events.AgentTurnCompletedEvent) != 1 {
 		t.Fatalf("recovery duplicated lifecycle events: %#v", before)
 	}
-	_, checkpoint, err := st.CompleteSupervisorTurn(ctx, started.Checkpoint, "ignored duplicate",
+	_, checkpoint, _, err := st.CompleteSupervisorTurn(ctx, started.Checkpoint,
 		llm.ChatResponse{Text: "ignored", Provider: "mock", Model: "mock-code"},
 		domain.RootAction{Version: domain.RootLifecycleVersion, Kind: domain.RootActionContinue, Message: "ignored"},
 		policy.Decision{Allowed: true, Reason: "allowed"}, 0)
@@ -137,6 +137,128 @@ func TestRunSupervisorRecoversStartedTurnAcrossStoreRestart(t *testing.T) {
 	}
 	if len(after) != len(before) {
 		t.Fatalf("idempotent completion duplicated events: before=%d after=%d", len(before), len(after))
+	}
+}
+
+func TestRunSupervisorRecoversCustomPendingInputAcrossStoreRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cyberagent.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	service := application.NewRunService(st)
+	_, run, err := service.Create(ctx, application.CreateRunRequest{
+		Goal: "pending input recovery", Profile: "review", ModelRoute: "lifecycle-test/model", Budget: domain.Budget{MaxTurns: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	started, err := st.BeginSupervisorTurn(ctx, run.ID, "durable custom request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.Checkpoint.PendingInput != "durable custom request" {
+		t.Fatalf("pending input was not checkpointed: %#v", started.Checkpoint)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	provider := &lifecycleProvider{responses: []string{
+		rootActionResponse(domain.RootActionContinue, "Recovered input.", "", ""),
+	}}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	result, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Recovered || result.UserMessage.Content != "durable custom request" || result.Checkpoint.PendingInput != "" || result.Checkpoint.NextTurn != 2 {
+		t.Fatalf("custom input was not recovered exactly once: %#v", result)
+	}
+	messages, err := st.ListSessionMessages(ctx, run.SessionID, true)
+	if err != nil || len(messages) != 2 || messages[0].Content != "durable custom request" {
+		t.Fatalf("unexpected recovered messages: %#v err=%v", messages, err)
+	}
+	items, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countEventType(items, events.AgentTurnStartedEvent) != 1 || countEventType(items, events.AgentTurnCompletedEvent) != 1 {
+		t.Fatalf("custom recovery duplicated events: %#v", items)
+	}
+}
+
+func TestRunSupervisorRejectsConflictingRecoveredInput(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	service := application.NewRunService(st)
+	_, run, err := service.Create(ctx, application.CreateRunRequest{
+		Goal: "input conflict", Profile: "review", Budget: domain.Budget{MaxTurns: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	started, err := st.BeginSupervisorTurn(ctx, run.ID, "first durable request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.BeginSupervisorTurn(ctx, run.ID, "different request"); apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("conflicting input code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	checkpoint, ok, err := st.GetSupervisorCheckpoint(ctx, run.ID)
+	if err != nil || !ok {
+		t.Fatalf("checkpoint lookup ok=%t err=%v", ok, err)
+	}
+	if checkpoint.AttemptID != started.Checkpoint.AttemptID || checkpoint.PendingInput != "first durable request" {
+		t.Fatalf("conflict changed durable input: %#v", checkpoint)
+	}
+}
+
+func TestRunSupervisorBoundsAndRedactsCustomInputBeforeCheckpoint(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	service := application.NewRunService(st)
+	_, run, err := service.Create(ctx, application.CreateRunRequest{
+		Goal: "input boundary", Profile: "review", Budget: domain.Budget{MaxTurns: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.BeginSupervisorTurn(ctx, run.ID, strings.Repeat("x", 64*1024+1)); apperror.CodeOf(err) != apperror.CodeResourceExhausted {
+		t.Fatalf("oversized input code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	if _, ok, err := st.GetSupervisorCheckpoint(ctx, run.ID); err != nil || ok {
+		t.Fatalf("oversized input created checkpoint ok=%t err=%v", ok, err)
+	}
+	started, err := st.BeginSupervisorTurn(ctx, run.ID, "MIMO_API_KEY="+"t"+"p-"+strings.Repeat("1", 30))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(started.Checkpoint.PendingInput, "1234567890") || !strings.Contains(started.Checkpoint.PendingInput, "[REDACTED:") {
+		t.Fatalf("pending input was not redacted: %q", started.Checkpoint.PendingInput)
 	}
 }
 
@@ -350,7 +472,7 @@ func TestRunSupervisorEnforcesPersistedExecutionTimeout(t *testing.T) {
 	if _, err := service.Start(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := st.BeginSupervisorTurn(ctx, run.ID)
+	turn, err := st.BeginSupervisorTurn(ctx, run.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +507,7 @@ func TestRunSupervisorAppliesRemainingExecutionDeadline(t *testing.T) {
 	if _, err := service.Start(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := st.BeginSupervisorTurn(ctx, run.ID)
+	turn, err := st.BeginSupervisorTurn(ctx, run.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,7 +670,7 @@ func TestRunSupervisorRootFinishCommitsTurnAndTerminalStateAtomically(t *testing
 		RunID: run.ID, NextTurn: 1, Phase: domain.SupervisorTurnStarted,
 		AttemptID: result.AttemptID, UpdatedAt: result.Checkpoint.UpdatedAt,
 	}
-	_, retried, err := st.CompleteSupervisorTurn(ctx, retryCheckpoint, "ignored retry",
+	_, retried, _, err := st.CompleteSupervisorTurn(ctx, retryCheckpoint,
 		llm.ChatResponse{Text: "ignored", Provider: provider.Name(), Model: "model"},
 		domain.RootAction{Version: domain.RootLifecycleVersion, Kind: domain.RootActionFinish, Message: "ignored", Summary: "review complete"},
 		policy.Decision{Allowed: true, Reason: "allowed"}, 0)
@@ -827,6 +949,7 @@ func (nilResponseProvider) SupportsJSONMode(string) bool { return false }
 
 type lifecycleProvider struct {
 	responses []string
+	requests  []llm.ChatRequest
 	calls     int
 }
 
@@ -836,7 +959,7 @@ func (*lifecycleProvider) ListModels(context.Context) ([]llm.ModelInfo, error) {
 	return []llm.ModelInfo{{ID: "model", Provider: "lifecycle-test"}}, nil
 }
 
-func (p *lifecycleProvider) Chat(ctx context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+func (p *lifecycleProvider) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -844,6 +967,7 @@ func (p *lifecycleProvider) Chat(ctx context.Context, _ llm.ChatRequest) (*llm.C
 		return nil, apperror.New(apperror.CodeFailedPrecondition, "lifecycle test response exhausted")
 	}
 	text := p.responses[p.calls]
+	p.requests = append(p.requests, req)
 	p.calls++
 	return &llm.ChatResponse{
 		Text: text, Provider: p.Name(), Model: "model",

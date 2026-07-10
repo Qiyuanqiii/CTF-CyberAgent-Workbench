@@ -23,6 +23,7 @@ type SupervisorCheckpoint struct {
 	NextTurn        int
 	Phase           SupervisorPhase
 	AttemptID       string
+	PendingInput    string
 	LastError       string
 	InputTokens     int64
 	OutputTokens    int64
@@ -49,6 +50,9 @@ func (c SupervisorCheckpoint) Validate() error {
 	case SupervisorIdle, SupervisorWaiting, SupervisorRunCompleted, SupervisorRunFailed:
 		if strings.TrimSpace(c.AttemptID) != "" {
 			return fmt.Errorf("checkpoint phase %s cannot have an active attempt", c.Phase)
+		}
+		if strings.TrimSpace(c.PendingInput) != "" {
+			return fmt.Errorf("checkpoint phase %s cannot have pending input", c.Phase)
 		}
 	case SupervisorTurnStarted, SupervisorTurnFailed:
 		if strings.TrimSpace(c.AttemptID) == "" {

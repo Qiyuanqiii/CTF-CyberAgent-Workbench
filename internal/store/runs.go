@@ -125,6 +125,18 @@ func (s *SQLiteStore) GetRun(ctx context.Context, id string) (domain.Run, error)
 	return scanRun(row)
 }
 
+func (s *SQLiteStore) GetRunBySession(ctx context.Context, sessionID string) (domain.Run, bool, error) {
+	run, err := scanRun(s.db.QueryRowContext(ctx, `SELECT id, mission_id, session_id, status, config_json, budget_json,
+		started_at, finished_at, created_at, updated_at FROM runs WHERE session_id = ?`, strings.TrimSpace(sessionID)))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Run{}, false, nil
+	}
+	if err != nil {
+		return domain.Run{}, false, err
+	}
+	return run, true, nil
+}
+
 func (s *SQLiteStore) ListRuns(ctx context.Context, filter domain.RunFilter) ([]domain.Run, error) {
 	query := `SELECT id, mission_id, session_id, status, config_json, budget_json,
 		started_at, finished_at, created_at, updated_at FROM runs WHERE 1=1`
