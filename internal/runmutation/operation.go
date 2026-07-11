@@ -32,6 +32,8 @@ type Operation struct {
 	RunID              string
 	SessionID          string
 	WorkspaceID        string
+	LeaseID            string
+	LeaseGeneration    int64
 	ToolName           string
 	TargetKind         TargetKind
 	TargetID           string
@@ -40,10 +42,20 @@ type Operation struct {
 }
 
 func (o Operation) Validate() error {
+	return o.validate(true)
+}
+
+// ValidateStored accepts records without an execution lease because leases are
+// transient fencing credentials and are intentionally not persisted with intent.
+func (o Operation) ValidateStored() error {
+	return o.validate(false)
+}
+
+func (o Operation) validate(requireSupervisorLease bool) error {
 	for label, value := range map[string]string{
 		"invocation id": o.InvocationID, "run id": o.RunID, "session id": o.SessionID,
 		"workspace id": o.WorkspaceID, "tool name": o.ToolName, "target id": o.TargetID,
-		"requester": o.RequestedBy,
+		"lease id": o.LeaseID, "requester": o.RequestedBy,
 	} {
 		if !utf8.ValidString(value) || strings.TrimSpace(value) != value || len([]rune(value)) > MaxIdentityRunes {
 			return fmt.Errorf("structured mutation %s must be normalized and bounded UTF-8", label)
@@ -52,6 +64,12 @@ func (o Operation) Validate() error {
 	if o.InvocationID == "" || o.RunID == "" || o.SessionID == "" || o.ToolName == "" ||
 		o.TargetID == "" || o.RequestedBy == "" {
 		return errors.New("structured mutation invocation, Run, Session, tool, target, and requester are required")
+	}
+	if (o.LeaseID == "") != (o.LeaseGeneration == 0) || o.LeaseGeneration < 0 {
+		return errors.New("structured mutation execution lease identity and generation are inconsistent")
+	}
+	if requireSupervisorLease && o.RequestedBy == "run_supervisor" && o.LeaseID == "" {
+		return errors.New("supervisor structured mutation requires a Run execution lease")
 	}
 	if !validDigest(o.KeyDigest) || !validDigest(o.RequestFingerprint) {
 		return errors.New("structured mutation key and request fingerprints must be lowercase SHA-256 digests")

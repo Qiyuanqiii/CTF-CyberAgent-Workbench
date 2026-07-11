@@ -40,7 +40,7 @@ Invoke-RestMethod "http://127.0.0.1:8765/api/v1/runs?limit=20" -Headers $headers
 - 只接受无 body 的 `GET`。没有写路由、CORS 响应头或浏览器跨源授权。
 - request target 最大 8 KiB，query 最大 4 KiB，response 最大 8 MiB，header 上限为 32 KiB。
 - HTTP handler 构造后只保留 token 的 SHA-256 摘要；明文仍可能存在于启动环境或短期进程内存，但不会写入配置、SQLite 或 Run events。
-- Artifact API 只返回 descriptor，不读取或返回正文；Run detail 不返回 checkpoint pending input。
+- Artifact API 只返回 descriptor，不读取或返回正文；Run detail 不返回 checkpoint pending input 或 execution fencing token。租约摘要仅包含 owner、generation、状态与时间。
 - 一个有效 token 可以读取该进程数据库暴露的全部 API 资源，应把它视为本地管理员凭据。
 
 - The listener, HTTP `Host`, and client address must all be loopback. `0.0.0.0`, an empty host, and public clients are rejected.
@@ -48,7 +48,7 @@ Invoke-RestMethod "http://127.0.0.1:8765/api/v1/runs?limit=20" -Headers $headers
 - Only bodyless `GET` requests are accepted. There are no write routes, CORS response headers, or browser cross-origin grants.
 - Request targets are capped at 8 KiB, queries at 4 KiB, responses at 8 MiB, and headers at 32 KiB.
 - After construction, the HTTP handler retains only a SHA-256 token digest. Plaintext may still exist in the launch environment or short-lived process memory, but is never written to configuration, SQLite, or Run events.
-- Artifact routes return descriptors only and never load content. Run detail omits checkpoint pending input.
+- Artifact routes return descriptors only and never load content. Run detail omits checkpoint pending input and the execution fencing token; its lease summary contains only owner, generation, status, and timestamps.
 - A valid token can read every API resource exposed from the process database and should be treated as a local administrator credential.
 
 ## Endpoints
@@ -58,7 +58,7 @@ Invoke-RestMethod "http://127.0.0.1:8765/api/v1/runs?limit=20" -Headers $headers
 | `GET` | `/api/v1` | API and application versions plus top-level resources |
 | `GET` | `/api/v1/health` | Health and SQLite schema version |
 | `GET` | `/api/v1/runs` | Runs; `status`, `mission_id`, pagination |
-| `GET` | `/api/v1/runs/{run_id}` | Run, Mission, checkpoint metadata, tool usage |
+| `GET` | `/api/v1/runs/{run_id}` | Run, Mission, checkpoint metadata, tool usage, token-free execution-lease summary |
 | `GET` | `/api/v1/runs/{run_id}/events` | Ordered Run events; pagination |
 | `GET` | `/api/v1/runs/{run_id}/work-items` | `status`, `owner`, pagination |
 | `GET` | `/api/v1/runs/{run_id}/notes` | `status`, `category`, `visibility`, `owner`, `tag`, `pinned`, pagination |
@@ -115,6 +115,7 @@ Pagination is a bounded live SQLite projection, not a multi-request snapshot. Ap
 ## 当前限制 / Current Limits
 
 - No write API, WebSocket event stream, OpenAPI document, browser UI, or cross-process active-call cancellation.
+- Execution-lease rows coordinate workers, but the API exposes neither `lease_id` nor any write operation that accepts a fencing token.
 - No Artifact content route. Use the authenticated local CLI `artifact read` when content is explicitly required.
 - No real Shell, LocalSandbox, or Docker execution. Existing approvals still resolve to audited dry-run results.
 - No per-resource authorization below the process token. Future remote or multi-user use requires a separate identity and authorization design.

@@ -22,6 +22,8 @@ Use these files first when resuming:
 - `docs/http-api.md`
 - `internal/app/app.go`
 - `internal/application/run_supervisor.go`
+- `internal/domain/execution_lease.go`
+- `internal/store/execution_leases.go`
 - `internal/domain/root_action.go`
 - `internal/domain/work_item.go`
 - `internal/domain/note.go`
@@ -62,7 +64,7 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 87%.
+- Overall product vision: about 88%.
 - v0.1 generic agent MVP: about 99%.
 - V2 run-centric runtime: about 99%.
 - Project scaffold/framework: about 99%.
@@ -70,7 +72,7 @@ Use these files first when resuming:
 Completed:
 
 - Go CLI entrypoint and command dispatch.
-- Authenticated loopback-only `api.v1` read control plane with stable envelopes, typed errors, bounded cursor pagination, graceful shutdown, and Run/Session/Event/WorkItem/Note/Artifact/ToolRound inspection.
+- Authenticated loopback-only `api.v1` read control plane with stable envelopes, typed errors, bounded cursor pagination, graceful shutdown, and Run/Session/Event/WorkItem/Note/Artifact/ToolRound plus token-free execution-lease inspection.
 - Mock LLM provider and model router.
 - CGO-backed SQLite store using `github.com/mattn/go-sqlite3`.
 - Workspace layout under `~/.cyberagent-workbench`.
@@ -93,6 +95,9 @@ Completed:
 - `tool schema [work_item_create|note_create]` exports provider-ready definitions. `tool invoke` accepts one bounded JSON payload or UTF-8 payload file, requires a stable operation key, derives trusted scope from the Run, and fixes the audit requester to `cli`.
 - `structured_tool_operations` stores only domain-separated operation-key digests and normalized redacted-intent fingerprints. Same-intent replay returns the original entity, changed intent conflicts, independent SQLite connections converge concurrently, and successful entity/Policy/domain/tool events commit atomically.
 - Schema v16 adds durable Supervisor tool rounds/calls and connects only `work_item_create`/`note_create` to the Provider loop. Each response is limited to four calls and each turn to four rounds; the successful model event and pending batch commit atomically, and restart recovery resumes only pending calls.
+- Schema v17 adds one durable execution lease per Run, explicit replay tokens, heartbeat renewal, generation takeover, and checkpoint fencing. `Step` holds one turn lease; `Execute` holds one lease across its bounded loop.
+- Every Supervisor checkpoint/model/tool mutation validates the active fencing token transactionally. Structured-memory budget charging and entity persistence both validate it, so a stale worker consumes neither budget nor state after takeover.
+- Lease acquisition/takeover/release events contain owner, generation, and timestamps but never `lease_id`. `run lease` and Run detail expose the same token-free metadata.
 - Provider call IDs are validated but never persisted. Stable local call IDs and Gateway operation keys derive from Run, turn, tool name, and redacted canonical arguments, so changed Provider IDs and repeated semantic intent converge without duplicate entities or success events.
 - Anthropic-compatible non-streaming and SSE paths now send tool definitions, encode `tool_use`/`tool_result` transcripts, parse streamed argument deltas, and return final typed ToolCalls. Protocol repair removes all advertised tools.
 - Policy denials and tool-budget exhaustion become bounded metadata-only error results. Storage/cancellation/internal failures leave the call pending; Shell, file, process, network, update, delete, completion, and archive tools remain unavailable to the model.
@@ -128,7 +133,7 @@ Completed:
 - Reworked `docs/architecture.md` around run-scoped budget, event, sandbox, report, approval, and recovery ownership without copying the reference implementation.
 - Replaced the obsolete README migration/scaffold copy with a bilingual Chinese/English product overview, current capabilities, architecture boundary, and development-scope notice.
 - Added `docs/TASK_BOOK.md` with phased migration tasks, acceptance criteria, compatibility rules, and CTF deferred to the final phase.
-- Versioned SQLite migrations through schema v16: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative model budgets, durable pending input, restart-safe protocol repair, Work Board, Notes, durable per-call approvals, revocable Session grants, atomic tool budgets, typed script processes, Run tool-output Artifacts, idempotent structured-memory operations, and durable Supervisor tool rounds/calls; each version is checksummed and transactional.
+- Versioned SQLite migrations through schema v17: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative model budgets, durable pending input, restart-safe protocol repair, Work Board, Notes, durable per-call approvals, revocable Session grants, atomic tool budgets, typed script processes, Run tool-output Artifacts, idempotent structured-memory operations, durable Supervisor tool rounds/calls, and Run execution leases with checkpoint fencing; each version is checksummed and transactional.
 - Migration tests cover idempotence, legacy data preservation, checksum history, and failed-migration rollback.
 - Unified `internal/idgen` now backs agent tasks, sessions, tool runs, file edits, Mission/Run, and event IDs.
 - Added pure Go Mission, Scope, Budget, RunConfig, Run status machine, and legal transition checks.
@@ -216,7 +221,7 @@ Not done yet:
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
 - HTTP write/control routes, WebSocket event streaming, TypeScript Web UI, and Rust analyzer processes; the bounded local read API is complete.
-- Provider cost budgets, AgentCoordinator, and Findings/Evidence/Report; Provider dispatch for the create-only WorkItem/Note tools and dedicated TUI views remain pending.
+- Provider cost budgets, AgentCoordinator, and Findings/Evidence/Report; create-only WorkItem/Note Provider dispatch and dedicated TUI views are complete.
 - Real Local/Docker execution and Sandbox Artifact export from an actual process; current terminal Shell/ScriptProcess completion remains dry-run only.
 
 ## Code Audit Notes
@@ -241,6 +246,8 @@ The schema v15 audit found no high-severity issue and fixed three low-risk robus
 
 The schema v16 audit found no high-severity issue and fixed four robustness defects before release. Application and Store originally canonicalized typed JSON in different field orders; repeated semantic intent in a later round originally reused a local call ID; concurrent recovery could produce different durable results because `replayed` is timing-dependent; and protocol repair still advertised tools despite forbidding them in text. Canonical JSON is now shared across boundaries, local IDs include the round while operation keys remain semantic, Provider results omit timing-dependent replay metadata, and repair requests carry no tools. The Store independently revalidates strict typed payloads, and concurrent result recording across two SQLite connections converges on one result and one round-completion event.
 
+The schema v17 audit found no unresolved high- or medium-severity issue and fixed six concurrency/security defects before release. Structured-memory writes were fenced but their earlier budget charge was not; durable idempotency records incorrectly required a transient lease; implicit same-owner acquisition replay allowed concurrent calls to share a lease; acquisition/takeover updates did not verify affected rows; the fencing token could have escaped through lease events or Gateway outcomes; and the required-lease check was briefly placed in generic `ToolCall.Validate`, which also validates deliberately token-free safe outcomes. Budget and entity transactions now independently verify the same token, stored intent uses a separate validation mode, replay requires the explicit current `lease_id`, every conditional update checks one affected row, Gateway ingress enforces the lease, and token values remain confined to the lease/checkpoint tables and process memory. Tests cover independent SQLite connections, expiry takeover, heartbeat beyond the original TTL, legacy checkpoint migration, stale-write rejection, and token-free CLI/API/event projections.
+
 Residual risks to address soon:
 
 - `staticcheck ./...` is clean; the prior TUI `S1008`, `S1011`, and unused-helper `U1000` findings were removed in this slice.
@@ -248,6 +255,7 @@ Residual risks to address soon:
 - Schema v13 removes the former Script Run/ToolRun two-transaction window. Mission, Session, Run, budget, Process, Approval, and initial events now roll back together on any failure.
 - Schema v14 commits each Artifact row and `artifact.created` together. If capture fails after a terminal proposal was committed, replay resumes capture without repeating execution or approval; ordinary events contain metadata only, while hashes cover redacted content rather than inaccessible raw secrets.
 - Schema v16 exposes only create-only WorkItem/Note calls. Model-driven update, completion, cancellation, archive, restore, file, Shell, process, and network actions stay disabled until their version, approval, Sandbox, and evidence semantics are separately reviewed.
+- Schema v17 provides cross-process execution exclusion and stale-write fencing for one local SQLite database. It is not a multi-host consensus protocol, and live active-call cancellation/subscription remains process-local until a separately authorized API/WebSocket control path exists.
 - Structured-memory replays, changed-intent conflicts, authoritative scope failures, and Policy denials consume tool-call budget because each is a well-formed invocation attempt. Malformed payloads and missing identities do not consume budget.
 - The current Policy checker conservatively rejects Notes containing dangerous scanner command text even when used descriptively. Future intent-aware classification may refine that behavior, but permanent cyber-action denial must remain authoritative.
 - A workspace read Artifact contains exactly the bounded content returned by that invocation. It does not reconstruct bytes intentionally excluded by the read tool's own requested maximum.
@@ -277,7 +285,7 @@ Residual risks to address soon:
 - Persisted `model.delta` events intentionally contain counters rather than model text. Historical SQLite replay can reconstruct progress and accounting, not token-by-token content; the current live envelope is also metadata-only until a safe lifecycle/text projection exists.
 - Active-call subscriptions are process-local and non-replayable. A full 32-event buffer closes that subscriber; consumers must inspect `Dropped()` and recover from durable Run events.
 - Application cancellation is audit-first: if SQLite cannot append the request, the registry does not silently signal an unaudited cancellation. Parent process-context cancellation remains the emergency path and still records `model.failed(cancelled)` when possible.
-- The read-only Go API can inspect durable state from another process, but cross-process cancellation is not available until a separately audited control/WebSocket path hosts the shared registry; a second process still cannot observe or signal another process's in-memory call.
+- The read-only Go API can inspect durable state and token-free lease activity from another process, but cross-process cancellation is not available until a separately audited control/WebSocket path hosts the shared registry; a second process still cannot inspect or signal another process's in-memory active-call channel.
 - TUI live state is transient metadata, not a durable transcript. Disconnect or process exit must recover from SQLite Run events, and user-visible text streaming remains disabled.
 - When no active registry item exists, `Ctrl+X` cancels the current application request context after a bounded lookup. This covers legacy/pre-activation calls without fabricating an audited Run cancellation event.
 - Root `wait` currently maps to `paused` plus a textual reason; structured dependencies and approvals are future Coordinator/Work Board work.
@@ -309,6 +317,7 @@ go run ./cmd/cyberagent run execute <run-id> --max-steps 2 --finish --summary "p
 go run ./cmd/cyberagent run finish <run-id> --summary "review complete"
 go run ./cmd/cyberagent run fail <run-id> --reason "blocked by provider"
 go run ./cmd/cyberagent run checkpoint <run-id>
+go run ./cmd/cyberagent run lease <run-id>
 go run ./cmd/cyberagent run usage <run-id>
 go run ./cmd/cyberagent tool schema
 go run ./cmd/cyberagent tool schema work_item_create
@@ -446,12 +455,13 @@ Expected context behavior:
 - The schema v16 gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. Tests cover Anthropic request/response/SSE tool blocks, strict Store revalidation, model/tool transactional persistence, restart after entity creation but before result recording, semantic replay across attempts and rounds, Policy denial, budget exhaustion, four-round bounds, and cross-Store result convergence. An isolated real-binary mock smoke exported both schemas and completed one Run turn with `tool_rounds: 0`/`tool_calls: 0`; its runtime was removed. Credential scanning found only the intentional redaction-test fixture and no user test keys.
 - The local read-API gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. Tests cover real SQLite state, every published resource family, endpoint-scoped pagination, historical Supervisor tool rounds, secret redaction, omitted Artifact content/checkpoint input, loopback and bearer boundaries, internal error hiding, 32 concurrent readers, CLI token non-persistence, and graceful server cancellation. An isolated real-binary smoke verified `v0.1.0`, `api.v1`, schema v16, authenticated 200, bad-token 401, POST 405, no CORS, no environment-token echo, and no token in the closed runtime database; its process and runtime were removed.
 - The Run-aware TUI gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. Real SQLite tests cover all four activity views, pending tool rounds, exact Grant linkage, `g` key async completion, later safe Shell auto-dry-run, grant-authorized crash recovery, current-Policy recheck before grant creation, cross-Session approve/grant/deny rejection with no state change, permanent dangerous-command denial, and terminal-cell-safe Chinese rendering. An isolated real-binary smoke created a Run, WorkItem, Note, active Shell Grant, and auto-dry-run proposal, rendered their shared TUI snapshot, and removed its runtime.
+- The schema v17 execution-lease gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. Tests cover eight-way cross-connection acquisition, explicit replay, expiry takeover, stale checkpoint/renew/release rejection, v16 pending-checkpoint migration, long-call heartbeat, one lease across two Execute turns, atomic stale tool-budget rejection, zero stale entity/event writes, and token-free Outcome/CLI/API/event projections.
 
 ## Recommended Next Slice
 
-Continue P9 and runtime coordination after the read API:
+Continue P9 now that cross-process execution is fenced:
 
-- Define and test a durable cross-process Run execution lease before adding API writes, cancellation, WebSocket control, or multiple worker processes; the current active-call registry remains process-local.
-- Generate an OpenAPI contract from the stabilized Go DTOs before starting React/Vite so TypeScript does not duplicate validation or security policy.
+- Generate and contract-test an OpenAPI document from the stabilized Go read DTOs before starting React/Vite, so TypeScript does not duplicate validation or security policy.
+- Design a read-only WebSocket/Event stream and a separately authorized cross-process cancellation operation on top of the lease model; never expose or accept a client-supplied fencing token.
 - Keep real Local/Docker execution disabled until the Sandbox manifest, resource/network limits, cancellation, and Artifact export path pass a separate audit.
 - Keep TypeScript, Rust, and model providers unable to bypass the Go Tool Gateway or policy boundary.

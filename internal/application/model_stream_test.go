@@ -200,7 +200,8 @@ func TestSupervisorModelDeltaLedgerIsOrderedAndIdempotent(t *testing.T) {
 	}
 	defer st.Close()
 	run := newStartedRunForProvider(t, st, "stream-test", domain.Budget{MaxTurns: 2})
-	turn, err := st.BeginSupervisorTurn(context.Background(), run.ID, "delta ledger")
+	turn, err := st.BeginSupervisorTurn(context.Background(),
+		acquireTestRunExecutionLease(t, context.Background(), st, run.ID), "delta ledger")
 	if err != nil {
 		t.Fatal(err)
 	}

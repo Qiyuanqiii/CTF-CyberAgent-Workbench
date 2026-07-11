@@ -30,6 +30,9 @@ func (s *SQLiteStore) CreateWorkItemToolOperation(ctx context.Context, operation
 	if err := acquireStructuredMutationWriteLockTx(ctx, tx, operation.RunID); err != nil {
 		return domain.WorkItem{}, false, err
 	}
+	if err := requireStructuredMutationExecutionLeaseTx(ctx, tx, operation); err != nil {
+		return domain.WorkItem{}, false, err
+	}
 
 	existing, found, err := getStructuredOperationByKeyTx(ctx, tx, operation.KeyDigest)
 	if err != nil {
@@ -86,6 +89,9 @@ func (s *SQLiteStore) CreateNoteToolOperation(ctx context.Context, operation run
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := acquireStructuredMutationWriteLockTx(ctx, tx, operation.RunID); err != nil {
+		return domain.Note{}, false, err
+	}
+	if err := requireStructuredMutationExecutionLeaseTx(ctx, tx, operation); err != nil {
 		return domain.Note{}, false, err
 	}
 
@@ -207,10 +213,21 @@ func normalizeStructuredOperation(operation runmutation.Operation) runmutation.O
 	operation.RunID = strings.TrimSpace(operation.RunID)
 	operation.SessionID = strings.TrimSpace(operation.SessionID)
 	operation.WorkspaceID = strings.TrimSpace(operation.WorkspaceID)
+	operation.LeaseID = strings.TrimSpace(operation.LeaseID)
 	operation.ToolName = strings.TrimSpace(operation.ToolName)
 	operation.TargetID = strings.TrimSpace(operation.TargetID)
 	operation.RequestedBy = strings.TrimSpace(redact.String(operation.RequestedBy))
 	return operation
+}
+
+func requireStructuredMutationExecutionLeaseTx(ctx context.Context, tx *sql.Tx,
+	operation runmutation.Operation,
+) error {
+	if operation.RequestedBy != "run_supervisor" {
+		return nil
+	}
+	return requireRunExecutionLeaseTx(ctx, tx, operation.RunID, operation.LeaseID,
+		operation.LeaseGeneration)
 }
 
 func requireStructuredOperationBindingTx(ctx context.Context, tx *sql.Tx, operation runmutation.Operation) (string, error) {
@@ -323,7 +340,7 @@ func getStructuredOperationByKey(ctx context.Context, queryer interface {
 	}
 	operation.TargetKind = runmutation.TargetKind(targetKind)
 	operation.CreatedAt = parseTS(createdAt)
-	if err := operation.Validate(); err != nil {
+	if err := operation.ValidateStored(); err != nil {
 		return runmutation.Operation{}, fmt.Errorf("invalid stored structured mutation: %w", err)
 	}
 	return operation, nil

@@ -11,6 +11,7 @@ import (
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/contextmgr"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/redact"
@@ -33,7 +34,7 @@ const maxModelRetryAttempts = 5
 const maxProtocolRepairReasonChars = 1024
 
 type SupervisorStore interface {
-	BeginSupervisorTurn(ctx context.Context, runID string, pendingInput string) (domain.SupervisorTurn, error)
+	BeginSupervisorTurn(ctx context.Context, lease domain.RunExecutionLease, pendingInput string) (domain.SupervisorTurn, error)
 	BindSupervisorTurnInput(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string) (domain.SupervisorCheckpoint, error)
 	NextSupervisorModelAttempt(ctx context.Context, checkpoint domain.SupervisorCheckpoint,
 		protocolRepair int, toolRound int) (int, int, error)
@@ -45,7 +46,7 @@ type SupervisorStore interface {
 	RecordSupervisorProtocolFailure(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, response llm.ChatResponse, reason string, requestRepair bool) (domain.SupervisorCheckpoint, error)
 	CompleteSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, response llm.ChatResponse, action domain.RootAction, decision policy.Decision, elapsed time.Duration) (domain.Run, domain.SupervisorCheckpoint, session.TurnMessages, error)
 	FailSupervisorTurn(ctx context.Context, checkpoint domain.SupervisorCheckpoint, cause string, elapsed time.Duration) (domain.SupervisorCheckpoint, error)
-	FinalizeSupervisorRun(ctx context.Context, runID string, target domain.RunStatus, summary string) (domain.Run, domain.SupervisorCheckpoint, error)
+	FinalizeSupervisorRun(ctx context.Context, lease domain.RunExecutionLease, target domain.RunStatus, summary string) (domain.Run, domain.SupervisorCheckpoint, error)
 	GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error)
 	GetRun(ctx context.Context, id string) (domain.Run, error)
 	ListSessionMessages(ctx context.Context, sessionID string, includeCompacted bool) ([]session.Message, error)
@@ -57,8 +58,16 @@ type SupervisorStore interface {
 		result domain.SupervisorToolResult) (domain.SupervisorToolCall, bool, error)
 }
 
+type RunExecutionLeaseStore interface {
+	AcquireRunExecutionLease(ctx context.Context, request domain.AcquireRunExecutionLeaseRequest) (domain.RunExecutionLeaseAcquisition, error)
+	RenewRunExecutionLease(ctx context.Context, expected domain.RunExecutionLease, ttl time.Duration) (domain.RunExecutionLease, error)
+	ReleaseRunExecutionLease(ctx context.Context, expected domain.RunExecutionLease) (domain.RunExecutionLease, bool, error)
+	GetRunExecutionLease(ctx context.Context, runID string) (domain.RunExecutionLease, bool, error)
+}
+
 type RunSupervisorStore interface {
 	SupervisorStore
+	RunExecutionLeaseStore
 	StructuredMemoryMutationStore
 	toolgateway.Store
 }
@@ -122,21 +131,57 @@ type ExecutionResult struct {
 }
 
 type RunSupervisor struct {
-	store       SupervisorStore
+	store       RunSupervisorStore
 	router      *llm.Router
 	checker     policy.Checker
 	retryPolicy ModelRetryPolicy
 	activeCalls *ActiveCallRegistry
 	tools       *toolgateway.Gateway
+	leaseOwner  string
+	leasePolicy RunExecutionLeasePolicy
 }
 
 func NewRunSupervisor(store RunSupervisorStore, router *llm.Router, checker policy.Checker) *RunSupervisor {
 	return &RunSupervisor{
 		store: store, router: router, checker: checker, retryPolicy: DefaultModelRetryPolicy(),
 		activeCalls: NewActiveCallRegistry(),
+		leaseOwner:  idgen.New("worker"), leasePolicy: DefaultRunExecutionLeasePolicy(),
 		tools: toolgateway.New(store, checker).
 			WithStructuredMemoryExecutor(NewStructuredMemoryToolExecutor(store)),
 	}
+}
+
+type RunExecutionLeasePolicy struct {
+	TTL           time.Duration
+	RenewInterval time.Duration
+}
+
+func DefaultRunExecutionLeasePolicy() RunExecutionLeasePolicy {
+	return RunExecutionLeasePolicy{TTL: 30 * time.Second, RenewInterval: 10 * time.Second}
+}
+
+func (p RunExecutionLeasePolicy) Validate() error {
+	if err := domain.ValidateRunExecutionLeaseTTL(p.TTL); err != nil {
+		return err
+	}
+	if p.RenewInterval <= 0 || p.RenewInterval >= p.TTL {
+		return errors.New("run execution lease renewal interval must be positive and shorter than its TTL")
+	}
+	return nil
+}
+
+func (s *RunSupervisor) WithRunExecutionLeasePolicy(policy RunExecutionLeasePolicy) *RunSupervisor {
+	if s != nil {
+		s.leasePolicy = policy
+	}
+	return s
+}
+
+func (s *RunSupervisor) WithRunExecutionLeaseOwner(ownerID string) *RunSupervisor {
+	if s != nil {
+		s.leaseOwner = strings.TrimSpace(ownerID)
+	}
+	return s
 }
 
 type ModelRetryPolicy struct {
@@ -179,7 +224,28 @@ func (s *RunSupervisor) step(ctx context.Context, runID string, requestedInput s
 	if s == nil || s.store == nil || s.router == nil || s.checker == nil || s.activeCalls == nil || s.tools == nil {
 		return LifecycleResult{}, apperror.New(apperror.CodeFailedPrecondition, "run supervisor dependencies are required")
 	}
-	turn, err := s.store.BeginSupervisorTurn(ctx, runID, requestedInput)
+	runID = strings.TrimSpace(runID)
+	run, err := s.store.GetRun(ctx, runID)
+	if err != nil {
+		return LifecycleResult{}, apperror.Normalize(err)
+	}
+	if run.Status != domain.RunRunning {
+		return LifecycleResult{}, apperror.New(apperror.CodeFailedPrecondition,
+			fmt.Sprintf("run %s is %s; supervisor requires running", run.ID, run.Status))
+	}
+	var result LifecycleResult
+	err = s.withRunExecutionLease(ctx, run.ID, func(leaseCtx context.Context, lease domain.RunExecutionLease) error {
+		var stepErr error
+		result, stepErr = s.stepWithLease(leaseCtx, lease, requestedInput)
+		return stepErr
+	})
+	return result, err
+}
+
+func (s *RunSupervisor) stepWithLease(ctx context.Context, lease domain.RunExecutionLease,
+	requestedInput string,
+) (LifecycleResult, error) {
+	turn, err := s.store.BeginSupervisorTurn(ctx, lease, requestedInput)
 	if err != nil {
 		return LifecycleResult{}, apperror.Normalize(err)
 	}
@@ -503,49 +569,77 @@ func (s *RunSupervisor) Execute(ctx context.Context, runID string, maxSteps int)
 		return ExecutionResult{}, apperror.New(apperror.CodeInvalidArgument, "max steps must be positive")
 	}
 	result := ExecutionResult{RunID: strings.TrimSpace(runID), Steps: make([]LifecycleResult, 0)}
-	for range maxSteps {
-		run, err := s.store.GetRun(ctx, result.RunID)
-		if err != nil {
-			return result, apperror.Normalize(err)
-		}
-		result.RunStatus = run.Status
-		if run.Terminal() {
-			result.StopReason = "run_terminal"
-			return result, nil
-		}
-		if run.Status == domain.RunPaused {
-			result.StopReason = "run_paused"
-			return result, nil
-		}
-		if run.Status == domain.RunWaitingApproval {
-			result.StopReason = "waiting_approval"
-			return result, nil
-		}
-		step, err := s.Step(ctx, result.RunID)
-		if step.Turn > 0 {
-			result.Steps = append(result.Steps, step)
-		}
-		if err != nil {
-			result.StopReason = strings.ToLower(string(apperror.CodeOf(err)))
-			return result, err
-		}
-		result.RunStatus = step.RunStatus
-		switch step.Action.Kind {
-		case domain.RootActionFinish:
-			result.StopReason = "root_finish"
-			return result, nil
-		case domain.RootActionWait:
-			result.StopReason = "root_wait"
-			return result, nil
-		}
-	}
 	run, err := s.store.GetRun(ctx, result.RunID)
 	if err != nil {
 		return result, apperror.Normalize(err)
 	}
 	result.RunStatus = run.Status
+	if run.Terminal() {
+		result.StopReason = "run_terminal"
+		return result, nil
+	}
+	if run.Status == domain.RunPaused {
+		result.StopReason = "run_paused"
+		return result, nil
+	}
+	if run.Status == domain.RunWaitingApproval {
+		result.StopReason = "waiting_approval"
+		return result, nil
+	}
+	err = s.withRunExecutionLease(ctx, result.RunID, func(leaseCtx context.Context,
+		lease domain.RunExecutionLease,
+	) error {
+		return s.executeWithLease(leaseCtx, lease, maxSteps, &result)
+	})
+	return result, err
+}
+
+func (s *RunSupervisor) executeWithLease(ctx context.Context, lease domain.RunExecutionLease,
+	maxSteps int, result *ExecutionResult,
+) error {
+	for range maxSteps {
+		run, err := s.store.GetRun(ctx, result.RunID)
+		if err != nil {
+			return apperror.Normalize(err)
+		}
+		result.RunStatus = run.Status
+		if run.Terminal() {
+			result.StopReason = "run_terminal"
+			return nil
+		}
+		if run.Status == domain.RunPaused {
+			result.StopReason = "run_paused"
+			return nil
+		}
+		if run.Status == domain.RunWaitingApproval {
+			result.StopReason = "waiting_approval"
+			return nil
+		}
+		step, err := s.stepWithLease(ctx, lease, "")
+		if step.Turn > 0 {
+			result.Steps = append(result.Steps, step)
+		}
+		if err != nil {
+			result.StopReason = strings.ToLower(string(apperror.CodeOf(err)))
+			return err
+		}
+		result.RunStatus = step.RunStatus
+		switch step.Action.Kind {
+		case domain.RootActionFinish:
+			result.StopReason = "root_finish"
+			return nil
+		case domain.RootActionWait:
+			result.StopReason = "root_wait"
+			return nil
+		}
+	}
+	run, err := s.store.GetRun(ctx, result.RunID)
+	if err != nil {
+		return apperror.Normalize(err)
+	}
+	result.RunStatus = run.Status
 	result.StopReason = "step_limit"
-	return result, nil
+	return nil
 }
 
 func (s *RunSupervisor) Finalize(ctx context.Context, runID string, outcome LifecycleOutcome, summary string) (FinalizationResult, error) {
@@ -561,11 +655,133 @@ func (s *RunSupervisor) Finalize(ctx context.Context, runID string, outcome Life
 	default:
 		return FinalizationResult{}, apperror.New(apperror.CodeInvalidArgument, "lifecycle outcome must be completed or failed")
 	}
-	run, checkpoint, err := s.store.FinalizeSupervisorRun(ctx, strings.TrimSpace(runID), target, summary)
+	runID = strings.TrimSpace(runID)
+	current, err := s.store.GetRun(ctx, runID)
 	if err != nil {
 		return FinalizationResult{}, apperror.Normalize(err)
 	}
-	return FinalizationResult{Run: run, Checkpoint: checkpoint, Outcome: outcome, Summary: redact.String(strings.TrimSpace(summary))}, nil
+	if current.Status == target {
+		return s.finalizationResult(ctx, current, outcome, summary)
+	}
+	if current.Terminal() {
+		return FinalizationResult{}, apperror.New(apperror.CodeConflict,
+			fmt.Sprintf("run %s is already terminal as %s", current.ID, current.Status))
+	}
+	var finalized FinalizationResult
+	err = s.withRunExecutionLease(ctx, current.ID, func(leaseCtx context.Context,
+		lease domain.RunExecutionLease,
+	) error {
+		run, checkpoint, finalizeErr := s.store.FinalizeSupervisorRun(leaseCtx, lease, target, summary)
+		if finalizeErr == nil {
+			finalized = FinalizationResult{Run: run, Checkpoint: checkpoint, Outcome: outcome,
+				Summary: redact.String(strings.TrimSpace(summary))}
+		}
+		return finalizeErr
+	})
+	if err != nil && finalized.Run.ID == "" {
+		latest, getErr := s.store.GetRun(ctx, current.ID)
+		if getErr == nil {
+			switch {
+			case latest.Status == target:
+				return s.finalizationResult(ctx, latest, outcome, summary)
+			case latest.Terminal():
+				return FinalizationResult{}, apperror.New(apperror.CodeConflict,
+					fmt.Sprintf("run %s is already terminal as %s", latest.ID, latest.Status))
+			}
+		}
+	}
+	return finalized, apperror.Normalize(err)
+}
+
+func (s *RunSupervisor) finalizationResult(ctx context.Context, run domain.Run,
+	outcome LifecycleOutcome, summary string,
+) (FinalizationResult, error) {
+	checkpoint, ok, err := s.store.GetSupervisorCheckpoint(ctx, run.ID)
+	if err != nil {
+		return FinalizationResult{}, apperror.Normalize(err)
+	}
+	if !ok {
+		return FinalizationResult{}, apperror.New(apperror.CodeFailedPrecondition,
+			"finalized run has no supervisor checkpoint")
+	}
+	return FinalizationResult{Run: run, Checkpoint: checkpoint, Outcome: outcome,
+		Summary: redact.String(strings.TrimSpace(summary))}, nil
+}
+
+func (s *RunSupervisor) withRunExecutionLease(ctx context.Context, runID string,
+	operation func(context.Context, domain.RunExecutionLease) error,
+) error {
+	if err := s.leasePolicy.Validate(); err != nil {
+		return apperror.Wrap(apperror.CodeFailedPrecondition, "invalid run execution lease policy", err)
+	}
+	if strings.TrimSpace(s.leaseOwner) == "" {
+		return apperror.New(apperror.CodeFailedPrecondition, "run execution lease owner is required")
+	}
+	acquired, err := s.store.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
+		RunID: strings.TrimSpace(runID), OwnerID: s.leaseOwner, TTL: s.leasePolicy.TTL,
+	})
+	if err != nil {
+		return apperror.Normalize(err)
+	}
+	leaseCtx, cancelLease := context.WithCancel(ctx)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	heartbeatErr := make(chan error, 1)
+	go func() {
+		defer close(done)
+		s.renewRunExecutionLease(leaseCtx, acquired.Lease, stop, heartbeatErr, cancelLease)
+	}()
+	operationErr := operation(leaseCtx, acquired.Lease)
+	close(stop)
+	cancelLease()
+	<-done
+	var renewalErr error
+	select {
+	case renewalErr = <-heartbeatErr:
+	default:
+	}
+	releaseCtx, cancelRelease := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	_, _, releaseErr := s.store.ReleaseRunExecutionLease(releaseCtx, acquired.Lease)
+	cancelRelease()
+	if renewalErr != nil {
+		return errors.Join(apperror.Normalize(renewalErr), operationErr, releaseErr)
+	}
+	return errors.Join(operationErr, releaseErr)
+}
+
+func (s *RunSupervisor) renewRunExecutionLease(ctx context.Context, lease domain.RunExecutionLease,
+	stop <-chan struct{}, heartbeatErr chan<- error, cancel context.CancelFunc,
+) {
+	ticker := time.NewTicker(s.leasePolicy.RenewInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-stop:
+			return
+		case <-ticker.C:
+			timeout := minDuration(2*time.Second, s.leasePolicy.RenewInterval)
+			renewCtx, cancelRenew := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+			_, err := s.store.RenewRunExecutionLease(renewCtx, lease, s.leasePolicy.TTL)
+			cancelRenew()
+			if err != nil {
+				select {
+				case heartbeatErr <- err:
+				default:
+				}
+				cancel()
+				return
+			}
+		}
+	}
+}
+
+func minDuration(left time.Duration, right time.Duration) time.Duration {
+	if left < right {
+		return left
+	}
+	return right
 }
 
 func (s *RunSupervisor) Checkpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error) {

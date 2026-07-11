@@ -39,6 +39,8 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runSupervisorExecute(ctx, args[1:])
 	case "checkpoint":
 		return a.runSupervisorCheckpoint(ctx, args[1:])
+	case "lease":
+		return a.runExecutionLease(ctx, service, args[1:])
 	case "usage":
 		return a.runUsage(ctx, service, args[1:])
 	case "finish":
@@ -56,6 +58,37 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown run subcommand %q", args[0])
 	}
+}
+
+func (a *App) runExecutionLease(ctx context.Context, service *application.RunService, args []string) error {
+	fs := newFlagSet("run lease", a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run lease <run-id>")
+	}
+	_, run, err := service.Get(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	lease, found, err := a.store.GetRunExecutionLease(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		fmt.Fprintf(a.out, "run %s has no execution lease\n", run.ID)
+		return nil
+	}
+	now := time.Now().UTC()
+	fmt.Fprintf(a.out, "run: %s\nowner: %s\ngeneration: %d\nstatus: %s\nactive: %t\nacquired_at: %s\nrenewed_at: %s\nexpires_at: %s\n",
+		lease.RunID, lease.OwnerID, lease.Generation, lease.Status, lease.ActiveAt(now),
+		lease.AcquiredAt.Format(time.RFC3339Nano), lease.RenewedAt.Format(time.RFC3339Nano),
+		lease.ExpiresAt.Format(time.RFC3339Nano))
+	if lease.ReleasedAt != nil {
+		fmt.Fprintf(a.out, "released_at: %s\n", lease.ReleasedAt.Format(time.RFC3339Nano))
+	}
+	return nil
 }
 
 func (a *App) runUsage(ctx context.Context, service *application.RunService, args []string) error {

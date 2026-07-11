@@ -72,8 +72,10 @@ func TestRunSupervisorCompletesOneTurnAndEnforcesBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(after) != len(before) {
-		t.Fatalf("budget rejection appended events: before=%d after=%d", len(before), len(after))
+	if len(after) != len(before)+2 ||
+		countEventType(after, events.RunExecutionLeaseAcquiredEvent) != countEventType(before, events.RunExecutionLeaseAcquiredEvent)+1 ||
+		countEventType(after, events.RunExecutionLeaseReleasedEvent) != countEventType(before, events.RunExecutionLeaseReleasedEvent)+1 {
+		t.Fatalf("budget rejection did not record exactly one lease attempt: before=%d after=%d", len(before), len(after))
 	}
 }
 
@@ -386,13 +388,14 @@ func TestRunSupervisorRecoversStartedTurnAcrossStoreRestart(t *testing.T) {
 	if _, err := service.Start(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	started, err := st.BeginSupervisorTurn(ctx, run.ID, "")
+	started, err := st.BeginSupervisorTurn(ctx, acquireTestRunExecutionLease(t, ctx, st, run.ID), "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if started.Recovered || started.Checkpoint.Phase != domain.SupervisorTurnStarted {
 		t.Fatalf("unexpected started checkpoint: %#v", started)
 	}
+	releaseTestRunExecutionLease(t, ctx, st, run.ID)
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -417,12 +420,12 @@ func TestRunSupervisorRecoversStartedTurnAcrossStoreRestart(t *testing.T) {
 	if countEventType(before, events.AgentTurnStartedEvent) != 1 || countEventType(before, events.AgentTurnCompletedEvent) != 1 {
 		t.Fatalf("recovery duplicated lifecycle events: %#v", before)
 	}
-	_, checkpoint, _, err := st.CompleteSupervisorTurn(ctx, started.Checkpoint,
+	_, _, _, err = st.CompleteSupervisorTurn(ctx, started.Checkpoint,
 		llm.ChatResponse{Text: "ignored", Provider: "mock", Model: "mock-code"},
 		domain.RootAction{Version: domain.RootLifecycleVersion, Kind: domain.RootActionContinue, Message: "ignored"},
 		policy.Decision{Allowed: true, Reason: "allowed"}, 0)
-	if err != nil || checkpoint.NextTurn != 2 {
-		t.Fatalf("idempotent completion failed checkpoint=%#v err=%v", checkpoint, err)
+	if apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("stale pre-takeover completion was not fenced: code=%s err=%v", apperror.CodeOf(err), err)
 	}
 	after, err := st.ListRunEvents(ctx, run.ID)
 	if err != nil {
@@ -450,13 +453,14 @@ func TestRunSupervisorRecoversCustomPendingInputAcrossStoreRestart(t *testing.T)
 	if _, err := service.Start(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	started, err := st.BeginSupervisorTurn(ctx, run.ID, "durable custom request")
+	started, err := st.BeginSupervisorTurn(ctx, acquireTestRunExecutionLease(t, ctx, st, run.ID), "durable custom request")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if started.Checkpoint.PendingInput != "durable custom request" {
 		t.Fatalf("pending input was not checkpointed: %#v", started.Checkpoint)
 	}
+	releaseTestRunExecutionLease(t, ctx, st, run.ID)
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -507,11 +511,12 @@ func TestRunSupervisorRejectsConflictingRecoveredInput(t *testing.T) {
 	if _, err := service.Start(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	started, err := st.BeginSupervisorTurn(ctx, run.ID, "first durable request")
+	lease := acquireTestRunExecutionLease(t, ctx, st, run.ID)
+	started, err := st.BeginSupervisorTurn(ctx, lease, "first durable request")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.BeginSupervisorTurn(ctx, run.ID, "different request"); apperror.CodeOf(err) != apperror.CodeConflict {
+	if _, err := st.BeginSupervisorTurn(ctx, lease, "different request"); apperror.CodeOf(err) != apperror.CodeConflict {
 		t.Fatalf("conflicting input code=%s err=%v", apperror.CodeOf(err), err)
 	}
 	checkpoint, ok, err := st.GetSupervisorCheckpoint(ctx, run.ID)
@@ -540,13 +545,14 @@ func TestRunSupervisorBoundsAndRedactsCustomInputBeforeCheckpoint(t *testing.T) 
 	if _, err := service.Start(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.BeginSupervisorTurn(ctx, run.ID, strings.Repeat("x", 64*1024+1)); apperror.CodeOf(err) != apperror.CodeResourceExhausted {
+	lease := acquireTestRunExecutionLease(t, ctx, st, run.ID)
+	if _, err := st.BeginSupervisorTurn(ctx, lease, strings.Repeat("x", 64*1024+1)); apperror.CodeOf(err) != apperror.CodeResourceExhausted {
 		t.Fatalf("oversized input code=%s err=%v", apperror.CodeOf(err), err)
 	}
 	if _, ok, err := st.GetSupervisorCheckpoint(ctx, run.ID); err != nil || ok {
 		t.Fatalf("oversized input created checkpoint ok=%t err=%v", ok, err)
 	}
-	started, err := st.BeginSupervisorTurn(ctx, run.ID, "MIMO_API_KEY="+"t"+"p-"+strings.Repeat("1", 30))
+	started, err := st.BeginSupervisorTurn(ctx, lease, "MIMO_API_KEY="+"t"+"p-"+strings.Repeat("1", 30))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -688,7 +694,7 @@ func TestSupervisorModelTerminalReplayDoesNotDoubleChargeBudget(t *testing.T) {
 	provider := &retrySequenceProvider{}
 	_, st, run, _ := newRetrySupervisor(t, provider)
 	ctx := context.Background()
-	turn, err := st.BeginSupervisorTurn(ctx, run.ID, "idempotent model event")
+	turn, err := st.BeginSupervisorTurn(ctx, acquireTestRunExecutionLease(t, ctx, st, run.ID), "idempotent model event")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -738,7 +744,7 @@ func TestSupervisorProtocolFailureReplayIsAtomicAndIdempotent(t *testing.T) {
 	defer st.Close()
 	ctx := context.Background()
 	run := newStartedRunForProvider(t, st, "lifecycle-test", domain.Budget{MaxTurns: 2, MaxTokens: 10})
-	turn, err := st.BeginSupervisorTurn(ctx, run.ID, "idempotent protocol failure")
+	turn, err := st.BeginSupervisorTurn(ctx, acquireTestRunExecutionLease(t, ctx, st, run.ID), "idempotent protocol failure")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1052,7 +1058,7 @@ func TestRunSupervisorEnforcesPersistedExecutionTimeout(t *testing.T) {
 	if _, err := service.Start(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := st.BeginSupervisorTurn(ctx, run.ID, "")
+	turn, err := st.BeginSupervisorTurn(ctx, acquireTestRunExecutionLease(t, ctx, st, run.ID), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1063,6 +1069,7 @@ func TestRunSupervisorEnforcesPersistedExecutionTimeout(t *testing.T) {
 	if checkpoint.ExecutionMillis != 1000 {
 		t.Fatalf("elapsed execution time was not persisted: %#v", checkpoint)
 	}
+	releaseTestRunExecutionLease(t, ctx, st, run.ID)
 	supervisor := application.NewRunSupervisor(st, llm.NewDefaultRouter(), policy.NewDefaultChecker())
 	if _, err := supervisor.Step(ctx, run.ID); apperror.CodeOf(err) != apperror.CodeDeadlineExceeded {
 		t.Fatalf("unexpected timeout code=%s err=%v", apperror.CodeOf(err), err)
@@ -1087,13 +1094,14 @@ func TestRunSupervisorAppliesRemainingExecutionDeadline(t *testing.T) {
 	if _, err := service.Start(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := st.BeginSupervisorTurn(ctx, run.ID, "")
+	turn, err := st.BeginSupervisorTurn(ctx, acquireTestRunExecutionLease(t, ctx, st, run.ID), "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.FailSupervisorTurn(ctx, turn.Checkpoint, "consume time", 999*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
+	releaseTestRunExecutionLease(t, ctx, st, run.ID)
 	router := llm.NewRouter(llm.ModelRef{Provider: "blocking-test", Model: "model"})
 	router.RegisterProvider(blockingProvider{})
 	result, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID)
@@ -1188,6 +1196,14 @@ func TestRunSupervisorExecuteStopsAtBoundedStepLimit(t *testing.T) {
 	if len(result.Steps) != 2 || result.StopReason != "step_limit" || result.RunStatus != domain.RunRunning || result.Steps[1].Checkpoint.NextTurn != 3 {
 		t.Fatalf("unexpected bounded execution: %#v", result)
 	}
+	timeline, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countEventType(timeline, events.RunExecutionLeaseAcquiredEvent) != 1 ||
+		countEventType(timeline, events.RunExecutionLeaseReleasedEvent) != 1 {
+		t.Fatalf("bounded execution did not hold one lease across both turns: %#v", timeline)
+	}
 }
 
 func TestRunSupervisorRootFinishCommitsTurnAndTerminalStateAtomically(t *testing.T) {
@@ -1247,18 +1263,17 @@ func TestRunSupervisorRootFinishCommitsTurnAndTerminalStateAtomically(t *testing
 	}
 	before := len(items)
 	retryCheckpoint := domain.SupervisorCheckpoint{
-		RunID: run.ID, NextTurn: 1, Phase: domain.SupervisorTurnStarted,
-		AttemptID: result.AttemptID, UpdatedAt: result.Checkpoint.UpdatedAt,
+		RunID: run.ID, LeaseID: result.Checkpoint.LeaseID, LeaseGeneration: result.Checkpoint.LeaseGeneration,
+		NextTurn: 1, Phase: domain.SupervisorTurnStarted, AttemptID: result.AttemptID,
+		UpdatedAt: result.Checkpoint.UpdatedAt,
 	}
-	_, retried, _, err := st.CompleteSupervisorTurn(ctx, retryCheckpoint,
+	_, _, _, err = st.CompleteSupervisorTurn(ctx, retryCheckpoint,
 		llm.ChatResponse{Text: "ignored", Provider: provider.Name(), Model: "model"},
 		domain.RootAction{Version: domain.RootLifecycleVersion, Kind: domain.RootActionFinish, Message: "ignored", Summary: "review complete"},
 		policy.Decision{Allowed: true, Reason: "allowed"}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if retried.Phase != domain.SupervisorRunCompleted || retried.NextTurn != 2 {
-		t.Fatalf("unexpected idempotent finish checkpoint: %#v", retried)
+	if apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("released execution lease allowed terminal checkpoint replay: code=%s err=%v",
+			apperror.CodeOf(err), err)
 	}
 	if _, err := supervisor.Finalize(ctx, run.ID, application.LifecycleOutcomeCompleted, "repeat"); err != nil {
 		t.Fatal(err)
@@ -1525,6 +1540,7 @@ func TestRunSupervisorResumesPendingProtocolRepairAfterRestart(t *testing.T) {
 	if pending.RepairPhase != domain.ProtocolRepairPending || pending.TotalTokens != 2 {
 		t.Fatalf("repair request was not checkpointed: %#v", pending)
 	}
+	releaseTestRunExecutionLease(t, ctx, st, run.ID)
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -1583,6 +1599,7 @@ func TestRunSupervisorDoesNotRetryExhaustedProtocolRepairAfterRestart(t *testing
 	if exhausted.RepairPhase != domain.ProtocolRepairExhausted || exhausted.TotalTokens != 4 {
 		t.Fatalf("exhausted repair was not checkpointed: %#v", exhausted)
 	}
+	releaseTestRunExecutionLease(t, ctx, st, run.ID)
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -1918,7 +1935,7 @@ func newStartedRunForProvider(t *testing.T, st *store.SQLiteStore, providerName 
 func persistProtocolRepairRequest(t *testing.T, st *store.SQLiteStore, runID string, input string, providerName string) domain.SupervisorCheckpoint {
 	t.Helper()
 	ctx := context.Background()
-	turn, err := st.BeginSupervisorTurn(ctx, runID, input)
+	turn, err := st.BeginSupervisorTurn(ctx, acquireTestRunExecutionLease(t, ctx, st, runID), input)
 	if err != nil {
 		t.Fatal(err)
 	}

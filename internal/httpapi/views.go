@@ -75,10 +75,22 @@ type ToolUsageView struct {
 	ExhaustedAt *time.Time `json:"exhausted_at,omitempty"`
 }
 
+type RunExecutionLeaseView struct {
+	OwnerID    string     `json:"owner_id"`
+	Generation int64      `json:"generation"`
+	Status     string     `json:"status"`
+	Active     bool       `json:"active"`
+	AcquiredAt time.Time  `json:"acquired_at"`
+	RenewedAt  time.Time  `json:"renewed_at"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	ReleasedAt *time.Time `json:"released_at,omitempty"`
+}
+
 type RunDetailView struct {
 	Run        RunView                   `json:"run"`
 	Mission    MissionView               `json:"mission"`
 	Checkpoint *SupervisorCheckpointView `json:"checkpoint,omitempty"`
+	Lease      *RunExecutionLeaseView    `json:"execution_lease,omitempty"`
 	ToolUsage  ToolUsageView             `json:"tool_usage"`
 }
 
@@ -230,6 +242,14 @@ func checkpointView(value domain.SupervisorCheckpoint) SupervisorCheckpointView 
 func toolUsageView(value toolbudget.Usage) ToolUsageView {
 	return ToolUsageView{Consumed: value.Consumed, Limit: value.Limit,
 		Remaining: value.Remaining, ExhaustedAt: value.ExhaustedAt}
+}
+
+func runExecutionLeaseView(value domain.RunExecutionLease, now time.Time) RunExecutionLeaseView {
+	return RunExecutionLeaseView{
+		OwnerID: value.OwnerID, Generation: value.Generation, Status: string(value.Status),
+		Active: value.ActiveAt(now), AcquiredAt: value.AcquiredAt, RenewedAt: value.RenewedAt,
+		ExpiresAt: value.ExpiresAt, ReleasedAt: value.ReleasedAt,
+	}
 }
 
 func sessionView(value session.Session) SessionView {

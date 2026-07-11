@@ -131,6 +131,10 @@ Transitions are checked in Go domain services and written with an event. UI code
 
 The supervisor owns process handles and channels only in memory. Durable IDs, statuses, inbox messages, checkpoints, and events live in SQLite so a process restart can reconstruct the run.
 
+Schema v17 adds one durable execution lease row per Run. A Supervisor must acquire the lease before entering a turn or operator finalization; `Step` holds it for one turn and `Execute` holds it across the complete bounded loop. The default 30-second lease is renewed every 10 seconds while a Provider call or Store operation is in flight. An expired or released lease may be replaced only by a higher generation. Same-owner acquisition is not implicitly reentrant: only a retry that presents the current `lease_id` can replay the acquisition, preventing concurrent calls from one worker identity from sharing a lease.
+
+The pair `(lease_id, generation)` is a fencing token. It is copied into the durable Supervisor checkpoint and verified inside every model/tool/checkpoint mutation transaction. RunSupervisor structured-memory calls also carry it through Tool Gateway; the budget charge checks it before incrementing, and the entity transaction checks it again before replay or creation. A takeover can rebind an unfinished checkpoint to the new generation while preserving its attempt and pending input, but the old worker can no longer append events, consume budget, or write entities. Heartbeat loss cancels the Go operation context, and release uses a short context independent of caller cancellation. Lease lifecycle events expose owner/generation/timestamps only; the token is absent from events, CLI output, HTTP DTOs, and Gateway outcomes.
+
 The current single-Agent slice persists cumulative input/output/total tokens, model-call execution milliseconds, and the redacted pending user input in the Supervisor checkpoint. A bounded executor performs only an operator-selected number of durable steps. Root model output uses strict `root_lifecycle.v1` JSON: `continue` returns to idle, `finish` completes the Run, and `wait` pauses it for explicit resume. Turn data, status, checkpoint, Session messages, and events commit in one transaction; arbitrary assistant text cannot mutate lifecycle state.
 
 Provider calls use typed outcomes: `retryable`, `rate_limited`, `invalid_response`, `cancelled`, or `permanent`. RunSupervisor retries only the first two, at most three transport attempts per protocol phase by default, with cancellation-aware exponential backoff. Server `Retry-After` is honored only when it is within the local maximum wait; a longer delay returns a stable rate-limit result instead of retrying early. Each call receives a durable global sequence number plus a phase-local transport number and emits `model.started` plus exactly one terminal model event. Terminal event persistence, token usage, and model execution time share one transaction, so restart recovery neither loses nor double-charges completed calls.
@@ -140,6 +144,8 @@ Every Supervisor model attempt uses `StreamChat`. The stream aggregator reconstr
 Incremental persistence is deliberately metadata-only. One attempt may append at most 32 ordered `model.delta` events carrying sequence, chunk count, byte count, cumulative bytes, and completion state. The Store validates idempotent replay, strict ordering, size limits, and exact agreement between the durable delta ledger and the terminal model event. Model text remains in bounded process memory until the validated turn transaction writes the final redacted assistant message.
 
 The Go application layer owns an in-process `ActiveCallRegistry`. A call is reserved before `model.started` to reject concurrent Provider calls for the same Run, but it becomes queryable and cancellable only after that durable start succeeds. Registry entries are keyed by Run plus Supervisor/model-attempt identity, own the Provider cancellation function, and are removed on every Provider terminal path. Explicit cancellation writes one idempotent, redacted `model.cancel_requested` event before signalling the context.
+
+The active-call registry still owns live cancellation only within one process. The schema v17 lease solves cross-process execution exclusion and stale-write fencing, not remote cancellation or live subscription; those remain API/WebSocket work.
 
 Live call subscribers receive a versioned metadata-only envelope for snapshot, progress, cancellation request, completion, and failure. Each subscriber has a 32-event buffer; a slow subscriber is closed instead of blocking the Provider. This transient stream has no replay guarantee and intentionally has no model-text field. Future user-facing text streaming needs a separate Go-owned redaction and lifecycle-projection boundary.
 
@@ -211,6 +217,8 @@ Workspace IDs are resolved to Store-owned roots before production reads or write
 Schema v11 makes per-call review a durable two-phase operation. Creating a Shell or FileEdit proposal inserts one fingerprint-bound `tool_approvals` record in the same SQLite transaction as the compatibility proposal and appends `approval.requested`. Review first commits an immutable domain-separated SHA-256 digest of the client key in `approval_operations` plus `approval.decided`, then advances the ToolRun/FileEdit state. The raw client key is not persisted. If the process exits between those commits, replaying the same key resumes the proposal transition. A legacy approval created before its Session gains a Run is transactionally adopted later with `approval.bound`. Reusing a key with different intent, changing a proposal fingerprint, creating a ghost approval, or writing `approved`/`applied`/`completed` without the matching durable decision is rejected at the Store boundary.
 
 Schema v12 adds `approval_session_grants`, grant-operation idempotency, `run_tool_usage`, and ordered `run_tool_calls`. A grant is exact-scope authorization over Run, active Session, Workspace, Tool, and ActionClass. Gateway proposal creation still runs Policy first; only an allowed proposal may consume a matching active grant, and `tool_approvals.grant_id` records that authorization fact. Revocation is optimistic, durable, and immediately removes the grant from lookup while leaving already completed actions auditable. Tool charging uses a transactionally serialized counter and ordered event. The first rejected call beyond the limit records one `tool.budget_exhausted`; repeated rejection does not duplicate that terminal budget fact.
+
+For schema v17 Supervisor calls, the same tool-budget transaction first validates the active Run lease fencing token. A stale worker therefore cannot consume a call before its later structured-memory write is rejected. Non-Supervisor CLI/Session calls retain their established budget path and do not synthesize execution credentials.
 
 `toolgateway.Store` requires the grant and tool-budget contracts at compile time. Script persistence is an explicit optional Gateway capability (`scriptprocess.Store` plus `toolgateway.ScriptRunStore`), so Session-only backends are not coupled to Run-creation methods they never use. A backend cannot execute the script workflow unless it implements both typed Process persistence and the atomic Run/Process transaction.
 
@@ -286,6 +294,7 @@ All user-facing surfaces consume normalized events:
 ```text
 run.created
 run.status_changed
+run.execution_lease_acquired / run.execution_lease_taken_over / run.execution_lease_released
 agent.created
 agent.status_changed
 agent.message
@@ -313,12 +322,13 @@ CLI and headless mode print persisted events. Bubble Tea consumes the bounded in
 
 ## Persistence
 
-SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, `v6` adds cumulative token and model-time budget counters, `v7` adds bounded pending input recovery, `v8` adds protocol-repair phase/reason recovery, `v9` adds the Run-scoped Work Board, `v10` adds Notes plus normalized tag/source/Evidence relationships, `v11` adds durable approvals, `v12` adds Session grants and tool budgets, `v13` adds typed script processes, `v14` adds Run output Artifacts, `v15` adds idempotent structured-memory operation facts, and `v16` adds durable Supervisor tool rounds/calls. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
+SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, `v6` adds cumulative token and model-time budget counters, `v7` adds bounded pending input recovery, `v8` adds protocol-repair phase/reason recovery, `v9` adds the Run-scoped Work Board, `v10` adds Notes plus normalized tag/source/Evidence relationships, `v11` adds durable approvals, `v12` adds Session grants and tool budgets, `v13` adds typed script processes, `v14` adds Run output Artifacts, `v15` adds idempotent structured-memory operation facts, `v16` adds durable Supervisor tool rounds/calls, and `v17` adds Run execution leases plus checkpoint fencing fields. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
 
 ```text
 missions
 runs
 run_events
+run_execution_leases
 work_items
 work_item_dependencies
 notes

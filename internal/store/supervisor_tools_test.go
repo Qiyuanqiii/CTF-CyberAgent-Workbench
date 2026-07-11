@@ -29,7 +29,7 @@ func TestSupervisorToolBatchAndResultEventsAreAtomicAndReplayable(t *testing.T) 
 	if _, err := application.NewRunService(st).Start(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := st.BeginSupervisorTurn(ctx, run.ID, "persist tools")
+	turn, err := st.BeginSupervisorTurn(ctx, acquireTestRunExecutionLease(t, ctx, st, run.ID), "persist tools")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestConcurrentSupervisorToolResultReplayConvergesAcrossStores(t *testing.T)
 	if _, err := application.NewRunService(st).Start(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := st.BeginSupervisorTurn(ctx, run.ID, "persist one concurrent result")
+	turn, err := st.BeginSupervisorTurn(ctx, acquireTestRunExecutionLease(t, ctx, st, run.ID), "persist one concurrent result")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestSupervisorToolBatchStoreRejectsUnknownPayloadFieldsBeforePersistence(t 
 	if _, err := application.NewRunService(st).Start(ctx, run.ID); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := st.BeginSupervisorTurn(ctx, run.ID, "reject unknown tool fields")
+	turn, err := st.BeginSupervisorTurn(ctx, acquireTestRunExecutionLease(t, ctx, st, run.ID), "reject unknown tool fields")
 	if err != nil {
 		t.Fatal(err)
 	}

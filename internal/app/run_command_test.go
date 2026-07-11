@@ -27,6 +27,13 @@ func executeTestCommand(t *testing.T, args ...string) (string, string, int) {
 	return out.String(), errOut.String(), code
 }
 
+func TestCLIHelpListsRunLease(t *testing.T) {
+	stdout, stderr, code := executeTestCommand(t, "help")
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "checkpoint|lease|finish") {
+		t.Fatalf("run lease is missing from help: stdout=%s stderr=%s code=%d", stdout, stderr, code)
+	}
+}
+
 func TestExecuteContextCancelsProviderAndPersistsFailure(t *testing.T) {
 	t.Setenv("CYBERAGENT_HOME", t.TempDir())
 	entered := make(chan struct{})
@@ -230,6 +237,10 @@ func TestRunCLISupervisorStepAndCheckpoint(t *testing.T) {
 	if runID == "" {
 		t.Fatalf("missing run id: %s", created)
 	}
+	lease, stderr, code := executeTestCommand(t, "run", "lease", runID)
+	if code != 0 || !strings.Contains(lease, "has no execution lease") {
+		t.Fatalf("unexpected empty lease output=%s stderr=%s code=%d", lease, stderr, code)
+	}
 	_, stderr, code = executeTestCommand(t, "run", "step", runID)
 	if code != 4 || !strings.Contains(stderr, "supervisor requires running") {
 		t.Fatalf("unexpected precondition result code=%d stderr=%s", code, stderr)
@@ -244,6 +255,12 @@ func TestRunCLISupervisorStepAndCheckpoint(t *testing.T) {
 	checkpoint, stderr, code := executeTestCommand(t, "run", "checkpoint", runID)
 	if code != 0 || !strings.Contains(checkpoint, "phase: idle") || !strings.Contains(checkpoint, "next_turn: 2") {
 		t.Fatalf("unexpected checkpoint output=%s stderr=%s code=%d", checkpoint, stderr, code)
+	}
+	lease, stderr, code = executeTestCommand(t, "run", "lease", runID)
+	if code != 0 || !strings.Contains(lease, "generation: 1") ||
+		!strings.Contains(lease, "status: released") || !strings.Contains(lease, "active: false") ||
+		strings.Contains(lease, "lease_id") {
+		t.Fatalf("unexpected released lease output=%s stderr=%s code=%d", lease, stderr, code)
 	}
 	_, stderr, code = executeTestCommand(t, "run", "step", runID)
 	if code != 8 || !strings.Contains(stderr, "exhausted its 1 turn budget") {

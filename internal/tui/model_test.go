@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -262,7 +263,13 @@ func TestModelRendersRunWorkNotesAndSupervisorRounds(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := st.BeginSupervisorTurn(ctx, run.ID, "record one pending tool round")
+	acquiredLease, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
+		RunID: run.ID, OwnerID: "tui-test-worker", TTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := st.BeginSupervisorTurn(ctx, acquiredLease.Lease, "record one pending tool round")
 	if err != nil {
 		t.Fatal(err)
 	}

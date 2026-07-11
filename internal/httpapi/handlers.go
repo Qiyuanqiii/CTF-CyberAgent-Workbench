@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -189,6 +190,14 @@ func (a *API) run(request *http.Request, runID string) (any, *Page, error) {
 	if found {
 		view := checkpointView(checkpoint)
 		detail.Checkpoint = &view
+	}
+	lease, found, err := a.store.GetRunExecutionLease(request.Context(), run.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if found {
+		view := runExecutionLeaseView(lease, time.Now().UTC())
+		detail.Lease = &view
 	}
 	return detail, nil, nil
 }

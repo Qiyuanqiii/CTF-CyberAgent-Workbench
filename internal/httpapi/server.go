@@ -46,6 +46,7 @@ type Store interface {
 	ListRuns(ctx context.Context, filter domain.RunFilter) ([]domain.Run, error)
 	ListRunEventsPage(ctx context.Context, runID string, offset int, limit int) ([]events.Event, error)
 	GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error)
+	GetRunExecutionLease(ctx context.Context, runID string) (domain.RunExecutionLease, bool, error)
 	GetToolCallUsage(ctx context.Context, runID string) (toolbudget.Usage, error)
 	ListRunSupervisorToolRoundsPage(ctx context.Context, runID string, offset int, limit int) ([]domain.SupervisorToolRound, error)
 

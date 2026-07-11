@@ -30,6 +30,16 @@ func (s *SQLiteStore) ChargeToolCall(ctx context.Context, request toolbudget.Cha
 	if err != nil {
 		return toolbudget.Usage{}, err
 	}
+	if normalized.LeaseID != "" {
+		if !tracked {
+			return toolbudget.Usage{}, apperror.New(apperror.CodeFailedPrecondition,
+				"Run execution lease cannot fence an untracked tool call")
+		}
+		if err := requireRunExecutionLeaseTx(ctx, tx, binding.RunID, normalized.LeaseID,
+			normalized.LeaseGeneration); err != nil {
+			return toolbudget.Usage{}, err
+		}
+	}
 	if !tracked {
 		if err := tx.Commit(); err != nil {
 			return toolbudget.Usage{}, err

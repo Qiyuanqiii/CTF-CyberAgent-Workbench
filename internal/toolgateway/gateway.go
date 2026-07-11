@@ -92,6 +92,9 @@ func (g *Gateway) Invoke(ctx context.Context, call ToolCall) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
+	if normalized.RequestedBy == "run_supervisor" && normalized.LeaseID == "" {
+		return Outcome{}, errors.New("run supervisor tool call requires a Run execution lease")
+	}
 	if err := validateToolArguments(normalized); err != nil {
 		return Outcome{}, err
 	}
@@ -106,10 +109,7 @@ func (g *Gateway) Invoke(ctx context.Context, call ToolCall) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("unsupported tool %q", normalized.Name)
 	}
 	if g.budgetStore != nil {
-		usage, err := g.budgetStore.ChargeToolCall(ctx, toolbudget.ChargeRequest{
-			RunID: normalized.RunID, SessionID: normalized.SessionID, WorkspaceID: normalized.WorkspaceID,
-			ToolName: string(normalized.Name), ActionClass: string(class),
-		})
+		usage, err := g.budgetStore.ChargeToolCall(ctx, toolBudgetRequest(normalized, class))
 		if err != nil {
 			return Outcome{}, err
 		}
@@ -764,6 +764,8 @@ func gatewayFileEditStatus(status string) (Status, bool) {
 func safeToolCall(call ToolCall) ToolCall {
 	call.WorkspaceRoot = ""
 	call.OperationKey = ""
+	call.LeaseID = ""
+	call.LeaseGeneration = 0
 	if len(call.Payload) > 0 {
 		call.Payload = redactStructuredMemoryPayload(call.Name, call.Payload)
 	}

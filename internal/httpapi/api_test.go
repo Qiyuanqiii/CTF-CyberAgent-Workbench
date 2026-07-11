@@ -42,6 +42,7 @@ type apiFixture struct {
 	notes      []domain.Note
 	artifactID string
 	secret     string
+	leaseID    string
 }
 
 func newAPIFixture(t *testing.T) *apiFixture {
@@ -124,7 +125,13 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	if err != nil || reviewed.Result == nil || reviewed.Result.Metadata["artifact_stdout_id"] == "" {
 		t.Fatalf("artifact capture failed: %#v err=%v", reviewed, err)
 	}
-	if _, err := st.BeginSupervisorTurn(ctx, run.ID, "pending input is deliberately private"); err != nil {
+	acquiredLease, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
+		RunID: run.ID, OwnerID: "http-api-test-worker", TTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.BeginSupervisorTurn(ctx, acquiredLease.Lease, "pending input is deliberately private"); err != nil {
 		t.Fatal(err)
 	}
 	api, err := New(st, Config{AccessToken: testAccessToken, AppVersion: "test-version"})
@@ -132,7 +139,8 @@ func newAPIFixture(t *testing.T) *apiFixture {
 		t.Fatal(err)
 	}
 	return &apiFixture{api: api, store: st, run: run, workItems: workItems, notes: notes,
-		artifactID: reviewed.Result.Metadata["artifact_stdout_id"], secret: secret}
+		artifactID: reviewed.Result.Metadata["artifact_stdout_id"], secret: secret,
+		leaseID: acquiredLease.Lease.LeaseID}
 }
 
 func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *testing.T) {
@@ -165,8 +173,13 @@ func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *te
 	var runDetail RunDetailView
 	decodeData(t, runDetailResponse, &runDetail)
 	if runDetail.Run.ID != fixture.run.ID || runDetail.Mission.Goal == "" || runDetail.Checkpoint == nil ||
-		runDetail.Checkpoint.Phase != string(domain.SupervisorTurnStarted) || runDetail.ToolUsage.Consumed != 1 {
+		runDetail.Checkpoint.Phase != string(domain.SupervisorTurnStarted) || runDetail.ToolUsage.Consumed != 1 ||
+		runDetail.Lease == nil || !runDetail.Lease.Active || runDetail.Lease.Generation != 1 ||
+		runDetail.Lease.OwnerID != "http-api-test-worker" {
 		t.Fatalf("unexpected Run detail: %#v", runDetail)
+	}
+	if strings.Contains(runDetailResponse.Body.String(), `"lease_id"`) {
+		t.Fatal("Run detail exposed the execution fencing token")
 	}
 
 	sessions := fixture.get(t, "/api/v1/sessions")
@@ -234,8 +247,13 @@ func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *te
 		t.Fatalf("unexpected Artifact detail: %#v", artifact)
 	}
 
+	eventResponse := fixture.get(t, "/api/v1/runs/"+fixture.run.ID+"/events?limit=100")
+	if strings.Contains(eventResponse.Body.String(), fixture.leaseID) ||
+		strings.Contains(eventResponse.Body.String(), `"lease_id"`) {
+		t.Fatal("Run timeline exposed the execution fencing token")
+	}
 	var eventViews []EventView
-	decodeData(t, fixture.get(t, "/api/v1/runs/"+fixture.run.ID+"/events?limit=100"), &eventViews)
+	decodeData(t, eventResponse, &eventViews)
 	if len(eventViews) < 10 {
 		t.Fatalf("Run timeline is incomplete: %#v", eventViews)
 	}

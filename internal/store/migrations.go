@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 16
+const LatestSchemaVersion = 17
 
 type migration struct {
 	Version    int
@@ -571,6 +571,31 @@ var supervisorToolLoopStatements = []string{
 		BEGIN
 			SELECT RAISE(ABORT, 'supervisor tool round still has pending calls');
 		END;`,
+}
+
+var runExecutionLeaseStatements = []string{
+	`CREATE TABLE run_execution_leases (
+		run_id TEXT PRIMARY KEY,
+		lease_id TEXT NOT NULL UNIQUE,
+		owner_id TEXT NOT NULL,
+		generation INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		acquired_at TEXT NOT NULL,
+		renewed_at TEXT NOT NULL,
+		expires_at TEXT NOT NULL,
+		released_at TEXT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		CHECK(generation > 0),
+		CHECK(status IN ('active', 'released')),
+		CHECK((status = 'active' AND released_at IS NULL)
+			OR (status = 'released' AND released_at IS NOT NULL))
+	);`,
+	`CREATE INDEX idx_run_execution_leases_status_expires
+		ON run_execution_leases(status, expires_at);`,
+	`ALTER TABLE run_supervisor_checkpoints ADD COLUMN lease_id TEXT NOT NULL DEFAULT '';`,
+	`ALTER TABLE run_supervisor_checkpoints ADD COLUMN lease_generation INTEGER NOT NULL DEFAULT 0
+		CHECK(lease_generation >= 0 AND ((lease_id = '' AND lease_generation = 0)
+			OR (lease_id <> '' AND lease_generation > 0)));`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {

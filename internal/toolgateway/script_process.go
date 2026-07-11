@@ -387,6 +387,7 @@ func gatewayScriptProcessStatus(status scriptprocess.Status) (Status, bool) {
 func toolBudgetRequest(call ToolCall, class ActionClass) toolbudget.ChargeRequest {
 	return toolbudget.ChargeRequest{
 		RunID: call.RunID, SessionID: call.SessionID, WorkspaceID: call.WorkspaceID,
-		ToolName: string(call.Name), ActionClass: string(class),
+		ToolName: string(call.Name), ActionClass: string(class), LeaseID: call.LeaseID,
+		LeaseGeneration: call.LeaseGeneration, RequestedBy: call.RequestedBy,
 	}
 }

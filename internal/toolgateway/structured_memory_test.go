@@ -120,6 +120,15 @@ func TestStructuredMemoryPayloadIsStrictAndValidatedBeforeBudgetCharge(t *testin
 	if store.chargeCount() != 0 {
 		t.Fatalf("invalid structured payload consumed %d tool calls", store.chargeCount())
 	}
+	supervisor := base
+	supervisor.RequestedBy = "run_supervisor"
+	supervisor.Payload = json.RawMessage(`{"title":"x"}`)
+	if _, err := gateway.Invoke(t.Context(), supervisor); err == nil {
+		t.Fatal("expected supervisor call without execution lease rejection")
+	}
+	if store.chargeCount() != 0 {
+		t.Fatal("unfenced supervisor call reached the tool budget")
+	}
 }
 
 func TestStructuredPayloadValidationDoesNotEchoSecret(t *testing.T) {

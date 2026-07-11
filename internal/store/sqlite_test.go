@@ -131,6 +131,24 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 			t.Fatalf("schema v16 supervisor tool table is missing: %q", table)
 		}
 	}
+	var executionLeaseTable string
+	if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master
+		WHERE type = 'table' AND name = 'run_execution_leases'`).Scan(&executionLeaseTable); err != nil {
+		t.Fatal(err)
+	}
+	if executionLeaseTable != "run_execution_leases" {
+		t.Fatalf("schema v17 execution lease table is missing: %q", executionLeaseTable)
+	}
+	for _, column := range []string{"lease_id", "lease_generation"} {
+		var count int
+		if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('run_supervisor_checkpoints')
+			WHERE name = ?`, column).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("schema v17 checkpoint column %s is missing", column)
+		}
+	}
 	var grantColumn int
 	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('tool_approvals') WHERE name = 'grant_id'`).Scan(&grantColumn); err != nil {
 		t.Fatal(err)
@@ -314,6 +332,10 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE run_execution_leases`,
+		`ALTER TABLE run_supervisor_checkpoints DROP COLUMN lease_generation`,
+		`ALTER TABLE run_supervisor_checkpoints DROP COLUMN lease_id`,
+		`DELETE FROM schema_migrations WHERE version = 17`,
 		`DROP TABLE run_supervisor_tool_calls`,
 		`DROP TABLE run_supervisor_tool_rounds`,
 		`DELETE FROM schema_migrations WHERE version = 16`,
@@ -343,6 +365,10 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 func removeSchemaV16ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) {
 	t.Helper()
 	for _, statement := range []string{
+		`DROP TABLE run_execution_leases`,
+		`ALTER TABLE run_supervisor_checkpoints DROP COLUMN lease_generation`,
+		`ALTER TABLE run_supervisor_checkpoints DROP COLUMN lease_id`,
+		`DELETE FROM schema_migrations WHERE version = 17`,
 		`DROP TABLE run_supervisor_tool_calls`,
 		`DROP TABLE run_supervisor_tool_rounds`,
 		`DELETE FROM schema_migrations WHERE version = 16`,

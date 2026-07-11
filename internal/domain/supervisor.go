@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type SupervisorPhase string
@@ -26,6 +27,8 @@ const (
 
 type SupervisorCheckpoint struct {
 	RunID           string
+	LeaseID         string
+	LeaseGeneration int64
 	NextTurn        int
 	Phase           SupervisorPhase
 	AttemptID       string
@@ -53,6 +56,10 @@ func (c SupervisorCheckpoint) Validate() error {
 	}
 	if c.NextTurn <= 0 {
 		return errors.New("checkpoint next turn must be positive")
+	}
+	if (strings.TrimSpace(c.LeaseID) == "") != (c.LeaseGeneration == 0) || c.LeaseGeneration < 0 ||
+		!utf8.ValidString(c.LeaseID) || len([]rune(c.LeaseID)) > MaxRunLeaseIdentityRunes {
+		return errors.New("checkpoint execution lease identity and generation are inconsistent")
 	}
 	switch c.Phase {
 	case SupervisorIdle, SupervisorWaiting, SupervisorRunCompleted, SupervisorRunFailed:

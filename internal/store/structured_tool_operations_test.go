@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
@@ -16,6 +17,63 @@ import (
 	"cyberagent-workbench/internal/runmutation"
 	"cyberagent-workbench/internal/toolgateway"
 )
+
+func TestStructuredSupervisorToolRejectsStaleLeaseBeforeBudgetAndEntityWrite(t *testing.T) {
+	st := openStructuredToolTestStore(t)
+	ctx := context.Background()
+	_, run := createStructuredToolTestRun(t, ctx, st, "stale structured supervisor")
+	first, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
+		RunID: run.ID, OwnerID: "structured-worker-a", TTL: 150 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForLeaseExpiry(first.Lease)
+	second, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
+		RunID: run.ID, OwnerID: "structured-worker-b", TTL: time.Minute,
+	})
+	if err != nil || !second.TookOver {
+		t.Fatalf("test lease takeover failed: %#v err=%v", second, err)
+	}
+	gateway := newStructuredToolTestGateway(st)
+	call := toolgateway.ToolCall{
+		Name: toolgateway.NoteCreateTool,
+		Payload: mustStructuredPayload(t, toolgateway.NoteCreateInput{
+			Title: "Fenced note", Content: "must not be written by stale worker",
+		}),
+		OperationKey: "stale-supervisor-note", RunID: run.ID, SessionID: run.SessionID,
+		WorkspaceID: "ws-structured", RequestedBy: "run_supervisor",
+		LeaseID: first.Lease.LeaseID, LeaseGeneration: first.Lease.Generation,
+	}
+	if _, err := gateway.Invoke(ctx, call); apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("stale supervisor tool was not fenced: code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	usage, err := st.GetToolCallUsage(ctx, run.ID)
+	if err != nil || usage.Consumed != 0 {
+		t.Fatalf("stale supervisor consumed tool budget: %#v err=%v", usage, err)
+	}
+	notes, err := st.ListNotes(ctx, domain.NoteFilter{RunID: run.ID})
+	if err != nil || len(notes) != 0 {
+		t.Fatalf("stale supervisor wrote a Note: %#v err=%v", notes, err)
+	}
+	timeline, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countRunEventType(timeline, events.ToolBudgetChargedEvent) != 0 ||
+		countRunEventType(timeline, events.NoteCreatedEvent) != 0 ||
+		countRunEventType(timeline, events.ToolCompletedEvent) != 0 {
+		t.Fatalf("stale supervisor appended tool events: %#v", timeline)
+	}
+
+	call.LeaseID = second.Lease.LeaseID
+	call.LeaseGeneration = second.Lease.Generation
+	valid, err := gateway.Invoke(ctx, call)
+	if err != nil || valid.Result == nil || valid.Result.Metadata["entity_kind"] != "note" ||
+		valid.Call.LeaseID != "" || valid.Call.LeaseGeneration != 0 {
+		t.Fatalf("current supervisor lease could not invoke tool: %#v err=%v", valid, err)
+	}
+}
 
 func TestStructuredWorkItemToolIsAtomicIdempotentAndAudited(t *testing.T) {
 	st := openStructuredToolTestStore(t)

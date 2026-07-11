@@ -152,7 +152,7 @@ func TestStoreModelCancellationRequestIsIdempotent(t *testing.T) {
 	provider := newActiveCallBlockingProvider()
 	_, st, run, _ := newRetrySupervisor(t, provider)
 	ctx := context.Background()
-	turn, err := st.BeginSupervisorTurn(ctx, run.ID, "cancel ledger")
+	turn, err := st.BeginSupervisorTurn(ctx, acquireTestRunExecutionLease(t, ctx, st, run.ID), "cancel ledger")
 	if err != nil {
 		t.Fatal(err)
 	}

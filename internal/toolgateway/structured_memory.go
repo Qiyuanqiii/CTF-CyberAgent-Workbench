@@ -42,14 +42,16 @@ type NoteCreateInput struct {
 }
 
 type StructuredMemoryContext struct {
-	Tool           ToolName
-	InvocationID   string
-	OperationKey   string
-	RunID          string
-	SessionID      string
-	WorkspaceID    string
-	RequestedBy    string
-	PolicyDecision Decision
+	Tool            ToolName
+	InvocationID    string
+	OperationKey    string
+	RunID           string
+	SessionID       string
+	WorkspaceID     string
+	LeaseID         string
+	LeaseGeneration int64
+	RequestedBy     string
+	PolicyDecision  Decision
 }
 
 func (c StructuredMemoryContext) Validate() error {
@@ -59,6 +61,7 @@ func (c StructuredMemoryContext) Validate() error {
 	for label, value := range map[string]string{
 		"invocation id": c.InvocationID, "operation key": c.OperationKey, "run id": c.RunID,
 		"session id": c.SessionID, "workspace id": c.WorkspaceID, "requester": c.RequestedBy,
+		"lease id": c.LeaseID,
 	} {
 		if !utf8.ValidString(value) || strings.TrimSpace(value) != value || len([]rune(value)) > MaxToolIdentityRunes {
 			return fmt.Errorf("structured memory %s must be normalized and bounded UTF-8", label)
@@ -66,6 +69,12 @@ func (c StructuredMemoryContext) Validate() error {
 	}
 	if c.InvocationID == "" || c.OperationKey == "" || c.RunID == "" || c.SessionID == "" || c.RequestedBy == "" {
 		return errors.New("structured memory invocation, operation, Run, Session, and requester are required")
+	}
+	if (c.LeaseID == "") != (c.LeaseGeneration == 0) || c.LeaseGeneration < 0 {
+		return errors.New("structured memory execution lease identity and generation are inconsistent")
+	}
+	if c.RequestedBy == "run_supervisor" && c.LeaseID == "" {
+		return errors.New("supervisor structured memory execution requires a Run lease")
 	}
 	if err := c.PolicyDecision.Validate(); err != nil {
 		return err
@@ -238,6 +247,7 @@ func (g *Gateway) invokeStructuredMemory(ctx context.Context, call ToolCall) (Ou
 	scope := StructuredMemoryContext{
 		Tool: call.Name, InvocationID: call.InvocationID, OperationKey: call.OperationKey,
 		RunID: call.RunID, SessionID: call.SessionID, WorkspaceID: call.WorkspaceID,
+		LeaseID: call.LeaseID, LeaseGeneration: call.LeaseGeneration,
 		RequestedBy: call.RequestedBy, PolicyDecision: decision,
 	}
 	if err := scope.Validate(); err != nil {

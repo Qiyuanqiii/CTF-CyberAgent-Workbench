@@ -24,7 +24,7 @@ const (
 	maxSupervisorInputChars = 64 * 1024
 )
 
-const supervisorCheckpointSelect = `SELECT run_id, next_turn, phase, attempt_id, last_error,
+const supervisorCheckpointSelect = `SELECT run_id, lease_id, lease_generation, next_turn, phase, attempt_id, last_error,
 	pending_input, repair_phase, repair_reason, input_tokens, output_tokens, total_tokens, execution_millis, updated_at
 	FROM run_supervisor_checkpoints WHERE run_id = ?`
 
@@ -39,13 +39,15 @@ func (s *SQLiteStore) GetSupervisorCheckpoint(ctx context.Context, runID string)
 	return checkpoint, true, nil
 }
 
-func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, runID string, pendingInput string) (domain.SupervisorTurn, error) {
+func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunExecutionLease,
+	pendingInput string,
+) (domain.SupervisorTurn, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.SupervisorTurn{}, apperror.Normalize(err)
 	}
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return domain.SupervisorTurn{}, apperror.New(apperror.CodeInvalidArgument, "run id is required")
+	if err := lease.Validate(); err != nil || lease.Status != domain.RunExecutionLeaseActive {
+		return domain.SupervisorTurn{}, apperror.Wrap(apperror.CodeInvalidArgument,
+			"active run execution lease is required", err)
 	}
 	pendingInput, err := normalizeSupervisorInput(pendingInput)
 	if err != nil {
@@ -56,8 +58,11 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, runID string, pen
 		return domain.SupervisorTurn{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := requireRunExecutionLeaseTx(ctx, tx, lease.RunID, lease.LeaseID, lease.Generation); err != nil {
+		return domain.SupervisorTurn{}, err
+	}
 	run, err := scanRun(tx.QueryRowContext(ctx, `SELECT id, mission_id, session_id, status, config_json, budget_json,
-		started_at, finished_at, created_at, updated_at FROM runs WHERE id = ?`, runID))
+		started_at, finished_at, created_at, updated_at FROM runs WHERE id = ?`, lease.RunID))
 	if err != nil {
 		return domain.SupervisorTurn{}, err
 	}
@@ -76,7 +81,8 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, runID string, pen
 	}
 	if !ok {
 		checkpoint = domain.SupervisorCheckpoint{
-			RunID: run.ID, NextTurn: 1, Phase: domain.SupervisorIdle, UpdatedAt: time.Now().UTC(),
+			RunID: run.ID, LeaseID: lease.LeaseID, LeaseGeneration: lease.Generation,
+			NextTurn: 1, Phase: domain.SupervisorIdle, UpdatedAt: time.Now().UTC(),
 		}
 	}
 	if checkpoint.Phase == domain.SupervisorRunCompleted || checkpoint.Phase == domain.SupervisorRunFailed {
@@ -84,16 +90,26 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, runID string, pen
 			fmt.Sprintf("run %s supervisor is finalized as %s", run.ID, checkpoint.Phase))
 	}
 	if checkpoint.Phase == domain.SupervisorTurnStarted {
+		leaseChanged := checkpoint.LeaseID != lease.LeaseID || checkpoint.LeaseGeneration != lease.Generation
+		checkpointChanged := leaseChanged
+		if leaseChanged {
+			checkpoint.LeaseID = lease.LeaseID
+			checkpoint.LeaseGeneration = lease.Generation
+			checkpoint.UpdatedAt = time.Now().UTC()
+		}
 		if pendingInput != "" {
 			switch {
 			case checkpoint.PendingInput == "":
 				checkpoint.PendingInput = pendingInput
 				checkpoint.UpdatedAt = time.Now().UTC()
-				if err := upsertSupervisorCheckpointTx(ctx, tx, checkpoint); err != nil {
-					return domain.SupervisorTurn{}, err
-				}
+				checkpointChanged = true
 			case checkpoint.PendingInput != pendingInput:
 				return domain.SupervisorTurn{}, apperror.New(apperror.CodeConflict, "supervisor turn already has different pending input")
+			}
+		}
+		if checkpointChanged {
+			if err := upsertSupervisorCheckpointTx(ctx, tx, checkpoint); err != nil {
+				return domain.SupervisorTurn{}, err
 			}
 		}
 		if err := tx.Commit(); err != nil {
@@ -118,6 +134,8 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, runID string, pen
 	}
 
 	checkpoint.Phase = domain.SupervisorTurnStarted
+	checkpoint.LeaseID = lease.LeaseID
+	checkpoint.LeaseGeneration = lease.Generation
 	checkpoint.AttemptID = idgen.New("attempt")
 	checkpoint.PendingInput = pendingInput
 	checkpoint.RepairPhase = domain.ProtocolRepairNone
@@ -168,6 +186,9 @@ func (s *SQLiteStore) BindSupervisorTurnInput(ctx context.Context, checkpoint do
 	}
 	if !ok {
 		return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeFailedPrecondition, "supervisor checkpoint was not found")
+	}
+	if err := requireSupervisorCheckpointLeaseTx(ctx, tx, checkpoint, current); err != nil {
+		return domain.SupervisorCheckpoint{}, err
 	}
 	if current.Phase != domain.SupervisorTurnStarted || current.NextTurn != checkpoint.NextTurn || current.AttemptID != checkpoint.AttemptID {
 		return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeConflict, "supervisor checkpoint changed before input binding")
@@ -716,6 +737,9 @@ func requireActiveSupervisorAttemptTx(ctx context.Context, tx *sql.Tx, checkpoin
 	if !ok {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeFailedPrecondition, "supervisor checkpoint was not found")
 	}
+	if err := requireSupervisorCheckpointLeaseTx(ctx, tx, checkpoint, current); err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
 	if current.Phase != domain.SupervisorTurnStarted || current.NextTurn != checkpoint.NextTurn || current.AttemptID != checkpoint.AttemptID {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeConflict, "supervisor checkpoint changed before model attempt")
 	}
@@ -957,6 +981,9 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	if !ok {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, apperror.New(apperror.CodeFailedPrecondition, "supervisor checkpoint was not found")
 	}
+	if err := requireSupervisorCheckpointLeaseTx(ctx, tx, checkpoint, current); err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+	}
 	run, err := scanRun(tx.QueryRowContext(ctx, `SELECT id, mission_id, session_id, status, config_json, budget_json,
 		started_at, finished_at, created_at, updated_at FROM runs WHERE id = ?`, checkpoint.RunID))
 	if err != nil {
@@ -1150,6 +1177,9 @@ func (s *SQLiteStore) FailSupervisorTurn(ctx context.Context, checkpoint domain.
 	if !ok {
 		return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeFailedPrecondition, "supervisor checkpoint was not found")
 	}
+	if err := requireSupervisorCheckpointLeaseTx(ctx, tx, checkpoint, current); err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
 	if current.Phase == domain.SupervisorTurnFailed && current.AttemptID == checkpoint.AttemptID {
 		if err := tx.Commit(); err != nil {
 			return domain.SupervisorCheckpoint{}, err
@@ -1203,7 +1233,13 @@ func (s *SQLiteStore) FailSupervisorTurn(ctx context.Context, checkpoint domain.
 	return current, nil
 }
 
-func (s *SQLiteStore) FinalizeSupervisorRun(ctx context.Context, runID string, target domain.RunStatus, summary string) (domain.Run, domain.SupervisorCheckpoint, error) {
+func (s *SQLiteStore) FinalizeSupervisorRun(ctx context.Context, lease domain.RunExecutionLease,
+	target domain.RunStatus, summary string,
+) (domain.Run, domain.SupervisorCheckpoint, error) {
+	if err := lease.Validate(); err != nil || lease.Status != domain.RunExecutionLeaseActive {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, apperror.Wrap(apperror.CodeInvalidArgument,
+			"active run execution lease is required", err)
+	}
 	if target != domain.RunCompleted && target != domain.RunFailed {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeInvalidArgument, "supervisor final status must be completed or failed")
 	}
@@ -1224,8 +1260,11 @@ func (s *SQLiteStore) FinalizeSupervisorRun(ctx context.Context, runID string, t
 		return domain.Run{}, domain.SupervisorCheckpoint{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := requireRunExecutionLeaseTx(ctx, tx, lease.RunID, lease.LeaseID, lease.Generation); err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
 	run, err := scanRun(tx.QueryRowContext(ctx, `SELECT id, mission_id, session_id, status, config_json, budget_json,
-		started_at, finished_at, created_at, updated_at FROM runs WHERE id = ?`, strings.TrimSpace(runID)))
+		started_at, finished_at, created_at, updated_at FROM runs WHERE id = ?`, lease.RunID))
 	if err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, err
 	}
@@ -1235,7 +1274,8 @@ func (s *SQLiteStore) FinalizeSupervisorRun(ctx context.Context, runID string, t
 	}
 	if !ok {
 		checkpoint = domain.SupervisorCheckpoint{
-			RunID: run.ID, NextTurn: 1, Phase: domain.SupervisorIdle, UpdatedAt: time.Now().UTC(),
+			RunID: run.ID, LeaseID: lease.LeaseID, LeaseGeneration: lease.Generation,
+			NextTurn: 1, Phase: domain.SupervisorIdle, UpdatedAt: time.Now().UTC(),
 		}
 	}
 	if run.Status == target {
@@ -1254,6 +1294,8 @@ func (s *SQLiteStore) FinalizeSupervisorRun(ctx context.Context, runID string, t
 	if target == domain.RunCompleted && checkpoint.Phase != domain.SupervisorIdle {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeFailedPrecondition, "only an idle supervisor can complete a run")
 	}
+	checkpoint.LeaseID = lease.LeaseID
+	checkpoint.LeaseGeneration = lease.Generation
 	if err := transitionSupervisorRunTx(ctx, tx, &run, target, summary, time.Now().UTC()); err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, err
 	}
@@ -1300,6 +1342,17 @@ func getSupervisorCheckpointTx(ctx context.Context, tx *sql.Tx, runID string) (d
 	return checkpoint, true, nil
 }
 
+func requireSupervisorCheckpointLeaseTx(ctx context.Context, tx *sql.Tx, expected domain.SupervisorCheckpoint,
+	current domain.SupervisorCheckpoint,
+) error {
+	if expected.LeaseID == "" || expected.LeaseGeneration <= 0 ||
+		current.LeaseID != expected.LeaseID || current.LeaseGeneration != expected.LeaseGeneration {
+		return apperror.New(apperror.CodeConflict,
+			"supervisor checkpoint execution lease fencing token changed")
+	}
+	return requireRunExecutionLeaseTx(ctx, tx, expected.RunID, expected.LeaseID, expected.LeaseGeneration)
+}
+
 func upsertSupervisorCheckpointTx(ctx context.Context, tx *sql.Tx, checkpoint domain.SupervisorCheckpoint) error {
 	checkpoint.LastError = redact.String(checkpoint.LastError)
 	checkpoint.PendingInput = redact.String(checkpoint.PendingInput)
@@ -1308,16 +1361,18 @@ func upsertSupervisorCheckpointTx(ctx context.Context, tx *sql.Tx, checkpoint do
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO run_supervisor_checkpoints
-		(run_id, next_turn, phase, attempt_id, last_error, pending_input, repair_phase, repair_reason, input_tokens, output_tokens,
-		total_tokens, execution_millis, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(run_id) DO UPDATE SET next_turn=excluded.next_turn, phase=excluded.phase,
+		(run_id, lease_id, lease_generation, next_turn, phase, attempt_id, last_error, pending_input, repair_phase,
+		repair_reason, input_tokens, output_tokens, total_tokens, execution_millis, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(run_id) DO UPDATE SET lease_id=excluded.lease_id,
+		lease_generation=excluded.lease_generation, next_turn=excluded.next_turn, phase=excluded.phase,
 		attempt_id=excluded.attempt_id, last_error=excluded.last_error, pending_input=excluded.pending_input,
 		repair_phase=excluded.repair_phase, repair_reason=excluded.repair_reason,
 		input_tokens=excluded.input_tokens,
 		output_tokens=excluded.output_tokens, total_tokens=excluded.total_tokens,
 		execution_millis=excluded.execution_millis, updated_at=excluded.updated_at`,
-		checkpoint.RunID, checkpoint.NextTurn, checkpoint.Phase, checkpoint.AttemptID,
+		checkpoint.RunID, checkpoint.LeaseID, checkpoint.LeaseGeneration,
+		checkpoint.NextTurn, checkpoint.Phase, checkpoint.AttemptID,
 		checkpoint.LastError, checkpoint.PendingInput, checkpoint.RepairPhase, checkpoint.RepairReason,
 		checkpoint.InputTokens, checkpoint.OutputTokens, checkpoint.TotalTokens,
 		checkpoint.ExecutionMillis, ts(checkpoint.UpdatedAt))
@@ -1340,7 +1395,8 @@ func scanSupervisorCheckpoint(row scanner) (domain.SupervisorCheckpoint, error) 
 	var lastError sql.NullString
 	var repairPhase string
 	var updated string
-	if err := row.Scan(&checkpoint.RunID, &checkpoint.NextTurn, &phase, &attempt, &lastError, &checkpoint.PendingInput,
+	if err := row.Scan(&checkpoint.RunID, &checkpoint.LeaseID, &checkpoint.LeaseGeneration,
+		&checkpoint.NextTurn, &phase, &attempt, &lastError, &checkpoint.PendingInput,
 		&repairPhase, &checkpoint.RepairReason,
 		&checkpoint.InputTokens, &checkpoint.OutputTokens, &checkpoint.TotalTokens,
 		&checkpoint.ExecutionMillis, &updated); err != nil {

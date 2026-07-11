@@ -17,6 +17,7 @@ cyberagent run execute <run-id> --max-steps 3 --finish --summary "planning compl
 cyberagent run finish <run-id> --summary "review complete"
 cyberagent run fail <run-id> --reason "blocked by provider"
 cyberagent run checkpoint <run-id>
+cyberagent run lease <run-id>
 cyberagent run pause <run-id>
 cyberagent run resume <run-id>
 cyberagent run cancel <run-id>
@@ -31,6 +32,8 @@ Session messages, assistant policy decisions, ToolRun changes, and FileEdit chan
 Root actions use `continue`, `finish`, or `wait`. `continue` advances to another idle turn. `finish` requires a summary and atomically completes the Run. `wait` requires a reason, atomically pauses the Run, and resumes at the next turn after `run resume`. Unknown fields, trailing data, Markdown fences, invalid combinations, and responses over 64 KiB fail the current turn without writing user/assistant messages. Assistant prose by itself cannot mutate Run state.
 
 `run execute` repeats that same durable step up to `--max-steps`; it stops immediately on root `finish` or `wait`. `--finish` remains an explicit operator fallback after a normal step limit and cannot complete a waiting Run. `run finish` and `run fail` atomically update the Run, Supervisor checkpoint, and event stream. Repeating the same terminal command or replaying the same committed lifecycle action is idempotent, while a conflicting terminal transition is rejected.
+
+Schema v17 serializes execution across processes with a durable Run lease. `run step` acquires one lease for one turn; `run execute` holds one lease across all steps in that invocation. The Supervisor renews the lease during long Provider calls. After expiry, a new worker takes over with a higher generation and the old checkpoint token can no longer append model/tool events, charge tool budget, or mutate WorkItems/Notes. An active competing worker returns `CONFLICT`/CLI exit 4; no manual lock cleanup is required because expired leases are recoverable. `run lease <run-id>` shows owner, generation, status, activity, and timestamps but intentionally omits the internal fencing token.
 
 Before each model call, the Supervisor passes the remaining token allowance as the request limit and applies the remaining persisted model-execution deadline. Its Context Builder considers the latest compacted summary, at most 20 active WorkItems, and at most 100 active Notes visible to the root Agent. It selects those structured sections under a separate 8,192-token estimate, keeps Work Board JSON under 16 KiB, and truncates individual Note context fields. `model.started` persists only included/omitted source IDs and token estimates, never Note bodies. A model `finish` action is sent through the existing one-repair protocol when active work remains; `run finish` remains an explicit operator override. Provider-reported usage is authoritative: if one call exceeds the remaining token allowance, its full actual usage is committed and subsequent calls are blocked. `MaxToolCalls` is now enforced by the Tool Gateway with an atomic SQLite ledger; `MaxCostUSD` remains configuration-only until provider pricing metadata is available.
 
@@ -59,7 +62,7 @@ $env:CYBERAGENT_API_TOKEN = "<a-random-token-of-at-least-32-bytes>"
 cyberagent api serve --listen 127.0.0.1:8765
 ```
 
-`api serve` exposes authenticated, bodyless `GET` routes under `/api/v1` for durable Runs, Sessions, events, WorkItems, Notes, Artifact metadata, and Supervisor tool rounds. The listener, request Host, and client must all be loopback. The API has stable success/error envelopes and endpoint-scoped cursor pagination, but no writes, CORS, Artifact content, checkpoint pending input, WebSocket, or cross-process cancellation. The access token is process-only and is never stored. See [http-api.md](http-api.md) for the complete contract.
+`api serve` exposes authenticated, bodyless `GET` routes under `/api/v1` for durable Runs, Sessions, events, WorkItems, Notes, Artifact metadata, Supervisor tool rounds, and token-free execution-lease status. The listener, request Host, and client must all be loopback. The API has stable success/error envelopes and endpoint-scoped cursor pagination, but no writes, CORS, Artifact content, checkpoint pending input, WebSocket, or cross-process cancellation. The access token is process-only and is never stored. See [http-api.md](http-api.md) for the complete contract.
 
 ## Work Board
 

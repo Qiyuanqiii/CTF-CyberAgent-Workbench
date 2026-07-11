@@ -127,16 +127,18 @@ func (s Status) Valid() bool {
 }
 
 type ToolCall struct {
-	Name          ToolName          `json:"name"`
-	Arguments     map[string]string `json:"arguments"`
-	Payload       json.RawMessage   `json:"payload,omitempty"`
-	InvocationID  string            `json:"invocation_id,omitempty"`
-	OperationKey  string            `json:"-"`
-	RunID         string            `json:"run_id,omitempty"`
-	SessionID     string            `json:"session_id,omitempty"`
-	WorkspaceID   string            `json:"workspace_id,omitempty"`
-	WorkspaceRoot string            `json:"-"`
-	RequestedBy   string            `json:"requested_by,omitempty"`
+	Name            ToolName          `json:"name"`
+	Arguments       map[string]string `json:"arguments"`
+	Payload         json.RawMessage   `json:"payload,omitempty"`
+	InvocationID    string            `json:"invocation_id,omitempty"`
+	OperationKey    string            `json:"-"`
+	RunID           string            `json:"run_id,omitempty"`
+	SessionID       string            `json:"session_id,omitempty"`
+	WorkspaceID     string            `json:"workspace_id,omitempty"`
+	LeaseID         string            `json:"-"`
+	LeaseGeneration int64             `json:"-"`
+	WorkspaceRoot   string            `json:"-"`
+	RequestedBy     string            `json:"requested_by,omitempty"`
 }
 
 func NormalizeToolCall(call ToolCall) (ToolCall, error) {
@@ -147,6 +149,7 @@ func NormalizeToolCall(call ToolCall) (ToolCall, error) {
 	call.RunID = strings.TrimSpace(call.RunID)
 	call.SessionID = strings.TrimSpace(call.SessionID)
 	call.WorkspaceID = strings.TrimSpace(call.WorkspaceID)
+	call.LeaseID = strings.TrimSpace(call.LeaseID)
 	call.WorkspaceRoot = strings.TrimSpace(call.WorkspaceRoot)
 	call.RequestedBy = strings.TrimSpace(redact.String(call.RequestedBy))
 	if !call.Name.Valid() {
@@ -155,7 +158,7 @@ func NormalizeToolCall(call ToolCall) (ToolCall, error) {
 	for label, value := range map[string]string{
 		"invocation id": call.InvocationID, "operation key": call.OperationKey,
 		"run id": call.RunID, "session id": call.SessionID,
-		"workspace id": call.WorkspaceID, "requester": call.RequestedBy,
+		"workspace id": call.WorkspaceID, "lease id": call.LeaseID, "requester": call.RequestedBy,
 	} {
 		if !utf8.ValidString(value) {
 			return ToolCall{}, fmt.Errorf("tool %s must be valid UTF-8", label)
@@ -163,6 +166,9 @@ func NormalizeToolCall(call ToolCall) (ToolCall, error) {
 		if len([]rune(value)) > MaxToolIdentityRunes {
 			return ToolCall{}, fmt.Errorf("tool %s exceeds %d characters", label, MaxToolIdentityRunes)
 		}
+	}
+	if (call.LeaseID == "") != (call.LeaseGeneration == 0) || call.LeaseGeneration < 0 {
+		return ToolCall{}, errors.New("tool execution lease identity and generation are inconsistent")
 	}
 	if strings.ContainsRune(call.OperationKey, 0) {
 		return ToolCall{}, errors.New("tool operation key cannot contain NUL")
@@ -210,7 +216,9 @@ func (c ToolCall) Validate() error {
 	}
 	if normalized.Name != c.Name || !bytes.Equal(normalized.Payload, c.Payload) || normalized.InvocationID != c.InvocationID ||
 		normalized.OperationKey != c.OperationKey || normalized.RunID != c.RunID || normalized.SessionID != c.SessionID ||
-		normalized.WorkspaceID != c.WorkspaceID || normalized.WorkspaceRoot != c.WorkspaceRoot || normalized.RequestedBy != c.RequestedBy ||
+		normalized.WorkspaceID != c.WorkspaceID || normalized.LeaseID != c.LeaseID ||
+		normalized.LeaseGeneration != c.LeaseGeneration || normalized.WorkspaceRoot != c.WorkspaceRoot ||
+		normalized.RequestedBy != c.RequestedBy ||
 		!maps.Equal(normalized.Arguments, c.Arguments) {
 		return errors.New("tool call must be normalized")
 	}

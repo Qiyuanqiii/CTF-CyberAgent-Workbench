@@ -124,6 +124,7 @@ func structuredMemoryOperation(scope toolgateway.StructuredMemoryContext, kind r
 		KeyDigest:          runmutation.OperationKeyDigest(string(scope.Tool), scope.RunID, scope.OperationKey),
 		RequestFingerprint: fingerprint, InvocationID: scope.InvocationID, RunID: scope.RunID,
 		SessionID: scope.SessionID, WorkspaceID: scope.WorkspaceID, ToolName: string(scope.Tool),
+		LeaseID: scope.LeaseID, LeaseGeneration: scope.LeaseGeneration,
 		TargetKind: kind, TargetID: targetID, RequestedBy: scope.RequestedBy, CreatedAt: createdAt,
 	}
 }

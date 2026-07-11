@@ -9,14 +9,20 @@ import (
 	"unicode/utf8"
 )
 
-const MaxIdentityRunes = 256
+const (
+	MaxIdentityRunes       = 256
+	RequesterRunSupervisor = "run_supervisor"
+)
 
 type ChargeRequest struct {
-	RunID       string
-	SessionID   string
-	WorkspaceID string
-	ToolName    string
-	ActionClass string
+	RunID           string
+	SessionID       string
+	WorkspaceID     string
+	ToolName        string
+	ActionClass     string
+	LeaseID         string
+	LeaseGeneration int64
+	RequestedBy     string
 }
 
 func (r ChargeRequest) Normalize() (ChargeRequest, error) {
@@ -25,9 +31,12 @@ func (r ChargeRequest) Normalize() (ChargeRequest, error) {
 	r.WorkspaceID = strings.TrimSpace(r.WorkspaceID)
 	r.ToolName = strings.TrimSpace(r.ToolName)
 	r.ActionClass = strings.TrimSpace(r.ActionClass)
+	r.LeaseID = strings.TrimSpace(r.LeaseID)
+	r.RequestedBy = strings.TrimSpace(r.RequestedBy)
 	for label, value := range map[string]string{
 		"run id": r.RunID, "session id": r.SessionID, "workspace id": r.WorkspaceID,
-		"tool name": r.ToolName, "action class": r.ActionClass,
+		"tool name": r.ToolName, "action class": r.ActionClass, "lease id": r.LeaseID,
+		"requester": r.RequestedBy,
 	} {
 		if !utf8.ValidString(value) || len([]rune(value)) > MaxIdentityRunes {
 			return ChargeRequest{}, fmt.Errorf("tool budget %s must be bounded UTF-8", label)
@@ -35,6 +44,12 @@ func (r ChargeRequest) Normalize() (ChargeRequest, error) {
 	}
 	if r.ToolName == "" || r.ActionClass == "" {
 		return ChargeRequest{}, errors.New("tool budget tool name and action class are required")
+	}
+	if (r.LeaseID == "") != (r.LeaseGeneration == 0) || r.LeaseGeneration < 0 {
+		return ChargeRequest{}, errors.New("tool budget execution lease identity and generation are inconsistent")
+	}
+	if r.RequestedBy == RequesterRunSupervisor && (r.RunID == "" || r.LeaseID == "") {
+		return ChargeRequest{}, errors.New("run supervisor tool budget charge requires a Run execution lease")
 	}
 	return r, nil
 }
