@@ -46,6 +46,7 @@ type SupervisorCheckpoint struct {
 type SupervisorTurn struct {
 	Run        Run
 	Mission    Mission
+	Agent      AgentNode
 	Checkpoint SupervisorCheckpoint
 	Recovered  bool
 }

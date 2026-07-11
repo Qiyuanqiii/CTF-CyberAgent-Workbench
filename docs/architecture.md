@@ -168,6 +168,10 @@ One `AgentCoordinator` owns the graph for a run:
 
 Agents communicate through coordinator messages. A child never invokes a parent callback and siblings do not share mutable memory. Multi-agent execution is opt-in; the first implementation runs one root agent through the same coordinator API.
 
+Schema v19 implements that first single-root slice. Every new Run receives one stable root `AgentNode`; existing databases register it lazily on the next Coordinator/Supervisor operation. `BeginSupervisorTurn`, lifecycle completion/failure/finalization, ordinary Run transitions, inbox changes, and graph recovery snapshots share their existing SQLite business transaction. Root `continue`, `wait`, `finish`, operator failure, and Run cancellation therefore cannot leave the Run and Agent projection in different committed states. `run graph` validates the current node/inbox projection against its latest `agent_graph.v1` snapshot.
+
+The current hard limits are one root plus at most two future children, depth one, 16 assigned Skills, 128 pending and 4,096 historical messages per inbox, 32 messages per consume batch, and 32 retained snapshots. Inbox payloads must be JSON objects with bounded ASCII field names; secret-shaped keys are rejected while string values pass through recursive redaction. Snapshot metadata includes a hash of each pending payload rather than a second payload copy. Child creation remains unavailable (`child_limit=0` on current roots), inbox messages are not yet injected into model context, and WorkItem/Note ownership still uses bounded labels until the specialist-session slice establishes those foreign keys.
+
 ## Work Board and Notes
 
 Conversation history is not enough for long-running work. Each run therefore has two structured memory surfaces:
@@ -342,13 +346,14 @@ run_tool_calls
 script_process_proposals
 run_artifacts
 structured_tool_operations
+agent_nodes
+agent_messages
+agent_graph_snapshots
 ```
 
 Later migrations add:
 
 ```text
-agent_nodes
-agent_inbox
 findings
 evidence
 approvals
@@ -360,7 +365,7 @@ Existing tables remain available during migration. JSON files may be exported fo
 
 ```text
 cmd/cyberagent/             CLI entrypoint
-internal/domain/            Mission, Run, WorkItem, Note, future AgentNode/Finding
+internal/domain/            Mission, Run, AgentNode, WorkItem, Note, future Finding
 internal/application/       Supervisors and use-case services
 internal/coordinator/       Agent graph, inbox, scheduling, cancellation
 internal/events/            Event envelope, subscriptions, projections

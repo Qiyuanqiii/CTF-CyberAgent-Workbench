@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 18
+const LatestSchemaVersion = 19
 
 type migration struct {
 	Version    int
@@ -628,6 +628,138 @@ var modelCancellationStatements = []string{
 		created_at TEXT NOT NULL,
 		FOREIGN KEY(cancellation_id) REFERENCES run_model_cancellations(id) ON DELETE CASCADE
 	);`,
+}
+
+var agentCoordinatorStatements = []string{
+	`CREATE TABLE agent_nodes (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		parent_id TEXT,
+		session_id TEXT NOT NULL,
+		role TEXT NOT NULL,
+		profile TEXT NOT NULL,
+		skills_json TEXT NOT NULL,
+		status TEXT NOT NULL,
+		depth INTEGER NOT NULL,
+		child_limit INTEGER NOT NULL,
+		turn_limit INTEGER NOT NULL,
+		token_limit INTEGER NOT NULL,
+		turns_used INTEGER NOT NULL DEFAULT 0,
+		tokens_used INTEGER NOT NULL DEFAULT 0,
+		active_attempt_id TEXT NOT NULL DEFAULT '',
+		status_reason TEXT NOT NULL DEFAULT '',
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		finished_at TEXT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id, parent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		UNIQUE(run_id, id),
+		UNIQUE(run_id, session_id),
+		CHECK(role IN ('root', 'specialist')),
+		CHECK(status IN ('ready', 'running', 'waiting', 'completed', 'failed', 'cancelled')),
+		CHECK(depth BETWEEN 0 AND 1),
+		CHECK(child_limit BETWEEN 0 AND 2),
+		CHECK(turn_limit > 0),
+		CHECK(token_limit >= 0 AND turns_used >= 0 AND tokens_used >= 0),
+		CHECK(version > 0),
+		CHECK((role = 'root' AND parent_id IS NULL AND depth = 0)
+			OR (role = 'specialist' AND parent_id IS NOT NULL AND depth > 0)),
+		CHECK((status = 'running' AND length(trim(active_attempt_id)) > 0)
+			OR (status <> 'running' AND active_attempt_id = '')),
+		CHECK((status IN ('completed', 'failed', 'cancelled') AND finished_at IS NOT NULL)
+			OR (status NOT IN ('completed', 'failed', 'cancelled') AND finished_at IS NULL))
+	);`,
+	`CREATE UNIQUE INDEX idx_agent_nodes_one_root
+		ON agent_nodes(run_id) WHERE parent_id IS NULL;`,
+	`CREATE INDEX idx_agent_nodes_run_status
+		ON agent_nodes(run_id, status, depth, created_at);`,
+	`CREATE TRIGGER trg_agent_root_session_matches_run
+		BEFORE INSERT ON agent_nodes
+		WHEN NEW.role = 'root' AND NOT EXISTS (
+			SELECT 1 FROM runs WHERE id = NEW.run_id AND session_id = NEW.session_id
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'root agent session does not match run');
+		END;`,
+	`CREATE TRIGGER trg_agent_child_depth
+		BEFORE INSERT ON agent_nodes
+		WHEN NEW.parent_id IS NOT NULL AND NOT EXISTS (
+			SELECT 1 FROM agent_nodes parent
+			WHERE parent.run_id = NEW.run_id AND parent.id = NEW.parent_id
+				AND NEW.depth = parent.depth + 1 AND parent.child_limit > (
+					SELECT COUNT(*) FROM agent_nodes child
+					WHERE child.run_id = NEW.run_id AND child.parent_id = parent.id
+				)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'agent child depth or limit is invalid');
+		END;`,
+	`CREATE TRIGGER trg_agent_node_limit
+		BEFORE INSERT ON agent_nodes
+		WHEN (SELECT COUNT(*) FROM agent_nodes WHERE run_id = NEW.run_id) >= 3
+		BEGIN
+			SELECT RAISE(ABORT, 'agent graph node limit reached');
+		END;`,
+	`CREATE TABLE agent_messages (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		sender_agent_id TEXT,
+		recipient_agent_id TEXT NOT NULL,
+		sequence INTEGER NOT NULL,
+		kind TEXT NOT NULL,
+		payload_json TEXT NOT NULL,
+		status TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		consumed_at TEXT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, sender_agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, recipient_agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		UNIQUE(recipient_agent_id, sequence),
+		CHECK(sender_agent_id IS NULL OR sender_agent_id <> recipient_agent_id),
+		CHECK(sequence > 0),
+		CHECK(kind IN ('control', 'instruction', 'result', 'notification')),
+		CHECK(status IN ('pending', 'consumed')),
+		CHECK((status = 'pending' AND consumed_at IS NULL)
+			OR (status = 'consumed' AND consumed_at IS NOT NULL))
+	);`,
+	`CREATE INDEX idx_agent_messages_inbox
+		ON agent_messages(recipient_agent_id, status, sequence);`,
+	`CREATE TRIGGER trg_agent_inbox_limit
+		BEFORE INSERT ON agent_messages
+		WHEN (SELECT COUNT(*) FROM agent_messages
+			WHERE recipient_agent_id = NEW.recipient_agent_id AND status = 'pending') >= 128
+		BEGIN
+			SELECT RAISE(ABORT, 'agent inbox limit reached');
+		END;`,
+	`CREATE TRIGGER trg_agent_message_history_limit
+		BEFORE INSERT ON agent_messages
+		WHEN (SELECT COUNT(*) FROM agent_messages
+			WHERE recipient_agent_id = NEW.recipient_agent_id) >= 4096
+		BEGIN
+			SELECT RAISE(ABORT, 'agent message history limit reached');
+		END;`,
+	`CREATE TABLE agent_graph_snapshots (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		version INTEGER NOT NULL,
+		protocol_version TEXT NOT NULL,
+		root_agent_id TEXT NOT NULL,
+		node_count INTEGER NOT NULL,
+		pending_message_count INTEGER NOT NULL,
+		state_json TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, root_agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		UNIQUE(run_id, version),
+		CHECK(version > 0),
+		CHECK(protocol_version = 'agent_graph.v1'),
+		CHECK(node_count BETWEEN 1 AND 3),
+		CHECK(pending_message_count BETWEEN 0 AND 384)
+	);`,
+	`CREATE INDEX idx_agent_graph_snapshots_latest
+		ON agent_graph_snapshots(run_id, version DESC);`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {

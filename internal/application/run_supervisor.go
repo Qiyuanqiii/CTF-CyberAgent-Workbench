@@ -90,6 +90,7 @@ const (
 
 type LifecycleResult struct {
 	Handle          RunHandle
+	AgentID         string
 	Status          LifecycleStatus
 	Turn            int
 	AttemptID       string
@@ -266,8 +267,9 @@ func (s *RunSupervisor) stepWithLease(ctx context.Context, lease domain.RunExecu
 		return LifecycleResult{}, apperror.Normalize(err)
 	}
 	result := LifecycleResult{
-		Handle: RunHandle{RunID: turn.Run.ID, MissionID: turn.Mission.ID, SessionID: turn.Run.SessionID},
-		Status: LifecycleTurnFailed, Turn: turn.Checkpoint.NextTurn, AttemptID: turn.Checkpoint.AttemptID,
+		Handle:  RunHandle{RunID: turn.Run.ID, MissionID: turn.Mission.ID, SessionID: turn.Run.SessionID},
+		AgentID: turn.Agent.ID,
+		Status:  LifecycleTurnFailed, Turn: turn.Checkpoint.NextTurn, AttemptID: turn.Checkpoint.AttemptID,
 		Recovered: turn.Recovered, Checkpoint: turn.Checkpoint,
 	}
 	if err := ctx.Err(); err != nil {
@@ -324,7 +326,8 @@ func (s *RunSupervisor) stepWithLease(ctx context.Context, lease domain.RunExecu
 		JSONMode: true,
 		Metadata: map[string]string{
 			"run_id": turn.Run.ID, "mission_id": turn.Mission.ID, "session_id": turn.Run.SessionID,
-			"turn": fmt.Sprint(turn.Checkpoint.NextTurn), "attempt_id": turn.Checkpoint.AttemptID,
+			"agent_id": turn.Agent.ID,
+			"turn":     fmt.Sprint(turn.Checkpoint.NextTurn), "attempt_id": turn.Checkpoint.AttemptID,
 			"response_schema":   domain.RootLifecycleVersion,
 			"active_work_items": fmt.Sprint(len(workItems)),
 			"available_notes":   fmt.Sprint(len(notes)),

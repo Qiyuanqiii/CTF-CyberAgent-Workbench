@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 91%。
+- 整体产品愿景：约 92%。
 - v0.1 通用 Agent MVP：约 99%。
 - V2 Run-centric Runtime：约 99%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程活动模型取消。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次。P9 已新增 loopback-only `api.v1` 读取面、独立授权的唯一取消 POST、由 Go DTO 生成且受 golden/live-route 测试保护的 OpenAPI 3.1 契约、有界可恢复 Run-event SSE，以及 Run-aware TUI 的 Work/Notes/ToolRounds/Tools 视图和批准一次/本会话操作；真实命令执行、通用 API 写入和非结构化记忆类模型工具继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程活动模型取消。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P4 已完成 schema v19 单 root Coordinator 地基：稳定 Agent 身份、状态/预算投影、有界 inbox、恢复快照和 Run/Supervisor 原子联动；子 Agent 继续关闭。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次。P9 已新增 loopback-only `api.v1` 读取面、独立授权的唯一取消 POST、由 Go DTO 生成且受 golden/live-route 测试保护的 OpenAPI 3.1 契约、有界可恢复 Run-event SSE，以及 Run-aware TUI 的 Work/Notes/ToolRounds/Tools 视图和批准一次/本会话操作；真实命令执行、通用 API 写入和非结构化记忆类模型工具继续关闭。
 
 ## 二、已完成功能
 
@@ -21,6 +21,9 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 
 - CLI 入口、命令分发、版本命令和 Bubble Tea TUI。
 - Agent Kernel、Planner、Executor、Critic 与 Task/Event 类型边界。
+- schema v19 为每个新 Run 原子创建稳定 root `AgentNode`；旧库可惰性补建。root 的 ready/running/waiting/completed/failed/cancelled、turn/token 用量和 active attempt 与 RunSupervisor/RunService 同事务投影。
+- `internal/coordinator` 提供 root register、结构化 inbox send/consume、snapshot/restore；`run graph` 验证当前节点与 pending inbox metadata 是否匹配最新 `agent_graph.v1` 快照。
+- 图最多 3 个节点、深度 1、每个 inbox 最多 128 条 pending/4096 条总历史、每批消费 32 条、快照保留 32 份；payload 递归脱敏并以 SHA-256 进入快照完整性校验。当前 root `child_limit=0`，没有 spawn 或子 Agent 执行入口。
 - 持久化 Session、Message、Task、Event、Artifact 和上下文摘要。
 - Codex 风格的长上下文压缩骨架，支持手动和自动压缩。
 - `/help`、`/compact`、`/model`、`/workspace`、`/ls`、`/read`、`/write`、`/run` 会话命令。
@@ -80,7 +83,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 
 ### 存储与 Run 架构
 
-- CGO SQLite 驱动 `github.com/mattn/go-sqlite3`，当前 schema 版本为 v17。
+- CGO SQLite 驱动 `github.com/mattn/go-sqlite3`，当前 schema 版本为 v19。
 - checksum 校验的版本化事务 migration，可保留旧库数据原地升级。
 - Mission、Run 和 append-only Run Events 持久化。
 - schema v3 为非空 `session_id` 建立唯一关联并拒绝引用不存在 Session 的 Run。
@@ -89,7 +92,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - 重复保存不会产生重复事件；跨工作区 ToolRun/FileEdit 会在 Store 边界回滚。
 - `apperror` 提供稳定代码、CLI 退出码和未来 HTTP 映射，现有错误文本保持不变。
 - schema v4 使用 `legacy_task_runs.task_id` 作为幂等键，`run adapt-task` 可安全重复或并发执行。
-- TaskAdapter 在一个事务内创建 Session、Mission、Run、映射和三条初始事件；历史状态不会触发隐式执行。
+- TaskAdapter 在一个事务内创建 Session、Mission、Run、映射和四条初始事件（含 root `agent.registered`）；历史状态不会触发隐式执行。
 - 旧 Task Goal 与旧 Event 内容补齐 Store 级脱敏。
 - schema v5 持久化 Supervisor phase、next turn、attempt 和脱敏错误。
 - schema v6 在同一 checkpoint 中持久化累计 input/output/total tokens 与模型执行毫秒数。
@@ -173,6 +176,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - 通用 HTTP 写入接口、TypeScript Web UI 和 Rust analyzer 进程；本地读取 API、metadata SSE 与精确取消控制已完成。
 - MCP Server、插件系统和远程任务能力。
 - 通用 Agent 稳定后的 CTF 自动分析与求解流程。
+- 子 Agent admission/scheduling、独立 Session/预算分配、消息唤醒与 WorkItem/Note Owner 外键；当前只开放单 root Coordinator，inbox 也尚未进入模型上下文。
 
 ## 五、审计结论
 
@@ -181,6 +185,8 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - schema v17 已解决同一 SQLite 数据库上的跨进程 Run 执行互斥和 stale-write fencing，schema v18 用独立 capability 把取消意图持久化并交给持有私有 lease 的 worker 消费；瞬时 registry 与 Provider cancel 函数仍不跨进程暴露。
 - execution lease 依赖本机 UTC 时钟与 SQLite 写事务；它不是分布式共识协议。当前 local-first 单机架构适用，未来多主机 worker 需要外部协调存储或数据库时间源。
 - `lease_id` 不进入 Run 事件、Gateway Outcome、CLI 或 HTTP DTO；可观测面只包含 owner、generation、状态和时间。租约过期无需人工删锁，新 generation 可接管未完成 checkpoint。
+- schema v19 将 root 注册、Supervisor 状态、Run 取消和 graph snapshot 放入同一 SQLite 写事务；不存在“Run 已终态但 root 仍 running”的已提交窗口。快照保存 pending payload 的 SHA-256 和 metadata，不复制正文；直接篡改 inbox 会在 restore 时失败。
+- Coordinator inbox 当前是内部原语；发送端尚无 operation-key 幂等账本，调用方重试会产生新 message ID。模型和公开 HTTP 均不能调用它，下一切片必须先补摘要幂等和 wake 语义，再开放 Agent 间发送。
 
 - 本地 HTTP API 只接受 loopback、bodyless GET 和单一 Bearer token，不提供 CORS、Artifact 正文或 checkpoint pending input。token 不持久化；环境提供值不回显，自动生成值只输出到启动终端。
 - API 尚无细粒度多用户授权；持有进程 token 等同于获得当前数据库全部已发布读取资源。写路由、WebSocket 与远程监听在单独威胁建模前保持关闭。
@@ -237,8 +243,8 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - Work Board 与 Notes 可由 CLI/application service、Gateway 或 RunSupervisor 的 create-only Provider 工具修改；模型更新和归档仍未开放。
 - Supervisor 的 Work Board 是每次调用前最多 20 项、16 KiB 的候选快照，并作为一个 Context Section 参与 token 选择；超出项保留在 SQLite，后续仍需相关性查询或显式加载协议。
 - 显式操作者 `run finish` 可以覆盖仍有活跃 WorkItem 的模型完成门禁；该命令是人工终结边界，报告层后续应明确记录未完成项。
-- WorkItem ID 在全库唯一、依赖在同 Run 内；当前没有独立 Session/Agent owner 外键，Owner 仍是受长度约束的标签，等待 AgentCoordinator 建立身份表。
-- Note Owner 同样还是受长度约束的身份标签；`root` 是当前 Supervisor 的保留查看者名称，等待 AgentNode 外键替换。
+- WorkItem ID 在全库唯一、依赖在同 Run 内；AgentNode 身份表现已存在，但 Owner 仍是受长度约束的兼容标签，等待 Specialist admission 后迁移为 Agent 外键。
+- Note Owner 同样还是受长度约束的身份标签；`root` 是当前 Supervisor 的保留查看者名称，下一阶段再绑定稳定 AgentNode ID。
 - Context Builder 的 8192 token 是启发式估算预算，只覆盖摘要/Work Board/Notes；最近 20 条 Session 消息仍使用既有数量上限，Provider usage 才是最终计费依据。
 - Supervisor 最多查询 100 条当前可见 active Notes；更多记录保留在 SQLite，但本轮不会进入候选集，后续需要查询相关性或显式加载协议。
 - Evidence ID 当前是结构化引用而不是外键，因为 Evidence 实体尚未落地；P6 报告阶段必须补引用完整性和失效投影。
@@ -331,12 +337,17 @@ Cross-Process Model Cancellation 切片新增 schema v18、`run_model_cancellati
 
 测试覆盖 HTTP 到阻塞 Provider 的双 SQLite 连接端到端取消、read/control capability 互斥、默认关闭、202 原键重放、409 变更意图/换键、stale lease/latest-attempt 拒绝、secret redaction、原始 key 零持久化、严格 body/content-type/大小边界和 OpenAPI live route。发布门通过全仓测试、全仓 `-race`、`go vet`、零告警 `staticcheck` 与 `govulncheck`，可达漏洞为 0。OpenAPI 当前为 18 paths、26 schemas、2 security schemes，并带 Apache-2.0 metadata；Redocly 零 warning。隔离真实二进制报告 schema v18，read health 为 200，read-token POST 与 control-token GET 均为 401，授权取消缺失 Run 为 404；输出与关闭后的 SQLite 均无两个测试 token，临时进程和目录已清理。
 
+Single-Root Agent Coordinator 切片新增 schema v19、`AgentNode`/inbox/`agent_graph.v1` 领域对象、`internal/coordinator` 服务、`agent_nodes`、`agent_messages`、`agent_graph_snapshots` 和 `run graph`。新 Run 在创建事务中获得一个稳定 root；v18 旧库不做不可审计的批量身份猜测，而是在下一次 register/Supervisor 操作中惰性补建。Supervisor begin、continue、wait、finish、failure/finalize 以及普通 Run pause/resume/cancel 都与 Agent 状态和快照同事务提交。
+
+本轮审计未发现未解决的高/中风险问题。实现阶段补强了五项健壮性边界：Coordinator 写入口先获取 SQLite writer reservation，避免并发 register/inbox sequence 的 deferred read-to-write 竞争；快照不复制 inbox payload，而是保存 SHA-256、消息 ID、sequence、kind 与时间，restore 会拒绝正文篡改；历史快照每 Run 只保留最新 32 份，inbox pending/总历史和消费批次都有数据库硬上限；register 不再在 graph 校验前修正已有 root，状态漂移会失败而不是被新快照覆盖；inbox JSON key 现在限制为 64-byte ASCII 协议字段并拒绝密钥形态，补上通用 value-redaction 不处理 map key 的边界。测试覆盖 concurrent registration、重启恢复、wait/resume 身份连续、cancel 级联、child insert hard denial、key/value secret handling、exactly-once consume、v18 原地升级、tamper detection 与 snapshot retention。最终 race 复核还修正了三项既有测试时序假设：Provider 总 deadline 不再被误当成全部模型执行时间，mid-stream cancellation 会等待首个 delta 持久化后再主动取消，API CLI 多行启动输出会等待最后一项元数据后再断言。发布门通过全仓测试、全仓 `-race`、`go vet`、零告警 `staticcheck` 与 `govulncheck`，可达漏洞为 0；隔离 CLI smoke 创建 Run 并由 `run graph` 恢复一个 ready root。当前 root `child_limit=0`，无 child spawn、无模型 inbox 注入、无新 Shell 权限。
+
 ## 七、下一开发切片
 
-1. 启动 P4 Coordinator 地基：先持久化 root Agent identity/status/inbox/graph snapshot，并让现有单 root Supervisor 走 register/wait/finish 契约，不立即开放 child 并发。
-2. 在任何 sub-agent spawn 前固化 depth、child count、并发数、turn/token 分配和级联取消上限，避免无限嵌套与预算失控。
-3. React/Vite 后续从 `docs/openapi.json` 生成 client/DTO，并通过带 Authorization header 的 fetch 消费 SSE，不把 token 放入 URL、不重复实现 Go Policy。
-4. Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
+1. 为 Coordinator inbox 增加原始 key 不落库的摘要幂等账本、明确 wake/dependency 消息语义，再允许模型侧发送。
+2. 增加 internal-only Specialist admission：原子预留最多两个 child slot、独立 Session 和 turn/token 子预算；在恢复、级联取消和父子 CompletionReport 测试通过前不执行 child 模型循环。
+3. 将 WorkItem/Note Owner 从兼容标签迁移到受验证的 Agent identity，并保留旧记录读取兼容。
+4. React/Vite 后续从 `docs/openapi.json` 生成 client/DTO，并通过带 Authorization header 的 fetch 消费 SSE，不把 token 放入 URL、不重复实现 Go Policy。
+5. Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
 
 ## 八、仓库同步与恢复约定
 

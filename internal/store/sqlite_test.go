@@ -342,6 +342,10 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE agent_graph_snapshots`,
+		`DROP TABLE agent_messages`,
+		`DROP TABLE agent_nodes`,
+		`DELETE FROM schema_migrations WHERE version = 19`,
 		`DROP TABLE run_model_cancellation_operations`,
 		`DROP TABLE run_model_cancellations`,
 		`DELETE FROM schema_migrations WHERE version = 18`,
@@ -378,6 +382,10 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 func removeSchemaV16ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) {
 	t.Helper()
 	for _, statement := range []string{
+		`DROP TABLE agent_graph_snapshots`,
+		`DROP TABLE agent_messages`,
+		`DROP TABLE agent_nodes`,
+		`DELETE FROM schema_migrations WHERE version = 19`,
 		`DROP TABLE run_model_cancellation_operations`,
 		`DROP TABLE run_model_cancellations`,
 		`DELETE FROM schema_migrations WHERE version = 18`,
@@ -469,7 +477,8 @@ func TestSQLiteStoreRejectsIllegalRunTransitionAtPersistenceBoundary(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 || items[0].Type != events.RunCreatedEvent || items[1].Type != events.SessionAttachedEvent {
+	if len(items) != 3 || items[0].Type != events.RunCreatedEvent ||
+		items[1].Type != events.SessionAttachedEvent || items[2].Type != events.AgentRegisteredEvent {
 		t.Fatalf("illegal transition appended an event: %#v", items)
 	}
 }
@@ -549,6 +558,7 @@ func TestSQLiteStoreProjectsRunActivityAtomically(t *testing.T) {
 	wantTypes := []string{
 		events.RunCreatedEvent,
 		events.SessionAttachedEvent,
+		events.AgentRegisteredEvent,
 		events.SessionMessageEvent,
 		events.PolicyDecisionEvent,
 		events.ToolProposedEvent,

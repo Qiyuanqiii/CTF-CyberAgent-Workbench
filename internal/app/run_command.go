@@ -10,6 +10,7 @@ import (
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
+	"cyberagent-workbench/internal/coordinator"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/workspace"
 )
@@ -39,6 +40,8 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runSupervisorExecute(ctx, args[1:])
 	case "checkpoint":
 		return a.runSupervisorCheckpoint(ctx, args[1:])
+	case "graph":
+		return a.runAgentGraph(ctx, args[1:])
 	case "lease":
 		return a.runExecutionLease(ctx, service, args[1:])
 	case "usage":
@@ -134,13 +137,40 @@ func (a *App) runSupervisorStep(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(a.out, "run %s turn %d completed\nattempt: %s\nrecovered: %t\nmodel_attempts: %d\nprotocol_repairs: %d\ntool_rounds: %d\ntool_calls: %d\nstream_events: %d\nstream_bytes: %d\nmodel_outcome: %s\naction: %s\nrun_status: %s\nprovider: %s\nmodel: %s\nusage: input=%d output=%d total=%d\ncumulative_tokens: %d\nexecution_millis: %d\nnext_turn: %d\nresponse: %s\n",
-		result.Handle.RunID, result.Turn, result.AttemptID, result.Recovered, result.ModelAttempts,
+	fmt.Fprintf(a.out, "run %s turn %d completed\nagent: %s\nattempt: %s\nrecovered: %t\nmodel_attempts: %d\nprotocol_repairs: %d\ntool_rounds: %d\ntool_calls: %d\nstream_events: %d\nstream_bytes: %d\nmodel_outcome: %s\naction: %s\nrun_status: %s\nprovider: %s\nmodel: %s\nusage: input=%d output=%d total=%d\ncumulative_tokens: %d\nexecution_millis: %d\nnext_turn: %d\nresponse: %s\n",
+		result.Handle.RunID, result.Turn, result.AgentID, result.AttemptID, result.Recovered, result.ModelAttempts,
 		result.ProtocolRepairs, result.ToolRounds, result.ToolCalls, result.StreamEvents, result.StreamBytes,
 		result.ModelOutcome, result.Action.Kind, result.RunStatus,
 		result.Provider, result.Model,
 		result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.TotalTokens,
 		result.Checkpoint.TotalTokens, result.Checkpoint.ExecutionMillis, result.Checkpoint.NextTurn, result.Text)
+	return nil
+}
+
+func (a *App) runAgentGraph(ctx context.Context, args []string) error {
+	fs := newFlagSet("run graph", a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run graph <run-id>")
+	}
+	service := coordinator.New(a.store)
+	if _, _, err := service.RegisterRoot(ctx, fs.Arg(0)); err != nil {
+		return err
+	}
+	graph, err := service.Restore(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "run: %s\nroot_agent: %s\nnodes: %d\npending_messages: %d\nsnapshot_version: %d\nsnapshot_protocol: %s\n",
+		graph.RunID, graph.RootAgentID, len(graph.Nodes), len(graph.PendingMessages),
+		graph.LatestSnapshot.Version, graph.LatestSnapshot.ProtocolVersion)
+	for _, node := range graph.Nodes {
+		fmt.Fprintf(a.out, "%s\trole=%s\tstatus=%s\tprofile=%s\tdepth=%d\tchildren=%d\tturns=%d/%d\ttokens=%d/%d\tversion=%d\n",
+			node.ID, node.Role, node.Status, node.Profile, node.Depth, node.ChildLimit,
+			node.TurnsUsed, node.TurnLimit, node.TokensUsed, node.TokenLimit, node.Version)
+	}
 	return nil
 }
 

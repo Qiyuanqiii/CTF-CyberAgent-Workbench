@@ -167,12 +167,49 @@ func TestRunSupervisorResumesAfterMidStreamCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	provider := &cancelThenStreamProvider{name: "cancel-stream"}
+	provider := &cancelThenStreamProvider{name: "cancel-stream", started: make(chan struct{})}
 	run, supervisor := newStreamSupervisor(t, st, provider, domain.Budget{MaxTurns: 2})
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
-	defer cancel()
-	first, err := supervisor.Step(ctx, run.ID)
-	if apperror.CodeOf(err) != apperror.CodeDeadlineExceeded || first.Checkpoint.Phase != domain.SupervisorTurnStarted ||
+	ctx, cancel := context.WithCancel(context.Background())
+	type stepResult struct {
+		result application.LifecycleResult
+		err    error
+	}
+	done := make(chan stepResult, 1)
+	go func() {
+		result, err := supervisor.Step(ctx, run.ID)
+		done <- stepResult{result: result, err: err}
+	}()
+	select {
+	case <-provider.started:
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("stream provider did not start")
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		items, err := st.ListRunEvents(context.Background(), run.ID)
+		if err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		if countEventType(items, events.ModelDeltaEvent) == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("partial model delta was not persisted before cancellation")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	var firstStep stepResult
+	select {
+	case firstStep = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled stream supervisor did not return")
+	}
+	first, err := firstStep.result, firstStep.err
+	if apperror.CodeOf(err) != apperror.CodeCancelled || first.Checkpoint.Phase != domain.SupervisorTurnStarted ||
 		first.StreamEvents != 1 || first.StreamBytes != len("partial stream") || first.ModelOutcome != llm.OutcomeCancelled {
 		t.Fatalf("mid-stream cancellation was not recoverable: result=%#v code=%s err=%v", first, apperror.CodeOf(err), err)
 	}
@@ -282,9 +319,10 @@ func (*scriptedStreamProvider) SupportsVision(string) bool   { return false }
 func (*scriptedStreamProvider) SupportsJSONMode(string) bool { return true }
 
 type cancelThenStreamProvider struct {
-	name  string
-	mu    sync.Mutex
-	calls int
+	name    string
+	mu      sync.Mutex
+	calls   int
+	started chan struct{}
 }
 
 func (p *cancelThenStreamProvider) Name() string { return p.name }
@@ -312,6 +350,9 @@ func (p *cancelThenStreamProvider) StreamChat(ctx context.Context, _ llm.ChatReq
 	}
 	chunks := make(chan llm.ChatChunk, 1)
 	chunks <- llm.ChatChunk{Text: "partial stream"}
+	if p.started != nil {
+		close(p.started)
+	}
 	go func() {
 		<-ctx.Done()
 		close(chunks)

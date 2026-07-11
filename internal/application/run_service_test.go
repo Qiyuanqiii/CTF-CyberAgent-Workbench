@@ -51,17 +51,26 @@ func TestRunServicePersistsLifecycleAndOrderedEvents(t *testing.T) {
 	if run.Status != domain.RunPaused {
 		t.Fatalf("unexpected paused run: %#v", run)
 	}
-	events, err := service.Events(ctx, run.ID)
+	items, err := service.Events(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 5 {
-		t.Fatalf("expected create, session attach, prepare, run, pause events; got %#v", events)
+	wantTypes := []string{
+		events.RunCreatedEvent, events.SessionAttachedEvent, events.AgentRegisteredEvent,
+		events.RunStatusChangedEvent, events.RunStatusChangedEvent, events.RunStatusChangedEvent,
+		events.AgentStatusChangedEvent,
 	}
-	for index, event := range events {
-		if event.Sequence != int64(index+1) {
-			t.Fatalf("unexpected event sequence: %#v", events)
+	if len(items) != len(wantTypes) {
+		t.Fatalf("expected run and root-agent lifecycle events; got %#v", items)
+	}
+	for index, event := range items {
+		if event.Sequence != int64(index+1) || event.Type != wantTypes[index] {
+			t.Fatalf("unexpected event sequence: %#v", items)
 		}
+	}
+	root, found, err := st.GetRootAgent(ctx, run.ID)
+	if err != nil || !found || root.Status != domain.AgentWaiting {
+		t.Fatalf("paused run did not project a waiting root agent: root=%#v found=%t err=%v", root, found, err)
 	}
 }
 
@@ -98,7 +107,9 @@ func TestRunServiceReusesOneActiveSessionOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 2 || items[0].Type != events.RunCreatedEvent || items[1].Type != events.SessionAttachedEvent || !strings.Contains(items[1].PayloadJSON, `"created":false`) {
+	if len(items) != 3 || items[0].Type != events.RunCreatedEvent ||
+		items[1].Type != events.SessionAttachedEvent || items[2].Type != events.AgentRegisteredEvent ||
+		!strings.Contains(items[1].PayloadJSON, `"created":false`) {
 		t.Fatalf("unexpected initial timeline: %#v", items)
 	}
 	if _, _, err := service.Create(ctx, application.CreateRunRequest{

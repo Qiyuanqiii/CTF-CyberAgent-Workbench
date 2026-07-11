@@ -96,8 +96,10 @@ func TestAPIServeCLIStartsAuthenticatedLoopbackServerWithoutPersistingToken(t *t
 	var baseURL string
 	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
-		baseURL = outputField(stdout.String(), "api_url")
-		if baseURL != "" {
+		output := stdout.String()
+		baseURL = outputField(output, "api_url")
+		if baseURL != "" && strings.Contains(output,
+			"api_control_token_source: "+apiControlTokenEnvironment) {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)

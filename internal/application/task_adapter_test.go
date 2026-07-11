@@ -41,7 +41,10 @@ func TestTaskAdapterIsIdempotentAndAuditable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTypes := []string{events.RunCreatedEvent, events.SessionAttachedEvent, events.LegacyTaskAdaptedEvent}
+	wantTypes := []string{
+		events.RunCreatedEvent, events.SessionAttachedEvent, events.LegacyTaskAdaptedEvent,
+		events.AgentRegisteredEvent,
+	}
 	if len(items) != len(wantTypes) {
 		t.Fatalf("unexpected initial events: %#v", items)
 	}

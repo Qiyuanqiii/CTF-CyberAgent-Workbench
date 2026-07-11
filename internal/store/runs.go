@@ -116,6 +116,14 @@ func createMissionRunTx(ctx context.Context, tx *sql.Tx, mission domain.Mission,
 			return err
 		}
 	}
+	if _, _, _, err := syncRootAgentTx(ctx, tx, run, mission, rootAgentProjection{
+		Status: domain.AgentReady,
+	}, run.CreatedAt); err != nil {
+		return err
+	}
+	if _, err := createAgentGraphSnapshotTx(ctx, tx, run); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -231,6 +239,22 @@ func (s *SQLiteStore) TransitionRun(ctx context.Context, run domain.Run, expecte
 	}
 	if _, err := insertRunEventTx(ctx, tx, event); err != nil {
 		return err
+	}
+	mission, err := scanMission(tx.QueryRowContext(ctx, `SELECT id, goal, profile, workspace_id, scope_json,
+		created_at, updated_at FROM missions WHERE id = ?`, run.MissionID))
+	if err != nil {
+		return err
+	}
+	projection, err := rootAgentProjectionForRunTx(ctx, tx, run)
+	if err != nil {
+		return err
+	}
+	if _, _, changed, err := syncRootAgentTx(ctx, tx, run, mission, projection, run.UpdatedAt); err != nil {
+		return err
+	} else if changed {
+		if _, err := createAgentGraphSnapshotTx(ctx, tx, run); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

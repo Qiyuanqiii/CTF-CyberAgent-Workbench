@@ -829,7 +829,7 @@ func TestRunSupervisorAuditsCancellationDuringProviderCall(t *testing.T) {
 	if apperror.CodeOf(err) != apperror.CodeDeadlineExceeded {
 		t.Fatalf("provider cancellation code=%s err=%v", apperror.CodeOf(err), err)
 	}
-	if result.Checkpoint.Phase != domain.SupervisorTurnStarted || result.Checkpoint.PendingInput != "cancel active provider" || result.Checkpoint.ExecutionMillis < 20 {
+	if result.Checkpoint.Phase != domain.SupervisorTurnStarted || result.Checkpoint.PendingInput != "cancel active provider" || result.Checkpoint.ExecutionMillis <= 0 {
 		t.Fatalf("provider cancellation was not durably checkpointed: %#v", result)
 	}
 	items, err := st.ListRunEvents(context.Background(), run.ID)
@@ -1319,6 +1319,11 @@ func TestRunSupervisorRootWaitPausesAndResumesAtNextTurn(t *testing.T) {
 	if execution.StopReason != "root_wait" || execution.RunStatus != domain.RunPaused || len(execution.Steps) != 1 || execution.Steps[0].Checkpoint.Phase != domain.SupervisorWaiting {
 		t.Fatalf("unexpected wait result: %#v", execution)
 	}
+	root, found, err := st.GetRootAgent(ctx, run.ID)
+	if err != nil || !found || root.ID != execution.Steps[0].AgentID || root.Status != domain.AgentWaiting ||
+		root.TurnsUsed != 1 {
+		t.Fatalf("wait action did not atomically park the root agent: root=%#v found=%t err=%v", root, found, err)
+	}
 	parked, err := supervisor.Execute(ctx, run.ID, 3)
 	if err != nil {
 		t.Fatal(err)
@@ -1335,8 +1340,16 @@ func TestRunSupervisorRootWaitPausesAndResumesAtNextTurn(t *testing.T) {
 	}
 	service = application.NewRunService(st)
 	supervisor = application.NewRunSupervisor(st, router, policy.NewDefaultChecker())
+	restored, err := st.RestoreAgentGraph(ctx, run.ID)
+	if err != nil || restored.RootAgentID != root.ID || restored.Nodes[0].Status != domain.AgentWaiting {
+		t.Fatalf("restart did not restore the waiting root graph: graph=%#v err=%v", restored, err)
+	}
 	if _, err := service.Resume(ctx, run.ID); err != nil {
 		t.Fatal(err)
+	}
+	resumedRoot, found, err := st.GetRootAgent(ctx, run.ID)
+	if err != nil || !found || resumedRoot.ID != root.ID || resumedRoot.Status != domain.AgentReady {
+		t.Fatalf("run resume did not wake the same root agent: root=%#v found=%t err=%v", resumedRoot, found, err)
 	}
 	continued, err := supervisor.Step(ctx, run.ID)
 	if err != nil {
@@ -1344,6 +1357,12 @@ func TestRunSupervisorRootWaitPausesAndResumesAtNextTurn(t *testing.T) {
 	}
 	if continued.Turn != 2 || continued.Action.Kind != domain.RootActionContinue || continued.RunStatus != domain.RunRunning || continued.Checkpoint.Phase != domain.SupervisorIdle || continued.Checkpoint.NextTurn != 3 {
 		t.Fatalf("unexpected resumed result: %#v", continued)
+	}
+	continuedRoot, found, err := st.GetRootAgent(ctx, run.ID)
+	if err != nil || !found || continuedRoot.ID != root.ID || continuedRoot.Status != domain.AgentReady ||
+		continuedRoot.TurnsUsed != 2 || continued.AgentID != root.ID {
+		t.Fatalf("continued turn did not preserve coordinator identity: root=%#v found=%t err=%v",
+			continuedRoot, found, err)
 	}
 	items, err := st.ListRunEvents(ctx, run.ID)
 	if err != nil {

@@ -112,10 +112,23 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunE
 				return domain.SupervisorTurn{}, err
 			}
 		}
+		agentNode, _, agentChanged, err := syncRootAgentTx(ctx, tx, run, mission, rootAgentProjection{
+			Status: domain.AgentRunning, ActiveAttemptID: checkpoint.AttemptID,
+			TurnsUsed: int64(checkpoint.NextTurn - 1), TokensUsed: checkpoint.TotalTokens,
+		}, checkpoint.UpdatedAt)
+		if err != nil {
+			return domain.SupervisorTurn{}, err
+		}
+		if agentChanged {
+			if _, err := createAgentGraphSnapshotTx(ctx, tx, run); err != nil {
+				return domain.SupervisorTurn{}, err
+			}
+		}
 		if err := tx.Commit(); err != nil {
 			return domain.SupervisorTurn{}, err
 		}
-		return domain.SupervisorTurn{Run: run, Mission: mission, Checkpoint: checkpoint, Recovered: true}, nil
+		return domain.SupervisorTurn{Run: run, Mission: mission, Agent: agentNode,
+			Checkpoint: checkpoint, Recovered: true}, nil
 	}
 	if checkpoint.NextTurn > run.Budget.MaxTurns {
 		return domain.SupervisorTurn{}, apperror.New(apperror.CodeResourceExhausted,
@@ -145,20 +158,33 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunE
 	if err := upsertSupervisorCheckpointTx(ctx, tx, checkpoint); err != nil {
 		return domain.SupervisorTurn{}, err
 	}
+	agentNode, _, agentChanged, err := syncRootAgentTx(ctx, tx, run, mission, rootAgentProjection{
+		Status: domain.AgentRunning, ActiveAttemptID: checkpoint.AttemptID,
+		TurnsUsed: int64(checkpoint.NextTurn - 1), TokensUsed: checkpoint.TotalTokens,
+	}, checkpoint.UpdatedAt)
+	if err != nil {
+		return domain.SupervisorTurn{}, err
+	}
+	if agentChanged {
+		if _, err := createAgentGraphSnapshotTx(ctx, tx, run); err != nil {
+			return domain.SupervisorTurn{}, err
+		}
+	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.SupervisorCheckpointedEvent, "run_supervisor", run.ID, map[string]any{
 		"phase": checkpoint.Phase, "next_turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
 	}); err != nil {
 		return domain.SupervisorTurn{}, err
 	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.AgentTurnStartedEvent, "run_supervisor", checkpoint.AttemptID, map[string]any{
-		"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID, "recovered": false,
+		"agent_id": agentNode.ID, "turn": checkpoint.NextTurn,
+		"attempt_id": checkpoint.AttemptID, "recovered": false,
 	}); err != nil {
 		return domain.SupervisorTurn{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.SupervisorTurn{}, err
 	}
-	return domain.SupervisorTurn{Run: run, Mission: mission, Checkpoint: checkpoint}, nil
+	return domain.SupervisorTurn{Run: run, Mission: mission, Agent: agentNode, Checkpoint: checkpoint}, nil
 }
 
 func (s *SQLiteStore) BindSupervisorTurnInput(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string) (domain.SupervisorCheckpoint, error) {
@@ -1007,6 +1033,27 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	if run.Status != domain.RunRunning {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, apperror.New(apperror.CodeFailedPrecondition, "run stopped before turn completion")
 	}
+	mission, err := scanMission(tx.QueryRowContext(ctx, `SELECT id, goal, profile, workspace_id, scope_json,
+		created_at, updated_at FROM missions WHERE id = ?`, run.MissionID))
+	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+	}
+	agentNode, agentFound, err := getRootAgentTx(ctx, tx, run.ID)
+	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+	}
+	if !agentFound {
+		agentNode, _, _, err = syncRootAgentTx(ctx, tx, run, mission, rootAgentProjection{
+			Status: domain.AgentRunning, ActiveAttemptID: checkpoint.AttemptID,
+			TurnsUsed: int64(checkpoint.NextTurn - 1), TokensUsed: checkpoint.TotalTokens,
+		}, checkpoint.UpdatedAt)
+		if err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+		}
+	} else if agentNode.Status != domain.AgentRunning || agentNode.ActiveAttemptID != checkpoint.AttemptID {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, apperror.New(apperror.CodeConflict,
+			"root agent is not bound to the completing supervisor attempt")
+	}
 	if current.RepairPhase == domain.ProtocolRepairExhausted {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, apperror.New(apperror.CodeFailedPrecondition, "exhausted protocol repair cannot complete a supervisor turn")
 	}
@@ -1040,7 +1087,7 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.AgentTurnCompletedEvent, "run_supervisor", checkpoint.AttemptID, map[string]any{
-		"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
+		"agent_id": agentNode.ID, "turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
 		"user_message_id": userMessage.ID, "assistant_message_id": assistantMessage.ID,
 		"provider": response.Provider, "model": response.Model, "usage": response.Usage,
 		"lifecycle_action": action.Kind,
@@ -1073,6 +1120,24 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 		}
 	case domain.RootActionWait:
 		if err := transitionSupervisorRunTx(ctx, tx, &run, domain.RunPaused, action.Reason, current.UpdatedAt); err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+		}
+	}
+	agentProjection := rootAgentProjection{
+		Status: domain.AgentReady, TurnsUsed: int64(current.NextTurn - 1), TokensUsed: current.TotalTokens,
+	}
+	switch action.Kind {
+	case domain.RootActionFinish:
+		agentProjection.Status = domain.AgentCompleted
+		agentProjection.StatusReason = action.Summary
+	case domain.RootActionWait:
+		agentProjection.Status = domain.AgentWaiting
+		agentProjection.StatusReason = action.Reason
+	}
+	if _, _, agentChanged, err := syncRootAgentTx(ctx, tx, run, mission, agentProjection, current.UpdatedAt); err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+	} else if agentChanged {
+		if _, err := createAgentGraphSnapshotTx(ctx, tx, run); err != nil {
 			return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 		}
 	}
@@ -1200,6 +1265,28 @@ func (s *SQLiteStore) FailSupervisorTurn(ctx context.Context, checkpoint domain.
 	if err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
+	mission, err := scanMission(tx.QueryRowContext(ctx, `SELECT id, goal, profile, workspace_id, scope_json,
+		created_at, updated_at FROM missions WHERE id = ?`, run.MissionID))
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
+	if run.Status == domain.RunRunning {
+		agentNode, found, err := getRootAgentTx(ctx, tx, run.ID)
+		if err != nil {
+			return domain.SupervisorCheckpoint{}, err
+		}
+		if !found {
+			if _, _, _, err := syncRootAgentTx(ctx, tx, run, mission, rootAgentProjection{
+				Status: domain.AgentRunning, ActiveAttemptID: checkpoint.AttemptID,
+				TurnsUsed: int64(checkpoint.NextTurn - 1), TokensUsed: checkpoint.TotalTokens,
+			}, checkpoint.UpdatedAt); err != nil {
+				return domain.SupervisorCheckpoint{}, err
+			}
+		} else if agentNode.Status != domain.AgentRunning || agentNode.ActiveAttemptID != checkpoint.AttemptID {
+			return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeConflict,
+				"root agent is not bound to the failing supervisor attempt")
+		}
+	}
 	repairAborted := current.RepairPhase == domain.ProtocolRepairPending
 	repairReason := current.RepairReason
 	current.Phase = domain.SupervisorTurnFailed
@@ -1214,8 +1301,26 @@ func (s *SQLiteStore) FailSupervisorTurn(ctx context.Context, checkpoint domain.
 	if err := upsertSupervisorCheckpointTx(ctx, tx, current); err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
+	agentProjection, err := rootAgentProjectionForRunTx(ctx, tx, run)
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
+	if run.Status == domain.RunRunning {
+		agentProjection.Status = domain.AgentReady
+		agentProjection.StatusReason = cause
+	}
+	agentNode, _, agentChanged, err := syncRootAgentTx(ctx, tx, run, mission, agentProjection, current.UpdatedAt)
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
+	if agentChanged {
+		if _, err := createAgentGraphSnapshotTx(ctx, tx, run); err != nil {
+			return domain.SupervisorCheckpoint{}, err
+		}
+	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.AgentTurnFailedEvent, "run_supervisor", checkpoint.AttemptID, map[string]any{
-		"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID, "error": cause,
+		"agent_id": agentNode.ID, "turn": checkpoint.NextTurn,
+		"attempt_id": checkpoint.AttemptID, "error": cause,
 	}); err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
@@ -1284,7 +1389,24 @@ func (s *SQLiteStore) FinalizeSupervisorRun(ctx context.Context, lease domain.Ru
 			NextTurn: 1, Phase: domain.SupervisorIdle, UpdatedAt: time.Now().UTC(),
 		}
 	}
+	mission, err := scanMission(tx.QueryRowContext(ctx, `SELECT id, goal, profile, workspace_id, scope_json,
+		created_at, updated_at FROM missions WHERE id = ?`, run.MissionID))
+	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
 	if run.Status == target {
+		projection, err := rootAgentProjectionForRunTx(ctx, tx, run)
+		if err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, err
+		}
+		projection.StatusReason = summary
+		if _, _, changed, err := syncRootAgentTx(ctx, tx, run, mission, projection, time.Now().UTC()); err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, err
+		} else if changed {
+			if _, err := createAgentGraphSnapshotTx(ctx, tx, run); err != nil {
+				return domain.Run{}, domain.SupervisorCheckpoint{}, err
+			}
+		}
 		if err := tx.Commit(); err != nil {
 			return domain.Run{}, domain.SupervisorCheckpoint{}, err
 		}
@@ -1319,6 +1441,20 @@ func (s *SQLiteStore) FinalizeSupervisorRun(ctx context.Context, lease domain.Ru
 	}
 	if err := upsertSupervisorCheckpointTx(ctx, tx, checkpoint); err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	}
+	agentStatus := domain.AgentCompleted
+	if target == domain.RunFailed {
+		agentStatus = domain.AgentFailed
+	}
+	if _, _, agentChanged, err := syncRootAgentTx(ctx, tx, run, mission, rootAgentProjection{
+		Status: agentStatus, StatusReason: summary, TurnsUsed: int64(checkpoint.NextTurn - 1),
+		TokensUsed: checkpoint.TotalTokens,
+	}, checkpoint.UpdatedAt); err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, err
+	} else if agentChanged {
+		if _, err := createAgentGraphSnapshotTx(ctx, tx, run); err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, err
+		}
 	}
 	eventType := events.SupervisorRunCompletedEvent
 	if target == domain.RunFailed {

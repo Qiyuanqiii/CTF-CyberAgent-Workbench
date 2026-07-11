@@ -4,7 +4,7 @@ Last updated: 2026-07-12
 
 ## Resume Context
 
-CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The current implementation is a CLI-first runtime with resumable Runs, streamed model calls, persisted sessions, a transactional SQLite event/message/WorkItem/Note/Artifact store, a unified Tool Gateway, workspace manager, safety policy, sandbox interfaces, context compaction, token-aware structured-memory selection, an authenticated loopback-only read API with resumable Run-event SSE, a separately authorized cross-process cancellation control, and a deterministic OpenAPI 3.1 contract generated from Go DTOs.
+CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The current implementation is a CLI-first runtime with resumable Runs, a durable single-root Agent Coordinator, streamed model calls, persisted sessions, a transactional SQLite event/message/WorkItem/Note/Artifact store, a unified Tool Gateway, workspace manager, safety policy, sandbox interfaces, context compaction, token-aware structured-memory selection, an authenticated loopback-only read API with resumable Run-event SSE, a separately authorized cross-process cancellation control, and a deterministic OpenAPI 3.1 contract generated from Go DTOs.
 
 Current product priority: migrate the working v0.1 scaffold into the V2 run-centric, resumable agent runtime described in ADR 0002 and `docs/TASK_BOOK.md`. CTF-specific solving logic is intentionally deferred until the generic runtime is stable.
 
@@ -24,6 +24,10 @@ Use these files first when resuming:
 - `docs/openapi.json`
 - `internal/app/app.go`
 - `internal/application/run_supervisor.go`
+- `internal/coordinator/coordinator.go`
+- `internal/domain/agent_node.go`
+- `internal/store/coordinator.go`
+- `internal/store/coordinator_snapshots.go`
 - `internal/domain/execution_lease.go`
 - `internal/store/execution_leases.go`
 - `internal/domain/root_action.go`
@@ -72,7 +76,7 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 91%.
+- Overall product vision: about 92%.
 - v0.1 generic agent MVP: about 99%.
 - V2 run-centric runtime: about 99%.
 - Project scaffold/framework: about 99%.
@@ -80,6 +84,7 @@ Use these files first when resuming:
 Completed:
 
 - Go CLI entrypoint and command dispatch.
+- Schema v19 single-root Agent Coordinator with stable root identity, role/profile/Skills/status/budget projection, bounded durable inboxes, SHA-256-backed recovery snapshots, lazy v18 backfill, `run graph`, and atomic Supervisor/Run lifecycle integration. Current roots have `child_limit=0`; no child execution path exists.
 - Authenticated loopback-only `api.v1` read plane with stable envelopes, typed errors, bounded cursor pagination, graceful shutdown, and Run/Session/Event/WorkItem/Note/Artifact/ToolRound plus token-free execution-lease inspection.
 - Schema v18 cross-process active-call cancellation with a distinct optional control token, exact Run/Supervisor/model-attempt preconditions, one-to-one hashed idempotency, audit-first request/observation, worker-owned context signalling, atomic terminal resolution, and stale-attempt supersession. Read and control capabilities are not interchangeable, and clients never receive or submit fencing tokens.
 - Deterministic OpenAPI 3.1 generation from Go DTOs and an explicit route catalog, with `api openapi` stdout/file export, a protected raw `/api/v1/openapi.json` endpoint, a committed golden document, live-handler contract tests, capability separation, and forbidden-internal-field checks.
@@ -144,7 +149,7 @@ Completed:
 - Reworked `docs/architecture.md` around run-scoped budget, event, sandbox, report, approval, and recovery ownership without copying the reference implementation.
 - Replaced the obsolete README migration/scaffold copy with a bilingual Chinese/English product overview, current capabilities, architecture boundary, and development-scope notice.
 - Added `docs/TASK_BOOK.md` with phased migration tasks, acceptance criteria, compatibility rules, and CTF deferred to the final phase.
-- Versioned SQLite migrations through schema v18: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative model budgets, durable pending input, restart-safe protocol repair, Work Board, Notes, durable per-call approvals, revocable Session grants, atomic tool budgets, typed script processes, Run tool-output Artifacts, idempotent structured-memory operations, durable Supervisor tool rounds/calls, Run execution leases with checkpoint fencing, and cross-process model cancellation; each version is checksummed and transactional.
+- Versioned SQLite migrations through schema v19: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative model budgets, durable pending input, restart-safe protocol repair, Work Board, Notes, durable per-call approvals, revocable Session grants, atomic tool budgets, typed script processes, Run tool-output Artifacts, idempotent structured-memory operations, durable Supervisor tool rounds/calls, Run execution leases with checkpoint fencing, cross-process model cancellation, and the bounded single-root Coordinator; each version is checksummed and transactional.
 - Migration tests cover idempotence, legacy data preservation, checksum history, and failed-migration rollback.
 - Unified `internal/idgen` now backs agent tasks, sessions, tool runs, file edits, Mission/Run, and event IDs.
 - Added pure Go Mission, Scope, Budget, RunConfig, Run status machine, and legal transition checks.
@@ -232,12 +237,14 @@ Not done yet:
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
 - TypeScript Web UI and Rust analyzer processes; the bounded local read API, durable metadata SSE, and narrowly scoped cancellation control are complete. No general HTTP mutation surface is planned yet.
-- Provider cost budgets, AgentCoordinator, and Findings/Evidence/Report; create-only WorkItem/Note Provider dispatch and dedicated TUI views are complete.
+- Provider cost budgets, child-Agent scheduling/ownership, and Findings/Evidence/Report; the single-root Coordinator, create-only WorkItem/Note Provider dispatch, and dedicated TUI views are complete.
 - Real Local/Docker execution and Sandbox Artifact export from an actual process; current terminal Shell/ScriptProcess completion remains dry-run only.
 
 ## Code Audit Notes
 
 No high-severity issue was found in the latest slice.
+
+The schema v19 Coordinator audit found no unresolved high- or medium-severity issue. Root registration, Supervisor begin/continue/wait/finish/failure, operator Run transitions, inbox mutation, and graph snapshots share their existing SQLite write transaction. Database checks cap the graph at three nodes and depth one, while the current root is created with `child_limit=0`, so the new schema cannot accidentally enable recursive execution. Inbox payload values are recursively redacted, secret-shaped or non-protocol JSON keys are rejected, payloads cap at 16 KiB, and snapshots store SHA-256 plus metadata rather than duplicated content. Per-Agent pending messages cap at 128, total message history at 4,096, consume batches at 32, and retained snapshots at 32. Registration no longer repairs an existing root before inspection, so `run graph` reports lifecycle/snapshot drift instead of blessing it with a new snapshot. Tests cover restart recovery, concurrent idempotent registration, exactly-once consume, cancellation cascade, blocked child insertion, key/value secret handling, v18 migration, snapshot tamper detection, and Run/Supervisor identity continuity. Full-race review also removed three pre-existing timing assumptions from cancellation accounting, mid-stream cancellation setup, and concurrent multi-line API startup-output tests.
 
 The OpenAPI audit found no unresolved high- or medium-severity issue. The contract is generated without opening SQLite or reading credentials, all 16 published paths are bodyless authenticated `GET` operations, and live-route tests exercise each path against real SQLite state. Golden comparison prevents DTO/document drift. Security tests reject unauthorized and queried contract requests and assert that Artifact content, checkpoint pending input, `lease_id`, fencing tokens, and API-key fields are absent. The runtime document is precomputed once at API construction and remains under the existing request-size, response-size, loopback, Host, client-address, and bearer-token boundary.
 
@@ -435,7 +442,7 @@ Expected context behavior:
 - Run activity projection tests passed for automatic/existing Session binding, one-to-one reuse rejection, contiguous event order, idempotent saves, invalid-state rollback, and cross-workspace rejection.
 - Isolated CLI smoke produced 14 contiguous events spanning Run, Session, Policy, ToolRun, and FileEdit across separate process invocations.
 - TaskAdapter tests passed for repeated and eight-way concurrent adaptation, event order, unsupported legacy kinds, and a single persisted Run.
-- Isolated adapter CLI smoke passed across separate processes with one three-event timeline and stable exit codes `2` (invalid argument) and `3` (not found).
+- Isolated adapter CLI smoke passed across separate processes with one four-event timeline including root registration and stable exit codes `2` (invalid argument) and `3` (not found).
 - Legacy Task/Event Store-boundary redaction tests passed with runtime-generated token-shaped fixtures.
 - RunSupervisor tests passed for normal completion, strict lifecycle parsing, JSON request metadata, root finish/wait, wait-resume, paused execution, lifecycle replay idempotence, schema v8 checkpoint persistence, cumulative tokens, persisted execution timeout, remaining call deadline, bounded execution, MaxTurns rejection, cancellation before begin, nil response/negative usage rejection, tool-call rejection, and immediate/persisted redaction.
 - Restart recovery test persisted `turn_started`, closed and reopened SQLite, resumed the same attempt, and observed one `agent.turn_started` plus one `agent.turn_completed` event.
@@ -483,13 +490,15 @@ Expected context behavior:
 - The durable Run-event SSE gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. It covers the then-current 17-path/24-schema contract, exact bounded replay and resume, heartbeat comments, cross-SQLite-connection visibility, process concurrency exhaustion/release, write deadlines, and graceful server cancellation. An isolated real binary streamed two durable frames over authenticated loopback SSE, exposed no internal fields or token, persisted no API token, and left no temporary runtime.
 - The schema v18 cross-process cancellation gate passed full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. It covers two-connection HTTP-to-worker cancellation of a blocking Provider, distinct read/control tokens, default-disabled control, 202 exact replay, changed-key/intent conflict, latest-attempt checks, stale lease rejection, crash-orphan `superseded` resolution, secret redaction, raw-key non-persistence, strict 4 KiB JSON, and token/fencing-field exclusion. The generated contract now has 18 paths, 26 schemas, two security schemes, and Apache-2.0 license metadata; Redocly validates it without warnings. An isolated real binary reported schema v18, accepted read health, returned 401 for read-token POST and control-token GET, returned 404 for an authorized missing-Run cancellation, echoed neither token, persisted neither token after shutdown, and removed its temporary runtime.
 
+- The schema v19 single-root Coordinator gate passed full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. It covers stable root creation and lazy v18 registration, concurrent idempotent registration, atomic ready/running/waiting/terminal projection, wait/restart/resume identity continuity, Run cancellation cascade, redacted bounded inbox send, exactly-once consume, payload-hash tamper detection, and 32-snapshot retention. An isolated CLI smoke created a schema v19 Run and restored one ready root through `run graph`; child creation remains structurally disabled with `child_limit=0`, and inbox delivery is internal rather than model-visible.
+
 ## Recommended Next Slice
 
-Start the P4 Coordinator foundation now that single-worker execution and cancellation are fenced:
+Continue P4 from the now-complete single-root foundation:
 
-- Define durable root Agent identity, status, inbox, and bounded graph snapshot types without enabling child concurrency yet.
-- Route the existing single root Supervisor through a minimal Coordinator register/wait/finish contract, preserving current CLI and Session behavior.
-- Add strict child-depth/count/token allocation limits before any sub-agent spawn operation becomes public.
+- Add a digest-based inbox send idempotency ledger and explicit wake/dependency message semantics before any model can send messages.
+- Add internal-only Specialist admission that atomically reserves one of two child slots plus turn/token allocation and creates a dedicated Session; keep child model execution disabled until recovery and cascade tests pass.
+- Replace WorkItem/Note owner labels with validated Agent references while retaining a compatibility path for historical rows.
 - Generate the future TypeScript client from `docs/openapi.json`; do not duplicate Go validation or security policy in React/Vite.
 - Keep real Local/Docker execution disabled until the Sandbox manifest, resource/network limits, cancellation, and Artifact export path pass a separate audit.
 - Keep TypeScript, Rust, and model providers unable to bypass the Go Tool Gateway or policy boundary.

@@ -27,10 +27,28 @@ func executeTestCommand(t *testing.T, args ...string) (string, string, int) {
 	return out.String(), errOut.String(), code
 }
 
-func TestCLIHelpListsRunLease(t *testing.T) {
+func TestCLIHelpListsRunGraphAndLease(t *testing.T) {
 	stdout, stderr, code := executeTestCommand(t, "help")
-	if code != 0 || stderr != "" || !strings.Contains(stdout, "checkpoint|lease|finish") {
-		t.Fatalf("run lease is missing from help: stdout=%s stderr=%s code=%d", stdout, stderr, code)
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "checkpoint|graph|lease|finish") {
+		t.Fatalf("run graph or lease is missing from help: stdout=%s stderr=%s code=%d", stdout, stderr, code)
+	}
+}
+
+func TestRunGraphShowsDurableRootProjection(t *testing.T) {
+	t.Setenv("CYBERAGENT_HOME", t.TempDir())
+	stdout, stderr, code := executeTestCommand(t, "run", "create", "graph root", "--profile", "code")
+	if code != 0 {
+		t.Fatalf("run create failed: stderr=%s", stderr)
+	}
+	runID := runIDPattern.FindString(stdout)
+	if runID == "" {
+		t.Fatalf("run id missing from create output: %s", stdout)
+	}
+	stdout, stderr, code = executeTestCommand(t, "run", "graph", runID)
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "nodes: 1") ||
+		!strings.Contains(stdout, "role=root") || !strings.Contains(stdout, "status=ready") ||
+		!strings.Contains(stdout, "snapshot_protocol: agent_graph.v1") {
+		t.Fatalf("unexpected run graph output: stdout=%s stderr=%s code=%d", stdout, stderr, code)
 	}
 }
 

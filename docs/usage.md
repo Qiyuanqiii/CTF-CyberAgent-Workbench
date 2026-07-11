@@ -17,6 +17,7 @@ cyberagent run execute <run-id> --max-steps 3 --finish --summary "planning compl
 cyberagent run finish <run-id> --summary "review complete"
 cyberagent run fail <run-id> --reason "blocked by provider"
 cyberagent run checkpoint <run-id>
+cyberagent run graph <run-id>
 cyberagent run lease <run-id>
 cyberagent run pause <run-id>
 cyberagent run resume <run-id>
@@ -30,6 +31,8 @@ Session messages, assistant policy decisions, ToolRun changes, and FileEdit chan
 `run step` asks the RunSupervisor to execute exactly one root Agent planning turn. It writes a `turn_started` checkpoint before the model call, permits only the bounded create-only WorkItem/Note tool loop, and ultimately requires one strict `root_lifecycle.v1` JSON action. The Supervisor validates and interprets the action, then atomically stores the user-facing message, policy decision, model usage, lifecycle events, cumulative token/model-time counters, and next checkpoint. Raw protocol JSON is not written to Session history. `run checkpoint` displays the durable phase, protocol-repair phase/reason, next turn, token counters, and execution milliseconds. A process restart resumes an unfinished started turn or pending tool batch; a committed turn is never appended twice. Turn or token budget exhaustion returns exit code 8, while the persisted execution-time boundary returns a deadline error.
 
 Root actions use `continue`, `finish`, or `wait`. `continue` advances to another idle turn. `finish` requires a summary and atomically completes the Run. `wait` requires a reason, atomically pauses the Run, and resumes at the next turn after `run resume`. Unknown fields, trailing data, Markdown fences, invalid combinations, and responses over 64 KiB fail the current turn without writing user/assistant messages. Assistant prose by itself cannot mutate Run state.
+
+Schema v19 assigns every new Run one stable root Agent identity. The root is `ready` before a turn, `running` only while bound to the persisted Supervisor attempt, `waiting` when the Run pauses, and terminal with the Run. These projections, coordinator events, and a bounded recovery snapshot commit in the same transaction as the existing Run/Supervisor change. `run graph <run-id>` lazily registers older Runs when needed, validates the current node and pending-inbox metadata against the latest `agent_graph.v1` snapshot, and prints only bounded metadata. Current roots have `child_limit=0`: no public child-spawn path or concurrent sub-agent execution exists yet. The durable inbox primitive is internal and is not inserted into model prompts in this slice.
 
 `run execute` repeats that same durable step up to `--max-steps`; it stops immediately on root `finish` or `wait`. `--finish` remains an explicit operator fallback after a normal step limit and cannot complete a waiting Run. `run finish` and `run fail` atomically update the Run, Supervisor checkpoint, and event stream. Repeating the same terminal command or replaying the same committed lifecycle action is idempotent, while a conflicting terminal transition is rejected.
 
