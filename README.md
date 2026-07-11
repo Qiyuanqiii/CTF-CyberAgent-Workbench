@@ -29,6 +29,8 @@ schema v15 新增 create-only 的 `work_item_create` 与 `note_create` 结构化
 
 schema v16 将这两个工具接入 RunSupervisor 的 Provider 工具循环。每个模型轮次最多接受 4 个调用，每个 turn 最多执行 4 个工具轮次；`model.completed` 与 pending 工具批次原子提交，进程中断后会从 SQLite 恢复未完成调用。语义操作键由 Run、turn、工具名和脱敏规范化参数生成，不依赖 Provider 的临时 call ID，因此重发和跨轮重复意图只创建一个实体。Anthropic-compatible Provider 已支持 `tools`、`tool_use`、`tool_result` 与流式工具参数。Policy 拒绝和预算耗尽会作为有界错误结果返回模型；Shell、文件、进程、网络以及更新/删除类模型工具仍不开放。
 
+当前还提供第一版本地只读 HTTP 控制面。`cyberagent api serve` 只允许绑定回环地址，并要求每个请求携带进程级 Bearer token；它通过稳定的 `api.v1` envelope 和有界游标分页读取 Run、Session、Event、WorkItem、Note、Artifact 元数据与 Supervisor ToolRound。API 不提供写入、CORS、WebSocket、Artifact 正文或 checkpoint pending input，也不会持久化访问令牌。它是未来 TypeScript 界面的 Go 安全边界，不是绕过 CLI、Store、Policy 或 Tool Gateway 的旁路。
+
 ### English
 
 CyberAgent Workbench is a local AI agent workbench powered by Go for coding, code review, security learning, scripting, and controlled cybersecurity analysis. It brings model calls, long-context memory, workspace files, policy checks, approvals, execution budgets, and event history into one resumable runtime, so work can continue after a process restart and every action remains inspectable.
@@ -53,6 +55,8 @@ Schema v15 adds create-only `work_item_create` and `note_create` structured-memo
 
 Schema v16 connects only those two tools to the RunSupervisor Provider loop. A model response may request at most four calls, and one turn may execute at most four tool rounds. `model.completed` and its pending tool batch commit atomically, so unfinished calls resume from SQLite after a process interruption. Semantic operation keys derive from the Run, turn, tool name, and redacted canonical arguments rather than transient Provider call IDs, making repeated intent converge on one entity. The Anthropic-compatible transport now supports `tools`, `tool_use`, `tool_result`, and streamed tool arguments. Policy denial and budget exhaustion return bounded error results to the model; model-driven Shell, file, process, network, update, and delete tools remain disabled.
 
+The project also includes its first local read-only HTTP control plane. `cyberagent api serve` binds only to a loopback address and requires a process-scoped bearer token on every request. Stable `api.v1` envelopes and bounded cursor pagination expose Run, Session, Event, WorkItem, Note, Artifact metadata, and Supervisor ToolRound state. The API has no writes, CORS, WebSocket, Artifact content, or checkpoint pending input, and never persists its access token. It is the Go security boundary for a future TypeScript UI, not a path around the CLI, Store, Policy, or Tool Gateway.
+
 ## 核心能力 / Core Capabilities
 
 - **可恢复运行 / Resumable runs:** durable checkpoints, bounded execution, restart recovery, graceful terminal cancellation, and explicit lifecycle actions.
@@ -64,7 +68,7 @@ Schema v16 connects only those two tools to the RunSupervisor Provider loop. A m
 - **安全与审批 / Safety and approval:** policy checks, secret redaction, automatic low-risk reads, durable per-call approvals, revocable scoped Session grants, atomic Run tool budgets, permanent denial, and dry-run command completion.
 - **完整审计链 / Audit trail:** append-only Run events for messages, context source provenance, bounded text-free stream progress, model calls, Notes, policy decisions, tool proposals, file edits, and content-free Artifact metadata.
 - **CLI 与 TUI / CLI and TUI:** a scriptable CLI plus a Bubble Tea interface with live model progress and audited cancellation.
-- **可扩展架构 / Extensible architecture:** Go control plane with planned HTTP/WebSocket, TypeScript UI, Docker sandbox, and Rust analyzer boundaries.
+- **可扩展架构 / Extensible architecture:** Go control plane with a loopback-only read API and planned WebSocket, TypeScript UI, Docker sandbox, and Rust analyzer boundaries.
 
 > [!NOTE]
 > 当前版本仍在积极开发中。Provider 只能自动创建 WorkItem/Note；真实 Shell/Docker 执行、更广工具面、多 Agent 协作、Web UI 和 CTF 自动求解尚未开放。<br>
@@ -136,6 +140,7 @@ go run ./cmd/cyberagent artifact list --run <run-id>
 go run ./cmd/cyberagent artifact show <artifact-id>
 go run ./cmd/cyberagent artifact read <artifact-id> --max-bytes 65536
 go run ./cmd/cyberagent artifact verify <artifact-id>
+go run ./cmd/cyberagent api serve --listen 127.0.0.1:8765
 go run ./cmd/cyberagent approval list --run <run-id> --status pending
 go run ./cmd/cyberagent approval show <approval-id>
 go run ./cmd/cyberagent approval grant create --session <session-id> --tool shell --reason "trusted build commands"
@@ -153,19 +158,21 @@ go run ./cmd/cyberagent context show --task task-demo
 
 Use `CYBERAGENT_HOME` to point runtime data at another directory during tests or experiments.
 
+`api serve` generates and prints a temporary access token when `CYBERAGENT_API_TOKEN` is absent. When the variable is supplied, the CLI validates its exact value but does not echo it. See [docs/http-api.md](docs/http-api.md) for endpoints, envelopes, pagination, and security boundaries.
+
 ## Project Memory
 
-Read [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [docs/PROGRESS_BOOK.md](docs/PROGRESS_BOOK.md), [docs/TASK_BOOK.md](docs/TASK_BOOK.md), [docs/errors.md](docs/errors.md), [ADR 0001](docs/adr/0001-go-control-plane.md), and [ADR 0002](docs/adr/0002-run-centric-runtime.md) first when resuming development after a long conversation. They record current progress, language ownership, run architecture, error contract, audit notes, verified commands, and the recommended next slice.
+Read [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [docs/PROGRESS_BOOK.md](docs/PROGRESS_BOOK.md), [docs/TASK_BOOK.md](docs/TASK_BOOK.md), [docs/http-api.md](docs/http-api.md), [docs/errors.md](docs/errors.md), [ADR 0001](docs/adr/0001-go-control-plane.md), and [ADR 0002](docs/adr/0002-run-centric-runtime.md) first when resuming development after a long conversation. They record current progress, language ownership, run architecture, API and error contracts, audit notes, verified commands, and the recommended next slice.
 
 ## Repository Workflow
 
-The canonical remote is [Qiyuanqiii/CTF-CyberAgent-Workbench](https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench). Each completed development slice ends with tests, a focused code/security audit, project-memory updates, a Git commit, and a push to GitHub. Pull requests remain user-controlled; the repository template records the expected summary, validation, and audit evidence.
+The canonical remote is [Qiyuanqiii/CTF-CyberAgent-Workbench](https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench). Each completed development slice ends with tests, a focused code/security audit, project-memory updates, a Git commit, and a push to GitHub. This repository currently develops directly on `main`; do not create a feature branch or pull request unless the user explicitly asks for one.
 
 Local runtime databases, workspace data, environment files, API keys, IDE metadata, and build output are excluded from Git.
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, exactly one restart-safe lifecycle-protocol repair, and the schema v16 bounded structured-memory tool loop. P3 includes migration v9 WorkItems, migration v10 Notes, transactional relationships/events, `todo` and `note` CLI lifecycles, root/owner visibility, token-budgeted memory selection, and durable context provenance. P5 includes the unified Tool Gateway, trusted workspace scope binding, schema v11 durable per-call approvals, schema v12 revocable Session grants and atomic Run tool-call accounting, schema v13 first-class typed script processes, schema v14 source-bound hashed output Artifacts, schema v15 idempotent structured-memory mutations, and v16 durable Provider tool rounds. Real Local/Docker command execution and all non-memory model tools remain disabled. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, exactly one restart-safe lifecycle-protocol repair, and the schema v16 bounded structured-memory tool loop. P3 includes migration v9 WorkItems, migration v10 Notes, transactional relationships/events, `todo` and `note` CLI lifecycles, root/owner visibility, token-budgeted memory selection, and durable context provenance. P5 includes the unified Tool Gateway, trusted workspace scope binding, schema v11 durable per-call approvals, schema v12 revocable Session grants and atomic Run tool-call accounting, schema v13 first-class typed script processes, schema v14 source-bound hashed output Artifacts, schema v15 idempotent structured-memory mutations, and v16 durable Provider tool rounds. P9 now includes the authenticated loopback-only `api.v1` read surface; WebSocket and TypeScript remain pending. Real Local/Docker command execution and all non-memory model tools remain disabled. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
 TUI quick controls: `cyberagent tui` opens a session picker. In chat, `Tab` switches focus, `PgUp/PgDn` scroll messages, `j/k` select tool runs, `a` approves, `d` denies, `Ctrl+X` requests cancellation of the current model call, `Ctrl+R` refreshes, and `Esc` quits when idle. Busy sends cannot be closed accidentally with `Esc`; cancel or wait first. The status line renders provider/model, attempt, chunk/byte progress, cancellation, disconnect, and terminal state without exposing raw model text. Attached workspaces render in the side panel with local directory counts for attachments, scripts, outputs, logs, and writeups.
 

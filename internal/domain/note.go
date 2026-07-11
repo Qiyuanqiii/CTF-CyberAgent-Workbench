@@ -89,6 +89,7 @@ type NoteFilter struct {
 	Tags         []string
 	Pinned       *bool
 	Limit        int
+	Offset       int
 }
 
 func ParseNoteCategory(value string) (NoteCategory, error) {

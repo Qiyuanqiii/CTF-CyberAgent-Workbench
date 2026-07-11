@@ -101,6 +101,9 @@ func (s *SQLiteStore) ListWorkItems(ctx context.Context, filter domain.WorkItemF
 	if filter.RunID == "" {
 		return nil, apperror.New(apperror.CodeInvalidArgument, "work item list run id is required")
 	}
+	if err := validateStoreListOffset(filter.Offset); err != nil {
+		return nil, apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+	}
 	query := workItemSelect + ` WHERE run_id = ?`
 	args := []any{filter.RunID}
 	if len(filter.Statuses) > 0 {
@@ -134,8 +137,8 @@ func (s *SQLiteStore) ListWorkItems(ctx context.Context, filter domain.WorkItemF
 	}
 	query += ` ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
 		CASE status WHEN 'in_progress' THEN 0 WHEN 'blocked' THEN 1 WHEN 'pending' THEN 2 ELSE 3 END,
-		updated_at DESC, id LIMIT ?`
-	args = append(args, limit)
+		updated_at DESC, id LIMIT ? OFFSET ?`
+	args = append(args, limit, filter.Offset)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

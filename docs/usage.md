@@ -40,7 +40,7 @@ Every call attempt emits `model.started` and then `model.completed` or `model.fa
 
 During an attempt, `run events` may contain at most 32 ordered `model.delta` records. These events contain only chunk and byte counters, sequence, and completion state; they never store model text. The terminal event must match those counters. Model terminal events, token usage, and `execution_millis` commit together, and replaying the same terminal event cannot double-charge the budget. Repair transitions emit `supervisor.protocol_repair_requested/started/completed/failed`. The raw invalid output is never copied into the repair prompt, Session, or event payload. `run step` prints `model_attempts`, `protocol_repairs`, `model_outcome`, `stream_events`, and `stream_bytes`. Exhausted transient retries return unavailable exit code 6, rate limits return resource-exhausted exit code 8, cancellation returns 7, and deadline expiration returns 9.
 
-The application service exposes in-process active-call query, bounded metadata subscription, and idempotent cancellation operations. An explicit application cancellation first appends a redacted `model.cancel_requested` event and then signals the Go-owned Provider context. Subscribers receive no raw model text and are disconnected if their 32-event buffer fills. Bubble Tea consumes this interface through an adapter; the control plane is not yet reachable from a second CLI process, so cross-process cancellation still waits for the local Go HTTP/WebSocket service.
+The application service exposes in-process active-call query, bounded metadata subscription, and idempotent cancellation operations. An explicit application cancellation first appends a redacted `model.cancel_requested` event and then signals the Go-owned Provider context. Subscribers receive no raw model text and are disconnected if their 32-event buffer fills. Bubble Tea consumes this interface through an adapter. The local HTTP API can now inspect durable state from another process, but active-call control is deliberately not exposed yet, so cross-process cancellation still waits for a separately audited write/WebSocket service.
 
 The `cyberagent` process handles `Ctrl+C` and termination signals through its command context. An interrupted Provider call records `model.failed` with a cancelled outcome and keeps the started Supervisor checkpoint recoverable instead of abandoning an unaccounted request.
 
@@ -51,6 +51,15 @@ Ordinary text sent to a Run-created Session uses the same RunSupervisor path as 
 CLI errors keep their existing text and use stable exit codes documented in [errors.md](errors.md).
 
 Supported profiles are `code`, `review`, `learn`, and `script`. New runs start with network access disabled. Budget flags reject negative values and include maximum turns, tokens, model cost, and wall-clock timeout.
+
+## Local Read API
+
+```powershell
+$env:CYBERAGENT_API_TOKEN = "<a-random-token-of-at-least-32-bytes>"
+cyberagent api serve --listen 127.0.0.1:8765
+```
+
+`api serve` exposes authenticated, bodyless `GET` routes under `/api/v1` for durable Runs, Sessions, events, WorkItems, Notes, Artifact metadata, and Supervisor tool rounds. The listener, request Host, and client must all be loopback. The API has stable success/error envelopes and endpoint-scoped cursor pagination, but no writes, CORS, Artifact content, checkpoint pending input, WebSocket, or cross-process cancellation. The access token is process-only and is never stored. See [http-api.md](http-api.md) for the complete contract.
 
 ## Work Board
 

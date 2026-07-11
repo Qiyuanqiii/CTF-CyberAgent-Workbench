@@ -4,11 +4,11 @@ Last updated: 2026-07-11
 
 ## Resume Context
 
-CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The current implementation is a CLI-first runtime with resumable Runs, streamed model calls, persisted sessions, a transactional SQLite event/message/WorkItem/Note/Artifact store, a unified Tool Gateway, workspace manager, safety policy, sandbox interfaces, context compaction, and token-aware structured-memory selection.
+CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The current implementation is a CLI-first runtime with resumable Runs, streamed model calls, persisted sessions, a transactional SQLite event/message/WorkItem/Note/Artifact store, a unified Tool Gateway, workspace manager, safety policy, sandbox interfaces, context compaction, token-aware structured-memory selection, and an authenticated loopback-only read API.
 
 Current product priority: migrate the working v0.1 scaffold into the V2 run-centric, resumable agent runtime described in ADR 0002 and `docs/TASK_BOOK.md`. CTF-specific solving logic is intentionally deferred until the generic runtime is stable.
 
-Canonical remote: `https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`. After every completed development slice, run tests and audit checks, update project memory, commit the focused changes, and push them to GitHub. PR creation stays under user control; prepare a concise PR summary and validation notes when a feature branch is used.
+Canonical remote: `https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`. After every completed development slice, run tests and audit checks, update project memory, commit the focused changes, and push them to GitHub. This repository currently develops directly on `main`; do not create a branch or pull request unless the user explicitly requests one.
 
 Use these files first when resuming:
 
@@ -19,6 +19,7 @@ Use these files first when resuming:
 - `docs/adr/0002-run-centric-runtime.md`
 - `docs/architecture.md`
 - `docs/usage.md`
+- `docs/http-api.md`
 - `internal/app/app.go`
 - `internal/application/run_supervisor.go`
 - `internal/domain/root_action.go`
@@ -55,10 +56,13 @@ Use these files first when resuming:
 - `internal/store/sqlite.go`
 - `internal/store/work_items.go`
 - `internal/store/notes.go`
+- `internal/httpapi/server.go`
+- `internal/httpapi/handlers.go`
+- `internal/app/api_command.go`
 
 ## Progress Review
 
-- Overall product vision: about 85%.
+- Overall product vision: about 86%.
 - v0.1 generic agent MVP: about 99%.
 - V2 run-centric runtime: about 99%.
 - Project scaffold/framework: about 99%.
@@ -66,6 +70,7 @@ Use these files first when resuming:
 Completed:
 
 - Go CLI entrypoint and command dispatch.
+- Authenticated loopback-only `api.v1` read control plane with stable envelopes, typed errors, bounded cursor pagination, graceful shutdown, and Run/Session/Event/WorkItem/Note/Artifact/ToolRound inspection.
 - Mock LLM provider and model router.
 - CGO-backed SQLite store using `github.com/mattn/go-sqlite3`.
 - Workspace layout under `~/.cyberagent-workbench`.
@@ -208,13 +213,15 @@ Not done yet:
 - User-visible safe text streaming and cross-process cancellation routing.
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
-- Go HTTP/WebSocket control-plane API, TypeScript Web UI, and Rust analyzer processes.
+- HTTP write/control routes, WebSocket event streaming, TypeScript Web UI, and Rust analyzer processes; the bounded local read API is complete.
 - Provider cost budgets, AgentCoordinator, and Findings/Evidence/Report; Provider dispatch for the create-only WorkItem/Note tools and dedicated TUI views remain pending.
 - Real Local/Docker execution and Sandbox Artifact export from an actual process; current terminal Shell/ScriptProcess completion remains dry-run only.
 
 ## Code Audit Notes
 
 No high-severity issue was found in the latest slice.
+
+The read-API audit fixed three low-risk robustness defects before release: a pre-cancelled Windows listen context could still bind, access-token validation returned an untyped internal CLI error and silently trimmed environment values, and a cursor at the 100,000-row window could advertise an unusable next cursor. The listener now checks cancellation before binding, token errors are stable `INVALID_ARGUMENT` values and environment tokens are neither normalized nor echoed, and bounded pagination reports `truncated` instead of returning an invalid cursor. Empty collection DTOs use stable JSON arrays. Tests cover loopback Host/client enforcement, exact bearer authorization, method/body rejection, error non-disclosure, no CORS, response headers, token non-persistence, concurrent SQLite reads, graceful shutdown, cursor scope, and metadata-only Artifacts.
 
 The Tool Gateway audit found and fixed four correctness/security issues: invalid UTF-8 before a truncation boundary could be deleted and misreported as valid text; a tiny output limit could overflow its truncation marker; a persisted shell denial could be mapped inconsistently when a later Store operation also returned an error; and production file calls trusted a caller-supplied workspace root. Regression tests cover each case, and production roots are now bound to the workspace Store record.
 
@@ -268,7 +275,7 @@ Residual risks to address soon:
 - Persisted `model.delta` events intentionally contain counters rather than model text. Historical SQLite replay can reconstruct progress and accounting, not token-by-token content; the current live envelope is also metadata-only until a safe lifecycle/text projection exists.
 - Active-call subscriptions are process-local and non-replayable. A full 32-event buffer closes that subscriber; consumers must inspect `Dropped()` and recover from durable Run events.
 - Application cancellation is audit-first: if SQLite cannot append the request, the registry does not silently signal an unaudited cancellation. Parent process-context cancellation remains the emergency path and still records `model.failed(cancelled)` when possible.
-- Cross-process cancellation is not available until the Go HTTP/WebSocket control plane hosts the shared registry; a second standalone CLI process cannot observe another process's in-memory call.
+- The read-only Go API can inspect durable state from another process, but cross-process cancellation is not available until a separately audited control/WebSocket path hosts the shared registry; a second process still cannot observe or signal another process's in-memory call.
 - TUI live state is transient metadata, not a durable transcript. Disconnect or process exit must recover from SQLite Run events, and user-visible text streaming remains disabled.
 - When no active registry item exists, `Ctrl+X` cancels the current application request context after a bounded lookup. This covers legacy/pre-activation calls without fabricating an audited Run cancellation event.
 - Root `wait` currently maps to `paused` plus a textual reason; structured dependencies and approvals are future Coordinator/Work Board work.
@@ -435,14 +442,14 @@ Expected context behavior:
 - The final schema v14 gate passed with uncached targeted/full tests, full-repository race tests, vet, clean staticcheck, and zero reachable govulncheck findings. Domain, migration, source-binding, redaction, truncation, rollback/recovery, replay, tamper, CLI, and Policy-denial tests passed. Isolated real-binary smoke created one stable Artifact and one `artifact.created`, verified its hash and redacted content, and retained `tool_calls: 1` after approval replay.
 - The final schema v15 gate passed with `go test -count=1 ./...`, full-repository `go test -race -count=1 ./...`, `go vet ./...`, clean `staticcheck ./...`, and zero reachable `govulncheck` findings. Cross-Store budget and structured replay tests passed ten consecutive runs. An isolated real-binary smoke verified WorkItem create/replay, changed-intent exit code 4, redacted Note creation, Policy exit code 5, five charged attempts, one domain/completion event per successful entity, and no raw operation key or secret in the timeline; the temporary runtime was removed.
 - The schema v16 gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. Tests cover Anthropic request/response/SSE tool blocks, strict Store revalidation, model/tool transactional persistence, restart after entity creation but before result recording, semantic replay across attempts and rounds, Policy denial, budget exhaustion, four-round bounds, and cross-Store result convergence. An isolated real-binary mock smoke exported both schemas and completed one Run turn with `tool_rounds: 0`/`tool_calls: 0`; its runtime was removed. Credential scanning found only the intentional redaction-test fixture and no user test keys.
+- The local read-API gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. Tests cover real SQLite state, every published resource family, endpoint-scoped pagination, historical Supervisor tool rounds, secret redaction, omitted Artifact content/checkpoint input, loopback and bearer boundaries, internal error hiding, 32 concurrent readers, CLI token non-persistence, and graceful server cancellation. An isolated real-binary smoke verified `v0.1.0`, `api.v1`, schema v16, authenticated 200, bad-token 401, POST 405, no CORS, no environment-token echo, and no token in the closed runtime database; its process and runtime were removed.
 
 ## Recommended Next Slice
 
-Continue P9 with the smallest read-only Go control-plane API:
+Continue P9 and runtime coordination after the read API:
 
-- Add a loopback-only `net/http` API for Run, Session, Event, WorkItem, Note, Artifact, and Supervisor tool-round inspection; SQLite remains the source of truth.
-- Define stable JSON envelopes, pagination, typed errors, request limits, and cancellation semantics before adding WebSocket or TypeScript code.
 - Add TUI views for WorkItems, Notes, and durable tool rounds, plus “approve once / this session” controls backed exclusively by the persisted Go grant service.
-- Add a durable cross-process execution lease before allowing multiple worker processes to drive the same Run concurrently; the current active-call registry remains process-local.
+- Define and test a durable cross-process Run execution lease before adding API writes, cancellation, WebSocket control, or multiple worker processes; the current active-call registry remains process-local.
+- Generate an OpenAPI contract from the stabilized Go DTOs before starting React/Vite so TypeScript does not duplicate validation or security policy.
 - Keep real Local/Docker execution disabled until the Sandbox manifest, resource/network limits, cancellation, and Artifact export path pass a separate audit.
 - Keep TypeScript, Rust, and model providers unable to bypass the Go Tool Gateway or policy boundary.

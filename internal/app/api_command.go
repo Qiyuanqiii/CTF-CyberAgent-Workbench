@@ -1,0 +1,66 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+
+	"cyberagent-workbench/internal/httpapi"
+)
+
+const apiTokenEnvironment = "CYBERAGENT_API_TOKEN"
+
+func (a *App) apiCommand(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("API subcommand is required")
+	}
+	if args[0] != "serve" {
+		return fmt.Errorf("unknown API subcommand %q", args[0])
+	}
+	fs := newFlagSet("api serve", a.errOut)
+	listenAddress := fs.String("listen", httpapi.DefaultListenAddress, "loopback listen address")
+	if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"listen": true})); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: cyberagent api serve [--listen <loopback-host:port>]")
+	}
+
+	accessToken := os.Getenv(apiTokenEnvironment)
+	generated := accessToken == ""
+	if generated {
+		var err error
+		accessToken, err = httpapi.GenerateAccessToken()
+		if err != nil {
+			return err
+		}
+	}
+	if err := a.ensureStore(); err != nil {
+		return err
+	}
+	api, err := httpapi.New(a.store, httpapi.Config{AccessToken: accessToken, AppVersion: Version})
+	if err != nil {
+		return err
+	}
+	listener, err := httpapi.ListenLoopback(ctx, *listenAddress)
+	if err != nil {
+		return err
+	}
+	server, err := httpapi.NewServer(api, log.New(a.errOut, "api: ", log.LstdFlags))
+	if err != nil {
+		_ = listener.Close()
+		return err
+	}
+	baseURL := "http://" + listener.Addr().String() + "/api/v1"
+	fmt.Fprintf(a.out, "api_url: %s\napi_version: %s\napi_token_generated: %t\n",
+		baseURL, httpapi.Version, generated)
+	if generated {
+		fmt.Fprintf(a.out, "api_token: %s\n", accessToken)
+	} else {
+		fmt.Fprintf(a.out, "api_token_source: %s\n", apiTokenEnvironment)
+	}
+	fmt.Fprintln(a.out, "note: the API is read-only, loopback-only, and the token is not persisted")
+	return server.Serve(ctx, listener)
+}

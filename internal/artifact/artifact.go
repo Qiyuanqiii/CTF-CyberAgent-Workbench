@@ -172,6 +172,7 @@ type ListFilter struct {
 	SourceID string
 	Stream   Stream
 	Limit    int
+	Offset   int
 }
 
 type Store interface {

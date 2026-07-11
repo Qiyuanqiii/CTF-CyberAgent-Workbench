@@ -366,7 +366,7 @@ internal/sandbox/           Backend interfaces and Docker/local runners
 internal/store/             SQLite stores and migrations
 internal/session/           Compatibility conversation service
 internal/tui/               Bubble Tea adapter
-internal/api/               Future HTTP/WebSocket adapter
+internal/httpapi/           Loopback-only read API; future WebSocket adapter remains Go-owned
 internal/analyzer/          Future Rust JSON process bridge
 ```
 

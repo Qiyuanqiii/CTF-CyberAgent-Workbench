@@ -144,6 +144,9 @@ func (s *SQLiteStore) GetRunBySession(ctx context.Context, sessionID string) (do
 }
 
 func (s *SQLiteStore) ListRuns(ctx context.Context, filter domain.RunFilter) ([]domain.Run, error) {
+	if err := validateStoreListOffset(filter.Offset); err != nil {
+		return nil, err
+	}
 	query := `SELECT id, mission_id, session_id, status, config_json, budget_json,
 		started_at, finished_at, created_at, updated_at FROM runs WHERE 1=1`
 	var args []any
@@ -158,12 +161,13 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, filter domain.RunFilter) ([]
 		query += ` AND status = ?`
 		args = append(args, filter.Status)
 	}
-	query += ` ORDER BY updated_at DESC, id DESC LIMIT ?`
+	query += ` ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`
 	limit := filter.Limit
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
 	args = append(args, limit)
+	args = append(args, filter.Offset)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

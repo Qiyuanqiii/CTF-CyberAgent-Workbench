@@ -92,6 +92,9 @@ func (s *SQLiteStore) ListNotes(ctx context.Context, filter domain.NoteFilter) (
 	if filter.RunID == "" {
 		return nil, apperror.New(apperror.CodeInvalidArgument, "note list run id is required")
 	}
+	if err := validateStoreListOffset(filter.Offset); err != nil {
+		return nil, apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+	}
 	query := noteSelect + ` WHERE run_id = ?`
 	args := []any{filter.RunID}
 	if len(filter.Statuses) > 0 {
@@ -168,8 +171,8 @@ func (s *SQLiteStore) ListNotes(ctx context.Context, filter domain.NoteFilter) (
 	}
 	query += ` ORDER BY pinned DESC,
 		CASE category WHEN 'decision' THEN 0 WHEN 'summary' THEN 1 WHEN 'observation' THEN 2 WHEN 'hypothesis' THEN 3 ELSE 4 END,
-		updated_at DESC, id LIMIT ?`
-	args = append(args, limit)
+		updated_at DESC, id LIMIT ? OFFSET ?`
+	args = append(args, limit, filter.Offset)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

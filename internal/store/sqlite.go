@@ -26,6 +26,15 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
+const maxStoreListOffset = 100000
+
+func validateStoreListOffset(offset int) error {
+	if offset < 0 || offset > maxStoreListOffset {
+		return fmt.Errorf("list offset must be between 0 and %d", maxStoreListOffset)
+	}
+	return nil
+}
+
 type WorkspaceRecord struct {
 	ID        string
 	Name      string

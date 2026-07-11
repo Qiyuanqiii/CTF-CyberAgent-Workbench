@@ -35,26 +35,56 @@ func (s *SQLiteStore) ListSupervisorToolRounds(ctx context.Context,
 		return nil, err
 	}
 	defer rows.Close()
-	rounds := make([]domain.SupervisorToolRound, 0, domain.MaxSupervisorToolRounds)
+	return scanSupervisorToolRounds(rows, domain.MaxSupervisorToolRounds)
+}
+
+func (s *SQLiteStore) ListRunSupervisorToolRoundsPage(ctx context.Context, runID string,
+	offset int, limit int,
+) ([]domain.SupervisorToolRound, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" || len([]rune(runID)) > domain.MaxSupervisorToolIdentityRunes {
+		return nil, apperror.New(apperror.CodeInvalidArgument, "run id is required and bounded")
+	}
+	if err := validateStoreReadPage(offset, limit); err != nil {
+		return nil, apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+	}
+	rows, err := s.db.QueryContext(ctx, `WITH selected AS (
+		SELECT run_id, turn, attempt_id, round, model_attempt, created_at, completed_at
+		FROM run_supervisor_tool_rounds WHERE run_id = ?
+		ORDER BY turn DESC, created_at DESC, attempt_id DESC, round DESC LIMIT ? OFFSET ?
+	)
+	SELECT
+		r.run_id, r.turn, r.attempt_id, r.round, r.model_attempt, r.created_at, r.completed_at,
+		c.run_id, c.turn, c.attempt_id, c.round, c.position, c.model_attempt, c.call_id, c.tool_name,
+		c.payload_json, c.status, c.result_json, c.error_code, c.created_at, c.completed_at
+		FROM selected r
+		JOIN run_supervisor_tool_calls c
+			ON c.run_id = r.run_id AND c.turn = r.turn AND c.attempt_id = r.attempt_id AND c.round = r.round
+		ORDER BY r.turn DESC, r.created_at DESC, r.attempt_id DESC, r.round DESC, c.position`,
+		runID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSupervisorToolRounds(rows, limit)
+}
+
+func scanSupervisorToolRounds(rows *sql.Rows, maxRounds int) ([]domain.SupervisorToolRound, error) {
+	rounds := make([]domain.SupervisorToolRound, 0, maxRounds)
 	for rows.Next() {
 		round, call, err := scanSupervisorToolRoundCall(rows)
 		if err != nil {
 			return nil, err
 		}
-		if len(rounds) == 0 || rounds[len(rounds)-1].Round != round.Round {
+		if len(rounds) == 0 || !sameSupervisorToolRoundIdentity(rounds[len(rounds)-1], round) {
 			rounds = append(rounds, round)
-		} else if rounds[len(rounds)-1].RunID != round.RunID || rounds[len(rounds)-1].Turn != round.Turn ||
-			rounds[len(rounds)-1].AttemptID != round.AttemptID ||
-			rounds[len(rounds)-1].ModelAttempt != round.ModelAttempt {
-			return nil, apperror.New(apperror.CodeFailedPrecondition,
-				"durable supervisor tool round rows are inconsistent")
 		}
 		rounds[len(rounds)-1].Calls = append(rounds[len(rounds)-1].Calls, call)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if len(rounds) > domain.MaxSupervisorToolRounds {
+	if maxRounds <= 0 || len(rounds) > maxRounds {
 		return nil, apperror.New(apperror.CodeFailedPrecondition,
 			"durable supervisor tool round limit was exceeded")
 	}
@@ -65,6 +95,11 @@ func (s *SQLiteStore) ListSupervisorToolRounds(ctx context.Context,
 		}
 	}
 	return rounds, nil
+}
+
+func sameSupervisorToolRoundIdentity(left domain.SupervisorToolRound, right domain.SupervisorToolRound) bool {
+	return left.RunID == right.RunID && left.Turn == right.Turn && left.AttemptID == right.AttemptID &&
+		left.Round == right.Round && left.ModelAttempt == right.ModelAttempt
 }
 
 func insertSupervisorToolRoundTx(ctx context.Context, tx *sql.Tx, run domain.Run,

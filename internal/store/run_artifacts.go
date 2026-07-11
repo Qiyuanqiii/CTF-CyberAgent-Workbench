@@ -120,6 +120,9 @@ func (s *SQLiteStore) ListRunArtifacts(ctx context.Context, filter artifact.List
 	if filter.Limit < 0 || filter.Limit > artifact.MaxListLimit {
 		return nil, fmt.Errorf("artifact limit must be between 0 and %d", artifact.MaxListLimit)
 	}
+	if err := validateStoreListOffset(filter.Offset); err != nil {
+		return nil, err
+	}
 	if filter.Limit == 0 {
 		filter.Limit = defaultRunArtifactListLimit
 	}
@@ -137,8 +140,8 @@ func (s *SQLiteStore) ListRunArtifacts(ctx context.Context, filter artifact.List
 		query += ` AND stream = ?`
 		args = append(args, filter.Stream)
 	}
-	query += ` ORDER BY created_at DESC, id DESC LIMIT ?`
-	args = append(args, filter.Limit)
+	query += ` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
+	args = append(args, filter.Limit, filter.Offset)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

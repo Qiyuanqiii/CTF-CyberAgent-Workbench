@@ -67,6 +67,7 @@ type WorkItemFilter struct {
 	Statuses []WorkItemStatus
 	Owner    string
 	Limit    int
+	Offset   int
 }
 
 func ParseWorkItemStatus(value string) (WorkItemStatus, error) {

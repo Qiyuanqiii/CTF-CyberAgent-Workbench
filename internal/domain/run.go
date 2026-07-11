@@ -228,4 +228,5 @@ type RunFilter struct {
 	MissionID string
 	Status    RunStatus
 	Limit     int
+	Offset    int
 }

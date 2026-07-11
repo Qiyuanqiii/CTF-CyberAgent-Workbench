@@ -101,6 +101,16 @@ func TestSupervisorToolBatchAndResultEventsAreAtomicAndReplayable(t *testing.T) 
 	if err != nil || !rounds[0].Complete() {
 		t.Fatalf("supervisor tool round was not completed: %#v err=%v", rounds, err)
 	}
+	history, err := st.ListRunSupervisorToolRoundsPage(ctx, run.ID, 0, 1)
+	if err != nil || len(history) != 1 || len(history[0].Calls) != 1 ||
+		history[0].AttemptID != rounds[0].AttemptID || history[0].Calls[0].CallID != result.CallID ||
+		!history[0].Complete() {
+		t.Fatalf("historical supervisor tool round page is inconsistent: %#v err=%v", history, err)
+	}
+	emptyHistory, err := st.ListRunSupervisorToolRoundsPage(ctx, run.ID, 1, 1)
+	if err != nil || len(emptyHistory) != 0 {
+		t.Fatalf("historical supervisor tool round offset is inconsistent: %#v err=%v", emptyHistory, err)
+	}
 	eventList, err := st.ListRunEvents(ctx, run.ID)
 	if err != nil || countRunEventType(eventList, events.SupervisorToolBatchEvent) != 1 ||
 		countRunEventType(eventList, events.SupervisorToolResultEvent) != 1 ||

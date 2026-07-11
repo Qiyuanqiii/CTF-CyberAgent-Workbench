@@ -1,0 +1,337 @@
+package httpapi
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"path"
+	"strconv"
+	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"cyberagent-workbench/internal/apperror"
+	"cyberagent-workbench/internal/artifact"
+	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/events"
+	"cyberagent-workbench/internal/idgen"
+	"cyberagent-workbench/internal/session"
+	"cyberagent-workbench/internal/toolbudget"
+)
+
+const (
+	Version               = "api.v1"
+	DefaultListenAddress  = "127.0.0.1:8765"
+	MaxRequestTargetBytes = 8 * 1024
+	MaxQueryBytes         = 4 * 1024
+	MaxResponseBytes      = 8 * 1024 * 1024
+	MinAccessTokenBytes   = 32
+	MaxAccessTokenBytes   = 512
+)
+
+type Store interface {
+	SchemaVersion(ctx context.Context) (int, error)
+	GetMission(ctx context.Context, id string) (domain.Mission, error)
+	GetRun(ctx context.Context, id string) (domain.Run, error)
+	GetRunBySession(ctx context.Context, sessionID string) (domain.Run, bool, error)
+	ListRuns(ctx context.Context, filter domain.RunFilter) ([]domain.Run, error)
+	ListRunEventsPage(ctx context.Context, runID string, offset int, limit int) ([]events.Event, error)
+	GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error)
+	GetToolCallUsage(ctx context.Context, runID string) (toolbudget.Usage, error)
+	ListRunSupervisorToolRoundsPage(ctx context.Context, runID string, offset int, limit int) ([]domain.SupervisorToolRound, error)
+
+	GetSession(ctx context.Context, id string) (session.Session, error)
+	ListSessionsPage(ctx context.Context, offset int, limit int) ([]session.Session, error)
+	ListSessionMessagesPage(ctx context.Context, sessionID string, includeCompacted bool,
+		offset int, limit int) ([]session.Message, error)
+
+	GetWorkItem(ctx context.Context, id string) (domain.WorkItem, error)
+	ListWorkItems(ctx context.Context, filter domain.WorkItemFilter) ([]domain.WorkItem, error)
+	GetNote(ctx context.Context, id string) (domain.Note, error)
+	ListNotes(ctx context.Context, filter domain.NoteFilter) ([]domain.Note, error)
+
+	GetRunArtifactDescriptor(ctx context.Context, id string) (artifact.Descriptor, error)
+	ListRunArtifacts(ctx context.Context, filter artifact.ListFilter) ([]artifact.Descriptor, error)
+}
+
+type Config struct {
+	AccessToken string
+	AppVersion  string
+}
+
+type API struct {
+	store      Store
+	tokenHash  [sha256.Size]byte
+	appVersion string
+}
+
+func New(store Store, config Config) (*API, error) {
+	if store == nil {
+		return nil, errors.New("HTTP API store is required")
+	}
+	token := config.AccessToken
+	if err := validateAccessToken(token); err != nil {
+		return nil, err
+	}
+	version := strings.TrimSpace(config.AppVersion)
+	if version == "" {
+		version = "unknown"
+	}
+	return &API{store: store, tokenHash: sha256.Sum256([]byte(token)), appVersion: version}, nil
+}
+
+func GenerateAccessToken() (string, error) {
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("generate HTTP API access token: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw[:]), nil
+}
+
+func validateAccessToken(token string) error {
+	if token != strings.TrimSpace(token) || !utf8.ValidString(token) ||
+		len([]byte(token)) < MinAccessTokenBytes || len([]byte(token)) > MaxAccessTokenBytes {
+		return apperror.New(apperror.CodeInvalidArgument,
+			fmt.Sprintf("HTTP API access token must be normalized UTF-8 between %d and %d bytes",
+				MinAccessTokenBytes, MaxAccessTokenBytes))
+	}
+	for _, current := range token {
+		if unicode.IsControl(current) || unicode.IsSpace(current) {
+			return apperror.New(apperror.CodeInvalidArgument,
+				"HTTP API access token cannot contain whitespace or control characters")
+		}
+	}
+	return nil
+}
+
+func ListenLoopback(ctx context.Context, address string) (net.Listener, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	address = strings.TrimSpace(address)
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || strings.TrimSpace(host) == "" || strings.TrimSpace(port) == "" {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API listen address must use loopback-host:port")
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 0 || portNumber > 65535 {
+		return nil, apperror.New(apperror.CodeInvalidArgument, "HTTP API listen port is invalid")
+	}
+	if !loopbackHost(host) {
+		return nil, apperror.New(apperror.CodePolicyDenied,
+			"HTTP API listen host must be localhost or a loopback IP address")
+	}
+	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", address)
+	if err != nil {
+		if ctx != nil && ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, apperror.Wrap(apperror.CodeUnavailable, "HTTP API listen failed", err)
+	}
+	tcpAddress, ok := listener.Addr().(*net.TCPAddr)
+	if !ok || tcpAddress.IP == nil || !tcpAddress.IP.IsLoopback() {
+		_ = listener.Close()
+		return nil, apperror.New(apperror.CodePolicyDenied,
+			"HTTP API listener resolved outside the loopback interface")
+	}
+	return listener, nil
+}
+
+func loopbackHost(host string) bool {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func (a *API) Handler() http.Handler {
+	return a
+}
+
+func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
+	requestID := idgen.New("req")
+	tracked := &responseWriter{ResponseWriter: writer}
+	setSecurityHeaders(tracked.Header(), requestID)
+	defer func() {
+		if recover() != nil && !tracked.wrote {
+			a.writeError(tracked, requestID,
+				apperror.New(apperror.CodeInternal, "internal server error"), 0)
+		}
+	}()
+
+	if status, err := validateRequestBoundary(request); err != nil {
+		a.writeError(tracked, requestID, err, status)
+		return
+	}
+	if !a.authorized(request) {
+		tracked.Header().Set("WWW-Authenticate", `Bearer realm="CyberAgent API"`)
+		a.writeError(tracked, requestID,
+			apperror.New(apperror.CodePolicyDenied, "valid bearer authorization is required"),
+			http.StatusUnauthorized)
+		return
+	}
+	if request.Method != http.MethodGet {
+		tracked.Header().Set("Allow", http.MethodGet)
+		a.writeError(tracked, requestID,
+			apperror.New(apperror.CodeInvalidArgument, "HTTP API endpoint only supports GET"),
+			http.StatusMethodNotAllowed)
+		return
+	}
+	if request.ContentLength != 0 || len(request.TransferEncoding) != 0 {
+		a.writeError(tracked, requestID,
+			apperror.New(apperror.CodeInvalidArgument, "read-only HTTP API requests cannot contain a body"), 0)
+		return
+	}
+	data, page, err := a.route(request)
+	if err != nil {
+		a.writeError(tracked, requestID, err, 0)
+		return
+	}
+	a.writeSuccess(tracked, requestID, data, page)
+}
+
+func validateRequestBoundary(request *http.Request) (int, error) {
+	if request == nil || request.URL == nil {
+		return 0, apperror.New(apperror.CodeInvalidArgument, "HTTP request is required")
+	}
+	if len(request.RequestURI) > MaxRequestTargetBytes {
+		return http.StatusRequestURITooLong,
+			apperror.New(apperror.CodeResourceExhausted, "HTTP request target exceeds its limit")
+	}
+	if len(request.URL.RawQuery) > MaxQueryBytes {
+		return http.StatusRequestURITooLong,
+			apperror.New(apperror.CodeResourceExhausted, "HTTP query exceeds its limit")
+	}
+	if request.URL.Path == "" || request.URL.Path != path.Clean(request.URL.Path) ||
+		strings.Contains(request.URL.Path, `\`) {
+		return 0, apperror.New(apperror.CodeInvalidArgument, "HTTP API path is not canonical")
+	}
+	if !loopbackRequestHost(request.Host) {
+		return 0, apperror.New(apperror.CodePolicyDenied, "HTTP Host must identify a loopback address")
+	}
+	remoteHost, _, err := net.SplitHostPort(strings.TrimSpace(request.RemoteAddr))
+	if err != nil || !loopbackHost(remoteHost) {
+		return 0, apperror.New(apperror.CodePolicyDenied, "HTTP client must connect from loopback")
+	}
+	return 0, nil
+}
+
+func loopbackRequestHost(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	host, _, err := net.SplitHostPort(value)
+	if err != nil {
+		host = value
+		if strings.Contains(strings.Trim(host, "[]"), ":") && net.ParseIP(strings.Trim(host, "[]")) == nil {
+			return false
+		}
+	}
+	return loopbackHost(host)
+}
+
+func (a *API) authorized(request *http.Request) bool {
+	values := request.Header.Values("Authorization")
+	if len(values) != 1 {
+		return false
+	}
+	parts := strings.SplitN(strings.TrimSpace(values[0]), " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" {
+		return false
+	}
+	candidate := sha256.Sum256([]byte(parts[1]))
+	return subtle.ConstantTimeCompare(candidate[:], a.tokenHash[:]) == 1
+}
+
+func setSecurityHeaders(header http.Header, requestID string) {
+	header.Set("Cache-Control", "no-store")
+	header.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+	header.Set("Referrer-Policy", "no-referrer")
+	header.Set("X-Content-Type-Options", "nosniff")
+	header.Set("X-Frame-Options", "DENY")
+	header.Set("X-CyberAgent-API-Version", Version)
+	header.Set("X-Request-ID", requestID)
+}
+
+type Server struct {
+	httpServer *http.Server
+}
+
+func NewServer(api *API, errorLog *log.Logger) (*Server, error) {
+	if api == nil {
+		return nil, errors.New("HTTP API is required")
+	}
+	if errorLog == nil {
+		errorLog = log.New(io.Discard, "", 0)
+	}
+	return &Server{httpServer: &http.Server{
+		Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
+		WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 32 * 1024,
+		ErrorLog: errorLog,
+	}}, nil
+}
+
+func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
+	if s == nil || s.httpServer == nil || listener == nil {
+		return apperror.New(apperror.CodeFailedPrecondition, "HTTP API server and listener are required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	done := make(chan error, 1)
+	go func() { done <- s.httpServer.Serve(listener) }()
+	select {
+	case err := <-done:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return apperror.Wrap(apperror.CodeUnavailable, "HTTP API server stopped", err)
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		shutdownErr := s.httpServer.Shutdown(shutdownCtx)
+		serveErr := <-done
+		if shutdownErr != nil {
+			return apperror.Wrap(apperror.CodeUnavailable, "HTTP API shutdown failed", shutdownErr)
+		}
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			return apperror.Wrap(apperror.CodeUnavailable, "HTTP API server stopped", serveErr)
+		}
+		return nil
+	}
+}
+
+type responseWriter struct {
+	http.ResponseWriter
+	wrote bool
+}
+
+func (w *responseWriter) WriteHeader(status int) {
+	if !w.wrote {
+		w.wrote = true
+		w.ResponseWriter.WriteHeader(status)
+	}
+}
+
+func (w *responseWriter) Write(body []byte) (int, error) {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(body)
+}

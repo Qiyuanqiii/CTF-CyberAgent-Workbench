@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 85%。
+- 整体产品愿景：约 86%。
 - v0.1 通用 Agent MVP：约 99%。
 - V2 Run-centric Runtime：约 99%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消和 schema v16 有界工具循环。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次；真实命令执行和非结构化记忆类模型工具继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消和 schema v16 有界工具循环。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次。P9 已新增 loopback-only `api.v1` 只读控制面；真实命令执行、API 写入/WebSocket 和非结构化记忆类模型工具继续关闭。
 
 ## 二、已完成功能
 
@@ -24,6 +24,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - 持久化 Session、Message、Task、Event、Artifact 和上下文摘要。
 - Codex 风格的长上下文压缩骨架，支持手动和自动压缩。
 - `/help`、`/compact`、`/model`、`/workspace`、`/ls`、`/read`、`/write`、`/run` 会话命令。
+- `cyberagent api serve` 提供 Bearer 认证、回环限定、稳定 envelope、有界 cursor pagination 和优雅关闭的本地只读控制面，覆盖 Run/Session/Event/WorkItem/Note/Artifact metadata/ToolRound。
 
 ### 模型层
 
@@ -161,13 +162,16 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - 跨进程主动取消、WebSocket 推送和经过单独安全设计的用户可见文本 streaming。
 - OpenAI-compatible 与 Ollama Provider。
 - 真实 Docker 隔离与命令执行；Tool Gateway、first-class ScriptProcess、逐次审批、Session Grant、工具预算和输出 Artifact 已完成。
-- Go HTTP/WebSocket API、TypeScript Web UI 和 Rust analyzer 进程。
+- HTTP 写入/控制接口、WebSocket、TypeScript Web UI 和 Rust analyzer 进程；本地只读 HTTP API 已完成。
 - MCP Server、插件系统和远程任务能力。
 - 通用 Agent 稳定后的 CTF 自动分析与求解流程。
 
 ## 五、审计结论
 
 最新审计未发现高严重度问题。主要残余风险：
+
+- 本地 HTTP API 只接受 loopback、bodyless GET 和单一 Bearer token，不提供 CORS、Artifact 正文或 checkpoint pending input。token 不持久化；环境提供值不回显，自动生成值只输出到启动终端。
+- API 尚无细粒度多用户授权；持有进程 token 等同于获得当前数据库全部已发布读取资源。写路由、WebSocket 与远程监听在单独威胁建模前保持关闭。
 
 - 本轮审批审计在发布前修复两项中风险完整性问题：公开 adoption 路径原本可能为不存在的提案创建幽灵审批，策略直接拒绝记录重复保存时可能从 `never` 漂移到 `per_call`；Store 现会验证真实 ToolRun/FileEdit 及指纹，并保留原拒绝模式。
 - 健壮性复核进一步修复一项低风险隐私问题：未来客户端提供的原始 review key 不再写入 SQLite，`approval_operations` 只保存域分隔 SHA-256 摘要，幂等重放和冲突检测语义保持不变。
@@ -285,17 +289,23 @@ Supervisor Tool Loop 切片新增 schema v16、持久化 tool round/call、Anthr
 
 本轮审计未发现高严重度问题，并修复四项健壮性问题：应用层与 Store 的 JSON 字段顺序不一致、跨轮次本地 call ID 冲突、并发恢复时 `replayed` 元数据使结果不稳定，以及协议修复仍向 Provider 暴露工具。Store 现在独立复核严格 typed payload，结果去除竞争时序字段，repair 请求工具列表为空。发布门通过 uncached 全仓测试、全仓 `-race`、`go vet`、`staticcheck` 和 `govulncheck`，可达漏洞为 0；双 SQLite 连接并发结果只产生一个 result/round-complete 事件。隔离真实二进制 mock smoke 导出两个 schema，并完成 `tool_rounds: 0`/`tool_calls: 0` 的 Run turn；凭据扫描仅命中脱敏单元测试的合成 fixture，未发现用户测试 key。
 
+Local Read API 切片新增 `internal/httpapi`、`cyberagent api serve`、Store 级 offset/page 查询和 metadata-only Artifact lookup。`api.v1` 覆盖 Run/Mission/checkpoint/tool usage、Session/messages、Run events、WorkItems、Notes、Artifacts 和历史 Supervisor ToolRounds；列表使用 route/filter-bound opaque cursor，每页最多 100，100,000 行窗口到达边界时显式标记 `truncated`。
+
+本轮代码与安全审计未发现高严重度问题，并修复三项低风险健壮性问题：Windows 上预取消 context 仍可能完成 bind、环境 token 被静默 trim 且校验错误误报为内部错误，以及游标窗口边界可能返回下一次必然无效的 cursor。现已在 listen 前检查 context、按原字节执行 typed token 校验且不回显环境 token，并以 `page.truncated` 表示硬边界。真实 SQLite 集成测试覆盖所有资源族、分页、父资源 404、脱敏、Artifact 正文隔离、checkpoint input 隔离、Host/remote/token/method/body 防线、内部错误隐藏、32 路并发读取、优雅关闭和 CLI token 零持久化。
+
+该切片发布门通过 `go test -count=1 ./...`、全仓库 `go test -race -count=1 ./...`、`go vet ./...`、`staticcheck ./...` 与 `govulncheck ./...`；可达漏洞为 0。真实二进制隔离 smoke 验证 `v0.1.0`、`api.v1`、schema v16、正确 token 200、错误 token 401、POST 405、无 CORS、环境 token 不回显且关闭进程后未出现在 SQLite；临时进程和运行目录已清理。
+
 ## 七、下一开发切片
 
-1. 设计并实现 loopback-only 的最小 Go `net/http` 只读控制面，先提供 Run/Session/Event/WorkItem/Note/Artifact/ToolRound 查询、分页、稳定错误 envelope 和请求上限。
-2. 为 Session Grant 增加 TUI 审批提示和“批准一次/本会话”组合操作，同时保持 Go Store 为唯一授权源。
-3. 在开放 WebSocket/TypeScript UI 或多 worker 前增加跨进程 Run execution lease；当前 active-call registry 仍是进程内能力。
+1. 为 Session Grant 增加 TUI 审批提示和“批准一次/本会话”组合操作，并增加 WorkItem、Note、durable ToolRound 视图；Go Store 继续作为唯一授权源。
+2. 在开放 API 写入、WebSocket 或多 worker 前增加跨进程 Run execution lease；当前 active-call registry 仍是进程内能力。
+3. 从稳定 Go DTO 生成 OpenAPI 契约后再建立 React/Vite UI，TypeScript 不重复实现校验或安全策略。
 4. Docker/Local 真实命令执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
 
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
-每次完成一个开发切片后，依次执行功能复核、测试、代码与安全审计、项目记忆更新、Git 提交和 GitHub 推送。PR 由用户主动创建；使用功能分支时生成可直接采用的 Summary、Validation 和 Audit 文本。
+每次完成一个开发切片后，依次执行功能复核、测试、代码与安全审计、项目记忆更新、Git 提交和 GitHub 推送。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/errors.md`、`docs/adr/0001-go-control-plane.md` 和 `docs/adr/0002-run-centric-runtime.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`、`docs/adr/0001-go-control-plane.md` 和 `docs/adr/0002-run-centric-runtime.md`。
