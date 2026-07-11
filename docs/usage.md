@@ -60,9 +60,10 @@ Supported profiles are `code`, `review`, `learn`, and `script`. New runs start w
 ```powershell
 $env:CYBERAGENT_API_TOKEN = "<a-random-token-of-at-least-32-bytes>"
 cyberagent api serve --listen 127.0.0.1:8765
+cyberagent api openapi --output docs/openapi.json
 ```
 
-`api serve` exposes authenticated, bodyless `GET` routes under `/api/v1` for durable Runs, Sessions, events, WorkItems, Notes, Artifact metadata, Supervisor tool rounds, and token-free execution-lease status. The listener, request Host, and client must all be loopback. The API has stable success/error envelopes and endpoint-scoped cursor pagination, but no writes, CORS, Artifact content, checkpoint pending input, WebSocket, or cross-process cancellation. The access token is process-only and is never stored. See [http-api.md](http-api.md) for the complete contract.
+`api serve` exposes authenticated, bodyless `GET` routes under `/api/v1` for durable Runs, Sessions, events, WorkItems, Notes, Artifact metadata, Supervisor tool rounds, token-free execution-lease status, and the raw OpenAPI 3.1 document. The listener, request Host, and client must all be loopback. The API has stable success/error envelopes and endpoint-scoped cursor pagination, but no writes, CORS, Artifact content, checkpoint pending input, WebSocket, or cross-process cancellation. `api openapi` deterministically exports the same Go-generated contract without opening SQLite or reading a token. The access token is process-only and is never stored. See [http-api.md](http-api.md) for the complete contract.
 
 ## Work Board
 

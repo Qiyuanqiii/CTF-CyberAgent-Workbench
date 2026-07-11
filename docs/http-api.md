@@ -29,6 +29,7 @@ note: the API is read-only, loopback-only, and the token is not persisted
 $headers = @{ Authorization = "Bearer $env:CYBERAGENT_API_TOKEN" }
 Invoke-RestMethod http://127.0.0.1:8765/api/v1/health -Headers $headers
 Invoke-RestMethod "http://127.0.0.1:8765/api/v1/runs?limit=20" -Headers $headers
+Invoke-WebRequest http://127.0.0.1:8765/api/v1/openapi.json -Headers $headers
 ```
 
 `Ctrl+C` cancels the command context and performs a bounded graceful shutdown.
@@ -57,6 +58,7 @@ Invoke-RestMethod "http://127.0.0.1:8765/api/v1/runs?limit=20" -Headers $headers
 | --- | --- | --- |
 | `GET` | `/api/v1` | API and application versions plus top-level resources |
 | `GET` | `/api/v1/health` | Health and SQLite schema version |
+| `GET` | `/api/v1/openapi.json` | Raw deterministic OpenAPI 3.1 JSON document |
 | `GET` | `/api/v1/runs` | Runs; `status`, `mission_id`, pagination |
 | `GET` | `/api/v1/runs/{run_id}` | Run, Mission, checkpoint metadata, tool usage, token-free execution-lease summary |
 | `GET` | `/api/v1/runs/{run_id}/events` | Ordered Run events; pagination |
@@ -73,9 +75,24 @@ Invoke-RestMethod "http://127.0.0.1:8765/api/v1/runs?limit=20" -Headers $headers
 
 Nested routes verify their parent first. A missing Run or Session returns `NOT_FOUND` rather than an empty child collection. Unknown query fields and repeated singleton fields are rejected.
 
+## OpenAPI Contract
+
+Go DTO 是响应结构的唯一来源。以下命令不启动数据库、不读取 token，并可复现仓库内受测试的 [openapi.json](openapi.json)：
+
+Go DTOs are the single source for response shapes. The following command neither opens the database nor reads an API token, and deterministically reproduces the tested repository [openapi.json](openapi.json):
+
+```powershell
+cyberagent api openapi
+cyberagent api openapi --output docs/openapi.json
+```
+
+运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。测试会核对生成结果与仓库快照、逐条命中公开 handler、只存在 `GET` operation，并确认契约不包含 Artifact 正文、checkpoint pending input、`lease_id`、fencing token 或 API key 字段。
+
+The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. Tests compare generation with the committed snapshot, exercise every published handler, permit only `GET` operations, and verify that the contract omits Artifact content, checkpoint pending input, `lease_id`, fencing tokens, and API-key fields.
+
 ## Envelopes
 
-All successful responses use one versioned envelope:
+Except for the raw OpenAPI document, successful responses use one versioned envelope:
 
 ```json
 {
@@ -114,7 +131,7 @@ Pagination is a bounded live SQLite projection, not a multi-request snapshot. Ap
 
 ## 当前限制 / Current Limits
 
-- No write API, WebSocket event stream, OpenAPI document, browser UI, or cross-process active-call cancellation.
+- No write API, WebSocket event stream, browser UI, or cross-process active-call cancellation.
 - Execution-lease rows coordinate workers, but the API exposes neither `lease_id` nor any write operation that accepts a fencing token.
 - No Artifact content route. Use the authenticated local CLI `artifact read` when content is explicitly required.
 - No real Shell, LocalSandbox, or Docker execution. Existing approvals still resolve to audited dry-run results.

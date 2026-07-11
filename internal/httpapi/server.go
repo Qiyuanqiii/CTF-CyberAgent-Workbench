@@ -30,6 +30,7 @@ import (
 
 const (
 	Version               = "api.v1"
+	OpenAPIPath           = "/api/v1/openapi.json"
 	DefaultListenAddress  = "127.0.0.1:8765"
 	MaxRequestTargetBytes = 8 * 1024
 	MaxQueryBytes         = 4 * 1024
@@ -73,6 +74,7 @@ type API struct {
 	store      Store
 	tokenHash  [sha256.Size]byte
 	appVersion string
+	openAPI    []byte
 }
 
 func New(store Store, config Config) (*API, error) {
@@ -87,7 +89,12 @@ func New(store Store, config Config) (*API, error) {
 	if version == "" {
 		version = "unknown"
 	}
-	return &API{store: store, tokenHash: sha256.Sum256([]byte(token)), appVersion: version}, nil
+	document, err := GenerateOpenAPI()
+	if err != nil {
+		return nil, fmt.Errorf("generate OpenAPI document: %w", err)
+	}
+	return &API{store: store, tokenHash: sha256.Sum256([]byte(token)), appVersion: version,
+		openAPI: document}, nil
 }
 
 func GenerateAccessToken() (string, error) {
@@ -196,6 +203,14 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if request.ContentLength != 0 || len(request.TransferEncoding) != 0 {
 		a.writeError(tracked, requestID,
 			apperror.New(apperror.CodeInvalidArgument, "read-only HTTP API requests cannot contain a body"), 0)
+		return
+	}
+	if request.URL.Path == OpenAPIPath {
+		if err := rejectQuery(request.URL.Query()); err != nil {
+			a.writeError(tracked, requestID, err, 0)
+			return
+		}
+		a.writeOpenAPI(tracked, requestID)
 		return
 	}
 	data, page, err := a.route(request)

@@ -12,11 +12,53 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"cyberagent-workbench/internal/httpapi"
 )
 
 type synchronizedBuffer struct {
 	mu sync.Mutex
 	bytes.Buffer
+}
+
+func TestAPIOpenAPICLIPrintsAndWritesCanonicalContractWithoutRuntimeState(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "runtime-not-created")
+	t.Setenv("CYBERAGENT_HOME", home)
+	t.Setenv("MIMO_API_KEY", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("CYBERAGENT_ANTHROPIC_API_KEY", "")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if code := ExecuteContext(context.Background(), []string{"api", "openapi"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("OpenAPI stdout export failed: code=%d stderr=%s", code, stderr.String())
+	}
+	expected, err := httpapi.GenerateOpenAPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(stdout.Bytes(), expected) || stderr.Len() != 0 || !json.Valid(stdout.Bytes()) {
+		t.Fatalf("OpenAPI stdout is not canonical: stderr=%s", stderr.String())
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Fatalf("OpenAPI export initialized runtime state: stat err=%v", err)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "openapi.json")
+	stdout.Reset()
+	stderr.Reset()
+	code := ExecuteContext(context.Background(), []string{"api", "openapi", "--output", outputPath},
+		&stdout, &stderr)
+	if code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "openapi_written: ") {
+		t.Fatalf("OpenAPI file export failed: code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	written, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(written, expected) {
+		t.Fatal("OpenAPI file export differs from the Go contract")
+	}
 }
 
 func (b *synchronizedBuffer) Write(value []byte) (int, error) {

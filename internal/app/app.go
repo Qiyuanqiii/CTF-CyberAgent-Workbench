@@ -223,7 +223,7 @@ func (a *App) printHelp() {
 	fmt.Fprintln(a.out, "  cyberagent edit propose|list|show|approve|deny")
 	fmt.Fprintln(a.out, "  cyberagent approval list|show|grant")
 	fmt.Fprintln(a.out, "  cyberagent artifact list|show|read|verify")
-	fmt.Fprintln(a.out, "  cyberagent api serve")
+	fmt.Fprintln(a.out, "  cyberagent api serve|openapi")
 	fmt.Fprintln(a.out, "  cyberagent run create|adapt-task|list|show|events|usage|start|step|execute|checkpoint|lease|finish|fail|pause|resume|cancel")
 	fmt.Fprintln(a.out, "  cyberagent todo create|list|show|update|start|block|reopen|complete|cancel")
 	fmt.Fprintln(a.out, "  cyberagent note create|list|show|update|archive|restore")

@@ -42,11 +42,8 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		if err := rejectQuery(request.URL.Query()); err != nil {
 			return nil, nil, err
 		}
-		return map[string]any{
-			"api_version": Version,
-			"app_version": a.appVersion,
-			"resources":   []string{"runs", "sessions", "work-items", "notes", "artifacts"},
-		}, nil, nil
+		return IndexView{APIVersion: Version, AppVersion: a.appVersion,
+			Resources: []string{"runs", "sessions", "work-items", "notes", "artifacts", "openapi"}}, nil, nil
 	case "/api/v1/health":
 		if err := rejectQuery(request.URL.Query()); err != nil {
 			return nil, nil, err
@@ -125,10 +122,8 @@ func (a *API) health(request *http.Request) (any, *Page, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return map[string]any{
-		"status": "ok", "api_version": Version, "app_version": a.appVersion,
-		"schema_version": version,
-	}, nil, nil
+	return HealthView{Status: "ok", APIVersion: Version, AppVersion: a.appVersion,
+		SchemaVersion: version}, nil, nil
 }
 
 func (a *API) runs(request *http.Request) (any, *Page, error) {
@@ -497,6 +492,17 @@ func (a *API) writeSuccess(writer http.ResponseWriter, requestID string, data an
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	writer.WriteHeader(http.StatusOK)
 	_, _ = writer.Write(append(encoded, '\n'))
+}
+
+func (a *API) writeOpenAPI(writer http.ResponseWriter, requestID string) {
+	if len(a.openAPI) == 0 || len(a.openAPI) > MaxResponseBytes {
+		a.writeError(writer, requestID,
+			apperror.New(apperror.CodeInternal, "internal server error"), 0)
+		return
+	}
+	writer.Header().Set("Content-Type", "application/vnd.oai.openapi+json;version=3.1; charset=utf-8")
+	writer.WriteHeader(http.StatusOK)
+	_, _ = writer.Write(a.openAPI)
 }
 
 func (a *API) writeError(writer http.ResponseWriter, requestID string, err error, statusOverride int) {

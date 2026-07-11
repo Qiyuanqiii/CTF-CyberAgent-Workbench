@@ -11,6 +11,19 @@ import (
 	"cyberagent-workbench/internal/toolbudget"
 )
 
+type IndexView struct {
+	APIVersion string   `json:"api_version"`
+	AppVersion string   `json:"app_version"`
+	Resources  []string `json:"resources"`
+}
+
+type HealthView struct {
+	Status        string `json:"status"`
+	APIVersion    string `json:"api_version"`
+	AppVersion    string `json:"app_version"`
+	SchemaVersion int    `json:"schema_version"`
+}
+
 type ScopeView struct {
 	WorkspaceID    string   `json:"workspace_id,omitempty"`
 	NetworkMode    string   `json:"network_mode"`

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"cyberagent-workbench/internal/httpapi"
 )
@@ -16,12 +18,20 @@ func (a *App) apiCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("API subcommand is required")
 	}
-	if args[0] != "serve" {
+	switch args[0] {
+	case "serve":
+		return a.apiServeCommand(ctx, args[1:])
+	case "openapi":
+		return a.apiOpenAPICommand(args[1:])
+	default:
 		return fmt.Errorf("unknown API subcommand %q", args[0])
 	}
+}
+
+func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 	fs := newFlagSet("api serve", a.errOut)
 	listenAddress := fs.String("listen", httpapi.DefaultListenAddress, "loopback listen address")
-	if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"listen": true})); err != nil {
+	if err := fs.Parse(reorderFlags(args, map[string]bool{"listen": true})); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -63,4 +73,33 @@ func (a *App) apiCommand(ctx context.Context, args []string) error {
 	}
 	fmt.Fprintln(a.out, "note: the API is read-only, loopback-only, and the token is not persisted")
 	return server.Serve(ctx, listener)
+}
+
+func (a *App) apiOpenAPICommand(args []string) error {
+	fs := newFlagSet("api openapi", a.errOut)
+	output := fs.String("output", "", "optional output file")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{"output": true})); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return errors.New("usage: cyberagent api openapi [--output <path>]")
+	}
+	document, err := httpapi.GenerateOpenAPI()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(*output) == "" {
+		_, err = a.out.Write(document)
+		return err
+	}
+	path := filepath.Clean(strings.TrimSpace(*output))
+	if err := os.WriteFile(path, document, 0o644); err != nil {
+		return fmt.Errorf("write OpenAPI document: %w", err)
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		absolute = path
+	}
+	fmt.Fprintf(a.out, "openapi_written: %s\n", absolute)
+	return nil
 }
