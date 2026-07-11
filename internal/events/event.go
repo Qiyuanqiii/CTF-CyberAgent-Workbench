@@ -42,6 +42,7 @@ const (
 	LegacyTaskAdaptedEvent          = "legacy.task_adapted"
 	SupervisorCheckpointedEvent     = "supervisor.checkpointed"
 	AgentRegisteredEvent            = "agent.registered"
+	AgentCapacityReservedEvent      = "agent.capacity_reserved"
 	AgentStatusChangedEvent         = "agent.status_changed"
 	AgentMessageSentEvent           = "agent.message_sent"
 	AgentMessageConsumedEvent       = "agent.message_consumed"

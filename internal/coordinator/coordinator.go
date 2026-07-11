@@ -16,6 +16,8 @@ type Store interface {
 	GetAgentNode(ctx context.Context, id string) (domain.AgentNode, error)
 	GetRootAgent(ctx context.Context, runID string) (domain.AgentNode, bool, error)
 	ListAgentNodes(ctx context.Context, runID string) ([]domain.AgentNode, error)
+	AdmitSpecialist(ctx context.Context, admission domain.SpecialistAdmission,
+		operationKey string) (domain.AgentNode, bool, error)
 	SendAgentMessage(ctx context.Context, message domain.AgentMessage,
 		operationKey string) (domain.AgentMessage, bool, error)
 	ListAgentMessages(ctx context.Context, agentID string, pendingOnly bool, limit int) ([]domain.AgentMessage, error)
@@ -26,7 +28,8 @@ type Store interface {
 }
 
 type Coordinator struct {
-	store Store
+	store            Store
+	specialistPolicy *SpecialistAdmissionPolicy
 }
 
 type SendRequest struct {

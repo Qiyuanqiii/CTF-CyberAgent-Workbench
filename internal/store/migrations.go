@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 20
+const LatestSchemaVersion = 21
 
 type migration struct {
 	Version    int
@@ -771,6 +771,18 @@ var agentInboxProtocolStatements = []string{
 		message_id TEXT NOT NULL UNIQUE,
 		created_at TEXT NOT NULL,
 		FOREIGN KEY(message_id) REFERENCES agent_messages(id) ON DELETE CASCADE,
+		CHECK(length(operation_key_digest) = 64),
+		CHECK(length(request_fingerprint) = 64)
+	);`,
+}
+
+var specialistAdmissionStatements = []string{
+	`CREATE TABLE agent_admission_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		agent_id TEXT NOT NULL UNIQUE,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(agent_id) REFERENCES agent_nodes(id) ON DELETE CASCADE,
 		CHECK(length(operation_key_digest) = 64),
 		CHECK(length(request_fingerprint) = 64)
 	);`,

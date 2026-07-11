@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,6 +32,8 @@ func TestSQLiteUpgradesV18AndLazilyRegistersExistingRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE agent_admission_operations`,
+		`DELETE FROM schema_migrations WHERE version = 21`,
 		`DROP TABLE agent_message_operations`,
 		`DELETE FROM schema_migrations WHERE version = 20`,
 		`DROP TABLE agent_graph_snapshots`,
@@ -342,6 +345,8 @@ func TestSQLiteUpgradesV19InboxToSemanticProtocol(t *testing.T) {
 		t.Fatalf("v19 snapshot was not created: found=%t err=%v", found, err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE agent_admission_operations`,
+		`DELETE FROM schema_migrations WHERE version = 21`,
 		`DROP TABLE agent_message_operations`,
 		`ALTER TABLE agent_messages DROP COLUMN semantic`,
 		`DELETE FROM schema_migrations WHERE version = 20`,
@@ -371,5 +376,220 @@ func TestSQLiteUpgradesV19InboxToSemanticProtocol(t *testing.T) {
 	if err != nil || !found || after.StateJSON != before.StateJSON {
 		t.Fatalf("v19 snapshot compatibility changed: found=%t err=%v\nbefore=%s\nafter=%s",
 			found, err, before.StateJSON, after.StateJSON)
+	}
+}
+
+func TestSpecialistAdmissionIsAtomicPrivateAndReducesSupervisorBudget(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "admission.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	runService := application.NewRunService(st)
+	_, run, err := runService.Create(ctx, application.CreateRunRequest{
+		Goal: "reserve specialist budget", Profile: "code",
+		Budget: domain.Budget{MaxTurns: 6, MaxTokens: 600},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runService.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	root, found, err := st.GetRootAgent(ctx, run.ID)
+	if err != nil || !found {
+		t.Fatalf("root was not created: found=%t err=%v", found, err)
+	}
+	admission := domain.SpecialistAdmission{
+		AgentID: idgen.New("agent"), SessionID: idgen.New("sess"), RunID: run.ID,
+		ParentAgentID: root.ID, Title: "analyst sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Skills: []string{"model.chat"}, TurnLimit: 6, TokenLimit: 200,
+		MaxChildren: 2, CreatedAt: time.Now().UTC(),
+	}
+	if _, _, err := st.AdmitSpecialist(ctx, admission, "oversized-admission-operation"); apperror.CodeOf(err) != apperror.CodeResourceExhausted {
+		t.Fatalf("oversized turn reservation was not rejected: code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	if _, err := st.db.ExecContext(ctx, `CREATE TRIGGER fail_specialist_registered
+		BEFORE INSERT ON run_events WHEN NEW.type = 'agent.registered'
+		BEGIN SELECT RAISE(ABORT, 'forced specialist event failure'); END;`); err != nil {
+		t.Fatal(err)
+	}
+	admission.TurnLimit = 2
+	operationKey := "private-admission-operation-0001"
+	if _, _, err := st.AdmitSpecialist(ctx, admission, operationKey); err == nil {
+		t.Fatal("forced event failure did not roll back specialist admission")
+	}
+	var children, sessions, operations int
+	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_nodes WHERE run_id = ? AND parent_id = ?`,
+		run.ID, root.ID).Scan(&children); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sessions WHERE id = ?`,
+		admission.SessionID).Scan(&sessions); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_admission_operations`).Scan(&operations); err != nil {
+		t.Fatal(err)
+	}
+	rolledBackRoot, err := st.GetAgentNode(ctx, root.ID)
+	if err != nil || children != 0 || sessions != 0 || operations != 0 || rolledBackRoot.ChildLimit != 0 {
+		t.Fatalf("failed admission left state behind: children=%d sessions=%d operations=%d root=%#v err=%v",
+			children, sessions, operations, rolledBackRoot, err)
+	}
+	if _, err := st.db.ExecContext(ctx, `DROP TRIGGER fail_specialist_registered`); err != nil {
+		t.Fatal(err)
+	}
+	child, replayed, err := st.AdmitSpecialist(ctx, admission, operationKey)
+	if err != nil || replayed {
+		t.Fatalf("valid specialist admission failed: child=%#v replayed=%t err=%v", child, replayed, err)
+	}
+	childSession, err := st.GetSession(ctx, child.SessionID)
+	if err != nil || strings.Contains(childSession.Title, "sk-aaaaaaaa") ||
+		!strings.Contains(childSession.Title, "[REDACTED:api-key]") {
+		t.Fatalf("specialist title was not redacted: session=%#v err=%v", childSession, err)
+	}
+	var storedDigest string
+	if err := st.db.QueryRowContext(ctx, `SELECT operation_key_digest FROM agent_admission_operations
+		WHERE agent_id = ?`, child.ID).Scan(&storedDigest); err != nil {
+		t.Fatal(err)
+	}
+	if storedDigest == operationKey || len(storedDigest) != 64 {
+		t.Fatalf("raw specialist admission key was persisted: %q", storedDigest)
+	}
+	lease := acquireTestRunExecutionLease(t, ctx, st, run.ID)
+	turn, err := st.BeginSupervisorTurn(ctx, lease, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if turn.Run.Budget.MaxTurns != 4 || turn.Run.Budget.MaxTokens != 400 ||
+		turn.Agent.TurnLimit != 4 || turn.Agent.TokenLimit != 400 {
+		t.Fatalf("specialist reservation did not reduce root execution budget: turn=%#v agent=%#v",
+			turn.Run.Budget, turn.Agent)
+	}
+}
+
+func TestSQLiteUpgradesV20ToSpecialistAdmissionLedger(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v20.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, run, err := application.NewRunService(st).Create(ctx, application.CreateRunRequest{
+		Goal: "preserve v20 root", Profile: "learn", Budget: domain.Budget{MaxTurns: 4},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, found, err := st.GetRootAgent(ctx, run.ID)
+	if err != nil || !found {
+		t.Fatalf("root was not created: found=%t err=%v", found, err)
+	}
+	if _, err := st.db.ExecContext(ctx, `DROP TABLE agent_admission_operations`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version = 21`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	version, err := st.SchemaVersion(ctx)
+	if err != nil || version != LatestSchemaVersion {
+		t.Fatalf("v20 database did not upgrade to v21: version=%d err=%v", version, err)
+	}
+	preserved, found, err := st.GetRootAgent(ctx, run.ID)
+	if err != nil || !found || preserved.ID != root.ID || preserved.ChildLimit != 0 {
+		t.Fatalf("v20 root was not preserved: root=%#v found=%t err=%v", preserved, found, err)
+	}
+}
+
+func TestConcurrentSpecialistAdmissionConvergesAcrossStores(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "concurrent-admission.db")
+	firstStore, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstStore.Close()
+	ctx := context.Background()
+	runService := application.NewRunService(firstStore)
+	_, run, err := runService.Create(ctx, application.CreateRunRequest{
+		Goal: "converge specialist admission", Profile: "review",
+		Budget: domain.Budget{MaxTurns: 8, MaxTokens: 800},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runService.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	root, found, err := firstStore.GetRootAgent(ctx, run.ID)
+	if err != nil || !found {
+		t.Fatalf("root was not created: found=%t err=%v", found, err)
+	}
+	secondStore, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondStore.Close()
+	stores := []*SQLiteStore{firstStore, secondStore}
+	type result struct {
+		agent    domain.AgentNode
+		replayed bool
+		err      error
+	}
+	results := make(chan result, len(stores))
+	var wait sync.WaitGroup
+	for index, current := range stores {
+		wait.Add(1)
+		go func(index int, current *SQLiteStore) {
+			defer wait.Done()
+			now := time.Now().UTC()
+			agent, replayed, err := current.AdmitSpecialist(ctx, domain.SpecialistAdmission{
+				AgentID: idgen.New("agent"), SessionID: idgen.New("sess"), RunID: run.ID,
+				ParentAgentID: root.ID, Title: "concurrent reviewer", Skills: []string{"model.chat"},
+				TurnLimit: 2, TokenLimit: 200, MaxChildren: 2, CreatedAt: now.Add(time.Duration(index)),
+			}, "concurrent-admission-operation")
+			results <- result{agent: agent, replayed: replayed, err: err}
+		}(index, current)
+	}
+	wait.Wait()
+	close(results)
+	agentID := ""
+	replays := 0
+	for current := range results {
+		if current.err != nil {
+			t.Fatalf("concurrent specialist admission failed: %v", current.err)
+		}
+		if agentID == "" {
+			agentID = current.agent.ID
+		}
+		if current.agent.ID != agentID {
+			t.Fatalf("concurrent admission returned different Agents: %s and %s", agentID, current.agent.ID)
+		}
+		if current.replayed {
+			replays++
+		}
+	}
+	if replays != 1 {
+		t.Fatalf("concurrent admission replay count = %d, want 1", replays)
+	}
+	var children, operations int
+	if err := firstStore.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_nodes
+		WHERE run_id = ? AND parent_id = ?`, run.ID, root.ID).Scan(&children); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstStore.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_admission_operations`).
+		Scan(&operations); err != nil {
+		t.Fatal(err)
+	}
+	if children != 1 || operations != 1 {
+		t.Fatalf("concurrent admission did not converge: children=%d operations=%d", children, operations)
 	}
 }

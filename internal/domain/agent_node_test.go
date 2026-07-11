@@ -125,3 +125,31 @@ func TestAgentOperationKeyIsNormalizedAndBounded(t *testing.T) {
 		}
 	}
 }
+
+func TestSpecialistAdmissionRequiresBoundedIndependentResources(t *testing.T) {
+	now := time.Now().UTC()
+	admission := SpecialistAdmission{
+		AgentID: "agent-child", SessionID: "session-child", RunID: "run-1",
+		ParentAgentID: "agent-root", Title: "focused reviewer",
+		Skills: []string{"model.chat", "note_create"}, TurnLimit: 2, TokenLimit: 200,
+		MaxChildren: 2, CreatedAt: now,
+	}
+	if err := admission.Validate(); err != nil {
+		t.Fatalf("valid specialist admission was rejected: %v", err)
+	}
+	invalid := admission
+	invalid.Skills = nil
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("specialist admission without skills was accepted")
+	}
+	invalid = admission
+	invalid.TokenLimit = 0
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("specialist admission without a token reservation was accepted")
+	}
+	invalid = admission
+	invalid.MaxChildren = MaxAgentChildren + 1
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("specialist admission above the graph capacity was accepted")
+	}
+}

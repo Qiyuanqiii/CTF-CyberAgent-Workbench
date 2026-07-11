@@ -224,6 +224,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 18, Name: "cross-process model cancellation", Statements: modelCancellationStatements},
 		{Version: 19, Name: "single-root agent coordinator", Statements: agentCoordinatorStatements},
 		{Version: 20, Name: "idempotent agent inbox protocol", Statements: agentInboxProtocolStatements},
+		{Version: 21, Name: "bounded specialist admission", Statements: specialistAdmissionStatements},
 	})
 }
 

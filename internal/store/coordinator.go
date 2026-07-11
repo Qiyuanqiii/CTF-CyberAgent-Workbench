@@ -516,7 +516,13 @@ func syncRootAgentTx(ctx context.Context, tx *sql.Tx, run domain.Run, mission do
 	}
 	if !found {
 		node, err := insertRootAgentTx(ctx, tx, run, mission, projection, at)
-		return node, true, true, err
+		if err != nil {
+			return domain.AgentNode{}, false, false, err
+		}
+		if _, err := syncSpecialistLifecycleTx(ctx, tx, run, projection.Status, at); err != nil {
+			return domain.AgentNode{}, false, false, err
+		}
+		return node, true, true, nil
 	}
 	if current.SessionID != run.SessionID || current.Profile != mission.Profile {
 		return domain.AgentNode{}, false, false, apperror.New(apperror.CodeConflict,
@@ -541,8 +547,12 @@ func syncRootAgentTx(ctx context.Context, tx *sql.Tx, run domain.Run, mission do
 	updated.Status = projection.Status
 	updated.ActiveAttemptID = projection.ActiveAttemptID
 	updated.StatusReason = projection.StatusReason
-	updated.TurnLimit = int64(run.Budget.MaxTurns)
-	updated.TokenLimit = run.Budget.MaxTokens
+	effectiveBudget, err := effectiveRootBudgetTx(ctx, tx, run, current.ID)
+	if err != nil {
+		return domain.AgentNode{}, false, false, err
+	}
+	updated.TurnLimit = int64(effectiveBudget.MaxTurns)
+	updated.TokenLimit = effectiveBudget.MaxTokens
 	updated.TurnsUsed = projection.TurnsUsed
 	updated.TokensUsed = projection.TokensUsed
 	if updated.Status != domain.AgentRunning {
@@ -564,7 +574,8 @@ func syncRootAgentTx(ctx context.Context, tx *sql.Tx, run domain.Run, mission do
 		updated.TokenLimit != current.TokenLimit || updated.TurnsUsed != current.TurnsUsed ||
 		updated.TokensUsed != current.TokensUsed || !sameTimePointer(updated.FinishedAt, current.FinishedAt)
 	if !changed {
-		return current, false, false, nil
+		specialistChanged, err := syncSpecialistLifecycleTx(ctx, tx, run, projection.Status, at)
+		return current, false, specialistChanged, err
 	}
 	updated.Version = current.Version + 1
 	updated.UpdatedAt = at.UTC()
@@ -597,6 +608,9 @@ func syncRootAgentTx(ctx context.Context, tx *sql.Tx, run domain.Run, mission do
 			"from": current.Status, "to": updated.Status, "active_attempt_id": updated.ActiveAttemptID,
 			"turns_used": updated.TurnsUsed, "tokens_used": updated.TokensUsed, "version": updated.Version,
 		}); err != nil {
+		return domain.AgentNode{}, false, false, err
+	}
+	if _, err := syncSpecialistLifecycleTx(ctx, tx, run, projection.Status, at); err != nil {
 		return domain.AgentNode{}, false, false, err
 	}
 	return updated, false, true, nil

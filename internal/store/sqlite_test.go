@@ -342,6 +342,8 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE agent_admission_operations`,
+		`DELETE FROM schema_migrations WHERE version = 21`,
 		`DROP TABLE agent_message_operations`,
 		`DELETE FROM schema_migrations WHERE version = 20`,
 		`DROP TABLE agent_graph_snapshots`,
@@ -384,6 +386,8 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 func removeSchemaV16ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) {
 	t.Helper()
 	for _, statement := range []string{
+		`DROP TABLE agent_admission_operations`,
+		`DELETE FROM schema_migrations WHERE version = 21`,
 		`DROP TABLE agent_message_operations`,
 		`DELETE FROM schema_migrations WHERE version = 20`,
 		`DROP TABLE agent_graph_snapshots`,

@@ -326,7 +326,7 @@ CLI and headless mode print persisted events. Bubble Tea consumes the bounded in
 
 ## Persistence
 
-SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, `v6` adds cumulative token and model-time budget counters, `v7` adds bounded pending input recovery, `v8` adds protocol-repair phase/reason recovery, `v9` adds the Run-scoped Work Board, `v10` adds Notes plus normalized tag/source/Evidence relationships, `v11` adds durable approvals, `v12` adds Session grants and tool budgets, `v13` adds typed script processes, `v14` adds Run output Artifacts, `v15` adds idempotent structured-memory operation facts, `v16` adds durable Supervisor tool rounds/calls, `v17` adds Run execution leases plus checkpoint fencing fields, `v18` adds cross-process model cancellation, `v19` adds the bounded single-root Agent graph, and `v20` adds digest-only Agent inbox operations plus wake/dependency semantics. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
+SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, `v6` adds cumulative token and model-time budget counters, `v7` adds bounded pending input recovery, `v8` adds protocol-repair phase/reason recovery, `v9` adds the Run-scoped Work Board, `v10` adds Notes plus normalized tag/source/Evidence relationships, `v11` adds durable approvals, `v12` adds Session grants and tool budgets, `v13` adds typed script processes, `v14` adds Run output Artifacts, `v15` adds idempotent structured-memory operation facts, `v16` adds durable Supervisor tool rounds/calls, `v17` adds Run execution leases plus checkpoint fencing fields, `v18` adds cross-process model cancellation, `v19` adds the bounded single-root Agent graph, `v20` adds digest-only Agent inbox operations plus wake/dependency semantics, and `v21` adds digest-only bounded Specialist admission with dedicated Sessions and root budget reservation. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
 
 ```text
 missions
@@ -349,6 +349,7 @@ structured_tool_operations
 agent_nodes
 agent_messages
 agent_message_operations
+agent_admission_operations
 agent_graph_snapshots
 ```
 

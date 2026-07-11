@@ -12,6 +12,7 @@ import (
 	"cyberagent-workbench/internal/coordinator"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
+	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/store"
 )
 
@@ -198,6 +199,176 @@ func TestCoordinatorRegistrationIsConcurrentAndRunCancellationCascades(t *testin
 	if len(graph.Nodes) != 1 || graph.Nodes[0].ID != rootID || graph.Nodes[0].Status != domain.AgentCancelled ||
 		graph.Nodes[0].FinishedAt == nil {
 		t.Fatalf("run cancellation did not cascade to the root graph: %#v", graph)
+	}
+}
+
+func TestSpecialistAdmissionIsOptInBoundedAndLifecycleSafe(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "specialists.db")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	runService := application.NewRunService(st)
+	_, run, err := runService.Create(ctx, application.CreateRunRequest{
+		Goal: "coordinate bounded specialists", Profile: "code",
+		Budget: domain.Budget{MaxTurns: 10, MaxTokens: 1000},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runService.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	root, found, err := st.GetRootAgent(ctx, run.ID)
+	if err != nil || !found {
+		t.Fatalf("root was not created: found=%t err=%v", found, err)
+	}
+	firstRequest := coordinator.AdmitSpecialistRequest{
+		RunID: run.ID, ParentAgentID: root.ID, Title: "focused note analyst",
+		Skills: []string{"note_create", "model.chat"}, TurnLimit: 2, TokenLimit: 200,
+		IdempotencyKey: "specialist-admission-0001",
+	}
+	if _, err := coordinator.New(st).AdmitSpecialist(ctx, firstRequest); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("default coordinator enabled specialist admission: code=%s err=%v",
+			apperror.CodeOf(err), err)
+	}
+	if _, err := coordinator.NewWithSpecialistAdmission(st, coordinator.SpecialistAdmissionPolicy{}); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("invalid specialist policy was accepted: code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	service, err := coordinator.NewWithSpecialistAdmission(st, coordinator.SpecialistAdmissionPolicy{
+		MaxChildren: 2, MaxTurnsPerChild: 3, MaxTokensPerChild: 300,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	overBudget := firstRequest
+	overBudget.TurnLimit = 4
+	overBudget.IdempotencyKey = "specialist-admission-over-budget"
+	if _, err := service.AdmitSpecialist(ctx, overBudget); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("per-child admission budget was not enforced: code=%s err=%v",
+			apperror.CodeOf(err), err)
+	}
+	escalated := firstRequest
+	escalated.Skills = []string{"shell.exec"}
+	escalated.IdempotencyKey = "specialist-admission-bad-skill"
+	if _, err := service.AdmitSpecialist(ctx, escalated); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("specialist skill escalation was not rejected: code=%s err=%v",
+			apperror.CodeOf(err), err)
+	}
+	first, err := service.AdmitSpecialist(ctx, firstRequest)
+	if err != nil || first.Replayed {
+		t.Fatalf("first specialist admission failed: result=%#v err=%v", first, err)
+	}
+	if first.Agent.Role != domain.AgentRoleSpecialist || first.Agent.ParentID != root.ID ||
+		first.Agent.Depth != 1 || first.Agent.ChildLimit != 0 || first.Agent.TurnLimit != 2 ||
+		first.Agent.TokenLimit != 200 || first.Agent.SessionID == root.SessionID {
+		t.Fatalf("unexpected first specialist: %#v", first.Agent)
+	}
+	childSession, err := st.GetSession(ctx, first.Agent.SessionID)
+	if err != nil || childSession.Status != session.StatusActive || childSession.Route != "code" ||
+		childSession.WorkspaceID != "" {
+		t.Fatalf("specialist Session was not independently created: session=%#v err=%v", childSession, err)
+	}
+	replayed, err := service.AdmitSpecialist(ctx, firstRequest)
+	if err != nil || !replayed.Replayed || replayed.Agent.ID != first.Agent.ID ||
+		replayed.Agent.SessionID != first.Agent.SessionID {
+		t.Fatalf("specialist admission replay was not stable: result=%#v err=%v", replayed, err)
+	}
+	changed := firstRequest
+	changed.Title = "changed specialist intent"
+	if _, err := service.AdmitSpecialist(ctx, changed); apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("changed admission intent did not conflict: code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	projectedRoot, err := st.GetAgentNode(ctx, root.ID)
+	if err != nil || projectedRoot.ChildLimit != 2 || projectedRoot.TurnLimit != 8 ||
+		projectedRoot.TokenLimit != 800 {
+		t.Fatalf("first reservation was not projected to root: root=%#v err=%v", projectedRoot, err)
+	}
+	secondRequest := coordinator.AdmitSpecialistRequest{
+		RunID: run.ID, ParentAgentID: root.ID, Title: "focused work planner",
+		Skills: []string{"work_item_create"}, TurnLimit: 2, TokenLimit: 200,
+		IdempotencyKey: "specialist-admission-0002",
+	}
+	second, err := service.AdmitSpecialist(ctx, secondRequest)
+	if err != nil || second.Replayed || second.Agent.ID == first.Agent.ID {
+		t.Fatalf("second specialist admission failed: result=%#v err=%v", second, err)
+	}
+	projectedRoot, err = st.GetAgentNode(ctx, root.ID)
+	if err != nil || projectedRoot.TurnLimit != 6 || projectedRoot.TokenLimit != 600 {
+		t.Fatalf("second reservation was not projected to root: root=%#v err=%v", projectedRoot, err)
+	}
+	third := secondRequest
+	third.Title = "over capacity"
+	third.IdempotencyKey = "specialist-admission-0003"
+	if _, err := service.AdmitSpecialist(ctx, third); apperror.CodeOf(err) != apperror.CodeResourceExhausted {
+		t.Fatalf("third specialist was not rejected: code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	graph, err := service.Restore(ctx, run.ID)
+	if err != nil || len(graph.Nodes) != domain.MaxAgentNodesPerRun {
+		t.Fatalf("specialist graph was not recoverable: nodes=%d err=%v", len(graph.Nodes), err)
+	}
+	if _, err := runService.Pause(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{first.Agent.ID, second.Agent.ID} {
+		node, err := st.GetAgentNode(ctx, id)
+		if err != nil || node.Status != domain.AgentWaiting || node.StatusReason != "run paused" {
+			t.Fatalf("paused Run did not pause specialist %s: node=%#v err=%v", id, node, err)
+		}
+	}
+	if _, err := runService.Resume(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{first.Agent.ID, second.Agent.ID} {
+		node, err := st.GetAgentNode(ctx, id)
+		if err != nil || node.Status != domain.AgentReady {
+			t.Fatalf("resumed Run did not restore specialist %s: node=%#v err=%v", id, node, err)
+		}
+	}
+	if _, err := runService.Cancel(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, child := range []domain.AgentNode{first.Agent, second.Agent} {
+		node, err := st.GetAgentNode(ctx, child.ID)
+		if err != nil || node.Status != domain.AgentCancelled || node.FinishedAt == nil {
+			t.Fatalf("Run cancellation did not terminate specialist %s: node=%#v err=%v", child.ID, node, err)
+		}
+		sess, err := st.GetSession(ctx, child.SessionID)
+		if err != nil || sess.Status != session.StatusArchived {
+			t.Fatalf("terminal specialist Session was not archived: session=%#v err=%v", sess, err)
+		}
+	}
+	items, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countType(items, events.AgentCapacityReservedEvent) != 2 ||
+		countType(items, events.AgentRegisteredEvent) != 3 {
+		t.Fatalf("unexpected specialist admission event stream: %#v", items)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	service, err = coordinator.NewWithSpecialistAdmission(st, coordinator.SpecialistAdmissionPolicy{
+		MaxChildren: 2, MaxTurnsPerChild: 3, MaxTokensPerChild: 300,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restartedGraph, err := service.Restore(ctx, run.ID)
+	if err != nil || len(restartedGraph.Nodes) != 3 {
+		t.Fatalf("restart did not restore specialist graph: graph=%#v err=%v", restartedGraph, err)
+	}
+	replayed, err = service.AdmitSpecialist(ctx, firstRequest)
+	if err != nil || !replayed.Replayed || replayed.Agent.ID != first.Agent.ID ||
+		replayed.Agent.Status != domain.AgentCancelled {
+		t.Fatalf("terminal admission replay was not stable: result=%#v err=%v", replayed, err)
 	}
 }
 

@@ -75,6 +75,16 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunE
 	if err != nil {
 		return domain.SupervisorTurn{}, err
 	}
+	executionRun := run
+	if root, found, err := getRootAgentTx(ctx, tx, run.ID); err != nil {
+		return domain.SupervisorTurn{}, err
+	} else if found {
+		effectiveBudget, err := effectiveRootBudgetTx(ctx, tx, run, root.ID)
+		if err != nil {
+			return domain.SupervisorTurn{}, err
+		}
+		executionRun.Budget = effectiveBudget
+	}
 	checkpoint, ok, err := getSupervisorCheckpointTx(ctx, tx, run.ID)
 	if err != nil {
 		return domain.SupervisorTurn{}, err
@@ -127,16 +137,16 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunE
 		if err := tx.Commit(); err != nil {
 			return domain.SupervisorTurn{}, err
 		}
-		return domain.SupervisorTurn{Run: run, Mission: mission, Agent: agentNode,
+		return domain.SupervisorTurn{Run: executionRun, Mission: mission, Agent: agentNode,
 			Checkpoint: checkpoint, Recovered: true}, nil
 	}
-	if checkpoint.NextTurn > run.Budget.MaxTurns {
+	if checkpoint.NextTurn > executionRun.Budget.MaxTurns {
 		return domain.SupervisorTurn{}, apperror.New(apperror.CodeResourceExhausted,
-			fmt.Sprintf("run %s exhausted its %d turn budget", run.ID, run.Budget.MaxTurns))
+			fmt.Sprintf("run %s exhausted its %d turn budget", run.ID, executionRun.Budget.MaxTurns))
 	}
-	if run.Budget.MaxTokens > 0 && checkpoint.TotalTokens >= run.Budget.MaxTokens {
+	if executionRun.Budget.MaxTokens > 0 && checkpoint.TotalTokens >= executionRun.Budget.MaxTokens {
 		return domain.SupervisorTurn{}, apperror.New(apperror.CodeResourceExhausted,
-			fmt.Sprintf("run %s exhausted its %d token budget", run.ID, run.Budget.MaxTokens))
+			fmt.Sprintf("run %s exhausted its %d token budget", run.ID, executionRun.Budget.MaxTokens))
 	}
 	if run.Budget.TimeoutSeconds > 0 && checkpoint.ExecutionMillis >= run.Budget.TimeoutSeconds*1000 {
 		return domain.SupervisorTurn{}, apperror.New(apperror.CodeDeadlineExceeded,
@@ -184,7 +194,7 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunE
 	if err := tx.Commit(); err != nil {
 		return domain.SupervisorTurn{}, err
 	}
-	return domain.SupervisorTurn{Run: run, Mission: mission, Agent: agentNode, Checkpoint: checkpoint}, nil
+	return domain.SupervisorTurn{Run: executionRun, Mission: mission, Agent: agentNode, Checkpoint: checkpoint}, nil
 }
 
 func (s *SQLiteStore) BindSupervisorTurnInput(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string) (domain.SupervisorCheckpoint, error) {
