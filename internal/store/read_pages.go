@@ -80,9 +80,9 @@ func (s *SQLiteStore) ListSessionMessagesPage(ctx context.Context, sessionID str
 func (s *SQLiteStore) ListRunEventsPage(ctx context.Context, runID string,
 	offset int, limit int,
 ) ([]events.Event, error) {
-	runID = strings.TrimSpace(runID)
-	if runID == "" {
-		return nil, errors.New("run id is required")
+	var err error
+	if runID, err = validateReadRunID(runID); err != nil {
+		return nil, err
 	}
 	if err := validateStoreReadPage(offset, limit); err != nil {
 		return nil, err
@@ -103,6 +103,45 @@ func (s *SQLiteStore) ListRunEventsPage(ctx context.Context, runID string,
 		out = append(out, event)
 	}
 	return out, rows.Err()
+}
+
+func (s *SQLiteStore) ListRunEventsAfterSequence(ctx context.Context, runID string,
+	afterSequence int64, limit int,
+) ([]events.Event, error) {
+	var err error
+	if runID, err = validateReadRunID(runID); err != nil {
+		return nil, err
+	}
+	if afterSequence < 0 {
+		return nil, errors.New("event sequence cursor cannot be negative")
+	}
+	if err := validateStoreReadPage(0, limit); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, event_id, version, run_id, mission_id, sequence,
+		type, source, subject_id, payload_json, created_at FROM run_events
+		WHERE run_id = ? AND sequence > ? ORDER BY sequence LIMIT ?`, runID, afterSequence, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]events.Event, 0, limit)
+	for rows.Next() {
+		event, err := scanRunEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, event)
+	}
+	return out, rows.Err()
+}
+
+func validateReadRunID(runID string) (string, error) {
+	runID = strings.TrimSpace(runID)
+	if runID == "" || !utf8.ValidString(runID) || len([]rune(runID)) > 256 {
+		return "", errors.New("run id is required and bounded")
+	}
+	return runID, nil
 }
 
 func (s *SQLiteStore) GetRunArtifactDescriptor(ctx context.Context, id string) (artifact.Descriptor, error) {

@@ -145,7 +145,7 @@ Incremental persistence is deliberately metadata-only. One attempt may append at
 
 The Go application layer owns an in-process `ActiveCallRegistry`. A call is reserved before `model.started` to reject concurrent Provider calls for the same Run, but it becomes queryable and cancellable only after that durable start succeeds. Registry entries are keyed by Run plus Supervisor/model-attempt identity, own the Provider cancellation function, and are removed on every Provider terminal path. Explicit cancellation writes one idempotent, redacted `model.cancel_requested` event before signalling the context.
 
-The active-call registry still owns live cancellation only within one process. The schema v17 lease solves cross-process execution exclusion and stale-write fencing, not remote cancellation or live subscription; those remain API/WebSocket work.
+The active-call registry still owns live cancellation only within one process. The schema v17 lease solves cross-process execution exclusion and stale-write fencing, while the HTTP API now polls and resumes durable metadata events through Run-bound SSE cursors. That stream does not expose the transient registry or make cancellation cross-process; remote cancellation remains separately authorized API work.
 
 Live call subscribers receive a versioned metadata-only envelope for snapshot, progress, cancellation request, completion, and failure. Each subscriber has a 32-event buffer; a slow subscriber is closed instead of blocking the Provider. This transient stream has no replay guarantee and intentionally has no model-text field. Future user-facing text streaming needs a separate Go-owned redaction and lifecycle-projection boundary.
 
@@ -318,7 +318,7 @@ supervisor.action_committed
 supervisor.run_waiting / supervisor.run_completed / supervisor.run_failed
 ```
 
-CLI and headless mode print persisted events. Bubble Tea consumes the bounded in-memory call envelope through a narrow controller, renders provider/attempt/chunk/byte and terminal state, and requests audited cancellation through the application service. Its request-context cancellation is used only as a fallback for legacy or not-yet-active calls; it never receives a Provider context. A future adapter will expose the metadata envelope over WebSocket and add a separately reviewed user-facing text projection. Persisted `model.delta` remains counter-only.
+CLI and headless mode print persisted events. Bubble Tea consumes the bounded in-memory call envelope through a narrow controller, renders provider/attempt/chunk/byte and terminal state, and requests audited cancellation through the application service. Its request-context cancellation is used only as a fallback for legacy or not-yet-active calls; it never receives a Provider context. The Go HTTP adapter now exposes persisted metadata over bounded resumable SSE. Transient active-call state and any future user-facing text projection still require separate Go-owned lifecycle/redaction design. Persisted `model.delta` remains counter-only.
 
 ## Persistence
 
@@ -376,7 +376,7 @@ internal/sandbox/           Backend interfaces and Docker/local runners
 internal/store/             SQLite stores and migrations
 internal/session/           Compatibility conversation service
 internal/tui/               Bubble Tea adapter
-internal/httpapi/           Loopback-only read API; future WebSocket adapter remains Go-owned
+internal/httpapi/           Loopback-only read API, OpenAPI contract, and bounded Run-event SSE
 internal/analyzer/          Future Rust JSON process bridge
 ```
 

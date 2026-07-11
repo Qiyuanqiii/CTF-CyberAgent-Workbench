@@ -190,7 +190,7 @@ V2 的 99% 在 P0/P1 基础上完成了可恢复 Supervisor、预算、严格生
 
 ## P9：TUI、Headless、API 与 TypeScript
 
-状态：部分完成；loopback-only `api.v1` 只读控制面、Go 生成的 OpenAPI 3.1 契约与第一版 Run-aware TUI 已落地
+状态：部分完成；loopback-only `api.v1` 只读控制面、Go 生成的 OpenAPI 3.1 契约、有界 Run-event SSE 与第一版 Run-aware TUI 已落地
 
 可复用：Bubble Tea Session picker、消息区、工具审批和异步状态。
 
@@ -201,7 +201,8 @@ V2 的 99% 在 P0/P1 基础上完成了可恢复 Supervisor、预算、严格生
 - [x] 基于标准库 `net/http` 提供 loopback-only 只读 API，覆盖 Run、Session、Event、WorkItem、Note、Artifact metadata 与 Supervisor ToolRound。
 - [x] Run detail 提供不含 `lease_id` 的 execution-lease 状态摘要；Run events 同样不暴露 fencing token。
 - [x] 提供 Bearer token、Host/remote 回环校验、请求/响应上限、稳定 `api.v1` envelope、typed error 与 scope-bound cursor pagination。
-- [ ] 提供经过单独审计的写入/主动取消入口与 WebSocket event stream；当前 HTTP API 保持只读。
+- [x] 提供只读 Run-event SSE：持久化 sequence、Run-bound cursor/`Last-Event-ID`、heartbeat、写 deadline、事件/寿命/并发边界和 server shutdown cancellation；不增加模型正文。
+- [ ] 提供经过单独审计的主动取消入口；除 metadata SSE 外当前 HTTP API 保持只读，WebSocket 只在未来确有双向或模型正文需求时再引入。
 - [x] 从 Go read DTO 生成确定性 OpenAPI 3.1/JSON Schema，提供鉴权端点、CLI 导出、golden 防漂移与 live-route contract tests；TypeScript 不手写安全规则。
 - [ ] Go API 稳定后创建 React/Vite UI。
 - [ ] Monaco/xterm.js 只展示 Go 授权的编辑和终端会话。

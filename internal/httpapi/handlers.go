@@ -43,7 +43,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 			return nil, nil, err
 		}
 		return IndexView{APIVersion: Version, AppVersion: a.appVersion,
-			Resources: []string{"runs", "sessions", "work-items", "notes", "artifacts", "openapi"}}, nil, nil
+			Resources: []string{"runs", "sessions", "work-items", "notes", "artifacts", "event-stream", "openapi"}}, nil, nil
 	case "/api/v1/health":
 		if err := rejectQuery(request.URL.Query()); err != nil {
 			return nil, nil, err

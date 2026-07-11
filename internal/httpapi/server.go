@@ -46,6 +46,7 @@ type Store interface {
 	GetRunBySession(ctx context.Context, sessionID string) (domain.Run, bool, error)
 	ListRuns(ctx context.Context, filter domain.RunFilter) ([]domain.Run, error)
 	ListRunEventsPage(ctx context.Context, runID string, offset int, limit int) ([]events.Event, error)
+	ListRunEventsAfterSequence(ctx context.Context, runID string, afterSequence int64, limit int) ([]events.Event, error)
 	GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error)
 	GetRunExecutionLease(ctx context.Context, runID string) (domain.RunExecutionLease, bool, error)
 	GetToolCallUsage(ctx context.Context, runID string) (toolbudget.Usage, error)
@@ -68,13 +69,16 @@ type Store interface {
 type Config struct {
 	AccessToken string
 	AppVersion  string
+	EventStream EventStreamConfig
 }
 
 type API struct {
-	store      Store
-	tokenHash  [sha256.Size]byte
-	appVersion string
-	openAPI    []byte
+	store            Store
+	tokenHash        [sha256.Size]byte
+	appVersion       string
+	openAPI          []byte
+	eventStream      EventStreamConfig
+	eventStreamSlots chan struct{}
 }
 
 func New(store Store, config Config) (*API, error) {
@@ -93,8 +97,13 @@ func New(store Store, config Config) (*API, error) {
 	if err != nil {
 		return nil, fmt.Errorf("generate OpenAPI document: %w", err)
 	}
+	eventStream, err := normalizeEventStreamConfig(config.EventStream)
+	if err != nil {
+		return nil, err
+	}
 	return &API{store: store, tokenHash: sha256.Sum256([]byte(token)), appVersion: version,
-		openAPI: document}, nil
+		openAPI: document, eventStream: eventStream,
+		eventStreamSlots: make(chan struct{}, eventStream.MaxConnections)}, nil
 }
 
 func GenerateAccessToken() (string, error) {
@@ -213,6 +222,14 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		a.writeOpenAPI(tracked, requestID)
 		return
 	}
+	if runID, matched := matchRunEventStreamPath(request.URL.Path); matched {
+		if err := validatePathIdentity(runID); err != nil {
+			a.writeError(tracked, requestID, err, 0)
+			return
+		}
+		a.serveRunEventStream(tracked, request, requestID, runID)
+		return
+	}
 	data, page, err := a.route(request)
 	if err != nil {
 		a.writeError(tracked, requestID, err, 0)
@@ -286,7 +303,8 @@ func setSecurityHeaders(header http.Header, requestID string) {
 }
 
 type Server struct {
-	httpServer *http.Server
+	httpServer     *http.Server
+	cancelRequests context.CancelFunc
 }
 
 func NewServer(api *API, errorLog *log.Logger) (*Server, error) {
@@ -296,20 +314,22 @@ func NewServer(api *API, errorLog *log.Logger) (*Server, error) {
 	if errorLog == nil {
 		errorLog = log.New(io.Discard, "", 0)
 	}
+	requestContext, cancelRequests := context.WithCancel(context.Background())
 	return &Server{httpServer: &http.Server{
 		Handler: api.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
 		WriteTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 32 * 1024,
-		ErrorLog: errorLog,
-	}}, nil
+		ErrorLog: errorLog, BaseContext: func(net.Listener) context.Context { return requestContext },
+	}, cancelRequests: cancelRequests}, nil
 }
 
 func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
-	if s == nil || s.httpServer == nil || listener == nil {
+	if s == nil || s.httpServer == nil || s.cancelRequests == nil || listener == nil {
 		return apperror.New(apperror.CodeFailedPrecondition, "HTTP API server and listener are required")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	defer s.cancelRequests()
 	done := make(chan error, 1)
 	go func() { done <- s.httpServer.Serve(listener) }()
 	select {
@@ -319,6 +339,7 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 		}
 		return apperror.Wrap(apperror.CodeUnavailable, "HTTP API server stopped", err)
 	case <-ctx.Done():
+		s.cancelRequests()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		shutdownErr := s.httpServer.Shutdown(shutdownCtx)
@@ -350,4 +371,8 @@ func (w *responseWriter) Write(body []byte) (int, error) {
 		w.WriteHeader(http.StatusOK)
 	}
 	return w.ResponseWriter.Write(body)
+}
+
+func (w *responseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }

@@ -1,8 +1,8 @@
 # 本地 HTTP API / Local HTTP API
 
-CyberAgent Workbench 提供由 Go 控制的本地只读 `api.v1`。它用于检查 SQLite 中的持久化 Agent 状态，并为后续 TUI、WebSocket 与 TypeScript UI 提供协议基础。当前 API 不执行工具、不修改状态，也不替代 Policy、Approval 或 Tool Gateway。
+CyberAgent Workbench 提供由 Go 控制的本地只读 `api.v1`。它用于检查 SQLite 中的持久化 Agent 状态，并通过可恢复 SSE 投影持久化 Run events，为后续 TUI 与 TypeScript UI 提供协议基础。当前 API 不执行工具、不修改状态，也不替代 Policy、Approval 或 Tool Gateway。
 
-CyberAgent Workbench exposes a Go-controlled, local, read-only `api.v1`. It inspects durable Agent state in SQLite and establishes the protocol foundation for future TUI, WebSocket, and TypeScript clients. The current API cannot execute tools or mutate state and does not replace Policy, Approval, or the Tool Gateway.
+CyberAgent Workbench exposes a Go-controlled, local, read-only `api.v1`. It inspects durable Agent state in SQLite and projects persisted Run events through resumable SSE for future TUI and TypeScript clients. The current API cannot execute tools or mutate state and does not replace Policy, Approval, or the Tool Gateway.
 
 ## 启动 / Start
 
@@ -30,6 +30,7 @@ $headers = @{ Authorization = "Bearer $env:CYBERAGENT_API_TOKEN" }
 Invoke-RestMethod http://127.0.0.1:8765/api/v1/health -Headers $headers
 Invoke-RestMethod "http://127.0.0.1:8765/api/v1/runs?limit=20" -Headers $headers
 Invoke-WebRequest http://127.0.0.1:8765/api/v1/openapi.json -Headers $headers
+curl.exe -N -H "Authorization: Bearer $env:CYBERAGENT_API_TOKEN" http://127.0.0.1:8765/api/v1/runs/<run-id>/events/stream
 ```
 
 `Ctrl+C` cancels the command context and performs a bounded graceful shutdown.
@@ -43,6 +44,7 @@ Invoke-WebRequest http://127.0.0.1:8765/api/v1/openapi.json -Headers $headers
 - HTTP handler 构造后只保留 token 的 SHA-256 摘要；明文仍可能存在于启动环境或短期进程内存，但不会写入配置、SQLite 或 Run events。
 - Artifact API 只返回 descriptor，不读取或返回正文；Run detail 不返回 checkpoint pending input 或 execution fencing token。租约摘要仅包含 owner、generation、状态与时间。
 - 一个有效 token 可以读取该进程数据库暴露的全部 API 资源，应把它视为本地管理员凭据。
+- SSE 使用同一 Authorization header，token 不进入 URL、cursor 或事件数据。默认最多同时 16 条 stream；每条连接最多 32-event 批量、2 MiB 单帧、10,000 events、5 分钟寿命，并对每次写入设置 2 秒 deadline。
 
 - The listener, HTTP `Host`, and client address must all be loopback. `0.0.0.0`, an empty host, and public clients are rejected.
 - Every request must contain exactly one valid `Authorization: Bearer <token>` header.
@@ -51,6 +53,7 @@ Invoke-WebRequest http://127.0.0.1:8765/api/v1/openapi.json -Headers $headers
 - After construction, the HTTP handler retains only a SHA-256 token digest. Plaintext may still exist in the launch environment or short-lived process memory, but is never written to configuration, SQLite, or Run events.
 - Artifact routes return descriptors only and never load content. Run detail omits checkpoint pending input and the execution fencing token; its lease summary contains only owner, generation, status, and timestamps.
 - A valid token can read every API resource exposed from the process database and should be treated as a local administrator credential.
+- SSE uses the same Authorization header; the token never enters the URL, cursor, or event data. Defaults allow at most 16 concurrent streams, 32 events per batch, 2 MiB per frame, 10,000 events per connection, a five-minute lifetime, and a two-second deadline on each write.
 
 ## Endpoints
 
@@ -62,6 +65,7 @@ Invoke-WebRequest http://127.0.0.1:8765/api/v1/openapi.json -Headers $headers
 | `GET` | `/api/v1/runs` | Runs; `status`, `mission_id`, pagination |
 | `GET` | `/api/v1/runs/{run_id}` | Run, Mission, checkpoint metadata, tool usage, token-free execution-lease summary |
 | `GET` | `/api/v1/runs/{run_id}/events` | Ordered Run events; pagination |
+| `GET` | `/api/v1/runs/{run_id}/events/stream` | Bounded SSE projection; opaque `cursor` or `Last-Event-ID` resume |
 | `GET` | `/api/v1/runs/{run_id}/work-items` | `status`, `owner`, pagination |
 | `GET` | `/api/v1/runs/{run_id}/notes` | `status`, `category`, `visibility`, `owner`, `tag`, `pinned`, pagination |
 | `GET` | `/api/v1/runs/{run_id}/artifacts` | Artifact descriptors; `source_id`, `stream`, pagination |
@@ -90,9 +94,32 @@ cyberagent api openapi --output docs/openapi.json
 
 The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. Tests compare generation with the committed snapshot, exercise every published handler, permit only `GET` operations, and verify that the contract omits Artifact content, checkpoint pending input, `lease_id`, fencing tokens, and API-key fields.
 
+## Run Event Stream
+
+SSE endpoint 只读取 append-only `run_events`。首次连接从 sequence 1 开始；每个 `run.event` frame 同时携带持久化 `sequence` 和不透明、与 Run 绑定的 `id`。断线后把最后一个 `id` 放入 `Last-Event-ID` header，或首次请求的 `cursor` query；两者不能同时出现。cursor 只用于定位，不是授权凭据，跨 Run 复用会在发送 SSE headers 前被拒绝。
+
+The SSE endpoint reads only append-only `run_events`. A fresh connection starts at sequence 1. Every `run.event` frame includes the durable sequence and an opaque Run-bound `id`. Reconnect by sending the final id in `Last-Event-ID`, or use the `cursor` query on an initial request; the two cannot be combined. A cursor is positioning data, not authorization, and cross-Run reuse is rejected before SSE headers are committed.
+
+```text
+: cyberagent run-events.v1
+retry: 1000
+
+id: <opaque-run-bound-cursor>
+event: run.event
+data: {"version":"run-events.v1","request_id":"req-...","run_id":"run-...","cursor":"...","sequence":42,"event":{...}}
+
+: heartbeat
+```
+
+心跳只是 SSE comment，不写入数据库，也不会占用 sequence。达到事件/时间上限或客户端过慢时连接关闭，客户端用最后成功 frame 的 id 恢复。另一个进程写入同一 SQLite 数据库的事件可在下一轮 polling 被观察到；服务器关闭会取消 request context，不等待五分钟连接寿命。stream 复用与 `/events` 完全相同的脱敏 `EventView`，第一版不增加模型正文投影。
+
+Heartbeats are SSE comments and consume neither database rows nor sequences. The connection closes at its event/time limit or when a client misses its write deadline; resume from the last successfully received frame id. Events written by another process to the same SQLite database become visible on a later poll. Server shutdown cancels request contexts instead of waiting for the five-minute lifetime. The stream reuses the same redacted `EventView` as `/events` and adds no user-visible model-text projection.
+
+Native browser `EventSource` cannot attach the current Bearer header. Until the Go process serves a same-origin UI with a separately reviewed browser-auth design, browser clients must use authenticated `fetch` streaming and must never put the token in a query string. CORS remains disabled.
+
 ## Envelopes
 
-Except for the raw OpenAPI document, successful responses use one versioned envelope:
+Except for the raw OpenAPI document and SSE frames, successful responses use one versioned envelope:
 
 ```json
 {
@@ -131,7 +158,7 @@ Pagination is a bounded live SQLite projection, not a multi-request snapshot. Ap
 
 ## 当前限制 / Current Limits
 
-- No write API, WebSocket event stream, browser UI, or cross-process active-call cancellation.
+- No write API, browser UI, user-visible model-text stream, or cross-process active-call cancellation.
 - Execution-lease rows coordinate workers, but the API exposes neither `lease_id` nor any write operation that accepts a fencing token.
 - No Artifact content route. Use the authenticated local CLI `artifact read` when content is explicitly required.
 - No real Shell, LocalSandbox, or Docker execution. Existing approvals still resolve to audited dry-run results.

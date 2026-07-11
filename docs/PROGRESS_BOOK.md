@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 89%。
+- 整体产品愿景：约 90%。
 - v0.1 通用 Agent MVP：约 99%。
 - V2 Run-centric Runtime：约 99%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环，以及 schema v17 跨进程执行租约、心跳续期和事务 fencing。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次。P9 已新增 loopback-only `api.v1` 只读控制面、由 Go DTO 生成且受 golden/live-route 测试保护的 OpenAPI 3.1 契约，以及 Run-aware TUI 的 Work/Notes/ToolRounds/Tools 视图和批准一次/本会话操作；真实命令执行、API 写入/WebSocket 和非结构化记忆类模型工具继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环，以及 schema v17 跨进程执行租约、心跳续期和事务 fencing。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次。P9 已新增 loopback-only `api.v1` 只读控制面、由 Go DTO 生成且受 golden/live-route 测试保护的 OpenAPI 3.1 契约、有界可恢复的 Run-event SSE，以及 Run-aware TUI 的 Work/Notes/ToolRounds/Tools 视图和批准一次/本会话操作；真实命令执行、API 写入和非结构化记忆类模型工具继续关闭。
 
 ## 二、已完成功能
 
@@ -26,6 +26,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - `/help`、`/compact`、`/model`、`/workspace`、`/ls`、`/read`、`/write`、`/run` 会话命令。
 - `cyberagent api serve` 提供 Bearer 认证、回环限定、稳定 envelope、有界 cursor pagination 和优雅关闭的本地只读控制面，覆盖 Run/Session/Event/WorkItem/Note/Artifact metadata/ToolRound，以及不含 fencing token 的 execution-lease 摘要。
 - `cyberagent api openapi` 从 Go read DTO 与显式路由目录生成确定性 OpenAPI 3.1 JSON；支持 stdout/文件导出，运行时 `/api/v1/openapi.json` 在同一鉴权边界返回原始契约。
+- `/api/v1/runs/{run_id}/events/stream` 从 SQLite sequence 增量投影已脱敏 Run events，支持 Run-bound cursor/`Last-Event-ID` 恢复、心跳、跨连接写入可见性、慢写 deadline、连接寿命/事件数和进程并发上限。
 
 ### 模型层
 
@@ -166,10 +167,10 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - 经过生命周期投影和跨 chunk 脱敏的用户可见文本 streaming；当前 TUI 只展示元数据。
 - Provider 费用预算，以及最近 Session 消息与结构化记忆共用的统一 token 预算。
 - Findings、Evidence 实体与 Report；WorkItem/Note 基础、create-only Provider 调度循环和 TUI 专用视图已完成。
-- 跨进程主动取消、WebSocket 推送和经过单独安全设计的用户可见文本 streaming。
+- 跨进程主动取消和经过单独安全设计的用户可见模型文本 streaming；持久化 metadata SSE 已完成。
 - OpenAI-compatible 与 Ollama Provider。
 - 真实 Docker 隔离与命令执行；Tool Gateway、first-class ScriptProcess、逐次审批、Session Grant、工具预算和输出 Artifact 已完成。
-- HTTP 写入/控制接口、WebSocket、TypeScript Web UI 和 Rust analyzer 进程；本地只读 HTTP API 已完成。
+- HTTP 写入/控制接口、TypeScript Web UI 和 Rust analyzer 进程；本地只读 HTTP API 与 metadata SSE 已完成。
 - MCP Server、插件系统和远程任务能力。
 - 通用 Agent 稳定后的 CTF 自动分析与求解流程。
 
@@ -177,7 +178,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 
 最新审计未发现高严重度问题。主要残余风险：
 
-- schema v17 已解决同一 SQLite 数据库上的跨进程 Run 执行互斥和 stale-write fencing，但 active-call 取消/订阅仍是进程内能力；远程取消与 WebSocket 仍需独立授权和威胁建模。
+- schema v17 已解决同一 SQLite 数据库上的跨进程 Run 执行互斥和 stale-write fencing，metadata SSE 已提供持久化事件的跨进程只读恢复；active-call 取消和瞬时 registry 订阅仍是进程内能力，远程取消需独立 capability、授权和威胁建模。
 - execution lease 依赖本机 UTC 时钟与 SQLite 写事务；它不是分布式共识协议。当前 local-first 单机架构适用，未来多主机 worker 需要外部协调存储或数据库时间源。
 - `lease_id` 不进入 Run 事件、Gateway Outcome、CLI 或 HTTP DTO；可观测面只包含 owner、generation、状态和时间。租约过期无需人工删锁，新 generation 可接管未完成 checkpoint。
 
@@ -185,6 +186,8 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - API 尚无细粒度多用户授权；持有进程 token 等同于获得当前数据库全部已发布读取资源。写路由、WebSocket 与远程监听在单独威胁建模前保持关闭。
 - OpenAPI 契约只描述 Go 已公开的只读面，并由 live-route 与 golden 测试阻止漂移；它不包含 Artifact 正文、checkpoint pending input、`lease_id`、fencing token 或 API-key 字段。未来 TypeScript 只能生成 DTO/client，不能把契约当成新的授权层。
 - Redocly 推荐规则确认文档符合 OpenAPI 3.1；唯一非阻断 warning 是 `info.license` 缺失。仓库尚未由所有者选择许可证，因此本轮不伪造法律元数据，后续需要项目所有者明确决定。
+- SSE cursor 只包含 version、持久化 sequence 和 Run scope digest，不含 token、正文或内部租约信息；跨 Run、未知字段、尾随 JSON、重复 header/query 和空 cursor 都在提交 stream headers 前拒绝。cursor 不是授权，所有重连仍必须携带 Bearer token。
+- 每条 stream 默认受 32-event batch、2 MiB frame、10,000 events、5 分钟 lifetime 和 2 秒 write deadline 限制，进程默认最多 16 条并发 stream；超限返回稳定 `RESOURCE_EXHAUSTED`。write deadline 上限为 4 秒，低于 5 秒 server shutdown 窗口；shutdown 先取消 request BaseContext，避免慢客户端或长连接阻塞退出。
 
 - 本轮审批审计在发布前修复两项中风险完整性问题：公开 adoption 路径原本可能为不存在的提案创建幽灵审批，策略直接拒绝记录重复保存时可能从 `never` 漂移到 `per_call`；Store 现会验证真实 ToolRun/FileEdit 及指纹，并保留原拒绝模式。
 - 健壮性复核进一步修复一项低风险隐私问题：未来客户端提供的原始 review key 不再写入 SQLite，`approval_operations` 只保存域分隔 SHA-256 摘要，幂等重放和冲突检测语义保持不变。
@@ -318,11 +321,15 @@ OpenAPI Contract 切片新增 `internal/httpapi/openapi.go`、`cyberagent api op
 
 该切片发布门通过 `go test -count=1 ./...`、全仓库 `go test -race -count=1 ./...`、`go vet ./...`、零告警 `staticcheck ./...` 与 `govulncheck ./...`，可达漏洞为 0。Redocly 独立校验确认文档有效，仅报告未选择项目许可证这一项元数据 warning。隔离真实二进制 smoke 导出 73,354-byte、16-path、23-schema 契约，确认未创建 `CYBERAGENT_HOME`；凭据、运行数据和 OpenAPI 内部字段扫描均为零命中，临时目录已安全清理。
 
+Run Event Stream 切片新增 sequence-based Store 查询、`run-events.v1` SSE envelope、Run-bound opaque cursor、`Last-Event-ID` 恢复、heartbeat、逐帧 write deadline、每连接事件/时间边界、进程连接槽位和 Server BaseContext shutdown cancellation。HTTP/OpenAPI contract 现包含 17 paths 与 24 schemas。测试覆盖前三页精确续传、跨 Run/损坏/重复 cursor 拒绝、heartbeat 零持久化、第二 SQLite 连接追加可见、并发槽超限与释放、慢 writer deadline，以及一分钟 stream 在 server shutdown 时立即结束。
+
+该切片发布门通过 `go test -count=1 ./...`、全仓库 `go test -race -count=1 ./...`、`go vet ./...`、零告警 `staticcheck ./...` 与 `govulncheck ./...`，可达漏洞为 0。Redocly 接受 17-path/24-schema 契约，唯一 warning 仍是等待所有者选择许可证。隔离真实二进制在 loopback Bearer 边界推送 2 个持久化 frame，curl 的 1 秒超时按预期断开；stream 不含 token、`lease_id` 或 pending input，SQLite 未持久化 API token。凭据、运行数据和 OpenAPI 内部字段扫描均为零命中，临时进程与目录已清理。
+
 ## 七、下一开发切片
 
-1. 先设计有界、只读、可重连的 Run Event stream：使用持久化 sequence cursor、慢消费者断开与恢复，第一版不推送用户可见模型正文。
-2. 在只读流稳定后，为跨进程主动取消单独做授权与威胁建模；读取 token 不能获得写权限，客户端永远不能提供 fencing token。
-3. 后续 React/Vite 从 `docs/openapi.json` 生成 client/DTO，不重复实现 Go 校验或安全策略；Docker/Local 真实执行继续关闭。
+1. 为跨进程主动取消单独做 capability/token、审计优先幂等键、精确 Run/attempt 前置条件和威胁建模；读取 token 不能获得写权限，客户端永远不能提供 fencing token。
+2. 取消入口稳定后，React/Vite 从 `docs/openapi.json` 生成 client/DTO，并通过带 Authorization header 的 fetch 消费 SSE，不把 token 放入 URL、不重复实现 Go Policy。
+3. Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
 
 ## 八、仓库同步与恢复约定
 

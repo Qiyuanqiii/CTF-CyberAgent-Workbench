@@ -91,6 +91,16 @@ func TestSQLiteReadPagesUseStableOffsetsAndBoundedMetadataQueries(t *testing.T) 
 	if err != nil || len(eventPage) != 1 || eventPage[0].EventID != eventList[1].EventID {
 		t.Fatalf("event offset page is unstable: %#v err=%v", eventPage, err)
 	}
+	eventSequencePage, err := st.ListRunEventsAfterSequence(ctx, firstRun.ID, eventList[0].Sequence, 2)
+	if err != nil || len(eventSequencePage) != 2 || eventSequencePage[0].Sequence != eventList[1].Sequence ||
+		eventSequencePage[1].Sequence != eventList[2].Sequence {
+		t.Fatalf("event sequence page is unstable: %#v err=%v", eventSequencePage, err)
+	}
+	noLaterEvents, err := st.ListRunEventsAfterSequence(ctx, firstRun.ID,
+		eventList[len(eventList)-1].Sequence, 10)
+	if err != nil || len(noLaterEvents) != 0 || noLaterEvents == nil {
+		t.Fatalf("empty event sequence page is unstable: %#v err=%v", noLaterEvents, err)
+	}
 
 	workService := application.NewWorkItemService(st)
 	noteService := application.NewNoteService(st)
@@ -171,6 +181,12 @@ func TestSQLiteReadPagesRejectOutOfRangeBounds(t *testing.T) {
 	}
 	if _, err := st.ListRunEventsPage(ctx, "run", 0, 0); err == nil {
 		t.Fatal("zero event page limit was accepted")
+	}
+	if _, err := st.ListRunEventsAfterSequence(ctx, "run", -1, 1); err == nil {
+		t.Fatal("negative event sequence cursor was accepted")
+	}
+	if _, err := st.ListRunEventsAfterSequence(ctx, "run", 0, maxStoreReadPageLimit+1); err == nil {
+		t.Fatal("oversized event sequence page was accepted")
 	}
 	if _, err := st.ListRuns(ctx, domain.RunFilter{Offset: maxStoreListOffset + 1}); err == nil {
 		t.Fatal("oversized Run list offset was accepted")

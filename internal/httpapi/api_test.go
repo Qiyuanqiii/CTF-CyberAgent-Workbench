@@ -37,6 +37,7 @@ type apiTestEnvelope struct {
 type apiFixture struct {
 	api        *API
 	store      *store.SQLiteStore
+	dbPath     string
 	run        domain.Run
 	workItems  []domain.WorkItem
 	notes      []domain.Note
@@ -47,7 +48,8 @@ type apiFixture struct {
 
 func newAPIFixture(t *testing.T) *apiFixture {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "http-api.db"))
+	dbPath := filepath.Join(t.TempDir(), "http-api.db")
+	st, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +140,7 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &apiFixture{api: api, store: st, run: run, workItems: workItems, notes: notes,
+	return &apiFixture{api: api, store: st, dbPath: dbPath, run: run, workItems: workItems, notes: notes,
 		artifactID: reviewed.Result.Metadata["artifact_stdout_id"], secret: secret,
 		leaseID: acquiredLease.Lease.LeaseID}
 }

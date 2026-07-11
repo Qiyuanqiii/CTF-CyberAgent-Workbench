@@ -795,6 +795,85 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/runs/{run_id}/events/stream": {
+      "get": {
+        "operationId": "streamRunEvents",
+        "summary": "Stream Run events",
+        "description": "Streams bounded durable Run events as SSE and resumes from a Run-bound cursor.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque Run-bound cursor from a previous SSE id; cannot be combined with Last-Event-ID",
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "description": "SSE reconnect cursor from the final received frame; cannot be combined with cursor",
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded Server-Sent Event stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunEventStreamView"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true,
+        "x-cyberagent-streaming": true
+      }
+    },
     "/api/v1/runs/{run_id}/notes": {
       "get": {
         "operationId": "listRunNotes",
@@ -2134,6 +2213,46 @@
           "run",
           "mission",
           "tool_usage"
+        ],
+        "type": "object"
+      },
+      "RunEventStreamView": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "event": {
+            "$ref": "#/components/schemas/EventView"
+          },
+          "request_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "sequence": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "version": {
+            "enum": [
+              "run-events.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "request_id",
+          "run_id",
+          "cursor",
+          "sequence",
+          "event"
         ],
         "type": "object"
       },

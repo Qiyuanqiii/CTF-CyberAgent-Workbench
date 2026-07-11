@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestOpenAPIDocumentIsDeterministicReadOnlyAndSecretFree(t *testing.T) {
@@ -91,6 +92,7 @@ func TestOpenAPIGoldenDocumentMatchesGoDTOs(t *testing.T) {
 
 func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 	fixture := newAPIFixture(t)
+	fixture.api.eventStream = testEventStreamConfig(1, 100*time.Millisecond)
 	replacements := map[string]string{
 		"{run_id}":       fixture.run.ID,
 		"{session_id}":   fixture.run.SessionID,
@@ -105,18 +107,23 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		}
 		t.Run(spec.OperationID, func(t *testing.T) {
 			response := fixture.get(t, requestPath)
-			if response.Code != http.StatusOK || !json.Valid(response.Body.Bytes()) {
+			if response.Code != http.StatusOK {
 				t.Fatalf("documented route is not live: path=%s status=%d body=%s",
 					requestPath, response.Code, response.Body.String())
 			}
 			assertSecurityHeaders(t, response)
 			contentType := response.Header().Get("Content-Type")
-			if spec.RawDocument {
+			if spec.Streaming {
+				streamEvents := parseSSEEvents(t, response.Body.Bytes())
+				if !strings.HasPrefix(contentType, "text/event-stream") || len(streamEvents) != 1 {
+					t.Fatalf("SSE response is invalid: content-type=%q body=%s", contentType, response.Body.String())
+				}
+			} else if spec.RawDocument {
 				if !strings.HasPrefix(contentType, openAPIContentType) ||
 					!bytes.Contains(response.Body.Bytes(), []byte(`"openapi": "3.1.0"`)) {
 					t.Fatalf("raw OpenAPI response is invalid: content-type=%q body=%s", contentType, response.Body.String())
 				}
-			} else if !strings.HasPrefix(contentType, "application/json") {
+			} else if !strings.HasPrefix(contentType, "application/json") || !json.Valid(response.Body.Bytes()) {
 				t.Fatalf("API envelope has wrong content type %q", contentType)
 			}
 		})

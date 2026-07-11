@@ -58,6 +58,7 @@ type openAPIOperation struct {
 	Parameters  []openAPIParameter `json:"parameters,omitempty"`
 	Responses   map[string]any     `json:"responses"`
 	ReadOnly    bool               `json:"x-cyberagent-read-only"`
+	Streaming   bool               `json:"x-cyberagent-streaming,omitempty"`
 }
 
 type openAPIParameter struct {
@@ -103,6 +104,7 @@ type openAPIOperationSpec struct {
 	Paginated   bool
 	NotFound    bool
 	RawDocument bool
+	Streaming   bool
 	Parameters  []openAPIParameter
 }
 
@@ -187,6 +189,16 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 			Tag: "Runs", Description: "Returns the ordered append-only Run event stream.",
 			DataType: reflect.TypeOf(EventView{}), Collection: true, Paginated: true, NotFound: true,
 			Parameters: append([]openAPIParameter{runID}, paginationParameters()...)},
+		{Path: RunEventStreamPathTemplate, OperationID: "streamRunEvents", Summary: "Stream Run events",
+			Tag: "Runs", Description: "Streams bounded durable Run events as SSE and resumes from a Run-bound cursor.",
+			DataType: reflect.TypeOf(RunEventStreamView{}), Streaming: true, NotFound: true,
+			Parameters: []openAPIParameter{
+				runID,
+				{Name: "cursor", In: "query", Description: "Opaque Run-bound cursor from a previous SSE id; cannot be combined with Last-Event-ID",
+					Schema: map[string]any{"type": "string", "minLength": 1, "maxLength": MaxEventStreamCursorBytes}},
+				{Name: "Last-Event-ID", In: "header", Description: "SSE reconnect cursor from the final received frame; cannot be combined with cursor",
+					Schema: map[string]any{"type": "string", "minLength": 1, "maxLength": MaxEventStreamCursorBytes}},
+			}},
 		{Path: "/api/v1/runs/{run_id}/work-items", OperationID: "listRunWorkItems",
 			Summary: "List Run WorkItems", Tag: "Memory", Description: "Returns structured Work Board items.",
 			DataType: reflect.TypeOf(WorkItemView{}), Collection: true, Paginated: true, NotFound: true,
@@ -240,7 +252,11 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 
 func buildOpenAPIOperation(spec openAPIOperationSpec, registry *openAPISchemaRegistry) (openAPIOperation, error) {
 	responses := standardOperationResponses(spec.NotFound)
-	if spec.RawDocument {
+	if spec.Streaming {
+		responses["200"] = openAPIResponse{Description: "Bounded Server-Sent Event stream", Content: map[string]openAPIMediaType{
+			"text/event-stream": {Schema: registry.ref(spec.DataType)},
+		}}
+	} else if spec.RawDocument {
 		responses["200"] = openAPIResponse{Description: "OpenAPI 3.1 document", Content: map[string]openAPIMediaType{
 			openAPIContentType: {Schema: map[string]any{"type": "object", "additionalProperties": true}},
 		}}
@@ -258,7 +274,7 @@ func buildOpenAPIOperation(spec openAPIOperationSpec, registry *openAPISchemaReg
 	}
 	return openAPIOperation{OperationID: spec.OperationID, Summary: spec.Summary,
 		Description: spec.Description, Tags: []string{spec.Tag}, Parameters: spec.Parameters,
-		Responses: responses, ReadOnly: true}, nil
+		Responses: responses, ReadOnly: true, Streaming: spec.Streaming}, nil
 }
 
 func successEnvelopeSchema(dataSchema map[string]any, paginated bool, registry *openAPISchemaRegistry) map[string]any {
@@ -526,6 +542,7 @@ var openAPIFieldEnums = map[string][]string{
 	"ArtifactView.stream":                   artifactStreams(),
 	"ArtifactView.encoding":                 {artifact.EncodingUTF8},
 	"SupervisorToolCallView.status":         {"pending", "completed", "denied", "failed"},
+	"RunEventStreamView.version":            {RunEventStreamVersion},
 }
 
 var openAPIFieldMinimums = map[string]float64{
