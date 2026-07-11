@@ -33,6 +33,8 @@ const maxModelRetryAttempts = 5
 
 const maxProtocolRepairReasonChars = 1024
 
+const maxModelCancellationPollInterval = 5 * time.Second
+
 type SupervisorStore interface {
 	BeginSupervisorTurn(ctx context.Context, lease domain.RunExecutionLease, pendingInput string) (domain.SupervisorTurn, error)
 	BindSupervisorTurnInput(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string) (domain.SupervisorCheckpoint, error)
@@ -40,6 +42,7 @@ type SupervisorStore interface {
 		protocolRepair int, toolRound int) (int, int, error)
 	RecordSupervisorModelStarted(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt) (bool, error)
 	RecordSupervisorModelCancelRequested(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, reason string) (bool, error)
+	ObserveSupervisorModelCancellation(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt) (domain.ModelCancellation, bool, error)
 	RecordSupervisorModelDelta(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, delta llm.ModelDelta) (bool, error)
 	RecordSupervisorModelCompleted(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt, response llm.ChatResponse) (domain.SupervisorCheckpoint, error)
 	RecordSupervisorModelFailed(ctx context.Context, checkpoint domain.SupervisorCheckpoint, attempt llm.ModelAttempt) (domain.SupervisorCheckpoint, error)
@@ -131,14 +134,15 @@ type ExecutionResult struct {
 }
 
 type RunSupervisor struct {
-	store       RunSupervisorStore
-	router      *llm.Router
-	checker     policy.Checker
-	retryPolicy ModelRetryPolicy
-	activeCalls *ActiveCallRegistry
-	tools       *toolgateway.Gateway
-	leaseOwner  string
-	leasePolicy RunExecutionLeasePolicy
+	store                    RunSupervisorStore
+	router                   *llm.Router
+	checker                  policy.Checker
+	retryPolicy              ModelRetryPolicy
+	activeCalls              *ActiveCallRegistry
+	tools                    *toolgateway.Gateway
+	leaseOwner               string
+	leasePolicy              RunExecutionLeasePolicy
+	cancellationPollInterval time.Duration
 }
 
 func NewRunSupervisor(store RunSupervisorStore, router *llm.Router, checker policy.Checker) *RunSupervisor {
@@ -146,6 +150,7 @@ func NewRunSupervisor(store RunSupervisorStore, router *llm.Router, checker poli
 		store: store, router: router, checker: checker, retryPolicy: DefaultModelRetryPolicy(),
 		activeCalls: NewActiveCallRegistry(),
 		leaseOwner:  idgen.New("worker"), leasePolicy: DefaultRunExecutionLeasePolicy(),
+		cancellationPollInterval: 100 * time.Millisecond,
 		tools: toolgateway.New(store, checker).
 			WithStructuredMemoryExecutor(NewStructuredMemoryToolExecutor(store)),
 	}
@@ -208,6 +213,13 @@ func (s *RunSupervisor) WithActiveCalls(registry *ActiveCallRegistry) *RunSuperv
 	return s
 }
 
+func (s *RunSupervisor) WithModelCancellationPollInterval(interval time.Duration) *RunSupervisor {
+	if s != nil {
+		s.cancellationPollInterval = interval
+	}
+	return s
+}
+
 func (s *RunSupervisor) Step(ctx context.Context, runID string) (LifecycleResult, error) {
 	return s.step(ctx, runID, "")
 }
@@ -223,6 +235,10 @@ func (s *RunSupervisor) StepWithInput(ctx context.Context, runID string, input s
 func (s *RunSupervisor) step(ctx context.Context, runID string, requestedInput string) (LifecycleResult, error) {
 	if s == nil || s.store == nil || s.router == nil || s.checker == nil || s.activeCalls == nil || s.tools == nil {
 		return LifecycleResult{}, apperror.New(apperror.CodeFailedPrecondition, "run supervisor dependencies are required")
+	}
+	if s.cancellationPollInterval <= 0 || s.cancellationPollInterval > maxModelCancellationPollInterval {
+		return LifecycleResult{}, apperror.New(apperror.CodeFailedPrecondition,
+			"model cancellation poll interval must be positive and bounded")
 	}
 	runID = strings.TrimSpace(runID)
 	run, err := s.store.GetRun(ctx, runID)
@@ -873,9 +889,11 @@ func (s *RunSupervisor) callModelWithRetry(ctx context.Context, turn domain.Supe
 			lease.Abort()
 			return result, apperror.Normalize(err)
 		}
+		stopCancellationWatch := s.watchModelCancellation(ctx, result.Checkpoint, attempt, lease)
 		callCtx, budgetCancel := supervisorModelContext(lease.Context(), turn.Run.Budget, result.Checkpoint, 0)
 		startedAt := time.Now()
 		streamed, callErr := s.streamModel(callCtx, result.Checkpoint, attempt, ref, request, lease)
+		stopCancellationWatch()
 		attempt.Elapsed = time.Since(startedAt)
 		attempt.StreamEvents = streamed.Events
 		attempt.StreamBytes = streamed.Bytes

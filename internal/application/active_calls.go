@@ -410,6 +410,14 @@ func (l *activeCallLease) Abort() {
 	})
 }
 
+func (l *activeCallLease) signalPersistedCancellation() bool {
+	if l == nil || l.registry == nil {
+		return false
+	}
+	_, signaled, _ := l.registry.signalCancel(l.key)
+	return signaled
+}
+
 func (r *ActiveCallRegistry) cancellationTarget(runID string) (activeCallCancelTarget, bool) {
 	if r == nil {
 		return activeCallCancelTarget{}, false

@@ -139,6 +139,16 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 	if executionLeaseTable != "run_execution_leases" {
 		t.Fatalf("schema v17 execution lease table is missing: %q", executionLeaseTable)
 	}
+	for _, name := range []string{"run_model_cancellations", "run_model_cancellation_operations"} {
+		var table string
+		if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master
+			WHERE type = 'table' AND name = ?`, name).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		if table != name {
+			t.Fatalf("schema v18 model cancellation table is missing: %q", table)
+		}
+	}
 	for _, column := range []string{"lease_id", "lease_generation"} {
 		var count int
 		if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('run_supervisor_checkpoints')
@@ -332,6 +342,9 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE run_model_cancellation_operations`,
+		`DROP TABLE run_model_cancellations`,
+		`DELETE FROM schema_migrations WHERE version = 18`,
 		`DROP TABLE run_execution_leases`,
 		`ALTER TABLE run_supervisor_checkpoints DROP COLUMN lease_generation`,
 		`ALTER TABLE run_supervisor_checkpoints DROP COLUMN lease_id`,
@@ -365,6 +378,9 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 func removeSchemaV16ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) {
 	t.Helper()
 	for _, statement := range []string{
+		`DROP TABLE run_model_cancellation_operations`,
+		`DROP TABLE run_model_cancellations`,
+		`DELETE FROM schema_migrations WHERE version = 18`,
 		`DROP TABLE run_execution_leases`,
 		`ALTER TABLE run_supervisor_checkpoints DROP COLUMN lease_generation`,
 		`ALTER TABLE run_supervisor_checkpoints DROP COLUMN lease_id`,

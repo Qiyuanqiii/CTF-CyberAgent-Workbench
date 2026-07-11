@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,7 +14,7 @@ import (
 	"time"
 )
 
-func TestOpenAPIDocumentIsDeterministicReadOnlyAndSecretFree(t *testing.T) {
+func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testing.T) {
 	first, err := GenerateOpenAPI()
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +37,8 @@ func TestOpenAPIDocumentIsDeterministicReadOnlyAndSecretFree(t *testing.T) {
 		t.Fatal(err)
 	}
 	if document.OpenAPI != openAPISpecVersion || document.JSONSchemaDialect != openAPIJSONSchemaDialect ||
-		document.Info.Version != Version || !document.ReadOnly || len(document.Security) != 1 {
+		document.Info.Version != Version || document.Info.License.Identifier != "Apache-2.0" ||
+		document.ReadOnly || len(document.Security) != 1 {
 		t.Fatalf("OpenAPI metadata is incomplete: %#v", document)
 	}
 	expectedPaths := sortedOpenAPIPaths()
@@ -44,13 +46,29 @@ func TestOpenAPIDocumentIsDeterministicReadOnlyAndSecretFree(t *testing.T) {
 	operationIDs := make(map[string]struct{}, len(document.Paths))
 	for path, item := range document.Paths {
 		actualPaths = append(actualPaths, path)
-		if item.Get.OperationID == "" || !item.Get.ReadOnly || item.Get.Responses["200"] == nil {
-			t.Fatalf("path %s has an incomplete read operation: %#v", path, item.Get)
+		operations := make([]*openAPIOperation, 0, 2)
+		if item.Get != nil {
+			if item.Get.OperationID == "" || !item.Get.ReadOnly || item.Get.Responses["200"] == nil ||
+				item.Get.RequestBody != nil || len(item.Get.Security) != 0 {
+				t.Fatalf("path %s has an incomplete read operation: %#v", path, item.Get)
+			}
+			operations = append(operations, item.Get)
 		}
-		if _, duplicate := operationIDs[item.Get.OperationID]; duplicate {
-			t.Fatalf("duplicate OpenAPI operation id %q", item.Get.OperationID)
+		if item.Post != nil {
+			if path != ModelCancellationPathTemplate || item.Post.OperationID != "requestModelCancellation" ||
+				item.Post.ReadOnly || item.Post.Responses["202"] == nil || item.Post.RequestBody == nil ||
+				len(item.Post.Security) != 1 || item.Post.Security[0]["ControlBearerAuth"] == nil {
+				t.Fatalf("path %s has an incomplete control operation: %#v", path, item.Post)
+			}
+			operations = append(operations, item.Post)
 		}
-		operationIDs[item.Get.OperationID] = struct{}{}
+		if len(operations) != 1 {
+			t.Fatalf("path %s must expose exactly one operation: %#v", path, item)
+		}
+		if _, duplicate := operationIDs[operations[0].OperationID]; duplicate {
+			t.Fatalf("duplicate OpenAPI operation id %q", operations[0].OperationID)
+		}
+		operationIDs[operations[0].OperationID] = struct{}{}
 	}
 	sort.Strings(actualPaths)
 	if !reflect.DeepEqual(actualPaths, expectedPaths) {
@@ -65,8 +83,8 @@ func TestOpenAPIDocumentIsDeterministicReadOnlyAndSecretFree(t *testing.T) {
 	}
 	for path, item := range raw.Paths {
 		for method := range item {
-			if method != "get" {
-				t.Fatalf("OpenAPI path %s exposed non-read operation %q", path, method)
+			if method != "get" && !(path == ModelCancellationPathTemplate && method == "post") {
+				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
 			}
 		}
 	}
@@ -106,8 +124,17 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 			requestPath = strings.ReplaceAll(requestPath, placeholder, value)
 		}
 		t.Run(spec.OperationID, func(t *testing.T) {
-			response := fixture.get(t, requestPath)
-			if response.Code != http.StatusOK {
+			var response *httptest.ResponseRecorder
+			expectedStatus := http.StatusOK
+			if spec.Control {
+				body := `{"attempt_id":"` + fixture.checkpoint.AttemptID + `","model_attempt":1}`
+				response = fixture.controlRequest(t, http.MethodPost, fixture.run.ID, testControlToken,
+					"openapi-live-operation-012345", "application/json", strings.NewReader(body))
+				expectedStatus = http.StatusAccepted
+			} else {
+				response = fixture.get(t, requestPath)
+			}
+			if response.Code != expectedStatus {
 				t.Fatalf("documented route is not live: path=%s status=%d body=%s",
 					requestPath, response.Code, response.Body.String())
 			}

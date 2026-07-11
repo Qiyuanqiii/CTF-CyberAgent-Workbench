@@ -80,7 +80,9 @@ func TestAPIServeCLIStartsAuthenticatedLoopbackServerWithoutPersistingToken(t *t
 	t.Setenv("DEEPSEEK_API_KEY", "")
 	t.Setenv("CYBERAGENT_ANTHROPIC_API_KEY", "")
 	token := "cli-api-token-0123456789-abcdefghijkl"
+	controlToken := "cli-control-token-0123456789-abcdefgh"
 	t.Setenv(apiTokenEnvironment, token)
+	t.Setenv(apiControlTokenEnvironment, controlToken)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -103,9 +105,11 @@ func TestAPIServeCLIStartsAuthenticatedLoopbackServerWithoutPersistingToken(t *t
 	if baseURL == "" {
 		t.Fatalf("API did not report its URL: stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
-	if strings.Contains(stdout.String(), token) ||
+	if strings.Contains(stdout.String(), token) || strings.Contains(stdout.String(), controlToken) ||
 		!strings.Contains(stdout.String(), "api_token_source: "+apiTokenEnvironment) ||
-		!strings.Contains(stdout.String(), "api_token_generated: false") {
+		!strings.Contains(stdout.String(), "api_token_generated: false") ||
+		!strings.Contains(stdout.String(), "api_control_enabled: true") ||
+		!strings.Contains(stdout.String(), "api_control_token_source: "+apiControlTokenEnvironment) {
 		t.Fatalf("environment token reporting is unsafe or incomplete: %s", stdout.String())
 	}
 
@@ -138,12 +142,14 @@ func TestAPIServeCLIStartsAuthenticatedLoopbackServerWithoutPersistingToken(t *t
 		t.Fatalf("API command wrote unexpected stderr: %s", stderr.String())
 	}
 	assertDirectoryOmitsValue(t, home, token)
+	assertDirectoryOmitsValue(t, home, controlToken)
 }
 
 func TestAPIServeCLIGeneratesUsableProcessToken(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CYBERAGENT_HOME", home)
 	t.Setenv(apiTokenEnvironment, "")
+	t.Setenv(apiControlTokenEnvironment, "")
 	t.Setenv("MIMO_API_KEY", "")
 	t.Setenv("DEEPSEEK_API_KEY", "")
 	t.Setenv("CYBERAGENT_ANTHROPIC_API_KEY", "")
@@ -168,7 +174,8 @@ func TestAPIServeCLIGeneratesUsableProcessToken(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if baseURL == "" || len(token) < 32 || !strings.Contains(stdout.String(), "api_token_generated: true") {
+	if baseURL == "" || len(token) < 32 || !strings.Contains(stdout.String(), "api_token_generated: true") ||
+		!strings.Contains(stdout.String(), "api_control_enabled: false") {
 		t.Fatalf("generated API credentials are incomplete: %s", stdout.String())
 	}
 	request, err := http.NewRequest(http.MethodGet, baseURL+"/health", nil)
@@ -200,16 +207,21 @@ func TestAPIServeCLIGeneratesUsableProcessToken(t *testing.T) {
 func TestAPIServeCLIRejectsUnsafeConfiguration(t *testing.T) {
 	t.Setenv("CYBERAGENT_HOME", t.TempDir())
 	tests := []struct {
-		name  string
-		token string
-		args  []string
-		code  int
-		text  string
+		name         string
+		token        string
+		controlToken string
+		args         []string
+		code         int
+		text         string
 	}{
 		{name: "short token", token: "short", args: []string{"api", "serve", "--listen", "127.0.0.1:0"},
 			code: 2, text: "access token"},
 		{name: "non-normalized token", token: strings.Repeat("x", 32) + " ",
 			args: []string{"api", "serve", "--listen", "127.0.0.1:0"}, code: 2, text: "access token"},
+		{name: "short control token", token: strings.Repeat("x", 32), controlToken: "short",
+			args: []string{"api", "serve", "--listen", "127.0.0.1:0"}, code: 2, text: "control token"},
+		{name: "shared read and control token", token: strings.Repeat("x", 32), controlToken: strings.Repeat("x", 32),
+			args: []string{"api", "serve", "--listen", "127.0.0.1:0"}, code: 2, text: "must be distinct"},
 		{name: "public bind", token: strings.Repeat("x", 32),
 			args: []string{"api", "serve", "--listen", "0.0.0.0:0"}, code: 5, text: "loopback"},
 		{name: "unknown subcommand", token: strings.Repeat("x", 32),
@@ -218,6 +230,7 @@ func TestAPIServeCLIRejectsUnsafeConfiguration(t *testing.T) {
 	for _, current := range tests {
 		t.Run(current.name, func(t *testing.T) {
 			t.Setenv(apiTokenEnvironment, current.token)
+			t.Setenv(apiControlTokenEnvironment, current.controlToken)
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
 			code := ExecuteContext(context.Background(), current.args, &stdout, &stderr)

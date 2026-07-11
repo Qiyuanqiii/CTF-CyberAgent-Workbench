@@ -314,6 +314,9 @@ func (s *SQLiteStore) RecordSupervisorModelStarted(ctx context.Context, checkpoi
 	if attempt.ProtocolRepair == 1 && current.RepairPhase != domain.ProtocolRepairPending {
 		return false, apperror.New(apperror.CodeFailedPrecondition, "protocol repair is not pending")
 	}
+	if err := resolveSupersededModelCancellationsTx(ctx, tx, checkpoint, attempt.Number); err != nil {
+		return false, err
+	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.ModelStartedEvent, "model_gateway", subject, map[string]any{
 		"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
 		"model_attempt": attempt.Number, "transport_attempt": attempt.TransportNumber(),
@@ -708,6 +711,9 @@ func (s *SQLiteStore) recordSupervisorModelTerminal(ctx context.Context, checkpo
 		return domain.SupervisorCheckpoint{}, err
 	}
 	if err := appendSupervisorEventTx(ctx, tx, run, eventType, "model_gateway", subject, payload); err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
+	if err := resolveSupervisorModelCancellationTx(ctx, tx, checkpoint, attempt); err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
 	if len(options.ToolCalls) > 0 {

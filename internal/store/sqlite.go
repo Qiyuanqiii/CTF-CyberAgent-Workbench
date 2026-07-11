@@ -221,6 +221,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 15, Name: "structured memory tool operations", Statements: structuredToolOperationStatements},
 		{Version: 16, Name: "supervisor structured tool loop", Statements: supervisorToolLoopStatements},
 		{Version: 17, Name: "run execution leases", Statements: runExecutionLeaseStatements},
+		{Version: 18, Name: "cross-process model cancellation", Statements: modelCancellationStatements},
 	})
 }
 

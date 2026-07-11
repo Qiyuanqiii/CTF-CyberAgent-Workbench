@@ -1,6 +1,6 @@
 # Stable Error Contract
 
-CyberAgent Workbench preserves human-readable error text while assigning every failure a stable machine code. CLI callers use exit codes; the Go `api.v1` read API uses the same code through `apperror.CodeOf` and `apperror.HTTPStatus`.
+CyberAgent Workbench preserves human-readable error text while assigning every failure a stable machine code. CLI callers use exit codes; the Go `api.v1` API uses the same code through `apperror.CodeOf` and `apperror.HTTPStatus`.
 
 | Code | CLI exit | HTTP status | Meaning |
 | --- | ---: | ---: | --- |
@@ -17,7 +17,7 @@ CyberAgent Workbench preserves human-readable error text while assigning every f
 
 `apperror.Normalize` provides a compatibility bridge for legacy plain Go errors. New application services should return typed errors directly and must not branch on human-readable text.
 
-The HTTP API returns these codes in its versioned error envelope and hides internal error details. Protocol boundaries may use a more precise transport status without changing the stable code: missing/invalid bearer authorization returns HTTP 401 with `POLICY_DENIED`, unsupported methods return 405 with `INVALID_ARGUMENT`, and an oversized request target returns 414 with `RESOURCE_EXHAUSTED`. See [http-api.md](http-api.md).
+The HTTP API returns these codes in its versioned error envelope and hides internal error details. Protocol boundaries may use a more precise transport status without changing the stable code: missing/invalid bearer authorization returns HTTP 401 with `POLICY_DENIED`, unsupported methods return 405 with `INVALID_ARGUMENT`, an oversized request target returns 414 with `RESOURCE_EXHAUSTED`, and cancellation-body/media failures use 413/415 with `RESOURCE_EXHAUSTED`/`INVALID_ARGUMENT`. A stale or inactive cancellation target returns 409 or 412 according to whether identity changed or the operation is no longer possible. See [http-api.md](http-api.md).
 
 Provider failures use a separate `llm.Outcome` classification before mapping into this contract. Exhausted retryable transport failures map to `UNAVAILABLE`; rate limits map to `RESOURCE_EXHAUSTED`; invalid/permanent responses map to `FAILED_PRECONDITION`; caller cancellation and model deadlines map to `CANCELLED` and `DEADLINE_EXCEEDED`. The original typed Provider error remains available through Go error unwrapping, while persisted and user-facing text is redacted.
 

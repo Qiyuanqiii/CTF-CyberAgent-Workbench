@@ -42,8 +42,11 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		if err := rejectQuery(request.URL.Query()); err != nil {
 			return nil, nil, err
 		}
-		return IndexView{APIVersion: Version, AppVersion: a.appVersion,
-			Resources: []string{"runs", "sessions", "work-items", "notes", "artifacts", "event-stream", "openapi"}}, nil, nil
+		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts", "event-stream", "openapi"}
+		if a.controlEnabled {
+			resources = append(resources, "model-cancellation-control")
+		}
+		return IndexView{APIVersion: Version, AppVersion: a.appVersion, Resources: resources}, nil, nil
 	case "/api/v1/health":
 		if err := rejectQuery(request.URL.Query()); err != nil {
 			return nil, nil, err
@@ -479,6 +482,10 @@ func (a *API) artifact(request *http.Request, id string) (any, *Page, error) {
 }
 
 func (a *API) writeSuccess(writer http.ResponseWriter, requestID string, data any, page *Page) {
+	a.writeSuccessStatus(writer, requestID, data, page, http.StatusOK)
+}
+
+func (a *API) writeSuccessStatus(writer http.ResponseWriter, requestID string, data any, page *Page, status int) {
 	encoded, err := json.Marshal(successEnvelope{Version: Version, RequestID: requestID, Data: data, Page: page})
 	if err != nil {
 		a.writeError(writer, requestID, apperror.New(apperror.CodeInternal, "internal server error"), 0)
@@ -490,7 +497,7 @@ func (a *API) writeSuccess(writer http.ResponseWriter, requestID string, data an
 		return
 	}
 	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
-	writer.WriteHeader(http.StatusOK)
+	writer.WriteHeader(status)
 	_, _ = writer.Write(append(encoded, '\n'))
 }
 

@@ -49,6 +49,7 @@ type Store interface {
 	ListRunEventsAfterSequence(ctx context.Context, runID string, afterSequence int64, limit int) ([]events.Event, error)
 	GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error)
 	GetRunExecutionLease(ctx context.Context, runID string) (domain.RunExecutionLease, bool, error)
+	RequestSupervisorModelCancellation(ctx context.Context, request domain.RequestModelCancellation) (domain.ModelCancellationResult, error)
 	GetToolCallUsage(ctx context.Context, runID string) (toolbudget.Usage, error)
 	ListRunSupervisorToolRoundsPage(ctx context.Context, runID string, offset int, limit int) ([]domain.SupervisorToolRound, error)
 
@@ -67,14 +68,17 @@ type Store interface {
 }
 
 type Config struct {
-	AccessToken string
-	AppVersion  string
-	EventStream EventStreamConfig
+	AccessToken  string
+	ControlToken string
+	AppVersion   string
+	EventStream  EventStreamConfig
 }
 
 type API struct {
 	store            Store
 	tokenHash        [sha256.Size]byte
+	controlTokenHash [sha256.Size]byte
+	controlEnabled   bool
 	appVersion       string
 	openAPI          []byte
 	eventStream      EventStreamConfig
@@ -89,6 +93,20 @@ func New(store Store, config Config) (*API, error) {
 	if err := validateAccessToken(token); err != nil {
 		return nil, err
 	}
+	controlToken := config.ControlToken
+	controlEnabled := controlToken != ""
+	var controlTokenHash [sha256.Size]byte
+	if controlEnabled {
+		if err := validateAccessToken(controlToken); err != nil {
+			return nil, apperror.Wrap(apperror.CodeInvalidArgument, "invalid HTTP API control token", err)
+		}
+		controlTokenHash = sha256.Sum256([]byte(controlToken))
+		accessTokenHash := sha256.Sum256([]byte(token))
+		if subtle.ConstantTimeCompare(accessTokenHash[:], controlTokenHash[:]) == 1 {
+			return nil, apperror.New(apperror.CodeInvalidArgument,
+				"HTTP API read and control tokens must be distinct")
+		}
+	}
 	version := strings.TrimSpace(config.AppVersion)
 	if version == "" {
 		version = "unknown"
@@ -101,7 +119,8 @@ func New(store Store, config Config) (*API, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &API{store: store, tokenHash: sha256.Sum256([]byte(token)), appVersion: version,
+	return &API{store: store, tokenHash: sha256.Sum256([]byte(token)),
+		controlTokenHash: controlTokenHash, controlEnabled: controlEnabled, appVersion: version,
 		openAPI: document, eventStream: eventStream,
 		eventStreamSlots: make(chan struct{}, eventStream.MaxConnections)}, nil
 }
@@ -195,7 +214,11 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		a.writeError(tracked, requestID, err, status)
 		return
 	}
-	if !a.authorized(request) {
+	if runID, matched := matchModelCancellationPath(request.URL.Path); matched {
+		a.serveModelCancellation(tracked, request, requestID, runID)
+		return
+	}
+	if !a.authorized(request, a.tokenHash) {
 		tracked.Header().Set("WWW-Authenticate", `Bearer realm="CyberAgent API"`)
 		a.writeError(tracked, requestID,
 			apperror.New(apperror.CodePolicyDenied, "valid bearer authorization is required"),
@@ -279,7 +302,7 @@ func loopbackRequestHost(value string) bool {
 	return loopbackHost(host)
 }
 
-func (a *API) authorized(request *http.Request) bool {
+func (a *API) authorized(request *http.Request, tokenHash [sha256.Size]byte) bool {
 	values := request.Header.Values("Authorization")
 	if len(values) != 1 {
 		return false
@@ -289,7 +312,7 @@ func (a *API) authorized(request *http.Request) bool {
 		return false
 	}
 	candidate := sha256.Sum256([]byte(parts[1]))
-	return subtle.ConstantTimeCompare(candidate[:], a.tokenHash[:]) == 1
+	return subtle.ConstantTimeCompare(candidate[:], tokenHash[:]) == 1
 }
 
 func setSecurityHeaders(header http.Header, requestID string) {

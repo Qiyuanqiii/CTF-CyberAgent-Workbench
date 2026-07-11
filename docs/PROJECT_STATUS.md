@@ -1,10 +1,10 @@
 # Project Status
 
-Last updated: 2026-07-11
+Last updated: 2026-07-12
 
 ## Resume Context
 
-CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The current implementation is a CLI-first runtime with resumable Runs, streamed model calls, persisted sessions, a transactional SQLite event/message/WorkItem/Note/Artifact store, a unified Tool Gateway, workspace manager, safety policy, sandbox interfaces, context compaction, token-aware structured-memory selection, an authenticated loopback-only read API with resumable Run-event SSE, and a deterministic OpenAPI 3.1 contract generated from Go DTOs.
+CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The current implementation is a CLI-first runtime with resumable Runs, streamed model calls, persisted sessions, a transactional SQLite event/message/WorkItem/Note/Artifact store, a unified Tool Gateway, workspace manager, safety policy, sandbox interfaces, context compaction, token-aware structured-memory selection, an authenticated loopback-only read API with resumable Run-event SSE, a separately authorized cross-process cancellation control, and a deterministic OpenAPI 3.1 contract generated from Go DTOs.
 
 Current product priority: migrate the working v0.1 scaffold into the V2 run-centric, resumable agent runtime described in ADR 0002 and `docs/TASK_BOOK.md`. CTF-specific solving logic is intentionally deferred until the generic runtime is stable.
 
@@ -13,6 +13,7 @@ Canonical remote: `https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`. Afte
 Use these files first when resuming:
 
 - `README.md`
+- `LICENSE`
 - `docs/PROGRESS_BOOK.md`
 - `docs/TASK_BOOK.md`
 - `docs/adr/0001-go-control-plane.md`
@@ -63,11 +64,15 @@ Use these files first when resuming:
 - `internal/httpapi/handlers.go`
 - `internal/httpapi/openapi.go`
 - `internal/httpapi/event_stream.go`
+- `internal/httpapi/control.go`
+- `internal/domain/model_cancellation.go`
+- `internal/store/model_cancellations.go`
+- `internal/application/model_cancellation_watch.go`
 - `internal/app/api_command.go`
 
 ## Progress Review
 
-- Overall product vision: about 90%.
+- Overall product vision: about 91%.
 - v0.1 generic agent MVP: about 99%.
 - V2 run-centric runtime: about 99%.
 - Project scaffold/framework: about 99%.
@@ -75,8 +80,9 @@ Use these files first when resuming:
 Completed:
 
 - Go CLI entrypoint and command dispatch.
-- Authenticated loopback-only `api.v1` read control plane with stable envelopes, typed errors, bounded cursor pagination, graceful shutdown, and Run/Session/Event/WorkItem/Note/Artifact/ToolRound plus token-free execution-lease inspection.
-- Deterministic OpenAPI 3.1 generation from Go read DTOs and an explicit route catalog, with `api openapi` stdout/file export, a protected raw `/api/v1/openapi.json` endpoint, a committed golden document, live-handler contract tests, and forbidden-internal-field checks.
+- Authenticated loopback-only `api.v1` read plane with stable envelopes, typed errors, bounded cursor pagination, graceful shutdown, and Run/Session/Event/WorkItem/Note/Artifact/ToolRound plus token-free execution-lease inspection.
+- Schema v18 cross-process active-call cancellation with a distinct optional control token, exact Run/Supervisor/model-attempt preconditions, one-to-one hashed idempotency, audit-first request/observation, worker-owned context signalling, atomic terminal resolution, and stale-attempt supersession. Read and control capabilities are not interchangeable, and clients never receive or submit fencing tokens.
+- Deterministic OpenAPI 3.1 generation from Go DTOs and an explicit route catalog, with `api openapi` stdout/file export, a protected raw `/api/v1/openapi.json` endpoint, a committed golden document, live-handler contract tests, capability separation, and forbidden-internal-field checks.
 - Bounded read-only `/api/v1/runs/{run_id}/events/stream` SSE backed by durable SQLite sequences, with Run-bound opaque cursors, `Last-Event-ID` resume, heartbeats, cross-connection polling, per-frame write deadlines, event/time/batch bounds, process-wide connection slots, and server-shutdown cancellation.
 - Mock LLM provider and model router.
 - CGO-backed SQLite store using `github.com/mattn/go-sqlite3`.
@@ -138,7 +144,7 @@ Completed:
 - Reworked `docs/architecture.md` around run-scoped budget, event, sandbox, report, approval, and recovery ownership without copying the reference implementation.
 - Replaced the obsolete README migration/scaffold copy with a bilingual Chinese/English product overview, current capabilities, architecture boundary, and development-scope notice.
 - Added `docs/TASK_BOOK.md` with phased migration tasks, acceptance criteria, compatibility rules, and CTF deferred to the final phase.
-- Versioned SQLite migrations through schema v17: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative model budgets, durable pending input, restart-safe protocol repair, Work Board, Notes, durable per-call approvals, revocable Session grants, atomic tool budgets, typed script processes, Run tool-output Artifacts, idempotent structured-memory operations, durable Supervisor tool rounds/calls, and Run execution leases with checkpoint fencing; each version is checksummed and transactional.
+- Versioned SQLite migrations through schema v18: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative model budgets, durable pending input, restart-safe protocol repair, Work Board, Notes, durable per-call approvals, revocable Session grants, atomic tool budgets, typed script processes, Run tool-output Artifacts, idempotent structured-memory operations, durable Supervisor tool rounds/calls, Run execution leases with checkpoint fencing, and cross-process model cancellation; each version is checksummed and transactional.
 - Migration tests cover idempotence, legacy data preservation, checksum history, and failed-migration rollback.
 - Unified `internal/idgen` now backs agent tasks, sessions, tool runs, file edits, Mission/Run, and event IDs.
 - Added pure Go Mission, Scope, Budget, RunConfig, Run status machine, and legal transition checks.
@@ -222,10 +228,10 @@ Not done yet:
 
 - OpenAI-compatible/Ollama providers.
 - Dedicated TUI file-edit pane with key-driven edit approval/denial.
-- User-visible safe model-text streaming and cross-process cancellation routing; durable metadata SSE is complete.
+- User-visible safe model-text streaming; durable metadata SSE and exact cross-process cancellation are complete.
 - Script generate-run-fix loop with real model calls.
 - CTF-specific solving workflows beyond placeholder commands.
-- HTTP write/control routes, TypeScript Web UI, and Rust analyzer processes; the bounded local read API and durable metadata SSE are complete.
+- TypeScript Web UI and Rust analyzer processes; the bounded local read API, durable metadata SSE, and narrowly scoped cancellation control are complete. No general HTTP mutation surface is planned yet.
 - Provider cost budgets, AgentCoordinator, and Findings/Evidence/Report; create-only WorkItem/Note Provider dispatch and dedicated TUI views are complete.
 - Real Local/Docker execution and Sandbox Artifact export from an actual process; current terminal Shell/ScriptProcess completion remains dry-run only.
 
@@ -235,7 +241,7 @@ No high-severity issue was found in the latest slice.
 
 The OpenAPI audit found no unresolved high- or medium-severity issue. The contract is generated without opening SQLite or reading credentials, all 16 published paths are bodyless authenticated `GET` operations, and live-route tests exercise each path against real SQLite state. Golden comparison prevents DTO/document drift. Security tests reject unauthorized and queried contract requests and assert that Artifact content, checkpoint pending input, `lease_id`, fencing tokens, and API-key fields are absent. The runtime document is precomputed once at API construction and remains under the existing request-size, response-size, loopback, Host, client-address, and bearer-token boundary.
 
-Independent Redocly validation accepts the OpenAPI 3.1 document. Its only advisory is the absent `info.license`; the repository owner has not selected a project license, so this legal metadata is intentionally not invented by the implementation.
+Independent Redocly validation accepts the OpenAPI 3.1 document with no warnings. The repository owner selected Apache License 2.0, and the generated contract publishes `info.license.identifier: Apache-2.0` from Go alongside the repository `LICENSE`.
 
 The Run-event SSE audit found no unresolved high- or medium-severity issue. The stream reuses Store-redacted `EventView` data and never reads Artifact content, checkpoint pending input, active-call channels, or fencing tokens. Cursors contain only a version, durable sequence, and a Run-scope digest and cannot be reused across Runs. Fresh and resumed batches require contiguous append-only sequences. Defaults bound each batch to 32 events, each frame to 2 MiB, each connection to 10,000 events/five minutes, each write to two seconds, and the process to 16 concurrent streams. Invalid cursors, missing Runs, and exhausted connection slots fail as ordinary typed JSON before SSE headers are committed; failures after commit close the connection for cursor recovery without writing an audit event for a read operation.
 
@@ -268,7 +274,8 @@ Residual risks to address soon:
 - Schema v13 removes the former Script Run/ToolRun two-transaction window. Mission, Session, Run, budget, Process, Approval, and initial events now roll back together on any failure.
 - Schema v14 commits each Artifact row and `artifact.created` together. If capture fails after a terminal proposal was committed, replay resumes capture without repeating execution or approval; ordinary events contain metadata only, while hashes cover redacted content rather than inaccessible raw secrets.
 - Schema v16 exposes only create-only WorkItem/Note calls. Model-driven update, completion, cancellation, archive, restore, file, Shell, process, and network actions stay disabled until their version, approval, Sandbox, and evidence semantics are separately reviewed.
-- Schema v17 provides cross-process execution exclusion and stale-write fencing for one local SQLite database. It is not a multi-host consensus protocol, and live active-call cancellation/subscription remains process-local until a separately authorized API/WebSocket control path exists.
+- Schema v17 provides cross-process execution exclusion and stale-write fencing for one local SQLite database. Schema v18 adds cancellation through that same database, but neither feature is a multi-host consensus protocol; live subscriptions and the actual Provider cancel function remain process-local.
+- Cross-process cancellation polling defaults to 100 ms and is available only while the worker and API share the same SQLite database. A crash before observation may leave the request pending until a later model attempt resolves it as `superseded`; cancellation is best-effort control, not a guarantee that an already-completed remote request can be recalled.
 - Structured-memory replays, changed-intent conflicts, authoritative scope failures, and Policy denials consume tool-call budget because each is a well-formed invocation attempt. Malformed payloads and missing identities do not consume budget.
 - The current Policy checker conservatively rejects Notes containing dangerous scanner command text even when used descriptively. Future intent-aware classification may refine that behavior, but permanent cyber-action denial must remain authoritative.
 - A workspace read Artifact contains exactly the bounded content returned by that invocation. It does not reconstruct bytes intentionally excluded by the read tool's own requested maximum.
@@ -298,7 +305,7 @@ Residual risks to address soon:
 - Persisted `model.delta` events intentionally contain counters rather than model text. Historical SQLite replay can reconstruct progress and accounting, not token-by-token content; the current live envelope is also metadata-only until a safe lifecycle/text projection exists.
 - Active-call subscriptions are process-local and non-replayable. A full 32-event buffer closes that subscriber; consumers must inspect `Dropped()` and recover from durable Run events.
 - Application cancellation is audit-first: if SQLite cannot append the request, the registry does not silently signal an unaudited cancellation. Parent process-context cancellation remains the emergency path and still records `model.failed(cancelled)` when possible.
-- The read-only Go API can inspect durable state, token-free lease activity, and resumable persisted Run events from another process. Cross-process cancellation is still unavailable until a separately audited capability-gated control path can signal the owning process; a second process cannot inspect or signal another process's in-memory active-call channel.
+- The Go API can inspect durable state, token-free lease activity, and resumable persisted Run events from another process. Its separately gated control path persists an exact cancellation request; only the fenced worker observes it and signals its own in-memory active-call registry. A read token cannot mutate, a control token cannot read, and neither API surface exposes the lease id.
 - TUI live state is transient metadata, not a durable transcript. Disconnect or process exit must recover from SQLite Run events, and user-visible text streaming remains disabled.
 - When no active registry item exists, `Ctrl+X` cancels the current application request context after a bounded lookup. This covers legacy/pre-activation calls without fabricating an audited Run cancellation event.
 - Root `wait` currently maps to `paused` plus a textual reason; structured dependencies and approvals are future Coordinator/Work Board work.
@@ -308,7 +315,7 @@ Residual risks to address soon:
 - Applied migration statements are immutable once released because their checksums are verified. Schema changes must always add a new migration version.
 - Schema v3 intentionally rejects duplicate non-empty Run/Session associations. A legacy database containing duplicates must be audited before upgrade instead of silently discarding an association.
 - `apperror.Normalize` includes a transitional text classifier for legacy plain errors. New services must return typed errors directly so future localization cannot affect classification.
-- WorkItems and Notes are operator/application managed in this slice. Models receive bounded read-only context and cannot mutate either surface until proposal/approval semantics exist in the unified Tool Gateway.
+- Models can create WorkItems and Notes only through the bounded schema v16 Tool Gateway loop. Update, status transition, archive, restore, and delete remain operator/application operations until their version and approval semantics are separately implemented.
 - The Supervisor queries at most 20 active WorkItems and 100 visible active Notes before token selection. SQLite retains overflow, but later relevance search or explicit loading must make those records discoverable.
 - Explicit `run finish` can close a Run with unfinished WorkItems as an intentional operator override. Future report projections should surface those unfinished records.
 - WorkItem Owner is currently a bounded label, not an AgentNode foreign key. Coordinator identity and per-agent visibility are still future P4 work.
@@ -472,15 +479,17 @@ Expected context behavior:
 - The local read-API gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. Tests cover real SQLite state, every published resource family, endpoint-scoped pagination, historical Supervisor tool rounds, secret redaction, omitted Artifact content/checkpoint input, loopback and bearer boundaries, internal error hiding, 32 concurrent readers, CLI token non-persistence, and graceful server cancellation. An isolated real-binary smoke verified `v0.1.0`, `api.v1`, schema v16, authenticated 200, bad-token 401, POST 405, no CORS, no environment-token echo, and no token in the closed runtime database; its process and runtime were removed.
 - The Run-aware TUI gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. Real SQLite tests cover all four activity views, pending tool rounds, exact Grant linkage, `g` key async completion, later safe Shell auto-dry-run, grant-authorized crash recovery, current-Policy recheck before grant creation, cross-Session approve/grant/deny rejection with no state change, permanent dangerous-command denial, and terminal-cell-safe Chinese rendering. An isolated real-binary smoke created a Run, WorkItem, Note, active Shell Grant, and auto-dry-run proposal, rendered their shared TUI snapshot, and removed its runtime.
 - The schema v17 execution-lease gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. Tests cover eight-way cross-connection acquisition, explicit replay, expiry takeover, stale checkpoint/renew/release rejection, v16 pending-checkpoint migration, long-call heartbeat, one lease across two Execute turns, atomic stale tool-budget rejection, zero stale entity/event writes, and token-free Outcome/CLI/API/event projections.
-- The OpenAPI contract gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. It covers deterministic generation, 16 live authenticated routes, 23 DTO-derived schemas, golden-file drift detection, raw media type, query/auth rejection, read-only operations, and explicit exclusion of Artifact content, checkpoint pending input, `lease_id`, fencing tokens, and API-key fields. Redocly accepted the document with only the unresolved owner-choice license metadata warning; an isolated real binary exported the contract without creating runtime state.
-- The durable Run-event SSE gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. It covers a 17-path/24-schema OpenAPI contract, exact bounded replay and resume, heartbeat comments, cross-SQLite-connection visibility, process concurrency exhaustion/release, write deadlines, and graceful server cancellation. Redocly accepts the updated contract with only the intentional owner-choice license warning. An isolated real binary streamed two durable frames over authenticated loopback SSE, exposed no internal fields or token, persisted no API token, and left no temporary runtime.
+- The OpenAPI contract gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. It covers deterministic generation, 16 initial live authenticated routes, 23 initial DTO-derived schemas, golden-file drift detection, raw media type, query/auth rejection, read-only operations, and explicit exclusion of Artifact content, checkpoint pending input, `lease_id`, fencing tokens, and API-key fields. The former license advisory is now resolved by the owner-selected Apache-2.0 metadata; an isolated real binary exported the contract without creating runtime state.
+- The durable Run-event SSE gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. It covers the then-current 17-path/24-schema contract, exact bounded replay and resume, heartbeat comments, cross-SQLite-connection visibility, process concurrency exhaustion/release, write deadlines, and graceful server cancellation. An isolated real binary streamed two durable frames over authenticated loopback SSE, exposed no internal fields or token, persisted no API token, and left no temporary runtime.
+- The schema v18 cross-process cancellation gate passed full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. It covers two-connection HTTP-to-worker cancellation of a blocking Provider, distinct read/control tokens, default-disabled control, 202 exact replay, changed-key/intent conflict, latest-attempt checks, stale lease rejection, crash-orphan `superseded` resolution, secret redaction, raw-key non-persistence, strict 4 KiB JSON, and token/fencing-field exclusion. The generated contract now has 18 paths, 26 schemas, two security schemes, and Apache-2.0 license metadata; Redocly validates it without warnings. An isolated real binary reported schema v18, accepted read health, returned 401 for read-token POST and control-token GET, returned 404 for an authorized missing-Run cancellation, echoed neither token, persisted neither token after shutdown, and removed its temporary runtime.
 
 ## Recommended Next Slice
 
-Continue P9 now that cross-process execution is fenced:
+Start the P4 Coordinator foundation now that single-worker execution and cancellation are fenced:
 
-- Threat-model a separately authorized cross-process cancellation operation now that the read stream is stable; never expose or accept a client-supplied fencing token, and keep ordinary read tokens unable to mutate state.
-- Give cancellation a distinct capability/token, immutable audit-first operation key, exact Run/attempt preconditions, and idempotent terminal behavior before adding any HTTP write route.
+- Define durable root Agent identity, status, inbox, and bounded graph snapshot types without enabling child concurrency yet.
+- Route the existing single root Supervisor through a minimal Coordinator register/wait/finish contract, preserving current CLI and Session behavior.
+- Add strict child-depth/count/token allocation limits before any sub-agent spawn operation becomes public.
 - Generate the future TypeScript client from `docs/openapi.json`; do not duplicate Go validation or security policy in React/Vite.
 - Keep real Local/Docker execution disabled until the Sandbox manifest, resource/network limits, cancellation, and Artifact export path pass a separate audit.
 - Keep TypeScript, Rust, and model providers unable to bypass the Go Tool Gateway or policy boundary.

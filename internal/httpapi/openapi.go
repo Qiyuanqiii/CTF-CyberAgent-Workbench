@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"reflect"
 	"sort"
 	"strings"
@@ -31,9 +32,15 @@ type openAPIDocument struct {
 }
 
 type openAPIInfo struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Version     string `json:"version"`
+	Title       string         `json:"title"`
+	Description string         `json:"description"`
+	Version     string         `json:"version"`
+	License     openAPILicense `json:"license"`
+}
+
+type openAPILicense struct {
+	Name       string `json:"name"`
+	Identifier string `json:"identifier"`
 }
 
 type openAPIServer struct {
@@ -47,18 +54,26 @@ type openAPITag struct {
 }
 
 type openAPIPathItem struct {
-	Get openAPIOperation `json:"get"`
+	Get  *openAPIOperation `json:"get,omitempty"`
+	Post *openAPIOperation `json:"post,omitempty"`
 }
 
 type openAPIOperation struct {
-	OperationID string             `json:"operationId"`
-	Summary     string             `json:"summary"`
-	Description string             `json:"description"`
-	Tags        []string           `json:"tags"`
-	Parameters  []openAPIParameter `json:"parameters,omitempty"`
-	Responses   map[string]any     `json:"responses"`
-	ReadOnly    bool               `json:"x-cyberagent-read-only"`
-	Streaming   bool               `json:"x-cyberagent-streaming,omitempty"`
+	OperationID string                `json:"operationId"`
+	Summary     string                `json:"summary"`
+	Description string                `json:"description"`
+	Tags        []string              `json:"tags"`
+	Parameters  []openAPIParameter    `json:"parameters,omitempty"`
+	Responses   map[string]any        `json:"responses"`
+	Security    []map[string][]string `json:"security,omitempty"`
+	RequestBody *openAPIRequestBody   `json:"requestBody,omitempty"`
+	ReadOnly    bool                  `json:"x-cyberagent-read-only"`
+	Streaming   bool                  `json:"x-cyberagent-streaming,omitempty"`
+}
+
+type openAPIRequestBody struct {
+	Required bool                        `json:"required"`
+	Content  map[string]openAPIMediaType `json:"content"`
 }
 
 type openAPIParameter struct {
@@ -95,6 +110,7 @@ type openAPIMediaType struct {
 
 type openAPIOperationSpec struct {
 	Path        string
+	Method      string
 	OperationID string
 	Summary     string
 	Description string
@@ -106,6 +122,8 @@ type openAPIOperationSpec struct {
 	RawDocument bool
 	Streaming   bool
 	Parameters  []openAPIParameter
+	RequestType reflect.Type
+	Control     bool
 }
 
 // GenerateOpenAPI creates the canonical client contract from the Go response DTOs.
@@ -113,14 +131,26 @@ func GenerateOpenAPI() ([]byte, error) {
 	registry := newOpenAPISchemaRegistry()
 	paths := make(map[string]openAPIPathItem)
 	for _, spec := range openAPIOperationSpecs() {
-		if _, exists := paths[spec.Path]; exists {
-			return nil, fmt.Errorf("duplicate OpenAPI path %q", spec.Path)
-		}
 		operation, err := buildOpenAPIOperation(spec, registry)
 		if err != nil {
 			return nil, err
 		}
-		paths[spec.Path] = openAPIPathItem{Get: operation}
+		item := paths[spec.Path]
+		switch spec.Method {
+		case "", http.MethodGet:
+			if item.Get != nil {
+				return nil, fmt.Errorf("duplicate OpenAPI GET path %q", spec.Path)
+			}
+			item.Get = &operation
+		case http.MethodPost:
+			if item.Post != nil {
+				return nil, fmt.Errorf("duplicate OpenAPI POST path %q", spec.Path)
+			}
+			item.Post = &operation
+		default:
+			return nil, fmt.Errorf("unsupported OpenAPI method %q", spec.Method)
+		}
+		paths[spec.Path] = item
 	}
 	if registry.err != nil {
 		return nil, registry.err
@@ -130,9 +160,10 @@ func GenerateOpenAPI() ([]byte, error) {
 		JSONSchemaDialect: openAPIJSONSchemaDialect,
 		Info: openAPIInfo{
 			Title: "CyberAgent Workbench Local API",
-			Description: "Authenticated loopback-only read API owned by the Go control plane. " +
-				"The contract exposes durable metadata, never tool execution or security-policy bypasses.",
+			Description: "Authenticated loopback-only API owned by the Go control plane. " +
+				"Read operations expose durable metadata; the separately authorized control capability only requests exact active-call cancellation.",
 			Version: Version,
+			License: openAPILicense{Name: "Apache License 2.0", Identifier: "Apache-2.0"},
 		},
 		Servers:  []openAPIServer{{URL: "http://127.0.0.1:8765", Description: "Default loopback server"}},
 		Security: []map[string][]string{{"BearerAuth": {}}},
@@ -142,6 +173,7 @@ func GenerateOpenAPI() ([]byte, error) {
 			{Name: "Sessions", Description: "Persisted Session metadata and redacted messages."},
 			{Name: "Memory", Description: "Structured WorkItems and Notes."},
 			{Name: "Artifacts", Description: "Content-free Artifact descriptors."},
+			{Name: "Control", Description: "Separately authorized, audit-first control operations."},
 		},
 		Paths: paths,
 		Components: openAPIComponents{
@@ -149,10 +181,12 @@ func GenerateOpenAPI() ([]byte, error) {
 			Responses: standardOpenAPIErrorResponses(registry),
 			SecuritySchemes: map[string]openAPISecurityType{
 				"BearerAuth": {Type: "http", Scheme: "bearer", BearerFormat: "opaque",
-					Description: "Process-scoped local administrator token; never persisted by CyberAgent."},
+					Description: "Process-scoped read token; never persisted by CyberAgent."},
+				"ControlBearerAuth": {Type: "http", Scheme: "bearer", BearerFormat: "opaque",
+					Description: "Distinct optional control token; cannot authorize read operations and is never persisted."},
 			},
 		},
-		ReadOnly: true,
+		ReadOnly: false,
 	}
 	encoded, err := json.MarshalIndent(document, "", "  ")
 	if err != nil {
@@ -198,6 +232,16 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 					Schema: map[string]any{"type": "string", "minLength": 1, "maxLength": MaxEventStreamCursorBytes}},
 				{Name: "Last-Event-ID", In: "header", Description: "SSE reconnect cursor from the final received frame; cannot be combined with cursor",
 					Schema: map[string]any{"type": "string", "minLength": 1, "maxLength": MaxEventStreamCursorBytes}},
+			}},
+		{Path: ModelCancellationPathTemplate, Method: http.MethodPost,
+			OperationID: "requestModelCancellation", Summary: "Cancel an active model call", Tag: "Control",
+			Description: "Persists an audit-first cancellation request bound to the exact active Supervisor and model attempt. The worker consumes it with its private execution lease; clients never provide a fencing token.",
+			DataType:    reflect.TypeOf(ModelCancellationView{}), RequestType: reflect.TypeOf(ModelCancellationRequestView{}),
+			Control: true, NotFound: true, Parameters: []openAPIParameter{
+				runID,
+				{Name: "Idempotency-Key", In: "header", Description: "Opaque operation key; only a domain-separated digest is persisted",
+					Required: true, Schema: map[string]any{"type": "string", "minLength": domain.MinModelCancellationKeyBytes,
+						"maxLength": domain.MaxModelCancellationKeyBytes, "pattern": `^\S+$`}},
 			}},
 		{Path: "/api/v1/runs/{run_id}/work-items", OperationID: "listRunWorkItems",
 			Summary: "List Run WorkItems", Tag: "Memory", Description: "Returns structured Work Board items.",
@@ -251,13 +295,19 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 }
 
 func buildOpenAPIOperation(spec openAPIOperationSpec, registry *openAPISchemaRegistry) (openAPIOperation, error) {
-	responses := standardOperationResponses(spec.NotFound)
+	responses := standardOperationResponses(spec.NotFound, spec.Control)
+	successStatus := "200"
+	successDescription := "Successful read"
+	if spec.Control {
+		successStatus = "202"
+		successDescription = "Cancellation request accepted or idempotently replayed"
+	}
 	if spec.Streaming {
-		responses["200"] = openAPIResponse{Description: "Bounded Server-Sent Event stream", Content: map[string]openAPIMediaType{
+		responses[successStatus] = openAPIResponse{Description: "Bounded Server-Sent Event stream", Content: map[string]openAPIMediaType{
 			"text/event-stream": {Schema: registry.ref(spec.DataType)},
 		}}
 	} else if spec.RawDocument {
-		responses["200"] = openAPIResponse{Description: "OpenAPI 3.1 document", Content: map[string]openAPIMediaType{
+		responses[successStatus] = openAPIResponse{Description: "OpenAPI 3.1 document", Content: map[string]openAPIMediaType{
 			openAPIContentType: {Schema: map[string]any{"type": "object", "additionalProperties": true}},
 		}}
 	} else {
@@ -268,13 +318,23 @@ func buildOpenAPIOperation(spec openAPIOperationSpec, registry *openAPISchemaReg
 		if spec.Collection {
 			dataSchema = map[string]any{"type": "array", "items": dataSchema}
 		}
-		responses["200"] = openAPIResponse{Description: "Successful read", Content: map[string]openAPIMediaType{
+		responses[successStatus] = openAPIResponse{Description: successDescription, Content: map[string]openAPIMediaType{
 			"application/json": {Schema: successEnvelopeSchema(dataSchema, spec.Paginated, registry)},
 		}}
 	}
-	return openAPIOperation{OperationID: spec.OperationID, Summary: spec.Summary,
+	operation := openAPIOperation{OperationID: spec.OperationID, Summary: spec.Summary,
 		Description: spec.Description, Tags: []string{spec.Tag}, Parameters: spec.Parameters,
-		Responses: responses, ReadOnly: true, Streaming: spec.Streaming}, nil
+		Responses: responses, ReadOnly: !spec.Control, Streaming: spec.Streaming}
+	if spec.Control {
+		if spec.RequestType == nil {
+			return openAPIOperation{}, fmt.Errorf("OpenAPI control path %q has no request DTO", spec.Path)
+		}
+		operation.Security = []map[string][]string{{"ControlBearerAuth": {}}}
+		operation.RequestBody = &openAPIRequestBody{Required: true, Content: map[string]openAPIMediaType{
+			"application/json": {Schema: registry.ref(spec.RequestType)},
+		}}
+	}
+	return operation, nil
 }
 
 func successEnvelopeSchema(dataSchema map[string]any, paginated bool, registry *openAPISchemaRegistry) map[string]any {
@@ -292,7 +352,7 @@ func successEnvelopeSchema(dataSchema map[string]any, paginated bool, registry *
 		"properties": properties, "required": required}
 }
 
-func standardOperationResponses(notFound bool) map[string]any {
+func standardOperationResponses(notFound bool, control bool) map[string]any {
 	responses := map[string]any{
 		"400": responseReference("BadRequest"),
 		"401": responseReference("Unauthorized"),
@@ -303,6 +363,12 @@ func standardOperationResponses(notFound bool) map[string]any {
 	}
 	if notFound {
 		responses["404"] = responseReference("NotFound")
+	}
+	if control {
+		responses["409"] = responseReference("Conflict")
+		responses["412"] = responseReference("FailedPrecondition")
+		responses["413"] = responseReference("RequestEntityTooLarge")
+		responses["415"] = responseReference("UnsupportedMediaType")
 	}
 	return responses
 }
@@ -318,13 +384,17 @@ func standardOpenAPIErrorResponses(registry *openAPISchemaRegistry) map[string]o
 			Content: map[string]openAPIMediaType{"application/json": {Schema: schema}}}
 	}
 	return map[string]openAPIResponse{
-		"BadRequest":        makeResponse("Invalid path, query, method, or request body"),
-		"Unauthorized":      makeResponse("Missing or invalid bearer token"),
-		"Forbidden":         makeResponse("Request is outside the loopback security boundary"),
-		"NotFound":          makeResponse("Requested durable resource was not found"),
-		"RequestTooLarge":   makeResponse("Request target or query exceeded its hard limit"),
-		"ResourceExhausted": makeResponse("Bounded response or resource limit was exhausted"),
-		"InternalError":     makeResponse("Redacted internal server failure"),
+		"BadRequest":            makeResponse("Invalid path, query, method, or request body"),
+		"Unauthorized":          makeResponse("Missing or invalid bearer token"),
+		"Forbidden":             makeResponse("Request is outside the loopback security boundary"),
+		"NotFound":              makeResponse("Requested durable resource was not found"),
+		"Conflict":              makeResponse("Idempotency key, Run, or active attempt changed"),
+		"FailedPrecondition":    makeResponse("The target model attempt is not active or cancellable"),
+		"RequestEntityTooLarge": makeResponse("Control request body exceeded its hard limit"),
+		"UnsupportedMediaType":  makeResponse("Control request must use application/json"),
+		"RequestTooLarge":       makeResponse("Request target or query exceeded its hard limit"),
+		"ResourceExhausted":     makeResponse("Bounded response or resource limit was exhausted"),
+		"InternalError":         makeResponse("Redacted internal server failure"),
 	}
 }
 
@@ -512,6 +582,9 @@ func applyOpenAPIFieldMetadata(typeName string, fieldName string, schema map[str
 	if minimum, ok := openAPIFieldMinimums[typeName+"."+fieldName]; ok {
 		schema["minimum"] = minimum
 	}
+	if maximum, ok := openAPIFieldMaxLengths[typeName+"."+fieldName]; ok {
+		schema["maxLength"] = maximum
+	}
 	if strings.HasSuffix(fieldName, "_id") || fieldName == "id" || fieldName == "event_id" {
 		if _, ref := schema["$ref"]; !ref {
 			schema["minLength"] = 1
@@ -543,33 +616,40 @@ var openAPIFieldEnums = map[string][]string{
 	"ArtifactView.encoding":                 {artifact.EncodingUTF8},
 	"SupervisorToolCallView.status":         {"pending", "completed", "denied", "failed"},
 	"RunEventStreamView.version":            {RunEventStreamVersion},
+	"ModelCancellationView.status":          {string(domain.ModelCancellationPending), string(domain.ModelCancellationObserved), string(domain.ModelCancellationResolved)},
 }
 
 var openAPIFieldMinimums = map[string]float64{
-	"HealthView.schema_version":                 0,
-	"BudgetView.max_turns":                      1,
-	"BudgetView.max_tokens":                     0,
-	"BudgetView.max_tool_calls":                 0,
-	"BudgetView.max_cost_usd":                   0,
-	"BudgetView.timeout_seconds":                0,
-	"SupervisorCheckpointView.next_turn":        1,
-	"SupervisorCheckpointView.input_tokens":     0,
-	"SupervisorCheckpointView.output_tokens":    0,
-	"SupervisorCheckpointView.total_tokens":     0,
-	"SupervisorCheckpointView.execution_millis": 0,
-	"ToolUsageView.consumed":                    0,
-	"ToolUsageView.limit":                       0,
-	"RunExecutionLeaseView.generation":          1,
-	"MessageView.token_estimate":                0,
-	"EventView.sequence":                        1,
-	"WorkItemView.version":                      1,
-	"NoteView.version":                          1,
-	"ArtifactView.size_bytes":                   0,
-	"SupervisorToolCallView.position":           0,
-	"SupervisorToolCallView.model_attempt":      1,
-	"SupervisorToolRoundView.turn":              1,
-	"SupervisorToolRoundView.round":             1,
-	"SupervisorToolRoundView.model_attempt":     1,
+	"HealthView.schema_version":                  0,
+	"BudgetView.max_turns":                       1,
+	"BudgetView.max_tokens":                      0,
+	"BudgetView.max_tool_calls":                  0,
+	"BudgetView.max_cost_usd":                    0,
+	"BudgetView.timeout_seconds":                 0,
+	"SupervisorCheckpointView.next_turn":         1,
+	"SupervisorCheckpointView.input_tokens":      0,
+	"SupervisorCheckpointView.output_tokens":     0,
+	"SupervisorCheckpointView.total_tokens":      0,
+	"SupervisorCheckpointView.execution_millis":  0,
+	"ToolUsageView.consumed":                     0,
+	"ToolUsageView.limit":                        0,
+	"RunExecutionLeaseView.generation":           1,
+	"MessageView.token_estimate":                 0,
+	"EventView.sequence":                         1,
+	"WorkItemView.version":                       1,
+	"NoteView.version":                           1,
+	"ArtifactView.size_bytes":                    0,
+	"SupervisorToolCallView.position":            0,
+	"SupervisorToolCallView.model_attempt":       1,
+	"SupervisorToolRoundView.turn":               1,
+	"SupervisorToolRoundView.round":              1,
+	"SupervisorToolRoundView.model_attempt":      1,
+	"ModelCancellationRequestView.model_attempt": 1,
+	"ModelCancellationView.model_attempt":        1,
+}
+
+var openAPIFieldMaxLengths = map[string]int{
+	"ModelCancellationRequestView.reason": domain.MaxModelCancellationReasonRunes,
 }
 
 func runStatuses() []string {
@@ -602,8 +682,13 @@ func artifactStreams() []string {
 }
 
 func sortedOpenAPIPaths() []string {
+	seen := map[string]struct{}{}
 	paths := make([]string, 0, len(openAPIOperationSpecs()))
 	for _, spec := range openAPIOperationSpecs() {
+		if _, exists := seen[spec.Path]; exists {
+			continue
+		}
+		seen[spec.Path] = struct{}{}
 		paths = append(paths, spec.Path)
 	}
 	sort.Strings(paths)

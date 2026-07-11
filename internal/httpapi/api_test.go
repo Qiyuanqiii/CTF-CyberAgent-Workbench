@@ -18,6 +18,7 @@ import (
 
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/store"
@@ -25,6 +26,8 @@ import (
 )
 
 const testAccessToken = "api-test-token-0123456789-abcdefghijk"
+
+const testControlToken = "api-control-token-0123456789-abcdefgh"
 
 type apiTestEnvelope struct {
 	Version   string          `json:"version"`
@@ -44,6 +47,8 @@ type apiFixture struct {
 	artifactID string
 	secret     string
 	leaseID    string
+	checkpoint domain.SupervisorCheckpoint
+	attempt    llm.ModelAttempt
 }
 
 func newAPIFixture(t *testing.T) *apiFixture {
@@ -133,16 +138,25 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.BeginSupervisorTurn(ctx, acquiredLease.Lease, "pending input is deliberately private"); err != nil {
+	turn, err := st.BeginSupervisorTurn(ctx, acquiredLease.Lease, "pending input is deliberately private")
+	if err != nil {
 		t.Fatal(err)
 	}
-	api, err := New(st, Config{AccessToken: testAccessToken, AppVersion: "test-version"})
+	attempt := llm.ModelAttempt{
+		Number: 1, TransportAttempt: 1, MaxAttempts: 3, Provider: "http-api-test", Model: "test-model",
+	}
+	if inserted, err := st.RecordSupervisorModelStarted(ctx, turn.Checkpoint, attempt); err != nil || !inserted {
+		t.Fatalf("fixture model start inserted=%t err=%v", inserted, err)
+	}
+	api, err := New(st, Config{
+		AccessToken: testAccessToken, ControlToken: testControlToken, AppVersion: "test-version",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return &apiFixture{api: api, store: st, dbPath: dbPath, run: run, workItems: workItems, notes: notes,
 		artifactID: reviewed.Result.Metadata["artifact_stdout_id"], secret: secret,
-		leaseID: acquiredLease.Lease.LeaseID}
+		leaseID: acquiredLease.Lease.LeaseID, checkpoint: turn.Checkpoint, attempt: attempt}
 }
 
 func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *testing.T) {

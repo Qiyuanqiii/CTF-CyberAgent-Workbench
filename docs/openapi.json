@@ -3,8 +3,12 @@
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "info": {
     "title": "CyberAgent Workbench Local API",
-    "description": "Authenticated loopback-only read API owned by the Go control plane. The contract exposes durable metadata, never tool execution or security-policy bypasses.",
-    "version": "api.v1"
+    "description": "Authenticated loopback-only API owned by the Go control plane. Read operations expose durable metadata; the separately authorized control capability only requests exact active-call cancellation.",
+    "version": "api.v1",
+    "license": {
+      "name": "Apache License 2.0",
+      "identifier": "Apache-2.0"
+    }
   },
   "servers": [
     {
@@ -37,6 +41,10 @@
     {
       "name": "Artifacts",
       "description": "Content-free Artifact descriptors."
+    },
+    {
+      "name": "Control",
+      "description": "Separately authorized, audit-first control operations."
     }
   ],
   "paths": {
@@ -557,6 +565,123 @@
           }
         },
         "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/runs/{run_id}/active-call/cancel": {
+      "post": {
+        "operationId": "requestModelCancellation",
+        "summary": "Cancel an active model call",
+        "description": "Persists an audit-first cancellation request bound to the exact active Supervisor and model attempt. The worker consumes it with its private execution lease; clients never provide a fencing token.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque operation key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Cancellation request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ModelCancellationView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelCancellationRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
       }
     },
     "/api/v1/runs/{run_id}/artifacts": {
@@ -2051,6 +2176,80 @@
         ],
         "type": "object"
       },
+      "ModelCancellationRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "model_attempt": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 1024,
+            "type": "string"
+          }
+        },
+        "required": [
+          "attempt_id",
+          "model_attempt"
+        ],
+        "type": "object"
+      },
+      "ModelCancellationView": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "model_attempt": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "observed",
+              "resolved"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "attempt_id",
+          "model_attempt",
+          "status",
+          "requested_at",
+          "replayed"
+        ],
+        "type": "object"
+      },
       "NoteView": {
         "additionalProperties": false,
         "properties": {
@@ -2776,6 +2975,26 @@
           }
         }
       },
+      "Conflict": {
+        "description": "Idempotency key, Run, or active attempt changed",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "FailedPrecondition": {
+        "description": "The target model attempt is not active or cancellable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
       "Forbidden": {
         "description": "Request is outside the loopback security boundary",
         "content": {
@@ -2798,6 +3017,16 @@
       },
       "NotFound": {
         "description": "Requested durable resource was not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "RequestEntityTooLarge": {
+        "description": "Control request body exceeded its hard limit",
         "content": {
           "application/json": {
             "schema": {
@@ -2835,6 +3064,16 @@
             }
           }
         }
+      },
+      "UnsupportedMediaType": {
+        "description": "Control request must use application/json",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -2842,9 +3081,15 @@
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "opaque",
-        "description": "Process-scoped local administrator token; never persisted by CyberAgent."
+        "description": "Process-scoped read token; never persisted by CyberAgent."
+      },
+      "ControlBearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "opaque",
+        "description": "Distinct optional control token; cannot authorize read operations and is never persisted."
       }
     }
   },
-  "x-cyberagent-read-only": true
+  "x-cyberagent-read-only": false
 }

@@ -46,6 +46,7 @@ const (
 	AgentTurnFailedEvent            = "agent.turn_failed"
 	ModelStartedEvent               = "model.started"
 	ModelCancelRequestedEvent       = "model.cancel_requested"
+	ModelCancelObservedEvent        = "model.cancel_observed"
 	ModelDeltaEvent                 = "model.delta"
 	ModelCompletedEvent             = "model.completed"
 	ModelFailedEvent                = "model.failed"

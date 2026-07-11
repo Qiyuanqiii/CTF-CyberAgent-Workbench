@@ -14,6 +14,8 @@ import (
 
 const apiTokenEnvironment = "CYBERAGENT_API_TOKEN"
 
+const apiControlTokenEnvironment = "CYBERAGENT_API_CONTROL_TOKEN"
+
 func (a *App) apiCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("API subcommand is required")
@@ -39,6 +41,7 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 	}
 
 	accessToken := os.Getenv(apiTokenEnvironment)
+	controlToken := os.Getenv(apiControlTokenEnvironment)
 	generated := accessToken == ""
 	if generated {
 		var err error
@@ -50,7 +53,9 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 	if err := a.ensureStore(); err != nil {
 		return err
 	}
-	api, err := httpapi.New(a.store, httpapi.Config{AccessToken: accessToken, AppVersion: Version})
+	api, err := httpapi.New(a.store, httpapi.Config{
+		AccessToken: accessToken, ControlToken: controlToken, AppVersion: Version,
+	})
 	if err != nil {
 		return err
 	}
@@ -64,14 +69,17 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	baseURL := "http://" + listener.Addr().String() + "/api/v1"
-	fmt.Fprintf(a.out, "api_url: %s\napi_version: %s\napi_token_generated: %t\n",
-		baseURL, httpapi.Version, generated)
+	fmt.Fprintf(a.out, "api_url: %s\napi_version: %s\napi_token_generated: %t\napi_control_enabled: %t\n",
+		baseURL, httpapi.Version, generated, controlToken != "")
 	if generated {
 		fmt.Fprintf(a.out, "api_token: %s\n", accessToken)
 	} else {
 		fmt.Fprintf(a.out, "api_token_source: %s\n", apiTokenEnvironment)
 	}
-	fmt.Fprintln(a.out, "note: the API is read-only, loopback-only, and the token is not persisted")
+	if controlToken != "" {
+		fmt.Fprintf(a.out, "api_control_token_source: %s\n", apiControlTokenEnvironment)
+	}
+	fmt.Fprintln(a.out, "note: the API is loopback-only; control is separately authorized and tokens are not persisted")
 	return server.Serve(ctx, listener)
 }
 

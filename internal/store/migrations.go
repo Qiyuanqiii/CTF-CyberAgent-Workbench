@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 17
+const LatestSchemaVersion = 18
 
 type migration struct {
 	Version    int
@@ -596,6 +596,38 @@ var runExecutionLeaseStatements = []string{
 	`ALTER TABLE run_supervisor_checkpoints ADD COLUMN lease_generation INTEGER NOT NULL DEFAULT 0
 		CHECK(lease_generation >= 0 AND ((lease_id = '' AND lease_generation = 0)
 			OR (lease_id <> '' AND lease_generation > 0)));`,
+}
+
+var modelCancellationStatements = []string{
+	`CREATE TABLE run_model_cancellations (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		attempt_id TEXT NOT NULL,
+		model_attempt INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		reason TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		requested_at TEXT NOT NULL,
+		observed_at TEXT,
+		resolved_at TEXT,
+		resolution TEXT NOT NULL DEFAULT '',
+		UNIQUE(run_id, attempt_id, model_attempt),
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		CHECK(model_attempt > 0),
+		CHECK(status IN ('pending', 'observed', 'resolved')),
+		CHECK((status = 'pending' AND observed_at IS NULL AND resolved_at IS NULL AND resolution = '')
+			OR (status = 'observed' AND observed_at IS NOT NULL AND resolved_at IS NULL AND resolution = '')
+			OR (status = 'resolved' AND resolved_at IS NOT NULL AND length(resolution) > 0))
+	);`,
+	`CREATE INDEX idx_run_model_cancellations_pending
+		ON run_model_cancellations(run_id, attempt_id, model_attempt, status);`,
+	`CREATE TABLE run_model_cancellation_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		cancellation_id TEXT NOT NULL UNIQUE,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(cancellation_id) REFERENCES run_model_cancellations(id) ON DELETE CASCADE
+	);`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {
