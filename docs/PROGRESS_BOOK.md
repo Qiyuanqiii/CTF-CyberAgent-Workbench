@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 86%。
+- 整体产品愿景：约 87%。
 - v0.1 通用 Agent MVP：约 99%。
 - V2 Run-centric Runtime：约 99%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消和 schema v16 有界工具循环。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次。P9 已新增 loopback-only `api.v1` 只读控制面；真实命令执行、API 写入/WebSocket 和非结构化记忆类模型工具继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消和 schema v16 有界工具循环。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次。P9 已新增 loopback-only `api.v1` 只读控制面，以及 Run-aware TUI 的 Work/Notes/ToolRounds/Tools 视图和批准一次/本会话操作；真实命令执行、API 写入/WebSocket 和非结构化记忆类模型工具继续关闭。
 
 ## 二、已完成功能
 
@@ -133,6 +133,9 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - 显式主动取消先写脱敏且幂等的 `model.cancel_requested`，再触发 Go 持有的 cancel function；终端 `Ctrl+C`/SIGTERM 也进入 Supervisor 取消与恢复路径。
 - ActiveCallInfo 带 Store 绑定的 Session ID；Bubble Tea 发送与订阅命令并行运行，不在 `Update` 中执行阻塞 I/O。
 - TUI 状态栏显示 provider/model、attempt、chunk/byte、取消、慢消费者断线和终态；live envelope 仍不含模型文本。
+- TUI 活动区从 Go Store 有界加载当前 Run、WorkItems、Notes、Supervisor ToolRounds、Shell ToolRuns 与活动 Grant；`h/l` 切换视图，`j/k` 选择，非 Tools 视图保持只读。
+- `a` 执行持久化逐次审批，`g` 创建或复用精确 Run/Session/Workspace/Shell/ActionClass Grant 并推进当前提案；推进前重新验证审批指纹、作用域和当前 Policy，Shell 仍只 dry-run。
+- TUI 换行和截断按终端单元格与字素计算，中文和宽字符不会被切成非法 UTF-8 或撑破默认侧栏。
 - `Ctrl+X` 优先调用 audit-first active-call API；legacy/尚未激活调用在短时查找后仅取消当前 application request context，不接触 Provider cancel function。
 - busy 时 `Esc/Ctrl+C` 只提示等待或 `Ctrl+X`，避免键盘退出直接中断进程内调用；picker 打开和新建会话都会继承同一控制器。
 - 限流耗尽后 checkpoint 保留 pending input；无新输入的 `run step` 会继续原请求而不是退回 Mission goal。
@@ -158,7 +161,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 
 - 经过生命周期投影和跨 chunk 脱敏的用户可见文本 streaming；当前 TUI 只展示元数据。
 - Provider 费用预算，以及最近 Session 消息与结构化记忆共用的统一 token 预算。
-- Findings、Evidence 实体与 Report；WorkItem/Note 基础、create-only Provider 调度循环已完成，TUI 专用视图尚未接入。
+- Findings、Evidence 实体与 Report；WorkItem/Note 基础、create-only Provider 调度循环和 TUI 专用视图已完成。
 - 跨进程主动取消、WebSocket 推送和经过单独安全设计的用户可见文本 streaming。
 - OpenAI-compatible 与 Ollama Provider。
 - 真实 Docker 隔离与命令执行；Tool Gateway、first-class ScriptProcess、逐次审批、Session Grant、工具预算和输出 Artifact 已完成。
@@ -295,12 +298,15 @@ Local Read API 切片新增 `internal/httpapi`、`cyberagent api serve`、Store 
 
 该切片发布门通过 `go test -count=1 ./...`、全仓库 `go test -race -count=1 ./...`、`go vet ./...`、`staticcheck ./...` 与 `govulncheck ./...`；可达漏洞为 0。真实二进制隔离 smoke 验证 `v0.1.0`、`api.v1`、schema v16、正确 token 200、错误 token 401、POST 405、无 CORS、环境 token 不回显且关闭进程后未出现在 SQLite；临时进程和运行目录已清理。
 
+Run-aware TUI 切片新增当前 Run 头部、Tools/Work/Notes/Rounds 四视图、`a` 逐次批准、`g` 本会话 Grant、活动授权提示和终端单元格感知的 Unicode 布局。会话授权由 Go Tool Gateway 校验持久化审批指纹与精确作用域，在创建 Grant 前重新执行当前 Policy；已授权但尚未推进的提案可恢复，Grant 永远不能覆盖永久拒绝。
+
+本轮审计未发现未解决的高/中风险问题，并修复四项健壮性/作用域缺口：异常审批记录可能先留下活动 Grant、TUI 手工输入其他 Session 的 ToolRun ID 时键盘与 slash command 的作用域语义不一致、状态栏无法区分四个活动视图、默认窄侧栏把标题与标签挤在同一行。适配器现要求调用方声明期望 Session，TUI 的批准一次、本会话授权和拒绝都先验证当前 Session。真实 SQLite 测试覆盖跨 Session 三类操作拒绝且零状态变化、Grant 关联、撤销后恢复、后续安全 Shell 自动 dry-run、危险命令永久拒绝、Policy 拒绝时零 Grant、pending ToolRound、中文 WorkItem/Note 和 `g` 键异步状态。发布门通过 `go test -count=1 ./...`、全仓库 `go test -race -count=1 ./...`、`go vet ./...`、`staticcheck ./...` 与 `govulncheck ./...`；可达漏洞为 0。
+
 ## 七、下一开发切片
 
-1. 为 Session Grant 增加 TUI 审批提示和“批准一次/本会话”组合操作，并增加 WorkItem、Note、durable ToolRound 视图；Go Store 继续作为唯一授权源。
-2. 在开放 API 写入、WebSocket 或多 worker 前增加跨进程 Run execution lease；当前 active-call registry 仍是进程内能力。
-3. 从稳定 Go DTO 生成 OpenAPI 契约后再建立 React/Vite UI，TypeScript 不重复实现校验或安全策略。
-4. Docker/Local 真实命令执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
+1. 在开放 API 写入、WebSocket 或多 worker 前增加跨进程 Run execution lease；当前 active-call registry 仍是进程内能力。
+2. 从稳定 Go DTO 生成 OpenAPI 契约后再建立 React/Vite UI，TypeScript 不重复实现校验或安全策略。
+3. Docker/Local 真实命令执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
 
 ## 八、仓库同步与恢复约定
 

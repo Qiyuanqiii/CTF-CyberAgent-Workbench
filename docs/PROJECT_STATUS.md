@@ -62,7 +62,7 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 86%.
+- Overall product vision: about 87%.
 - v0.1 generic agent MVP: about 99%.
 - V2 run-centric runtime: about 99%.
 - Project scaffold/framework: about 99%.
@@ -114,7 +114,9 @@ Completed:
 - Session `/write <path> <content>` normally creates a reviewable file edit proposal; a matching active Session grant may apply it immediately, and Session/TUI text reflects the persisted outcome.
 - File edit approval re-resolves workspace paths, rejects traversal/symlink escape, verifies original/proposed SHA-256 hashes, refuses stale proposals, and supports resumable `approved` state.
 - Existing text files and new text files under existing workspace directories are supported; non-UTF-8 content, missing parents, directories, and files over 256 KiB are rejected.
-- Bubble Tea TUI shell with session messages, input, tool run pane, snapshot mode, `/approve`/`/deny` input commands, message scrollback, tool selection, and key-driven approve/deny.
+- Bubble Tea TUI shell with session messages, Run identity/status, snapshot mode, message scrollback, and a four-view activity pane for Shell ToolRuns, WorkItems, Notes, and durable Supervisor ToolRounds.
+- TUI Tool controls expose `a` for one durable approval and `g` for an exact revocable Session Grant. Session approval verifies the stored proposal fingerprint/scope and current Policy before grant creation; future allowed Shell calls remain dry-run and permanent denial still wins.
+- TUI rendering uses terminal-cell-aware grapheme wrapping/truncation for CJK and other wide Unicode text, while bounded Store queries cap each Run memory view.
 - TUI session picker/start screen: restore existing sessions or press `n` to create a new one.
 - TUI async action loop: sends, refreshes, and tool approve/deny actions enter a `busy` state and complete through Bubble Tea commands without freezing the UI event path.
 - TUI workspace context side panel: attached sessions show workspace ID/name/root and lightweight local directory counts without reading file contents.
@@ -443,12 +445,12 @@ Expected context behavior:
 - The final schema v15 gate passed with `go test -count=1 ./...`, full-repository `go test -race -count=1 ./...`, `go vet ./...`, clean `staticcheck ./...`, and zero reachable `govulncheck` findings. Cross-Store budget and structured replay tests passed ten consecutive runs. An isolated real-binary smoke verified WorkItem create/replay, changed-intent exit code 4, redacted Note creation, Policy exit code 5, five charged attempts, one domain/completion event per successful entity, and no raw operation key or secret in the timeline; the temporary runtime was removed.
 - The schema v16 gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. Tests cover Anthropic request/response/SSE tool blocks, strict Store revalidation, model/tool transactional persistence, restart after entity creation but before result recording, semantic replay across attempts and rounds, Policy denial, budget exhaustion, four-round bounds, and cross-Store result convergence. An isolated real-binary mock smoke exported both schemas and completed one Run turn with `tool_rounds: 0`/`tool_calls: 0`; its runtime was removed. Credential scanning found only the intentional redaction-test fixture and no user test keys.
 - The local read-API gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. Tests cover real SQLite state, every published resource family, endpoint-scoped pagination, historical Supervisor tool rounds, secret redaction, omitted Artifact content/checkpoint input, loopback and bearer boundaries, internal error hiding, 32 concurrent readers, CLI token non-persistence, and graceful server cancellation. An isolated real-binary smoke verified `v0.1.0`, `api.v1`, schema v16, authenticated 200, bad-token 401, POST 405, no CORS, no environment-token echo, and no token in the closed runtime database; its process and runtime were removed.
+- The Run-aware TUI gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. Real SQLite tests cover all four activity views, pending tool rounds, exact Grant linkage, `g` key async completion, later safe Shell auto-dry-run, grant-authorized crash recovery, current-Policy recheck before grant creation, cross-Session approve/grant/deny rejection with no state change, permanent dangerous-command denial, and terminal-cell-safe Chinese rendering. An isolated real-binary smoke created a Run, WorkItem, Note, active Shell Grant, and auto-dry-run proposal, rendered their shared TUI snapshot, and removed its runtime.
 
 ## Recommended Next Slice
 
 Continue P9 and runtime coordination after the read API:
 
-- Add TUI views for WorkItems, Notes, and durable tool rounds, plus “approve once / this session” controls backed exclusively by the persisted Go grant service.
 - Define and test a durable cross-process Run execution lease before adding API writes, cancellation, WebSocket control, or multiple worker processes; the current active-call registry remains process-local.
 - Generate an OpenAPI contract from the stabilized Go DTOs before starting React/Vite so TypeScript does not duplicate validation or security policy.
 - Keep real Local/Docker execution disabled until the Sandbox manifest, resource/network limits, cancellation, and Artifact export path pass a separate audit.

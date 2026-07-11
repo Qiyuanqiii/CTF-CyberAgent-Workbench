@@ -196,19 +196,22 @@ The chat TUI uses the same session and tool approval runtime as the CLI. Normal 
 
 ```text
 /approve <tool-run-id>
+/approve-session <tool-run-id>
 /deny <tool-run-id> not needed
 ```
 
 Keyboard controls:
 
 ```text
-Tab              switch focus between input and tool runs
-Enter            send from input or approve selected proposed tool
+Tab              switch focus between input and the activity pane
+Enter            send from input or approve one selected proposed tool
 PgUp / PgDn      scroll messages
-j / k            select next/previous tool when tool runs are focused
-a                approve selected proposed tool when tool runs are focused
-d                deny selected proposed tool when tool runs are focused
-Ctrl+R           refresh session/tool state
+h / l            switch among Tools, Work, Notes, and Rounds
+j / k            select the next/previous item in the active view
+a                approve the selected Shell proposal once
+g                approve it and grant the exact current Session scope
+d                deny the selected Shell proposal
+Ctrl+R           refresh Session, Run, memory, and tool state
 Ctrl+X           request audited cancellation of the current model call
 Esc              quit when idle; a busy action must finish or be cancelled first
 ```
@@ -216,6 +219,8 @@ Esc              quit when idle; a busy action must finish or be cancelled first
 `--print` renders one snapshot and exits, which is useful for non-interactive verification.
 
 Message sends, live-call discovery, refreshes, cancellation, and tool approval/deny actions run asynchronously. During a Run-bound model call, the status line shows provider/model, attempt, chunk/byte progress, cancellation, slow-consumer disconnect, and terminal state. `Ctrl+X` prefers the application audit-first cancellation API; if a legacy or not-yet-active request has no registry entry, it cancels the current application request context instead. Additional input is held until the current action finishes, and raw model text is never included in the live envelope.
+
+For a Run-bound Session, the activity pane reads WorkItems, Notes, durable Supervisor ToolRounds, active Shell grants, and ToolRuns from the Go Store. Work, Notes, and Rounds are read-only views; approval keys act only in Tools. `a` uses the existing durable per-call decision, while `g` creates or reuses a revocable Grant scoped to the exact Run, Session, Workspace, `shell` tool, and `shell` ActionClass. Keyboard and slash-command approval paths both reject ToolRun IDs outside the currently open Session. The current proposal is matched against its persisted fingerprint and rechecked by Policy before the Grant is created. Later allowed Shell calls may complete automatically as dry runs; Policy denial always wins. TUI text layout uses terminal-cell-aware grapheme wrapping, so wide Unicode text does not break panel boundaries.
 
 When a session has an attached workspace, the TUI side panel shows workspace identity, root path, and lightweight counts for `attachments`, `scripts`, `outputs`, `logs`, and `writeups`. This is metadata only; the panel does not read file contents.
 
