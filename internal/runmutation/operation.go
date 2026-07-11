@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -66,6 +67,23 @@ func (o Operation) Validate() error {
 
 func OperationKeyDigest(toolName string, runID string, operationKey string) string {
 	return Fingerprint("structured_tool_operation.v1", toolName, runID, operationKey)
+}
+
+func SupervisorToolOperationKey(runID string, turn int, toolName string, payloadJSON string) string {
+	return Fingerprint("supervisor_structured_tool.v1", strings.TrimSpace(runID), strconv.Itoa(turn),
+		strings.TrimSpace(toolName), strings.TrimSpace(payloadJSON))
+}
+
+func SupervisorToolCallID(operationKey string, round int) (string, error) {
+	operationKey = strings.TrimSpace(operationKey)
+	if !validDigest(operationKey) {
+		return "", errors.New("supervisor tool operation key must be a SHA-256 digest")
+	}
+	if round <= 0 {
+		return "", errors.New("supervisor tool call round must be positive")
+	}
+	identity := Fingerprint("supervisor_tool_call_id.v1", operationKey, strconv.Itoa(round))
+	return "toolu_" + identity[:24], nil
 }
 
 func Fingerprint(parts ...string) string {

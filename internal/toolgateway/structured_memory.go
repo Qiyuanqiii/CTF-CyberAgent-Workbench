@@ -147,6 +147,43 @@ func StructuredMemoryToolDefinition(name ToolName) (ToolDefinition, bool) {
 	return ToolDefinition{}, false
 }
 
+func NormalizeStructuredMemoryPayload(name ToolName, payload json.RawMessage) (json.RawMessage, error) {
+	var canonical json.RawMessage
+	var err error
+	switch name {
+	case WorkItemCreateTool:
+		_, canonical, err = decodeWorkItemCreateInput(payload)
+	case NoteCreateTool:
+		_, canonical, err = decodeNoteCreateInput(payload)
+	default:
+		return nil, fmt.Errorf("unsupported structured memory tool %q", name)
+	}
+	if err != nil {
+		return nil, err
+	}
+	safe := redactStructuredMemoryPayload(name, canonical)
+	switch name {
+	case WorkItemCreateTool:
+		_, canonical, err = decodeWorkItemCreateInput(safe)
+	case NoteCreateTool:
+		_, canonical, err = decodeNoteCreateInput(safe)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("redacted structured memory payload is invalid: %w", err)
+	}
+	var value any
+	decoder := json.NewDecoder(strings.NewReader(string(canonical)))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return nil, fmt.Errorf("canonical structured memory payload is invalid: %w", err)
+	}
+	canonical, err = json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("encode canonical structured memory payload: %w", err)
+	}
+	return canonical, nil
+}
+
 func (g *Gateway) WithStructuredMemoryExecutor(executor StructuredMemoryExecutor) *Gateway {
 	if g != nil {
 		g.structuredMemory = executor

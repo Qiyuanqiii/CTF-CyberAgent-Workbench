@@ -101,8 +101,10 @@ func (a *App) runSupervisorStep(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(a.out, "run %s turn %d completed\nattempt: %s\nrecovered: %t\nmodel_attempts: %d\nprotocol_repairs: %d\nstream_events: %d\nstream_bytes: %d\nmodel_outcome: %s\naction: %s\nrun_status: %s\nprovider: %s\nmodel: %s\nusage: input=%d output=%d total=%d\ncumulative_tokens: %d\nexecution_millis: %d\nnext_turn: %d\nresponse: %s\n",
-		result.Handle.RunID, result.Turn, result.AttemptID, result.Recovered, result.ModelAttempts, result.ProtocolRepairs, result.StreamEvents, result.StreamBytes, result.ModelOutcome, result.Action.Kind, result.RunStatus,
+	fmt.Fprintf(a.out, "run %s turn %d completed\nattempt: %s\nrecovered: %t\nmodel_attempts: %d\nprotocol_repairs: %d\ntool_rounds: %d\ntool_calls: %d\nstream_events: %d\nstream_bytes: %d\nmodel_outcome: %s\naction: %s\nrun_status: %s\nprovider: %s\nmodel: %s\nusage: input=%d output=%d total=%d\ncumulative_tokens: %d\nexecution_millis: %d\nnext_turn: %d\nresponse: %s\n",
+		result.Handle.RunID, result.Turn, result.AttemptID, result.Recovered, result.ModelAttempts,
+		result.ProtocolRepairs, result.ToolRounds, result.ToolCalls, result.StreamEvents, result.StreamBytes,
+		result.ModelOutcome, result.Action.Kind, result.RunStatus,
 		result.Provider, result.Model,
 		result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.TotalTokens,
 		result.Checkpoint.TotalTokens, result.Checkpoint.ExecutionMillis, result.Checkpoint.NextTurn, result.Text)
@@ -123,8 +125,9 @@ func (a *App) runSupervisorExecute(ctx context.Context, args []string) error {
 	supervisor := a.newRunSupervisor()
 	result, err := supervisor.Execute(ctx, fs.Arg(0), *maxSteps)
 	for _, step := range result.Steps {
-		fmt.Fprintf(a.out, "turn %d\t%s\t%s/%s\tattempts=%d\trepairs=%d\tstream_events=%d\ttokens=%d\tnext=%d\n",
-			step.Turn, step.Action.Kind, step.Provider, step.Model, step.ModelAttempts, step.ProtocolRepairs, step.StreamEvents, step.Usage.TotalTokens, step.Checkpoint.NextTurn)
+		fmt.Fprintf(a.out, "turn %d\t%s\t%s/%s\tattempts=%d\trepairs=%d\ttool_rounds=%d\ttool_calls=%d\tstream_events=%d\ttokens=%d\tnext=%d\n",
+			step.Turn, step.Action.Kind, step.Provider, step.Model, step.ModelAttempts, step.ProtocolRepairs,
+			step.ToolRounds, step.ToolCalls, step.StreamEvents, step.Usage.TotalTokens, step.Checkpoint.NextTurn)
 	}
 	if err != nil {
 		fmt.Fprintf(a.out, "execution stopped: %s\n", result.StopReason)

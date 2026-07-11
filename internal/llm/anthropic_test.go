@@ -130,6 +130,102 @@ func TestAnthropicCompatibleProviderStreamsSSEWithFinalUsage(t *testing.T) {
 	}
 }
 
+func TestAnthropicCompatibleProviderMapsToolsAndToolResults(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_tool","type":"message","role":"assistant","model":"tool-model",
+			"content":[{"type":"tool_use","id":"provider-tool-2","name":"note_create",
+				"input":{"title":"Decision","content":"Use strict JSON"}}],
+			"usage":{"input_tokens":9,"output_tokens":4}
+		}`))
+	}))
+	defer server.Close()
+	provider, err := NewAnthropicCompatibleProvider(AnthropicCompatibleConfig{
+		Name: "test", BaseURL: server.URL, APIKey: "secret", DefaultModel: "tool-model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := provider.Chat(t.Context(), ChatRequest{
+		Messages: []Message{
+			{Role: "user", Content: "plan"},
+			{Role: "assistant", ToolCalls: []ToolCall{{
+				ID: "toolu_0123456789abcdef01234567", Name: "work_item_create",
+				Arguments: json.RawMessage(`{"title":"Inspect parser"}`),
+			}}},
+			{Role: "user", ToolResults: []ToolResult{{
+				ToolCallID: "toolu_0123456789abcdef01234567", Content: `{"status":"completed"}`,
+			}}},
+		},
+		Tools: []ToolSpec{{
+			Name: "note_create", Description: "Create a Note",
+			Parameters: json.RawMessage(`{"type":"object","required":["title","content"]}`),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools, ok := captured["tools"].([]any)
+	messages, messagesOK := captured["messages"].([]any)
+	if !ok || len(tools) != 1 || !messagesOK || len(messages) != 3 || !provider.SupportsTools("tool-model") {
+		t.Fatalf("Anthropic tool request was not encoded: %#v", captured)
+	}
+	if len(response.ToolCalls) != 1 || response.ToolCalls[0].ID != "provider-tool-2" ||
+		response.ToolCalls[0].Name != "note_create" || !json.Valid(response.ToolCalls[0].Arguments) ||
+		response.Usage.TotalTokens != 13 || response.Text != "" {
+		t.Fatalf("Anthropic tool response was not decoded: %#v", response)
+	}
+}
+
+func TestAnthropicCompatibleProviderStreamsToolUseJSONDeltas(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		for _, payload := range []string{
+			`{"type":"message_start","message":{"model":"tool-stream","usage":{"input_tokens":6,"output_tokens":0}}}`,
+			`{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"provider-stream-1","name":"work_item_create","input":{}}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"title\":"}}`,
+			`{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"Stream plan\"}"}}`,
+			`{"type":"content_block_stop","index":0}`,
+			`{"type":"message_delta","usage":{"output_tokens":3}}`,
+			`{"type":"message_stop"}`,
+		} {
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", payload)
+			flusher.Flush()
+		}
+	}))
+	defer server.Close()
+	provider, err := NewAnthropicCompatibleProvider(AnthropicCompatibleConfig{
+		Name: "test", BaseURL: server.URL, APIKey: "secret", DefaultModel: "tool-stream",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks, err := provider.StreamChat(t.Context(), ChatRequest{Messages: []Message{{Role: "user", Content: "plan"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var final ChatChunk
+	for chunk := range chunks {
+		if chunk.Err != nil {
+			t.Fatal(chunk.Err)
+		}
+		if chunk.Done {
+			final = chunk
+		}
+	}
+	if !final.Done || final.Usage == nil || final.Usage.TotalTokens != 9 || len(final.ToolCalls) != 1 ||
+		final.ToolCalls[0].ID != "provider-stream-1" ||
+		string(final.ToolCalls[0].Arguments) != `{"title":"Stream plan"}` {
+		t.Fatalf("unexpected streamed tool call: %#v", final)
+	}
+}
+
 func TestAnthropicCompatibleProviderReportsMalformedStreamEvent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

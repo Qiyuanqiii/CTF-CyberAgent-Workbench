@@ -51,9 +51,9 @@ func (v activeCallView) summary() string {
 	if v.Info.CancelRequested && state != "cancelled" && state != "failed" {
 		state = "cancelling"
 	}
-	return fmt.Sprintf("live=%s model=%s/%s a=%d chunks=%d bytes=%d",
+	return fmt.Sprintf("live=%s model=%s/%s a=%d round=%d chunks=%d bytes=%d",
 		state, truncate(v.Info.Provider, 12), truncate(v.Info.Model, 16),
-		v.Info.ModelAttempt, v.Info.StreamChunks, v.Info.StreamBytes)
+		v.Info.ModelAttempt, v.Info.ToolRound, v.Info.StreamChunks, v.Info.StreamBytes)
 }
 
 func (v activeCallView) terminal() bool {

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 15
+const LatestSchemaVersion = 16
 
 type migration struct {
 	Version    int
@@ -482,6 +482,94 @@ var structuredToolOperationStatements = []string{
 			AND NOT EXISTS (SELECT 1 FROM notes WHERE id = NEW.target_id AND run_id = NEW.run_id)
 		BEGIN
 			SELECT RAISE(ABORT, 'structured tool Note target mismatch');
+		END;`,
+}
+
+var supervisorToolLoopStatements = []string{
+	`CREATE TABLE run_supervisor_tool_rounds (
+		run_id TEXT NOT NULL,
+		turn INTEGER NOT NULL,
+		attempt_id TEXT NOT NULL,
+		round INTEGER NOT NULL,
+		model_attempt INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		completed_at TEXT,
+		PRIMARY KEY(run_id, turn, attempt_id, round),
+		UNIQUE(run_id, turn, attempt_id, model_attempt),
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		CHECK(turn > 0),
+		CHECK(round BETWEEN 1 AND 4),
+		CHECK(model_attempt > 0)
+	);`,
+	`CREATE TABLE run_supervisor_tool_calls (
+		run_id TEXT NOT NULL,
+		turn INTEGER NOT NULL,
+		attempt_id TEXT NOT NULL,
+		round INTEGER NOT NULL,
+		position INTEGER NOT NULL,
+		model_attempt INTEGER NOT NULL,
+		call_id TEXT NOT NULL,
+		tool_name TEXT NOT NULL,
+		payload_json TEXT NOT NULL,
+		status TEXT NOT NULL,
+		result_json TEXT NOT NULL DEFAULT '',
+		error_code TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		completed_at TEXT,
+		PRIMARY KEY(run_id, turn, attempt_id, round, position),
+		UNIQUE(run_id, turn, attempt_id, call_id),
+		FOREIGN KEY(run_id, turn, attempt_id, round)
+			REFERENCES run_supervisor_tool_rounds(run_id, turn, attempt_id, round) ON DELETE CASCADE,
+		CHECK(position BETWEEN 1 AND 4),
+		CHECK(model_attempt > 0),
+		CHECK(tool_name IN ('work_item_create', 'note_create')),
+		CHECK(status IN ('pending', 'completed', 'denied', 'failed')),
+		CHECK((status = 'pending' AND result_json = '' AND error_code = '' AND completed_at IS NULL)
+			OR (status = 'completed' AND length(result_json) > 0 AND error_code = '' AND completed_at IS NOT NULL)
+			OR (status IN ('denied', 'failed') AND length(result_json) > 0 AND length(error_code) > 0
+				AND completed_at IS NOT NULL))
+	);`,
+	`CREATE INDEX idx_run_supervisor_tool_calls_pending
+		ON run_supervisor_tool_calls(run_id, turn, attempt_id, status, round, position);`,
+	`CREATE TRIGGER trg_supervisor_tool_round_active_attempt
+		BEFORE INSERT ON run_supervisor_tool_rounds
+		WHEN NOT EXISTS (
+			SELECT 1 FROM run_supervisor_checkpoints
+			WHERE run_id = NEW.run_id AND next_turn = NEW.turn AND attempt_id = NEW.attempt_id
+				AND phase = 'turn_started'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'supervisor tool round is not bound to the active turn');
+		END;`,
+	`CREATE TRIGGER trg_supervisor_tool_round_completed_model
+		BEFORE INSERT ON run_supervisor_tool_rounds
+		WHEN NOT EXISTS (
+			SELECT 1 FROM run_events
+			WHERE run_id = NEW.run_id AND type = 'model.completed' AND source = 'model_gateway'
+				AND subject_id = NEW.attempt_id || '/model/' || NEW.model_attempt
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'supervisor tool round requires a completed model attempt');
+		END;`,
+	`CREATE TRIGGER trg_supervisor_tool_call_model_attempt
+		BEFORE INSERT ON run_supervisor_tool_calls
+		WHEN NOT EXISTS (
+			SELECT 1 FROM run_supervisor_tool_rounds
+			WHERE run_id = NEW.run_id AND turn = NEW.turn AND attempt_id = NEW.attempt_id
+				AND round = NEW.round AND model_attempt = NEW.model_attempt
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'supervisor tool call model attempt mismatch');
+		END;`,
+	`CREATE TRIGGER trg_supervisor_tool_round_completion
+		BEFORE UPDATE OF completed_at ON run_supervisor_tool_rounds
+		WHEN NEW.completed_at IS NOT NULL AND EXISTS (
+			SELECT 1 FROM run_supervisor_tool_calls
+			WHERE run_id = NEW.run_id AND turn = NEW.turn AND attempt_id = NEW.attempt_id
+				AND round = NEW.round AND status = 'pending'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'supervisor tool round still has pending calls');
 		END;`,
 }
 

@@ -210,6 +210,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 13, Name: "typed script process proposals", Statements: typedScriptProcessStatements},
 		{Version: 14, Name: "run tool output artifacts", Statements: runArtifactStatements},
 		{Version: 15, Name: "structured memory tool operations", Statements: structuredToolOperationStatements},
+		{Version: 16, Name: "supervisor structured tool loop", Statements: supervisorToolLoopStatements},
 	})
 }
 

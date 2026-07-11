@@ -38,6 +38,7 @@ type ActiveCallInfo struct {
 	TransportAttempt int       `json:"transport_attempt"`
 	MaxAttempts      int       `json:"max_attempts"`
 	ProtocolRepair   int       `json:"protocol_repair"`
+	ToolRound        int       `json:"tool_round"`
 	Provider         string    `json:"provider"`
 	Model            string    `json:"model"`
 	StartedAt        time.Time `json:"started_at"`
@@ -55,6 +56,9 @@ func (i ActiveCallInfo) Validate() error {
 	}
 	if i.ProtocolRepair < 0 || i.ProtocolRepair > 1 {
 		return errors.New("active call protocol repair number must be zero or one")
+	}
+	if i.ToolRound < 0 || i.ToolRound > domain.MaxSupervisorToolRounds {
+		return errors.New("active call tool round is out of range")
 	}
 	if strings.TrimSpace(i.Provider) == "" || strings.TrimSpace(i.Model) == "" {
 		return errors.New("active call provider and model are required")
@@ -315,8 +319,9 @@ func (r *ActiveCallRegistry) reserve(parent context.Context, checkpoint domain.S
 		info: ActiveCallInfo{
 			RunID: checkpoint.RunID, SessionID: sessionID, AttemptID: checkpoint.AttemptID,
 			ModelAttempt: attempt.Number, TransportAttempt: attempt.TransportNumber(), MaxAttempts: attempt.MaxAttempts,
-			ProtocolRepair: attempt.ProtocolRepair, Provider: redact.String(strings.TrimSpace(attempt.Provider)),
-			Model: redact.String(strings.TrimSpace(attempt.Model)),
+			ProtocolRepair: attempt.ProtocolRepair, ToolRound: attempt.ToolRound,
+			Provider: redact.String(strings.TrimSpace(attempt.Provider)),
+			Model:    redact.String(strings.TrimSpace(attempt.Model)),
 		},
 		subscribers: map[uint64]*activeCallSubscriber{},
 	}

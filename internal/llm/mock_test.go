@@ -116,6 +116,34 @@ func TestRouterRedactsStreamingRequestBeforeProvider(t *testing.T) {
 	}
 }
 
+func TestRouterRedactsStructuredToolTranscriptBeforeProvider(t *testing.T) {
+	provider := &capturingProvider{name: "capture"}
+	router := NewRouter(ModelRef{Provider: "capture", Model: "capture-model"})
+	router.RegisterProvider(provider)
+	token := "s" + "k-" + strings.Repeat("r", 28)
+	_, err := router.ChatModelRef(t.Context(), ModelRef{Provider: "capture", Model: "capture-model"}, ChatRequest{
+		Messages: []Message{
+			{Role: "assistant", ToolCalls: []ToolCall{{
+				ID: "toolu_0123456789abcdef01234567", Name: "note_create",
+				Arguments: json.RawMessage(`{"title":"Provider","content":"token=` + token + `"}`),
+			}}},
+			{Role: "user", ToolResults: []ToolResult{{
+				ToolCallID: "toolu_0123456789abcdef01234567", Content: `{"message":"token=` + token + `"}`,
+			}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(provider.last.Messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), token) || !strings.Contains(string(encoded), "[REDACTED:") {
+		t.Fatalf("structured tool transcript was not redacted: %s", encoded)
+	}
+}
+
 func TestModelDeltaValidation(t *testing.T) {
 	valid := ModelDelta{Sequence: 1, ChunkCount: 2, ByteCount: 10, TotalBytes: 10}
 	if err := valid.Validate(MaxModelDeltaEvents, MaxModelOutputBytes); err != nil {

@@ -246,6 +246,7 @@ func TestSQLiteUpgradesSchemaV14ToStructuredToolsWithoutLosingNotes(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	removeSchemaV16ForTest(t, st, ctx)
 	if _, err := st.db.ExecContext(ctx, `DROP TABLE structured_tool_operations`); err != nil {
 		t.Fatal(err)
 	}

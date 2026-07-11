@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 84%。
+- 整体产品愿景：约 85%。
 - v0.1 通用 Agent MVP：约 99%。
-- V2 Run-centric Runtime：约 98.5%。
+- V2 Run-centric Runtime：约 99%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming 和进程内主动取消链路。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact，以及 schema v15 create-only WorkItem/Note 结构化工具；真实命令执行和 Provider 自动工具循环继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消和 schema v16 有界工具循环。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次；真实命令执行和非结构化记忆类模型工具继续关闭。
 
 ## 二、已完成功能
 
@@ -38,7 +38,8 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - transport retry 每个协议阶段独立最多三次，全局 model attempt 编号保持连续；CLI 显示 `protocol_repairs`。
 - Router 的 StreamChat 与 Chat 共用模型解析和请求脱敏；RunSupervisor 不再旁路 streaming 接口。
 - Anthropic-compatible Provider 解析 `message_start/content_block_delta/message_delta/message_stop/error` SSE，并在 final chunk 返回模型与 usage。
-- Stream aggregator 支持跨 chunk UTF-8，拒绝超 64 KiB、缺失 Done/usage、负数或溢出 usage、ToolCall、畸形流和中途取消。
+- Stream aggregator 支持跨 chunk UTF-8，拒绝超 64 KiB、缺失 Done/usage、负数或溢出 usage、非 final ToolCall、畸形流和中途取消；final ToolCall 会进入严格类型化工具循环。
+- Anthropic-compatible Provider 支持 `tools`、assistant `tool_use`、user `tool_result`、非流式 ToolCall 和 SSE `input_json_delta` 聚合。
 
 ### 工作区、编辑与工具
 
@@ -54,6 +55,8 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - schema v15 新增 `run_memory` action class 与严格 JSON 的 `work_item_create`/`note_create`。调用绑定持久化 Run/Session/Workspace、经过 Policy 与 Run 工具预算，并把业务实体、允许决定、领域事件、`tool.completed` 和幂等账本原子提交。
 - `tool schema [name]` 可导出 Provider-ready schema，`tool invoke <name> --run ... --operation-key ... --payload/--payload-file` 可执行 create-only 调用；CLI 从 Run 推导可信 Session/Workspace，调用方不能伪造审计 requester。
 - schema v15 `structured_tool_operations` 只保存原始 operation key 的域分隔 SHA-256 与脱敏规范化意图指纹。相同意图重放返回原实体，异意图冲突，跨 SQLite 连接并发收敛为一个实体；格式错误在预算前拒绝，重放、冲突和 Policy 拒绝按真实调用计入预算。
+- schema v16 新增 `run_supervisor_tool_rounds`/`run_supervisor_tool_calls`。模型完成事件与 pending 批次原子提交，每条结果和 round-complete 事件也在一个事务内提交；重启只重放 pending 调用。
+- RunSupervisor 仅公布 `work_item_create`/`note_create`，每批最多 4 个调用、每 turn 最多 4 轮。Provider call ID 不落库，语义 operation key 来自 Run/turn/工具/脱敏规范化参数；Policy 拒绝和预算耗尽作为 metadata-only error result 返回模型。
 - `script run` 现在要求 workspace 相对文件，并在单个 SQLite 事务中创建 Script Profile Mission/Run/Session、初始预算扣减、`script_process.v1` typed proposal、Approval 及 Policy/Tool events。
 - `script run --idempotency-key` 可安全跨进程重试；相同意图返回同一 Mission/Run/Session/Process，异意图复用返回冲突，原始 key 不持久化。
 - `--local` 只记录 requested backend；CLI 不再构造 Local/Noop Runner，审批前后均只产生 dry-run，不执行宿主机命令。
@@ -74,7 +77,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 
 ### 存储与 Run 架构
 
-- CGO SQLite 驱动 `github.com/mattn/go-sqlite3`，当前 schema 版本为 v15。
+- CGO SQLite 驱动 `github.com/mattn/go-sqlite3`，当前 schema 版本为 v16。
 - checksum 校验的版本化事务 migration，可保留旧库数据原地升级。
 - Mission、Run 和 append-only Run Events 持久化。
 - schema v3 为非空 `session_id` 建立唯一关联并拒绝引用不存在 Session 的 Run。
@@ -104,12 +107,13 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - 通用 Context Section 选择器按优先级在 8192-token 估算预算内选择最新摘要、Work Board 与 Notes，pin 和 decision/summary 类别优先。
 - 每条 `model.started` 持久化 included/omitted 的 kind/source_id/tokens 与总预算，不持久化 Note 正文，重启后仍可审计当次模型上下文来源。
 - schema v15 新增带 Run/Session/Workspace、预算 invocation、target 与 requester 约束的结构化工具操作事实；SQLite trigger 拒绝跨作用域 invocation 或目标，所有写事务使用 immediate lock 和 5 秒 busy timeout，避免多进程 deferred transaction 升级竞争。
-- `run step` 每次只执行一个无工具规划 turn；`run checkpoint` 可观察恢复状态。
+- schema v16 新增 Supervisor 工具 round/call 状态、严格 Store 复核、active-attempt/model-attempt trigger 和 terminal-result 不变量。
+- `run step` 每次执行一个有界 turn，内部可包含最多四轮结构化记忆调用；`run checkpoint` 可观察恢复状态，CLI 结果展示 `tool_rounds`/`tool_calls`。
 - 模型调用前写 started checkpoint，完成时原子写消息、策略、用量、事件和下一个 checkpoint。
 - 重启会恢复同一 started attempt；已提交完成的 turn 和消息不会重复。
 - MaxTurns、MaxTokens、模型执行超时与调用前 cancellation 已执行；剩余 token/时间会传入 Provider 请求上下文。
 - `run execute` 提供显式步数上限；`run finish/fail` 在一个事务内推进 Run、Supervisor checkpoint 和事件，重复相同终态命令幂等。
-- 模型返回 ToolCall 会失败且不会创建 ToolRun；只有校验通过的结构化 action 能推进 Run，自由文本不能。
+- 模型只可调用 create-only WorkItem/Note；其他 ToolCall 会进入一次无工具协议修复，仍不合规则失败。只有校验通过的结构化 lifecycle action 能推进 Run，自由文本不能。
 - root Agent 必须返回严格 JSON action；未知字段、尾随数据、Markdown fence、非法字段组合和超过 64 KiB 的回复都会失败。
 - `continue` 回到 idle；`finish` 原子提交 turn 与 completed；`wait` 原子提交 turn 与 paused，`run resume` 后从下一 turn 继续。
 - 原始 lifecycle JSON 不进入 Session history；只持久化脱敏后的用户可见 message、summary/reason 与审计事件。
@@ -153,7 +157,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 
 - 经过生命周期投影和跨 chunk 脱敏的用户可见文本 streaming；当前 TUI 只展示元数据。
 - Provider 费用预算，以及最近 Session 消息与结构化记忆共用的统一 token 预算。
-- Findings、Evidence 实体与 Report；WorkItem/Note 基础与 create-only 工具已完成，Provider 调度循环和 TUI 视图尚未接入。
+- Findings、Evidence 实体与 Report；WorkItem/Note 基础、create-only Provider 调度循环已完成，TUI 专用视图尚未接入。
 - 跨进程主动取消、WebSocket 推送和经过单独安全设计的用户可见文本 streaming。
 - OpenAI-compatible 与 Ollama Provider。
 - 真实 Docker 隔离与命令执行；Tool Gateway、first-class ScriptProcess、逐次审批、Session Grant、工具预算和输出 Artifact 已完成。
@@ -182,11 +186,11 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - Windows 当前账号不能创建符号链接，真实链接逃逸测试会跳过；运行时仍会解析链接并检查工作区边界。
 - 脱敏是启发式安全层，不是完整的 Secrets Manager。
 - Docker Runner 还不是真实隔离边界。
-- schema v15 工具目前只有 create，不允许模型更新、完成、取消或归档已有记录；这是为了先验证幂等、预算和事件语义，避免过早扩大可变状态面。
+- schema v16 模型工具面仍只有 create，不允许更新、完成、取消、归档、文件、Shell、进程或网络动作；这是为了保持可变状态面和安全边界可审计。
 - 结构化工具 Policy 目前会保守拒绝包含 `masscan`/`nmap` 等危险动作文本的 Note，即使文字是描述用途；后续需要在不削弱永久拒绝的前提下区分“记录内容”和“执行意图”。
 - 相同 operation key 的安全重放仍会消耗一次工具预算，因为预算衡量 invocation attempt；只保证业务实体和成功事件不重复。
 - `run start` 只推进生命周期，`run step` 执行一个模型 turn，`run execute` 只执行操作者指定的有限步数。
-- pre-call checkpoint 后崩溃可能重发一次无副作用模型请求，但已完成 turn 不会重复；RunSupervisor 的 Provider ToolCall 调度因此继续禁用，已落地的结构化创建工具先依靠 operation key 为后续重试提供幂等边界。
+- pre-call checkpoint 后崩溃可能重发模型请求，但已完成 turn 不会重复；工具响应与 pending 批次原子提交，且相同语义意图依靠 operation key 收敛。最终零工具 `model.completed` 到 turn 提交之间仍可能重发一次最终模型请求。
 - 结构化记忆已有 8192-token 估算预算，但最近 Session 历史仍按 20 条消息限制，尚未纳入同一 token 预算。
 - MaxCostUSD 尚未执行，因为 Provider 价格元数据缺失；工具调用预算已由 Gateway 原子记入 Run budget。
 - 执行时间当前只统计 Provider 模型调用；一次 Provider 调用可能超过剩余 token，但实际用量会完整记账并阻止下一次调用。
@@ -210,7 +214,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - 已发布 migration 的语句和 checksum 不可修改，后续 schema 变化必须新增版本。
 - v3 会拒绝一个 Session 关联多个 Run；若旧数据库存在重复关联，应先审计，而不是自动丢弃数据。
 - 兼容期仍有普通字符串错误通过 `apperror.Normalize` 分类；新服务必须直接返回 typed error。
-- Work Board 与 Notes 当前可由 CLI/application service 或 Gateway create-only 工具修改；模型仍只能读取选中的记录，因为 Provider ToolCall 尚未接入 RunSupervisor。
+- Work Board 与 Notes 可由 CLI/application service、Gateway 或 RunSupervisor 的 create-only Provider 工具修改；模型更新和归档仍未开放。
 - Supervisor 的 Work Board 是每次调用前最多 20 项、16 KiB 的候选快照，并作为一个 Context Section 参与 token 选择；超出项保留在 SQLite，后续仍需相关性查询或显式加载协议。
 - 显式操作者 `run finish` 可以覆盖仍有活跃 WorkItem 的模型完成门禁；该命令是人工终结边界，报告层后续应明确记录未完成项。
 - WorkItem ID 在全库唯一、依赖在同 Run 内；当前没有独立 Session/Agent owner 外键，Owner 仍是受长度约束的标签，等待 AgentCoordinator 建立身份表。
@@ -218,7 +222,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - Context Builder 的 8192 token 是启发式估算预算，只覆盖摘要/Work Board/Notes；最近 20 条 Session 消息仍使用既有数量上限，Provider usage 才是最终计费依据。
 - Supervisor 最多查询 100 条当前可见 active Notes；更多记录保留在 SQLite，但本轮不会进入候选集，后续需要查询相关性或显式加载协议。
 - Evidence ID 当前是结构化引用而不是外键，因为 Evidence 实体尚未落地；P6 报告阶段必须补引用完整性和失效投影。
-- 模型当前只能读取选中的 Note；`note_create` Gateway 工具已具备安全写入语义，但 Provider adapter 未开放，更新和归档仍只属于操作者命令。
+- 模型可读取选中的 Note，并通过 `note_create` 安全新增 metadata-tracked Note；更新和归档仍只属于操作者命令。
 
 ## 六、验证基线
 
@@ -277,11 +281,15 @@ Structured Memory Tool 切片新增 schema v15、`internal/runmutation`、`run_m
 
 该切片发布门通过 `go test -count=1 ./...`、全仓库 `go test -race -count=1 ./...`、`go vet ./...`、`staticcheck ./...` 与 `govulncheck ./...`；可达漏洞为 0。两项跨 Store 并发测试连续 10 轮通过。真实二进制 smoke 验证 WorkItem 创建/重放、异意图退出码 4、Note 脱敏、危险内容退出码 5、`tool_calls: 5`、唯一领域/完成事件，以及原始 key/伪密钥不进入事件流；临时运行目录已清理。
 
+Supervisor Tool Loop 切片新增 schema v16、持久化 tool round/call、Anthropic-compatible 工具协议、final-stream ToolCall 聚合、RunSupervisor 白名单循环、metadata-only 结果和 CLI 轮次计数。单批最多 4 调用、单 turn 最多 4 轮；模型事件与批次原子提交，pending 结果可跨 Store 重启恢复。语义键不采用 Provider 临时 ID，同一意图跨失败 attempt、不同 Provider ID 和后续轮次只创建一个实体。
+
+本轮审计未发现高严重度问题，并修复四项健壮性问题：应用层与 Store 的 JSON 字段顺序不一致、跨轮次本地 call ID 冲突、并发恢复时 `replayed` 元数据使结果不稳定，以及协议修复仍向 Provider 暴露工具。Store 现在独立复核严格 typed payload，结果去除竞争时序字段，repair 请求工具列表为空。发布门通过 uncached 全仓测试、全仓 `-race`、`go vet`、`staticcheck` 和 `govulncheck`，可达漏洞为 0；双 SQLite 连接并发结果只产生一个 result/round-complete 事件。隔离真实二进制 mock smoke 导出两个 schema，并完成 `tool_rounds: 0`/`tool_calls: 0` 的 Run turn；凭据扫描仅命中脱敏单元测试的合成 fixture，未发现用户测试 key。
+
 ## 七、下一开发切片
 
-1. 在 RunSupervisor 中加入只允许 `work_item_create`/`note_create` 的有界 Provider ToolCall 循环，把 Provider tool-call ID 映射为 operation key，并保证调用结果、模型重试、checkpoint 与事件可跨重启恢复；继续拒绝其他工具。
+1. 设计并实现 loopback-only 的最小 Go `net/http` 只读控制面，先提供 Run/Session/Event/WorkItem/Note/Artifact/ToolRound 查询、分页、稳定错误 envelope 和请求上限。
 2. 为 Session Grant 增加 TUI 审批提示和“批准一次/本会话”组合操作，同时保持 Go Store 为唯一授权源。
-3. 设计 Go HTTP/WebSocket 控制面的最小只读 Run/Session/Event/Artifact API，为 TypeScript UI 和跨进程取消准备协议边界。
+3. 在开放 WebSocket/TypeScript UI 或多 worker 前增加跨进程 Run execution lease；当前 active-call registry 仍是进程内能力。
 4. Docker/Local 真实命令执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
 
 ## 八、仓库同步与恢复约定

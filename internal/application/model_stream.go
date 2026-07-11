@@ -85,9 +85,10 @@ func (a *modelStreamAggregator) consume(ctx context.Context, chunks <-chan llm.C
 			}
 			return a.result(nil), modelStreamFailure(llm.NormalizeProviderError(a.ref.Provider, chunk.Err), flushErr)
 		}
-		if len(chunk.ToolCalls) > 0 {
+		if len(chunk.ToolCalls) > 0 && !chunk.Done {
 			flushErr := a.flush(false)
-			streamErr := llm.NewProviderError(llm.OutcomeInvalidResponse, a.ref.Provider, "tool calls are disabled in the P2 supervisor foundation", nil)
+			streamErr := llm.NewProviderError(llm.OutcomeInvalidResponse, a.ref.Provider,
+				"tool calls are only valid on the final stream chunk", nil)
 			return a.result(nil), modelStreamFailure(streamErr, flushErr)
 		}
 		if err := a.appendText(chunk.Text); err != nil {
@@ -128,8 +129,14 @@ func (a *modelStreamAggregator) consume(ctx context.Context, chunks <-chan llm.C
 		if model == "" {
 			model = a.ref.Model
 		}
+		toolCalls, err := llm.NormalizeToolCalls(chunk.ToolCalls)
+		if err != nil {
+			streamErr := llm.NewProviderError(llm.OutcomeInvalidResponse, a.ref.Provider,
+				"final stream chunk returned invalid tool calls", err)
+			return a.result(nil), streamErr
+		}
 		response := &llm.ChatResponse{
-			Text: a.output.String(), Usage: *chunk.Usage, Provider: provider, Model: model,
+			Text: a.output.String(), ToolCalls: toolCalls, Usage: *chunk.Usage, Provider: provider, Model: model,
 		}
 		return a.result(response), nil
 	}

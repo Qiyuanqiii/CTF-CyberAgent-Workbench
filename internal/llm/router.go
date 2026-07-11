@@ -1,8 +1,11 @@
 package llm
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 
@@ -84,7 +87,10 @@ func (r *Router) ChatModelRef(ctx context.Context, ref ModelRef, req ChatRequest
 	if req.Model == "" {
 		req.Model = ref.Model
 	}
-	req = redactRequest(req)
+	req, err := redactRequest(req)
+	if err != nil {
+		return nil, NewProviderError(OutcomePermanent, ref.Provider, "invalid model request", err)
+	}
 	response, err := provider.Chat(ctx, req)
 	if err != nil {
 		return nil, NormalizeProviderError(ref.Provider, err)
@@ -104,7 +110,11 @@ func (r *Router) StreamChatModelRef(ctx context.Context, ref ModelRef, req ChatR
 	if req.Model == "" {
 		req.Model = ref.Model
 	}
-	req = redactRequest(req)
+	var err error
+	req, err = redactRequest(req)
+	if err != nil {
+		return nil, NewProviderError(OutcomePermanent, ref.Provider, "invalid model request", err)
+	}
 	chunks, err := provider.StreamChat(ctx, req)
 	if err != nil {
 		return nil, NormalizeProviderError(ref.Provider, err)
@@ -135,10 +145,40 @@ func ParseModelRef(value string) (ModelRef, error) {
 	return ModelRef{Provider: parts[0], Model: parts[1]}, nil
 }
 
-func redactRequest(req ChatRequest) ChatRequest {
+func redactRequest(req ChatRequest) (ChatRequest, error) {
 	req.Messages = append([]Message(nil), req.Messages...)
 	for i := range req.Messages {
 		req.Messages[i].Content = redact.String(req.Messages[i].Content)
+		calls, err := NormalizeToolCalls(req.Messages[i].ToolCalls)
+		if err != nil {
+			return ChatRequest{}, err
+		}
+		for index := range calls {
+			calls[index].Arguments, err = redactModelJSON(calls[index].Arguments)
+			if err != nil {
+				return ChatRequest{}, err
+			}
+		}
+		req.Messages[i].ToolCalls = calls
+		results := make([]ToolResult, len(req.Messages[i].ToolResults))
+		for index, result := range req.Messages[i].ToolResults {
+			normalized, err := NormalizeToolResult(result)
+			if err != nil {
+				return ChatRequest{}, err
+			}
+			normalized.Content = redact.String(normalized.Content)
+			results[index] = normalized
+		}
+		req.Messages[i].ToolResults = results
+	}
+	req.Tools = append([]ToolSpec(nil), req.Tools...)
+	for index := range req.Tools {
+		req.Tools[index].Name = strings.TrimSpace(req.Tools[index].Name)
+		req.Tools[index].Description = redact.String(strings.TrimSpace(req.Tools[index].Description))
+		req.Tools[index].Parameters = append(json.RawMessage(nil), bytes.TrimSpace(req.Tools[index].Parameters)...)
+		if req.Tools[index].Name == "" || len(req.Tools[index].Parameters) == 0 || !json.Valid(req.Tools[index].Parameters) {
+			return ChatRequest{}, fmt.Errorf("model tool specification at index %d is invalid", index)
+		}
 	}
 	if len(req.Metadata) > 0 {
 		metadata := make(map[string]string, len(req.Metadata))
@@ -147,5 +187,70 @@ func redactRequest(req ChatRequest) ChatRequest {
 		}
 		req.Metadata = metadata
 	}
-	return req
+	return req, nil
+}
+
+func redactModelJSON(raw json.RawMessage) (json.RawMessage, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if err := ensureModelJSONEOF(decoder); err != nil {
+		return nil, err
+	}
+	nodes := 0
+	safe, err := redactModelJSONValue(value, 0, &nodes)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(safe)
+}
+
+func ensureModelJSONEOF(decoder *json.Decoder) error {
+	var trailing any
+	if err := decoder.Decode(&trailing); err != nil {
+		if err == io.EOF {
+			return nil
+		}
+		return err
+	}
+	return fmt.Errorf("model tool JSON contains trailing data")
+}
+
+func redactModelJSONValue(value any, depth int, nodes *int) (any, error) {
+	if depth > 64 {
+		return nil, fmt.Errorf("model tool JSON exceeds depth limit")
+	}
+	(*nodes)++
+	if *nodes > 100000 {
+		return nil, fmt.Errorf("model tool JSON exceeds node limit")
+	}
+	switch current := value.(type) {
+	case string:
+		return redact.String(current), nil
+	case []any:
+		out := make([]any, len(current))
+		for index, item := range current {
+			redacted, err := redactModelJSONValue(item, depth+1, nodes)
+			if err != nil {
+				return nil, err
+			}
+			out[index] = redacted
+		}
+		return out, nil
+	case map[string]any:
+		out := make(map[string]any, len(current))
+		for key, item := range current {
+			redacted, err := redactModelJSONValue(item, depth+1, nodes)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = redacted
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
 }

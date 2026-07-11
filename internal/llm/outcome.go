@@ -129,6 +129,7 @@ type ModelAttempt struct {
 	TransportAttempt int
 	MaxAttempts      int
 	ProtocolRepair   int
+	ToolRound        int
 	Provider         string
 	Model            string
 	Outcome          Outcome
@@ -205,6 +206,9 @@ func (a ModelAttempt) ValidateStarted() error {
 	}
 	if a.ProtocolRepair < 0 || a.ProtocolRepair > 1 {
 		return errors.New("model protocol repair number must be zero or one")
+	}
+	if a.ToolRound < 0 || a.ToolRound > 4 {
+		return errors.New("model tool round must be between zero and four")
 	}
 	if strings.TrimSpace(a.Provider) == "" || strings.TrimSpace(a.Model) == "" {
 		return errors.New("model attempt provider and model are required")

@@ -14,7 +14,7 @@ import (
 
 type SessionRunStore interface {
 	RunStore
-	SupervisorStore
+	RunSupervisorStore
 	GetRunBySession(ctx context.Context, sessionID string) (domain.Run, bool, error)
 }
 

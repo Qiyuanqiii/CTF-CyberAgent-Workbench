@@ -121,6 +121,16 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 	if structuredOperationTable != "structured_tool_operations" {
 		t.Fatalf("schema v15 structured tool operation table is missing: %q", structuredOperationTable)
 	}
+	for _, name := range []string{"run_supervisor_tool_rounds", "run_supervisor_tool_calls"} {
+		var table string
+		if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master
+			WHERE type = 'table' AND name = ?`, name).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		if table != name {
+			t.Fatalf("schema v16 supervisor tool table is missing: %q", table)
+		}
+	}
 	var grantColumn int
 	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('tool_approvals') WHERE name = 'grant_id'`).Scan(&grantColumn); err != nil {
 		t.Fatal(err)
@@ -304,6 +314,9 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE run_supervisor_tool_calls`,
+		`DROP TABLE run_supervisor_tool_rounds`,
+		`DELETE FROM schema_migrations WHERE version = 16`,
 		`DROP TABLE structured_tool_operations`,
 		`DELETE FROM schema_migrations WHERE version = 15`,
 		`DROP TABLE run_artifacts`,
@@ -324,6 +337,19 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 	}
 	if _, err := st.db.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func removeSchemaV16ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) {
+	t.Helper()
+	for _, statement := range []string{
+		`DROP TABLE run_supervisor_tool_calls`,
+		`DROP TABLE run_supervisor_tool_rounds`,
+		`DELETE FROM schema_migrations WHERE version = 16`,
+	} {
+		if _, err := st.db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("remove schema v16 with %q: %v", statement, err)
+		}
 	}
 }
 

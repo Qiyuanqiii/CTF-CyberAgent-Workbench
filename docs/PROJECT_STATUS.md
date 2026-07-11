@@ -32,6 +32,10 @@ Use these files first when resuming:
 - `internal/toolgateway/model.go`
 - `internal/toolgateway/gateway.go`
 - `internal/toolgateway/structured_memory.go`
+- `internal/application/supervisor_tools.go`
+- `internal/domain/supervisor_tool.go`
+- `internal/store/supervisor_tools.go`
+- `internal/llm/anthropic.go`
 - `internal/application/structured_memory_tool.go`
 - `internal/runmutation/operation.go`
 - `internal/store/structured_tool_operations.go`
@@ -54,9 +58,9 @@ Use these files first when resuming:
 
 ## Progress Review
 
-- Overall product vision: about 84%.
+- Overall product vision: about 85%.
 - v0.1 generic agent MVP: about 99%.
-- V2 run-centric runtime: about 98.5%.
+- V2 run-centric runtime: about 99%.
 - Project scaffold/framework: about 99%.
 
 Completed:
@@ -83,6 +87,10 @@ Completed:
 - Schema v15 adds create-only `work_item_create` and `note_create` tools under the `run_memory` class. Strict JSON and identity validation precede budget charging; Policy and authoritative persisted Run/Session/Workspace binding apply before mutation.
 - `tool schema [work_item_create|note_create]` exports provider-ready definitions. `tool invoke` accepts one bounded JSON payload or UTF-8 payload file, requires a stable operation key, derives trusted scope from the Run, and fixes the audit requester to `cli`.
 - `structured_tool_operations` stores only domain-separated operation-key digests and normalized redacted-intent fingerprints. Same-intent replay returns the original entity, changed intent conflicts, independent SQLite connections converge concurrently, and successful entity/Policy/domain/tool events commit atomically.
+- Schema v16 adds durable Supervisor tool rounds/calls and connects only `work_item_create`/`note_create` to the Provider loop. Each response is limited to four calls and each turn to four rounds; the successful model event and pending batch commit atomically, and restart recovery resumes only pending calls.
+- Provider call IDs are validated but never persisted. Stable local call IDs and Gateway operation keys derive from Run, turn, tool name, and redacted canonical arguments, so changed Provider IDs and repeated semantic intent converge without duplicate entities or success events.
+- Anthropic-compatible non-streaming and SSE paths now send tool definitions, encode `tool_use`/`tool_result` transcripts, parse streamed argument deltas, and return final typed ToolCalls. Protocol repair removes all advertised tools.
+- Policy denials and tool-budget exhaustion become bounded metadata-only error results. Storage/cancellation/internal failures leave the call pending; Shell, file, process, network, update, delete, completion, and archive tools remain unavailable to the model.
 - `--local` is retained only as requested-backend metadata. Production code has no Local/Noop Sandbox Runner invocation, and tool approval remains dry-run without host side effects.
 - JSON payload redaction is structure-aware: Store code parses JSON with exact numbers, recursively redacts string values, and re-encodes before validation/persistence, preserving nested escaped JSON.
 - Schema v11 adds Run/Session-bound `tool_approvals` and immutable `approval_operations`; proposal creation appends `approval.requested` transactionally, review commits `approval.decided` before compatibility-state execution, and an identical key resumes safely after restart.
@@ -113,7 +121,7 @@ Completed:
 - Reworked `docs/architecture.md` around run-scoped budget, event, sandbox, report, approval, and recovery ownership without copying the reference implementation.
 - Replaced the obsolete README migration/scaffold copy with a bilingual Chinese/English product overview, current capabilities, architecture boundary, and development-scope notice.
 - Added `docs/TASK_BOOK.md` with phased migration tasks, acceptance criteria, compatibility rules, and CTF deferred to the final phase.
-- Versioned SQLite migrations through schema v15: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative model budgets, durable pending input, restart-safe protocol repair, Work Board, Notes, durable per-call approvals, revocable Session grants, atomic tool budgets, typed script processes, Run tool-output Artifacts, and idempotent structured-memory operations; each version is checksummed and transactional.
+- Versioned SQLite migrations through schema v16: legacy baseline, run-centric foundation, Run/Session projection constraints, legacy Task mapping, Supervisor checkpoints, cumulative model budgets, durable pending input, restart-safe protocol repair, Work Board, Notes, durable per-call approvals, revocable Session grants, atomic tool budgets, typed script processes, Run tool-output Artifacts, idempotent structured-memory operations, and durable Supervisor tool rounds/calls; each version is checksummed and transactional.
 - Migration tests cover idempotence, legacy data preservation, checksum history, and failed-migration rollback.
 - Unified `internal/idgen` now backs agent tasks, sessions, tool runs, file edits, Mission/Run, and event IDs.
 - Added pure Go Mission, Scope, Budget, RunConfig, Run status machine, and legal transition checks.
@@ -134,7 +142,7 @@ Completed:
 - Added `RunSupervisor`, `RunHandle`, and `LifecycleResult`, plus `run step` and `run checkpoint` CLI commands.
 - A supervised turn checkpoints before the model call and atomically commits Session messages, policy decision, model usage, completion event, and the next checkpoint.
 - Started turns recover across Store/process restart; repeated completion is idempotent and committed turns are not duplicated.
-- MaxTurns and preflight cancellation are enforced before model calls; tool calls are rejected and never create ToolRuns in this slice.
+- The initial schema v5 Supervisor slice enforced MaxTurns/preflight cancellation and rejected all ToolCalls; schema v16 later opened only the two create-only structured-memory tools without creating legacy ToolRuns.
 - Immediate Supervisor responses and persisted responses share the same secret-redaction boundary.
 - Added schema v6 cumulative input/output/total token counters and model-execution milliseconds to durable Supervisor checkpoints.
 - MaxTokens and TimeoutSeconds are checked before each call; remaining tokens and model-call time are passed to the Provider boundary.
@@ -222,13 +230,15 @@ The schema v14 audit found no high-severity issue and fixed two low-risk robustn
 
 The schema v15 audit found no high-severity issue and fixed three low-risk robustness/privacy defects. WorkItem dependency validation was initially broad enough for a secret-shaped value to reach a missing-dependency error; strict JSON/enum decoder errors could echo a secret-shaped field or value; and independent SQLite deferred transactions could race during read-to-write promotion with `database is locked`. Structured dependencies now accept only the real generated WorkItem ID shape, parser diagnostics pass through redaction, and SQLite uses immediate write transactions plus the existing busy timeout. The read-only Session-grant lookup no longer starts a transaction that would unnecessarily take a writer reservation. Tests cover zero-charge malformed input, content-free errors/events, exact scope/invocation binding, rollback, migration, and repeated cross-Store concurrency.
 
+The schema v16 audit found no high-severity issue and fixed four robustness defects before release. Application and Store originally canonicalized typed JSON in different field orders; repeated semantic intent in a later round originally reused a local call ID; concurrent recovery could produce different durable results because `replayed` is timing-dependent; and protocol repair still advertised tools despite forbidding them in text. Canonical JSON is now shared across boundaries, local IDs include the round while operation keys remain semantic, Provider results omit timing-dependent replay metadata, and repair requests carry no tools. The Store independently revalidates strict typed payloads, and concurrent result recording across two SQLite connections converges on one result and one round-completion event.
+
 Residual risks to address soon:
 
 - `staticcheck ./...` is clean; the prior TUI `S1008`, `S1011`, and unused-helper `U1000` findings were removed in this slice.
 - `script run --local` no longer executes commands. It creates a workspace-scoped, Run-bound, policy-checked proposal and records `execution_mode=disabled`; LocalSandbox remains disconnected from production.
 - Schema v13 removes the former Script Run/ToolRun two-transaction window. Mission, Session, Run, budget, Process, Approval, and initial events now roll back together on any failure.
 - Schema v14 commits each Artifact row and `artifact.created` together. If capture fails after a terminal proposal was committed, replay resumes capture without repeating execution or approval; ordinary events contain metadata only, while hashes cover redacted content rather than inaccessible raw secrets.
-- Schema v15 exposes create only. Model-driven update, completion, cancellation, archive, and restore stay disabled until their optimistic-version and approval semantics are separately reviewed.
+- Schema v16 exposes only create-only WorkItem/Note calls. Model-driven update, completion, cancellation, archive, restore, file, Shell, process, and network actions stay disabled until their version, approval, Sandbox, and evidence semantics are separately reviewed.
 - Structured-memory replays, changed-intent conflicts, authoritative scope failures, and Policy denials consume tool-call budget because each is a well-formed invocation attempt. Malformed payloads and missing identities do not consume budget.
 - The current Policy checker conservatively rejects Notes containing dangerous scanner command text even when used descriptively. Future intent-aware classification may refine that behavior, but permanent cyber-action denial must remain authoritative.
 - A workspace read Artifact contains exactly the bounded content returned by that invocation. It does not reconstruct bytes intentionally excluded by the read tool's own requested maximum.
@@ -244,7 +254,7 @@ Residual risks to address soon:
 - DeepSeek model availability is an external contract. `deepseek-v4-flash` was live-verified on 2026-07-10, while `DEEPSEEK_MODEL` remains the explicit override when the service changes its model catalog.
 - Future Rust and TypeScript modules must not bypass Go for LLM, secrets, policy, workspace permissions, Docker, shell, network scope, or persistence.
 - `run start` advances lifecycle only; `run step` performs one model turn and `run execute` performs only the operator-selected number of durable steps.
-- A crash after the pre-call checkpoint can repeat a model request, but committed messages and completed turns are never duplicated. RunSupervisor Provider ToolCalls remain disabled; schema v15 establishes idempotency only for the two additive structured-memory tools needed by the next bounded loop.
+- A crash after the pre-call checkpoint can repeat a model request, but committed messages and completed turns are never duplicated. Schema v16 makes repeated create-tool intent idempotent even when Provider call IDs change; each real Gateway retry still consumes tool budget.
 - Structured memory now has an 8,192-token estimate, but recent Session history is still bounded by 20 messages rather than sharing that token budget.
 - MaxCostUSD is not enforced until provider pricing metadata exists. Tool-call budgets are enforced by the Gateway; zero remains unlimited for older/API-created Runs unless a caller supplies a limit.
 - ExecutionMillis measures Provider model-call time, not total wall-clock orchestration time.
@@ -254,7 +264,7 @@ Residual risks to address soon:
 - Provider retry is enabled only inside RunSupervisor; legacy unbound Sessions receive typed errors but still use the direct, non-retrying Router compatibility path.
 - Retry backoff is deterministic and intentionally capped at three attempts/2 seconds for the local single-user runtime. Add jitter before enabling concurrent remote workers.
 - A server `Retry-After` above the local ceiling is not auto-retried; the Run remains running with a failed Supervisor turn and preserved input until a later operator retry.
-- If the process dies after `model.completed` but before the turn transaction, recovery may repeat the model request under the next durable attempt number. The prior usage is already charged atomically; the next tool-loop slice must use Provider tool-call IDs as stable operation keys before enabling any dispatch.
+- If the process dies after a final zero-tool `model.completed` but before the turn-completion transaction, recovery may repeat that final model request under the next durable attempt number. Prior usage remains charged. Tool-producing responses do not have this window because their model event and pending batch commit atomically, and semantic operation keys prevent duplicate entities.
 - Persisted `model.delta` events intentionally contain counters rather than model text. Historical SQLite replay can reconstruct progress and accounting, not token-by-token content; the current live envelope is also metadata-only until a safe lifecycle/text projection exists.
 - Active-call subscriptions are process-local and non-replayable. A full 32-event buffer closes that subscriber; consumers must inspect `Dropped()` and recover from durable Run events.
 - Application cancellation is audit-first: if SQLite cannot append the request, the registry does not silently signal an unaudited cancellation. Parent process-context cancellation remains the emergency path and still records `model.failed(cancelled)` when possible.
@@ -424,15 +434,15 @@ Expected context behavior:
 - The final schema v13 gate passed with uncached full tests, full-repository race tests, vet, clean staticcheck, and zero reachable govulncheck findings. Twelve-way idempotency, rollback, migration, approval-gate, multi-Process, cross-Run binding, CLI conflict/policy, redaction, and no-side-effect tests passed. Isolated real-binary smoke returned conflict exit code 4 and Policy exit code 5, consumed one tool call across replay, completed only as dry-run, and created no marker file. Repository scans returned `NO_USER_TEST_KEYS_IN_REPO`, `NO_CREDENTIAL_PATTERN_IN_REPO`, `NO_TRACKED_RUNTIME_OR_SECRET_ARTIFACTS`, and `NO_PRODUCTION_SANDBOX_RUNNER_CALLS`.
 - The final schema v14 gate passed with uncached targeted/full tests, full-repository race tests, vet, clean staticcheck, and zero reachable govulncheck findings. Domain, migration, source-binding, redaction, truncation, rollback/recovery, replay, tamper, CLI, and Policy-denial tests passed. Isolated real-binary smoke created one stable Artifact and one `artifact.created`, verified its hash and redacted content, and retained `tool_calls: 1` after approval replay.
 - The final schema v15 gate passed with `go test -count=1 ./...`, full-repository `go test -race -count=1 ./...`, `go vet ./...`, clean `staticcheck ./...`, and zero reachable `govulncheck` findings. Cross-Store budget and structured replay tests passed ten consecutive runs. An isolated real-binary smoke verified WorkItem create/replay, changed-intent exit code 4, redacted Note creation, Policy exit code 5, five charged attempts, one domain/completion event per successful entity, and no raw operation key or secret in the timeline; the temporary runtime was removed.
+- The schema v16 gate passed uncached full tests, full-repository race tests, `go vet`, clean `staticcheck`, and `govulncheck` with zero reachable vulnerabilities. Tests cover Anthropic request/response/SSE tool blocks, strict Store revalidation, model/tool transactional persistence, restart after entity creation but before result recording, semantic replay across attempts and rounds, Policy denial, budget exhaustion, four-round bounds, and cross-Store result convergence. An isolated real-binary mock smoke exported both schemas and completed one Run turn with `tool_rounds: 0`/`tool_calls: 0`; its runtime was removed. Credential scanning found only the intentional redaction-test fixture and no user test keys.
 
 ## Recommended Next Slice
 
-Continue P2/P5 with the smallest safe Provider tool loop:
+Continue P9 with the smallest read-only Go control-plane API:
 
-- Adapt Provider ToolCall arguments and provider tool-call IDs into the existing `work_item_create`/`note_create` Gateway payload and operation-key contract.
-- Let RunSupervisor execute only those two whitelisted create tools in a bounded, checkpointed loop, then return metadata-only tool results to the Provider; all file, Shell, process, update, and lifecycle tools remain rejected.
-- Add restart tests proving a repeated Provider response replays the same entity without duplicate success events while each actual invocation remains budgeted.
-- Add TUI “approve once / this session” controls backed exclusively by the persisted Go grant service.
-- Design the smallest read-only Go HTTP/WebSocket projection for Run, Session, Event, active-call, and Artifact state before starting the TypeScript UI.
+- Add a loopback-only `net/http` API for Run, Session, Event, WorkItem, Note, Artifact, and Supervisor tool-round inspection; SQLite remains the source of truth.
+- Define stable JSON envelopes, pagination, typed errors, request limits, and cancellation semantics before adding WebSocket or TypeScript code.
+- Add TUI views for WorkItems, Notes, and durable tool rounds, plus “approve once / this session” controls backed exclusively by the persisted Go grant service.
+- Add a durable cross-process execution lease before allowing multiple worker processes to drive the same Run concurrently; the current active-call registry remains process-local.
 - Keep real Local/Docker execution disabled until the Sandbox manifest, resource/network limits, cancellation, and Artifact export path pass a separate audit.
 - Keep TypeScript, Rust, and model providers unable to bypass the Go Tool Gateway or policy boundary.

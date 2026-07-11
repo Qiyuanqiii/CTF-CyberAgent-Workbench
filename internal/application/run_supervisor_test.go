@@ -299,7 +299,8 @@ func TestRunSupervisorRepairsFinishWhileWorkItemsRemainActive(t *testing.T) {
 	for _, message := range provider.requests[1].Messages {
 		repairExplained = repairExplained || strings.Contains(message.Content, "active work item")
 	}
-	if provider.requests[1].Metadata["protocol_repair"] != "1" || !repairExplained {
+	if provider.requests[1].Metadata["protocol_repair"] != "1" || !repairExplained ||
+		len(provider.requests[1].Tools) != 0 {
 		t.Fatalf("repair request did not explain work board conflict: %#v", provider.requests[1])
 	}
 	timeline, err := st.ListRunEvents(ctx, run.ID)
@@ -840,7 +841,7 @@ func TestRunSupervisorAuditsCancellationDuringProviderCall(t *testing.T) {
 	}
 }
 
-func TestRunSupervisorRejectsToolCallsWithoutExecution(t *testing.T) {
+func TestRunSupervisorRejectsNonAllowlistedToolCallsWithoutExecution(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -864,7 +865,8 @@ func TestRunSupervisorRejectsToolCallsWithoutExecution(t *testing.T) {
 	if apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
 		t.Fatalf("unexpected tool-call rejection code=%s err=%v", apperror.CodeOf(err), err)
 	}
-	if result.Checkpoint.Phase != domain.SupervisorTurnFailed || !strings.Contains(result.Checkpoint.LastError, "tool calls are disabled") {
+	if result.Checkpoint.Phase != domain.SupervisorTurnFailed || result.ToolCalls != 0 ||
+		!strings.Contains(result.Checkpoint.LastError, "protocol repair response cannot request tools") {
 		t.Fatalf("tool-call failure was not checkpointed: %#v", result)
 	}
 	runs, err := st.ListToolRuns(ctx, toolrun.ListFilter{SessionID: run.SessionID})
@@ -1367,7 +1369,7 @@ func TestRunSupervisorRepairsMalformedRootActionOnce(t *testing.T) {
 	if len(messages) != 2 || messages[1].Content != "protocol repaired" {
 		t.Fatalf("repair did not commit exactly one clean session turn: %#v", messages)
 	}
-	if provider.requests[1].Metadata["protocol_repair"] != "1" {
+	if provider.requests[1].Metadata["protocol_repair"] != "1" || len(provider.requests[1].Tools) != 0 {
 		t.Fatalf("repair request metadata is missing: %#v", provider.requests[1].Metadata)
 	}
 	for _, message := range provider.requests[1].Messages {
@@ -1427,9 +1429,9 @@ func TestRunSupervisorSeparatesRepairTransportAttemptsFromGlobalSequence(t *test
 		t.Fatal(err)
 	}
 	wantAttempts := []string{
-		`"model_attempt":1,"protocol_repair":0,"provider":"lifecycle-test","transport_attempt":1`,
-		`"model_attempt":2,"protocol_repair":1,"provider":"lifecycle-test","transport_attempt":1`,
-		`"model_attempt":3,"protocol_repair":1,"provider":"lifecycle-test","transport_attempt":2`,
+		`"model_attempt":1,"protocol_repair":0,"provider":"lifecycle-test","tool_round":0,"transport_attempt":1`,
+		`"model_attempt":2,"protocol_repair":1,"provider":"lifecycle-test","tool_round":0,"transport_attempt":1`,
+		`"model_attempt":3,"protocol_repair":1,"provider":"lifecycle-test","tool_round":0,"transport_attempt":2`,
 	}
 	found := make([]bool, len(wantAttempts))
 	for _, item := range items {
