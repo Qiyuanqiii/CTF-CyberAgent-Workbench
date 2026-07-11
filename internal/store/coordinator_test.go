@@ -31,6 +31,8 @@ func TestSQLiteUpgradesV18AndLazilyRegistersExistingRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE agent_message_operations`,
+		`DELETE FROM schema_migrations WHERE version = 20`,
 		`DROP TABLE agent_graph_snapshots`,
 		`DROP TABLE agent_messages`,
 		`DROP TABLE agent_nodes`,
@@ -91,13 +93,17 @@ func TestAgentGraphSnapshotDetectsInboxTamperingAndRetainsBoundedHistory(t *test
 	if err != nil || !found {
 		t.Fatalf("root agent was not created: found=%t err=%v", found, err)
 	}
-	message, err := st.SendAgentMessage(ctx, domain.AgentMessage{
+	message, replayed, err := st.SendAgentMessage(ctx, domain.AgentMessage{
 		ID: idgen.New("agentmsg"), RunID: run.ID, RecipientAgentID: root.ID,
-		Kind: domain.AgentMessageInstruction, PayloadJSON: `{"goal":"inspect"}`,
-		Status: domain.AgentMessagePending,
-	})
+		Kind: domain.AgentMessageInstruction, Semantic: domain.AgentMessageSemanticMessage,
+		PayloadJSON: `{"goal":"inspect"}`,
+		Status:      domain.AgentMessagePending,
+	}, "snapshot-integrity-message")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if replayed {
+		t.Fatal("first agent message send was reported as a replay")
 	}
 	if _, err := st.RestoreAgentGraph(ctx, run.ID); err != nil {
 		t.Fatalf("valid graph did not restore: %v", err)
@@ -168,5 +174,202 @@ func TestAgentCoordinatorSchemaKeepsChildCreationDisabled(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("blocked child insert changed graph size to %d", count)
+	}
+}
+
+func TestAgentInboxWakeIsIdempotentAndDoesNotLeakOperationKey(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "coordinator.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	runService := application.NewRunService(st)
+	_, run, err := runService.Create(ctx, application.CreateRunRequest{
+		Goal: "wake a bounded specialist", Profile: "code",
+		Budget: domain.Budget{MaxTurns: 8, MaxTokens: 1000},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runService.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	root, found, err := st.GetRootAgent(ctx, run.ID)
+	if err != nil || !found {
+		t.Fatalf("root agent was not created: found=%t err=%v", found, err)
+	}
+	childSession := session.New("", "wake test specialist", "code")
+	if err := st.SaveSession(ctx, childSession); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(ctx, `UPDATE agent_nodes SET child_limit = 1 WHERE id = ?`, root.ID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	child := domain.AgentNode{
+		ID: idgen.New("agent"), RunID: run.ID, ParentID: root.ID, SessionID: childSession.ID,
+		Role: domain.AgentRoleSpecialist, Profile: domain.ProfileCode, Skills: []string{"model.chat"},
+		Status: domain.AgentWaiting, Depth: 1, ChildLimit: 0, TurnLimit: 2, TokenLimit: 200,
+		StatusReason: "dependency pending", Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := child.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(ctx, `INSERT INTO agent_nodes
+		(id, run_id, parent_id, session_id, role, profile, skills_json, status, depth, child_limit,
+		turn_limit, token_limit, turns_used, tokens_used, active_attempt_id, status_reason, version,
+		created_at, updated_at, finished_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, '', ?, ?, ?, ?, NULL)`,
+		child.ID, child.RunID, child.ParentID, child.SessionID, child.Role, child.Profile, `["model.chat"]`,
+		child.Status, child.Depth, child.ChildLimit, child.TurnLimit, child.TokenLimit, child.StatusReason,
+		child.Version, ts(child.CreatedAt), ts(child.UpdatedAt)); err != nil {
+		t.Fatal(err)
+	}
+
+	operationKey := "wake-specialist-operation-0001"
+	request := domain.AgentMessage{
+		ID: idgen.New("agentmsg"), RunID: run.ID, SenderAgentID: root.ID,
+		RecipientAgentID: child.ID, Kind: domain.AgentMessageControl,
+		Semantic: domain.AgentMessageSemanticWake, PayloadJSON: `{"reason":"dependency resolved"}`,
+	}
+	message, replayed, err := st.SendAgentMessage(ctx, request, operationKey)
+	if err != nil || replayed {
+		t.Fatalf("first wake failed: message=%#v replayed=%t err=%v", message, replayed, err)
+	}
+	woken, err := st.GetAgentNode(ctx, child.ID)
+	if err != nil || woken.Status != domain.AgentReady || woken.Version != 2 ||
+		woken.StatusReason != "dependency resolved" {
+		t.Fatalf("specialist was not woken exactly once: node=%#v err=%v", woken, err)
+	}
+	var eventsBefore, snapshotsBefore int
+	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_events WHERE run_id = ?`, run.ID).
+		Scan(&eventsBefore); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_graph_snapshots WHERE run_id = ?`, run.ID).
+		Scan(&snapshotsBefore); err != nil {
+		t.Fatal(err)
+	}
+	request.ID = idgen.New("agentmsg")
+	repeated, replayed, err := st.SendAgentMessage(ctx, request, operationKey)
+	if err != nil || !replayed || repeated.ID != message.ID {
+		t.Fatalf("wake replay was not stable: message=%#v replayed=%t err=%v", repeated, replayed, err)
+	}
+	var eventsAfter, snapshotsAfter int
+	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_events WHERE run_id = ?`, run.ID).
+		Scan(&eventsAfter); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_graph_snapshots WHERE run_id = ?`, run.ID).
+		Scan(&snapshotsAfter); err != nil {
+		t.Fatal(err)
+	}
+	if eventsAfter != eventsBefore || snapshotsAfter != snapshotsBefore {
+		t.Fatalf("wake replay duplicated durable effects: events %d->%d snapshots %d->%d",
+			eventsBefore, eventsAfter, snapshotsBefore, snapshotsAfter)
+	}
+	request.PayloadJSON = `{"reason":"different intent"}`
+	if _, _, err := st.SendAgentMessage(ctx, request, operationKey); apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("changed wake intent did not conflict: code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	var storedDigest string
+	if err := st.db.QueryRowContext(ctx, `SELECT operation_key_digest FROM agent_message_operations
+		WHERE message_id = ?`, message.ID).Scan(&storedDigest); err != nil {
+		t.Fatal(err)
+	}
+	if storedDigest == operationKey || len(storedDigest) != 64 {
+		t.Fatalf("raw operation key was persisted: %q", storedDigest)
+	}
+	var leaked int
+	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_events
+		WHERE run_id = ? AND payload_json LIKE ?`, run.ID, "%"+operationKey+"%").Scan(&leaked); err != nil {
+		t.Fatal(err)
+	}
+	if leaked != 0 {
+		t.Fatalf("raw operation key leaked into %d audit events", leaked)
+	}
+
+	rootWake := domain.AgentMessage{
+		ID: idgen.New("agentmsg"), RunID: run.ID, RecipientAgentID: root.ID,
+		Kind: domain.AgentMessageControl, Semantic: domain.AgentMessageSemanticWake,
+		PayloadJSON: `{"reason":"must not resume root"}`,
+	}
+	if _, _, err := st.SendAgentMessage(ctx, rootWake, "root-wake-operation-0001"); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("root wake was not rejected: code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	dependency := domain.AgentMessage{
+		ID: idgen.New("agentmsg"), RunID: run.ID, RecipientAgentID: child.ID,
+		Kind: domain.AgentMessageNotification, Semantic: domain.AgentMessageSemanticDependency,
+		PayloadJSON: `{"dependency_id":"work-1","state":"satisfied"}`,
+	}
+	if _, _, err := st.SendAgentMessage(ctx, dependency, "dependency-operation-0001"); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("senderless dependency was not rejected: code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	dependency.SenderAgentID = root.ID
+	if _, replayed, err := st.SendAgentMessage(ctx, dependency, "dependency-operation-0002"); err != nil || replayed {
+		t.Fatalf("valid dependency notification failed: replayed=%t err=%v", replayed, err)
+	}
+}
+
+func TestSQLiteUpgradesV19InboxToSemanticProtocol(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v19.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	_, run, err := application.NewRunService(st).Create(ctx, application.CreateRunRequest{
+		Goal: "preserve v19 inbox", Profile: "review", Budget: domain.Budget{MaxTurns: 4},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, found, err := st.GetRootAgent(ctx, run.ID)
+	if err != nil || !found {
+		t.Fatalf("root agent was not created: found=%t err=%v", found, err)
+	}
+	message, _, err := st.SendAgentMessage(ctx, domain.AgentMessage{
+		ID: idgen.New("agentmsg"), RunID: run.ID, RecipientAgentID: root.ID,
+		Kind: domain.AgentMessageInstruction, Semantic: domain.AgentMessageSemanticMessage,
+		PayloadJSON: `{"goal":"preserve"}`,
+	}, "v19-preserved-message")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, found, err := st.GetLatestAgentGraphSnapshot(ctx, run.ID)
+	if err != nil || !found {
+		t.Fatalf("v19 snapshot was not created: found=%t err=%v", found, err)
+	}
+	for _, statement := range []string{
+		`DROP TABLE agent_message_operations`,
+		`ALTER TABLE agent_messages DROP COLUMN semantic`,
+		`DELETE FROM schema_migrations WHERE version = 20`,
+	} {
+		if _, err := st.db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("prepare v19 schema with %q: %v", statement, err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	version, err := st.SchemaVersion(ctx)
+	if err != nil || version != LatestSchemaVersion {
+		t.Fatalf("v19 database did not upgrade to v20: version=%d err=%v", version, err)
+	}
+	messages, err := st.ListAgentMessages(ctx, root.ID, true, 10)
+	if err != nil || len(messages) != 1 || messages[0].ID != message.ID ||
+		messages[0].Semantic != domain.AgentMessageSemanticMessage {
+		t.Fatalf("v19 message was not preserved: messages=%#v err=%v", messages, err)
+	}
+	after, found, err := st.GetLatestAgentGraphSnapshot(ctx, run.ID)
+	if err != nil || !found || after.StateJSON != before.StateJSON {
+		t.Fatalf("v19 snapshot compatibility changed: found=%t err=%v\nbefore=%s\nafter=%s",
+			found, err, before.StateJSON, after.StateJSON)
 	}
 }

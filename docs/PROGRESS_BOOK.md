@@ -13,7 +13,7 @@
 - V2 Run-centric Runtime：约 99%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程活动模型取消。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P4 已完成 schema v19 单 root Coordinator 地基：稳定 Agent 身份、状态/预算投影、有界 inbox、恢复快照和 Run/Supervisor 原子联动；子 Agent 继续关闭。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次。P9 已新增 loopback-only `api.v1` 读取面、独立授权的唯一取消 POST、由 Go DTO 生成且受 golden/live-route 测试保护的 OpenAPI 3.1 契约、有界可恢复 Run-event SSE，以及 Run-aware TUI 的 Work/Notes/ToolRounds/Tools 视图和批准一次/本会话操作；真实命令执行、通用 API 写入和非结构化记忆类模型工具继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程活动模型取消。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P4 已完成 schema v19 单 root Coordinator 地基与 schema v20 可恢复 inbox 协议：稳定 Agent 身份、状态/预算投影、有界 inbox、摘要幂等发送、严格 wake/dependency 语义、恢复快照和 Run/Supervisor 原子联动；Specialist admission/execution 继续关闭。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次。P9 已新增 loopback-only `api.v1` 读取面、独立授权的唯一取消 POST、由 Go DTO 生成且受 golden/live-route 测试保护的 OpenAPI 3.1 契约、有界可恢复 Run-event SSE，以及 Run-aware TUI 的 Work/Notes/ToolRounds/Tools 视图和批准一次/本会话操作；真实命令执行、通用 API 写入和非结构化记忆类模型工具继续关闭。
 
 ## 二、已完成功能
 
@@ -24,6 +24,8 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - schema v19 为每个新 Run 原子创建稳定 root `AgentNode`；旧库可惰性补建。root 的 ready/running/waiting/completed/failed/cancelled、turn/token 用量和 active attempt 与 RunSupervisor/RunService 同事务投影。
 - `internal/coordinator` 提供 root register、结构化 inbox send/consume、snapshot/restore；`run graph` 验证当前节点与 pending inbox metadata 是否匹配最新 `agent_graph.v1` 快照。
 - 图最多 3 个节点、深度 1、每个 inbox 最多 128 条 pending/4096 条总历史、每批消费 32 条、快照保留 32 份；payload 递归脱敏并以 SHA-256 进入快照完整性校验。当前 root `child_limit=0`，没有 spawn 或子 Agent 执行入口。
+- schema v20 要求 inbox send 携带 16-256 字节幂等键，只持久化域分隔摘要与脱敏意图指纹；原键重放不重复消息、事件、快照或 wake 状态转换，异意图复用返回稳定冲突。
+- `wake` 仅允许 running Run 内的 waiting Specialist 转为 ready，不能唤醒 root 或恢复暂停 Run；`dependency` 要求同 Run Agent sender 和严格枚举 payload。普通 v19 消息/快照可原地升级。
 - 持久化 Session、Message、Task、Event、Artifact 和上下文摘要。
 - Codex 风格的长上下文压缩骨架，支持手动和自动压缩。
 - `/help`、`/compact`、`/model`、`/workspace`、`/ls`、`/read`、`/write`、`/run` 会话命令。
@@ -341,11 +343,15 @@ Single-Root Agent Coordinator 切片新增 schema v19、`AgentNode`/inbox/`agent
 
 本轮审计未发现未解决的高/中风险问题。实现阶段补强了五项健壮性边界：Coordinator 写入口先获取 SQLite writer reservation，避免并发 register/inbox sequence 的 deferred read-to-write 竞争；快照不复制 inbox payload，而是保存 SHA-256、消息 ID、sequence、kind 与时间，restore 会拒绝正文篡改；历史快照每 Run 只保留最新 32 份，inbox pending/总历史和消费批次都有数据库硬上限；register 不再在 graph 校验前修正已有 root，状态漂移会失败而不是被新快照覆盖；inbox JSON key 现在限制为 64-byte ASCII 协议字段并拒绝密钥形态，补上通用 value-redaction 不处理 map key 的边界。测试覆盖 concurrent registration、重启恢复、wait/resume 身份连续、cancel 级联、child insert hard denial、key/value secret handling、exactly-once consume、v18 原地升级、tamper detection 与 snapshot retention。最终 race 复核还修正了三项既有测试时序假设：Provider 总 deadline 不再被误当成全部模型执行时间，mid-stream cancellation 会等待首个 delta 持久化后再主动取消，API CLI 多行启动输出会等待最后一项元数据后再断言。发布门通过全仓测试、全仓 `-race`、`go vet`、零告警 `staticcheck` 与 `govulncheck`，可达漏洞为 0；隔离 CLI smoke 创建 Run 并由 `run graph` 恢复一个 ready root。当前 root `child_limit=0`，无 child spawn、无模型 inbox 注入、无新 Shell 权限。
 
+Idempotent Agent Inbox Protocol 切片新增 schema v20、`agent_message_operations` 摘要账本和 `message`/`wake`/`dependency` 语义。Store 在同一 SQLite writer transaction 内完成重放判定、消息、操作事实、审计事件、可选 Specialist 状态转换和图快照；判断重放发生在当前收件状态检查之前，因此成功 wake 后的网络重试仍返回原消息。快照只为非普通语义增加字段，v19 普通消息快照保持字节兼容。
+
+本轮代码与安全审计未发现未解决的高/中风险问题。原始幂等键不进入数据库、事件、快照或错误；指纹排除随机 message ID/时间并基于脱敏规范化 payload；同键异意图稳定冲突。严格 payload decoder 拒绝未知字段、非法 dependency 状态、wake/kind 错配、senderless dependency 和 root wake。测试覆盖正常重放、冲突、wake exactly-once、事件/快照零重复、原键零泄漏、v19->v20 数据/快照兼容和旧迁移夹具。发布门通过 `go test -count=1 ./...`、全仓 `go test -race -count=1 ./...`、`go vet ./...`、零告警 `staticcheck ./...` 与 `govulncheck ./...`；可达漏洞为 0。Specialist admission、child model execution、模型 inbox 注入和任何新 Shell/网络权限仍未开放。
+
 ## 七、下一开发切片
 
-1. 为 Coordinator inbox 增加原始 key 不落库的摘要幂等账本、明确 wake/dependency 消息语义，再允许模型侧发送。
-2. 增加 internal-only Specialist admission：原子预留最多两个 child slot、独立 Session 和 turn/token 子预算；在恢复、级联取消和父子 CompletionReport 测试通过前不执行 child 模型循环。
-3. 将 WorkItem/Note Owner 从兼容标签迁移到受验证的 Agent identity，并保留旧记录读取兼容。
+1. 增加 internal-only Specialist admission：原子预留最多两个 child slot、独立 Session 和 turn/token 子预算；在恢复、级联取消和父子 CompletionReport 测试通过前不执行 child 模型循环。
+2. 将 WorkItem/Note Owner 从兼容标签迁移到受验证的 Agent identity，并保留旧记录读取兼容。
+3. 在受限 child loop 开放前补齐 CompletionReport、父子预算消费、崩溃通知和恢复调度。
 4. React/Vite 后续从 `docs/openapi.json` 生成 client/DTO，并通过带 Authorization header 的 fetch 消费 SSE，不把 token 放入 URL、不重复实现 Go Policy。
 5. Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
 

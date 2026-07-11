@@ -61,8 +61,9 @@ func TestAgentMessageRequiresBoundedJSONObject(t *testing.T) {
 	now := time.Now().UTC()
 	message := AgentMessage{
 		ID: "message-1", RunID: "run-1", RecipientAgentID: "agent-root", Sequence: 1,
-		Kind: AgentMessageInstruction, PayloadJSON: `{"goal":"inspect"}`,
-		Status: AgentMessagePending, CreatedAt: now,
+		Kind: AgentMessageInstruction, Semantic: AgentMessageSemanticMessage,
+		PayloadJSON: `{"goal":"inspect"}`,
+		Status:      AgentMessagePending, CreatedAt: now,
 	}
 	if err := message.Validate(); err != nil {
 		t.Fatalf("valid agent message was rejected: %v", err)
@@ -75,5 +76,52 @@ func TestAgentMessageRequiresBoundedJSONObject(t *testing.T) {
 	message.Status = AgentMessageConsumed
 	if err := message.Validate(); err == nil {
 		t.Fatal("consumed message without consumed_at was accepted")
+	}
+}
+
+func TestAgentMessageSemanticSchemasAreStrict(t *testing.T) {
+	now := time.Now().UTC()
+	wake := AgentMessage{
+		ID: "message-wake", RunID: "run-1", SenderAgentID: "agent-root",
+		RecipientAgentID: "agent-child", Sequence: 1, Kind: AgentMessageControl,
+		Semantic: AgentMessageSemanticWake, PayloadJSON: `{"reason":"dependency resolved"}`,
+		Status: AgentMessagePending, CreatedAt: now,
+	}
+	if err := wake.Validate(); err != nil {
+		t.Fatalf("valid wake message was rejected: %v", err)
+	}
+	wake.Kind = AgentMessageInstruction
+	if err := wake.Validate(); err == nil {
+		t.Fatal("wake message with a non-control kind was accepted")
+	}
+	wake.Kind = AgentMessageControl
+	wake.PayloadJSON = `{"reason":"ready","extra":true}`
+	if err := wake.Validate(); err == nil {
+		t.Fatal("wake message with an unknown payload field was accepted")
+	}
+
+	dependency := wake
+	dependency.ID = "message-dependency"
+	dependency.Kind = AgentMessageNotification
+	dependency.Semantic = AgentMessageSemanticDependency
+	dependency.PayloadJSON = `{"dependency_id":"work-1","state":"satisfied"}`
+	if err := dependency.Validate(); err != nil {
+		t.Fatalf("valid dependency message was rejected: %v", err)
+	}
+	dependency.PayloadJSON = `{"dependency_id":"work-1","state":"maybe"}`
+	if err := dependency.Validate(); err == nil {
+		t.Fatal("dependency message with an unknown state was accepted")
+	}
+}
+
+func TestAgentOperationKeyIsNormalizedAndBounded(t *testing.T) {
+	key := "agent-operation-0001"
+	if normalized, err := NormalizeAgentOperationKey(key); err != nil || normalized != key {
+		t.Fatalf("valid operation key was rejected: normalized=%q err=%v", normalized, err)
+	}
+	for _, invalid := range []string{"short", " padded-operation-key ", strings.Repeat("x", MaxAgentOperationKeyBytes+1)} {
+		if _, err := NormalizeAgentOperationKey(invalid); err == nil {
+			t.Fatalf("invalid operation key was accepted: length=%d", len(invalid))
+		}
 	}
 }

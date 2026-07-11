@@ -41,13 +41,14 @@ type agentGraphNodeSnapshot struct {
 }
 
 type agentGraphMessageSnapshot struct {
-	ID               string                  `json:"id"`
-	SenderAgentID    string                  `json:"sender_agent_id,omitempty"`
-	RecipientAgentID string                  `json:"recipient_agent_id"`
-	Sequence         int64                   `json:"sequence"`
-	Kind             domain.AgentMessageKind `json:"kind"`
-	PayloadSHA256    string                  `json:"payload_sha256"`
-	CreatedAt        string                  `json:"created_at"`
+	ID               string                      `json:"id"`
+	SenderAgentID    string                      `json:"sender_agent_id,omitempty"`
+	RecipientAgentID string                      `json:"recipient_agent_id"`
+	Sequence         int64                       `json:"sequence"`
+	Kind             domain.AgentMessageKind     `json:"kind"`
+	Semantic         domain.AgentMessageSemantic `json:"semantic,omitempty"`
+	PayloadSHA256    string                      `json:"payload_sha256"`
+	CreatedAt        string                      `json:"created_at"`
 }
 
 type agentGraphSnapshotState struct {
@@ -329,9 +330,14 @@ func marshalAgentGraphSnapshotState(rootID string, nodes []domain.AgentNode,
 	}
 	for _, message := range messages {
 		payloadHash := sha256.Sum256([]byte(message.PayloadJSON))
+		semantic := message.Semantic
+		if semantic == domain.AgentMessageSemanticMessage {
+			semantic = ""
+		}
 		state.PendingMessages = append(state.PendingMessages, agentGraphMessageSnapshot{
 			ID: message.ID, SenderAgentID: message.SenderAgentID,
 			RecipientAgentID: message.RecipientAgentID, Sequence: message.Sequence, Kind: message.Kind,
+			Semantic:      semantic,
 			PayloadSHA256: fmt.Sprintf("%x", payloadHash[:]),
 			CreatedAt:     message.CreatedAt.UTC().Format(time.RFC3339Nano),
 		})

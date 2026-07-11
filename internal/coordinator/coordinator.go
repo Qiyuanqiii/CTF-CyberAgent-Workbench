@@ -16,7 +16,8 @@ type Store interface {
 	GetAgentNode(ctx context.Context, id string) (domain.AgentNode, error)
 	GetRootAgent(ctx context.Context, runID string) (domain.AgentNode, bool, error)
 	ListAgentNodes(ctx context.Context, runID string) ([]domain.AgentNode, error)
-	SendAgentMessage(ctx context.Context, message domain.AgentMessage) (domain.AgentMessage, error)
+	SendAgentMessage(ctx context.Context, message domain.AgentMessage,
+		operationKey string) (domain.AgentMessage, bool, error)
 	ListAgentMessages(ctx context.Context, agentID string, pendingOnly bool, limit int) ([]domain.AgentMessage, error)
 	ConsumeAgentMessages(ctx context.Context, agentID string, limit int) ([]domain.AgentMessage, error)
 	SnapshotAgentGraph(ctx context.Context, runID string) (domain.AgentGraphSnapshot, error)
@@ -33,7 +34,14 @@ type SendRequest struct {
 	SenderAgentID    string
 	RecipientAgentID string
 	Kind             domain.AgentMessageKind
+	Semantic         domain.AgentMessageSemantic
 	Payload          map[string]any
+	IdempotencyKey   string
+}
+
+type SendResult struct {
+	Message  domain.AgentMessage
+	Replayed bool
 }
 
 func New(store Store) *Coordinator {
@@ -49,27 +57,36 @@ func (c *Coordinator) RegisterRoot(ctx context.Context, runID string) (domain.Ag
 	return node, created, apperror.Normalize(err)
 }
 
-func (c *Coordinator) Send(ctx context.Context, req SendRequest) (domain.AgentMessage, error) {
+func (c *Coordinator) Send(ctx context.Context, req SendRequest) (SendResult, error) {
 	if c == nil || c.store == nil {
-		return domain.AgentMessage{}, apperror.New(apperror.CodeFailedPrecondition,
+		return SendResult{}, apperror.New(apperror.CodeFailedPrecondition,
 			"agent coordinator store is required")
 	}
 	if req.Payload == nil {
-		return domain.AgentMessage{}, apperror.New(apperror.CodeInvalidArgument,
+		return SendResult{}, apperror.New(apperror.CodeInvalidArgument,
 			"agent message payload object is required")
+	}
+	operationKey, err := domain.NormalizeAgentOperationKey(req.IdempotencyKey)
+	if err != nil {
+		return SendResult{}, apperror.Wrap(apperror.CodeInvalidArgument,
+			"agent message idempotency key is invalid", err)
+	}
+	semantic := req.Semantic
+	if semantic == "" {
+		semantic = domain.AgentMessageSemanticMessage
 	}
 	payloadJSON, err := json.Marshal(req.Payload)
 	if err != nil {
-		return domain.AgentMessage{}, apperror.Wrap(apperror.CodeInvalidArgument,
+		return SendResult{}, apperror.Wrap(apperror.CodeInvalidArgument,
 			"agent message payload cannot be encoded", err)
 	}
-	message, err := c.store.SendAgentMessage(ctx, domain.AgentMessage{
+	message, replayed, err := c.store.SendAgentMessage(ctx, domain.AgentMessage{
 		ID: idgen.New("agentmsg"), RunID: strings.TrimSpace(req.RunID),
 		SenderAgentID:    strings.TrimSpace(req.SenderAgentID),
-		RecipientAgentID: strings.TrimSpace(req.RecipientAgentID), Kind: req.Kind,
+		RecipientAgentID: strings.TrimSpace(req.RecipientAgentID), Kind: req.Kind, Semantic: semantic,
 		PayloadJSON: string(payloadJSON), Status: domain.AgentMessagePending, CreatedAt: time.Now().UTC(),
-	})
-	return message, apperror.Normalize(err)
+	}, operationKey)
+	return SendResult{Message: message, Replayed: replayed}, apperror.Normalize(err)
 }
 
 func (c *Coordinator) Inbox(ctx context.Context, agentID string, pendingOnly bool,

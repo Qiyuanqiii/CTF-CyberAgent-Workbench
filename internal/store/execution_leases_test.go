@@ -206,6 +206,8 @@ func TestSQLiteSchemaV17RebindsLegacyPendingSupervisorCheckpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE agent_message_operations`,
+		`DELETE FROM schema_migrations WHERE version = 20`,
 		`DROP TABLE agent_graph_snapshots`,
 		`DROP TABLE agent_messages`,
 		`DROP TABLE agent_nodes`,

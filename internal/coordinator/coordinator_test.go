@@ -45,19 +45,40 @@ func TestCoordinatorRestoresStableRootAndExactlyOnceInbox(t *testing.T) {
 	}
 
 	rawSecret := "sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	message, err := service.Send(ctx, coordinator.SendRequest{
+	sent, err := service.Send(ctx, coordinator.SendRequest{
 		RunID: run.ID, RecipientAgentID: root.ID, Kind: domain.AgentMessageInstruction,
-		Payload: map[string]any{"goal": "inspect", "credential": rawSecret},
+		Payload:        map[string]any{"goal": "inspect", "credential": rawSecret},
+		IdempotencyKey: "coordinator-message-0001",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	message := sent.Message
+	if sent.Replayed {
+		t.Fatal("first agent message send was reported as a replay")
+	}
 	if strings.Contains(message.PayloadJSON, rawSecret) || !strings.Contains(message.PayloadJSON, "[REDACTED:api-key]") {
 		t.Fatalf("agent inbox did not redact its payload: %s", message.PayloadJSON)
 	}
+	replayed, err := service.Send(ctx, coordinator.SendRequest{
+		RunID: run.ID, RecipientAgentID: root.ID, Kind: domain.AgentMessageInstruction,
+		Payload:        map[string]any{"goal": "inspect", "credential": rawSecret},
+		IdempotencyKey: "coordinator-message-0001",
+	})
+	if err != nil || !replayed.Replayed || replayed.Message.ID != message.ID {
+		t.Fatalf("agent message replay was not stable: result=%#v err=%v", replayed, err)
+	}
 	if _, err := service.Send(ctx, coordinator.SendRequest{
 		RunID: run.ID, RecipientAgentID: root.ID, Kind: domain.AgentMessageInstruction,
-		Payload: map[string]any{rawSecret: "must not persist"},
+		Payload:        map[string]any{"goal": "different intent"},
+		IdempotencyKey: "coordinator-message-0001",
+	}); apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("idempotency key reuse did not conflict: code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	if _, err := service.Send(ctx, coordinator.SendRequest{
+		RunID: run.ID, RecipientAgentID: root.ID, Kind: domain.AgentMessageInstruction,
+		Payload:        map[string]any{rawSecret: "must not persist"},
+		IdempotencyKey: "coordinator-message-0002",
 	}); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
 		t.Fatalf("sensitive agent message field name was not rejected: code=%s err=%v",
 			apperror.CodeOf(err), err)

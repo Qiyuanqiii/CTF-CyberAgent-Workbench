@@ -14,6 +14,7 @@ import (
 	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/redact"
+	"cyberagent-workbench/internal/runmutation"
 )
 
 const agentNodeSelect = `SELECT id, run_id, parent_id, session_id, role, profile, skills_json, status,
@@ -21,7 +22,7 @@ const agentNodeSelect = `SELECT id, run_id, parent_id, session_id, role, profile
 	status_reason, version, created_at, updated_at, finished_at FROM agent_nodes`
 
 const agentMessageSelect = `SELECT id, run_id, sender_agent_id, recipient_agent_id, sequence, kind,
-	payload_json, status, created_at, consumed_at FROM agent_messages`
+	semantic, payload_json, status, created_at, consumed_at FROM agent_messages`
 
 type rootAgentProjection struct {
 	Status          domain.AgentStatus
@@ -106,37 +107,53 @@ func (s *SQLiteStore) ListAgentNodes(ctx context.Context, runID string) ([]domai
 	return listAgentNodes(ctx, s.db, strings.TrimSpace(runID))
 }
 
-func (s *SQLiteStore) SendAgentMessage(ctx context.Context, message domain.AgentMessage) (domain.AgentMessage, error) {
+func (s *SQLiteStore) SendAgentMessage(ctx context.Context, message domain.AgentMessage,
+	operationKey string,
+) (domain.AgentMessage, bool, error) {
 	message.ID = strings.TrimSpace(message.ID)
 	message.RunID = strings.TrimSpace(message.RunID)
 	message.SenderAgentID = strings.TrimSpace(message.SenderAgentID)
 	message.RecipientAgentID = strings.TrimSpace(message.RecipientAgentID)
 	message.PayloadJSON = strings.TrimSpace(message.PayloadJSON)
+	if message.Semantic == "" {
+		message.Semantic = domain.AgentMessageSemanticMessage
+	}
 	message.Status = domain.AgentMessagePending
 	message.Sequence = 0
 	message.ConsumedAt = nil
 	if message.ID == "" || message.RunID == "" || message.RecipientAgentID == "" {
-		return domain.AgentMessage{}, apperror.New(apperror.CodeInvalidArgument,
+		return domain.AgentMessage{}, false, apperror.New(apperror.CodeInvalidArgument,
 			"agent message id, run id, and recipient are required")
 	}
 	if !domain.ValidAgentMessageKind(message.Kind) {
-		return domain.AgentMessage{}, apperror.New(apperror.CodeInvalidArgument, "agent message kind is invalid")
+		return domain.AgentMessage{}, false,
+			apperror.New(apperror.CodeInvalidArgument, "agent message kind is invalid")
+	}
+	if !domain.ValidAgentMessageSemantic(message.Semantic) {
+		return domain.AgentMessage{}, false,
+			apperror.New(apperror.CodeInvalidArgument, "agent message semantic is invalid")
+	}
+	normalizedOperationKey, err := domain.NormalizeAgentOperationKey(operationKey)
+	if err != nil {
+		return domain.AgentMessage{}, false,
+			apperror.Wrap(apperror.CodeInvalidArgument, "agent message idempotency key is invalid", err)
 	}
 	safePayload, err := redactJSONPayload(message.PayloadJSON)
 	if err != nil {
-		return domain.AgentMessage{}, apperror.Wrap(apperror.CodeInvalidArgument, "invalid agent message payload", err)
+		return domain.AgentMessage{}, false,
+			apperror.Wrap(apperror.CodeInvalidArgument, "invalid agent message payload", err)
 	}
 	if len([]byte(safePayload)) == 0 || len([]byte(safePayload)) > domain.MaxAgentMessagePayloadBytes {
-		return domain.AgentMessage{}, apperror.New(apperror.CodeResourceExhausted,
+		return domain.AgentMessage{}, false, apperror.New(apperror.CodeResourceExhausted,
 			fmt.Sprintf("agent message payload exceeds %d bytes", domain.MaxAgentMessagePayloadBytes))
 	}
 	var object map[string]any
 	if err := json.Unmarshal([]byte(safePayload), &object); err != nil || object == nil {
-		return domain.AgentMessage{}, apperror.New(apperror.CodeInvalidArgument,
+		return domain.AgentMessage{}, false, apperror.New(apperror.CodeInvalidArgument,
 			"agent message payload must be a JSON object")
 	}
 	if err := validateAgentMessageJSON(object, 0); err != nil {
-		return domain.AgentMessage{}, apperror.Wrap(apperror.CodeInvalidArgument,
+		return domain.AgentMessage{}, false, apperror.Wrap(apperror.CodeInvalidArgument,
 			"agent message payload has an invalid structure", err)
 	}
 	message.PayloadJSON = safePayload
@@ -145,90 +162,181 @@ func (s *SQLiteStore) SendAgentMessage(ctx context.Context, message domain.Agent
 	} else {
 		message.CreatedAt = message.CreatedAt.UTC()
 	}
+	validationMessage := message
+	validationMessage.Sequence = 1
+	if err := validationMessage.Validate(); err != nil {
+		return domain.AgentMessage{}, false,
+			apperror.Wrap(apperror.CodeInvalidArgument, "invalid agent message", err)
+	}
+	keyDigest := runmutation.Fingerprint("agent_message_operation.v1", message.RunID,
+		normalizedOperationKey)
+	requestFingerprint := runmutation.Fingerprint("agent_message_request.v1", message.RunID,
+		message.SenderAgentID, message.RecipientAgentID, string(message.Kind), string(message.Semantic),
+		message.PayloadJSON)
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return domain.AgentMessage{}, err
+		return domain.AgentMessage{}, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `UPDATE agent_nodes SET updated_at = updated_at WHERE id = ?`,
 		message.RecipientAgentID); err != nil {
-		return domain.AgentMessage{}, err
+		return domain.AgentMessage{}, false, err
+	}
+	storedFingerprint, storedMessageID, found, err := getAgentMessageOperationTx(ctx, tx, keyDigest)
+	if err != nil {
+		return domain.AgentMessage{}, false, err
+	}
+	if found {
+		if storedFingerprint != requestFingerprint {
+			return domain.AgentMessage{}, false, apperror.New(apperror.CodeConflict,
+				"agent message idempotency key was already used for different intent")
+		}
+		existing, err := scanAgentMessage(tx.QueryRowContext(ctx,
+			agentMessageSelect+` WHERE id = ?`, storedMessageID))
+		if err != nil {
+			return domain.AgentMessage{}, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.AgentMessage{}, false, err
+		}
+		return existing, true, nil
 	}
 	recipient, err := scanAgentNode(tx.QueryRowContext(ctx, agentNodeSelect+` WHERE id = ?`, message.RecipientAgentID))
 	if err != nil {
-		return domain.AgentMessage{}, err
+		return domain.AgentMessage{}, false, err
 	}
 	if recipient.RunID != message.RunID {
-		return domain.AgentMessage{}, apperror.New(apperror.CodeInvalidArgument,
+		return domain.AgentMessage{}, false, apperror.New(apperror.CodeInvalidArgument,
 			"agent message recipient belongs to another run")
 	}
 	if recipient.Terminal() {
-		return domain.AgentMessage{}, apperror.New(apperror.CodeFailedPrecondition,
+		return domain.AgentMessage{}, false, apperror.New(apperror.CodeFailedPrecondition,
 			"terminal agent cannot receive inbox messages")
 	}
 	if message.SenderAgentID != "" {
 		sender, err := scanAgentNode(tx.QueryRowContext(ctx, agentNodeSelect+` WHERE id = ?`, message.SenderAgentID))
 		if err != nil {
-			return domain.AgentMessage{}, err
+			return domain.AgentMessage{}, false, err
 		}
 		if sender.RunID != message.RunID {
-			return domain.AgentMessage{}, apperror.New(apperror.CodeInvalidArgument,
+			return domain.AgentMessage{}, false, apperror.New(apperror.CodeInvalidArgument,
 				"agent message sender belongs to another run")
 		}
 		if sender.ID == recipient.ID {
-			return domain.AgentMessage{}, apperror.New(apperror.CodeInvalidArgument,
+			return domain.AgentMessage{}, false, apperror.New(apperror.CodeInvalidArgument,
 				"agent cannot send a message to itself")
+		}
+	}
+	if message.Semantic == domain.AgentMessageSemanticDependency && message.SenderAgentID == "" {
+		return domain.AgentMessage{}, false, apperror.New(apperror.CodeInvalidArgument,
+			"dependency notification requires an agent sender")
+	}
+	run, err := scanRun(tx.QueryRowContext(ctx, `SELECT id, mission_id, session_id, status, config_json, budget_json,
+		started_at, finished_at, created_at, updated_at FROM runs WHERE id = ?`, message.RunID))
+	if err != nil {
+		return domain.AgentMessage{}, false, err
+	}
+	var wakePayload domain.AgentWakePayload
+	if message.Semantic == domain.AgentMessageSemanticWake {
+		if run.Status != domain.RunRunning {
+			return domain.AgentMessage{}, false, apperror.New(apperror.CodeFailedPrecondition,
+				"wake requires a running Run")
+		}
+		if recipient.Role != domain.AgentRoleSpecialist || recipient.Status != domain.AgentWaiting {
+			return domain.AgentMessage{}, false, apperror.New(apperror.CodeFailedPrecondition,
+				"wake requires a waiting Specialist recipient")
+		}
+		wakePayload, err = domain.DecodeAgentWakePayload(message.PayloadJSON)
+		if err != nil {
+			return domain.AgentMessage{}, false,
+				apperror.Wrap(apperror.CodeInvalidArgument, "invalid wake payload", err)
 		}
 	}
 	var pending int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_messages
 		WHERE recipient_agent_id = ? AND status = ?`, recipient.ID, domain.AgentMessagePending).Scan(&pending); err != nil {
-		return domain.AgentMessage{}, err
+		return domain.AgentMessage{}, false, err
 	}
 	if pending >= domain.MaxAgentInboxMessages {
-		return domain.AgentMessage{}, apperror.New(apperror.CodeResourceExhausted, "agent inbox is full")
+		return domain.AgentMessage{}, false,
+			apperror.New(apperror.CodeResourceExhausted, "agent inbox is full")
 	}
 	var history int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_messages
 		WHERE recipient_agent_id = ?`, recipient.ID).Scan(&history); err != nil {
-		return domain.AgentMessage{}, err
+		return domain.AgentMessage{}, false, err
 	}
 	if history >= domain.MaxAgentMessageHistory {
-		return domain.AgentMessage{}, apperror.New(apperror.CodeResourceExhausted,
+		return domain.AgentMessage{}, false, apperror.New(apperror.CodeResourceExhausted,
 			"agent message history is full")
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM agent_messages
 		WHERE recipient_agent_id = ?`, recipient.ID).Scan(&message.Sequence); err != nil {
-		return domain.AgentMessage{}, err
+		return domain.AgentMessage{}, false, err
 	}
 	if err := message.Validate(); err != nil {
-		return domain.AgentMessage{}, apperror.Wrap(apperror.CodeInvalidArgument, "invalid agent message", err)
+		return domain.AgentMessage{}, false,
+			apperror.Wrap(apperror.CodeInvalidArgument, "invalid agent message", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_messages
-		(id, run_id, sender_agent_id, recipient_agent_id, sequence, kind, payload_json, status, created_at, consumed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`, message.ID, message.RunID,
+		(id, run_id, sender_agent_id, recipient_agent_id, sequence, kind, semantic, payload_json, status, created_at, consumed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`, message.ID, message.RunID,
 		nullableAgentID(message.SenderAgentID), message.RecipientAgentID, message.Sequence, message.Kind,
-		message.PayloadJSON, message.Status, ts(message.CreatedAt)); err != nil {
-		return domain.AgentMessage{}, err
+		message.Semantic, message.PayloadJSON, message.Status, ts(message.CreatedAt)); err != nil {
+		return domain.AgentMessage{}, false, err
 	}
-	run, err := scanRun(tx.QueryRowContext(ctx, `SELECT id, mission_id, session_id, status, config_json, budget_json,
-		started_at, finished_at, created_at, updated_at FROM runs WHERE id = ?`, message.RunID))
-	if err != nil {
-		return domain.AgentMessage{}, err
+	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_message_operations
+		(operation_key_digest, request_fingerprint, message_id, created_at) VALUES (?, ?, ?, ?)`,
+		keyDigest, requestFingerprint, message.ID, ts(message.CreatedAt)); err != nil {
+		return domain.AgentMessage{}, false, err
 	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.AgentMessageSentEvent, "agent_coordinator", message.ID, map[string]any{
 		"sender_agent_id": message.SenderAgentID, "recipient_agent_id": message.RecipientAgentID,
-		"sequence": message.Sequence, "kind": message.Kind, "payload_bytes": len([]byte(message.PayloadJSON)),
+		"sequence": message.Sequence, "kind": message.Kind, "semantic": message.Semantic,
+		"payload_bytes": len([]byte(message.PayloadJSON)),
 	}); err != nil {
-		return domain.AgentMessage{}, err
+		return domain.AgentMessage{}, false, err
+	}
+	if message.Semantic == domain.AgentMessageSemanticWake {
+		updated := recipient
+		updated.Status = domain.AgentReady
+		updated.ActiveAttemptID = ""
+		updated.StatusReason = normalizeAgentStatusReason(wakePayload.Reason)
+		updated.Version++
+		updated.UpdatedAt = time.Now().UTC()
+		if err := updated.Validate(); err != nil {
+			return domain.AgentMessage{}, false, err
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE agent_nodes SET status = ?, active_attempt_id = '',
+			status_reason = ?, version = ?, updated_at = ? WHERE id = ? AND version = ? AND status = ?`,
+			updated.Status, updated.StatusReason, updated.Version, ts(updated.UpdatedAt), updated.ID,
+			recipient.Version, domain.AgentWaiting)
+		if err != nil {
+			return domain.AgentMessage{}, false, err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return domain.AgentMessage{}, false, err
+		}
+		if rows != 1 {
+			return domain.AgentMessage{}, false,
+				apperror.New(apperror.CodeConflict, "wake recipient changed concurrently")
+		}
+		if err := appendSupervisorEventTx(ctx, tx, run, events.AgentStatusChangedEvent,
+			"agent_coordinator", updated.ID, map[string]any{
+				"from": recipient.Status, "to": updated.Status, "reason": updated.StatusReason,
+				"message_id": message.ID, "version": updated.Version,
+			}); err != nil {
+			return domain.AgentMessage{}, false, err
+		}
 	}
 	if _, err := createAgentGraphSnapshotTx(ctx, tx, run); err != nil {
-		return domain.AgentMessage{}, err
+		return domain.AgentMessage{}, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return domain.AgentMessage{}, err
+		return domain.AgentMessage{}, false, err
 	}
-	return message, nil
+	return message, false, nil
 }
 
 func (s *SQLiteStore) ListAgentMessages(ctx context.Context, agentID string, pendingOnly bool,
@@ -324,7 +432,8 @@ func (s *SQLiteStore) ConsumeAgentMessages(ctx context.Context, agentID string, 
 		}
 		if err := appendSupervisorEventTx(ctx, tx, run, events.AgentMessageConsumedEvent,
 			"agent_coordinator", messages[index].ID, map[string]any{
-				"recipient_agent_id": node.ID, "sequence": messages[index].Sequence, "kind": messages[index].Kind,
+				"recipient_agent_id": node.ID, "sequence": messages[index].Sequence,
+				"kind": messages[index].Kind, "semantic": messages[index].Semantic,
 			}); err != nil {
 			return nil, err
 		}
@@ -613,17 +722,34 @@ func listAgentNodes(ctx context.Context, queryer interface {
 func scanAgentMessage(row scanner) (domain.AgentMessage, error) {
 	var message domain.AgentMessage
 	var senderID, consumedAt sql.NullString
-	var kind, status, createdAt string
+	var kind, semantic, status, createdAt string
 	if err := row.Scan(&message.ID, &message.RunID, &senderID, &message.RecipientAgentID,
-		&message.Sequence, &kind, &message.PayloadJSON, &status, &createdAt, &consumedAt); err != nil {
+		&message.Sequence, &kind, &semantic, &message.PayloadJSON, &status, &createdAt, &consumedAt); err != nil {
 		return domain.AgentMessage{}, err
 	}
 	message.SenderAgentID = senderID.String
 	message.Kind = domain.AgentMessageKind(kind)
+	message.Semantic = domain.AgentMessageSemantic(semantic)
 	message.Status = domain.AgentMessageStatus(status)
 	message.CreatedAt = parseTS(createdAt)
 	message.ConsumedAt = parseNullableTS(consumedAt)
 	return message, message.Validate()
+}
+
+func getAgentMessageOperationTx(ctx context.Context, tx *sql.Tx,
+	keyDigest string,
+) (string, string, bool, error) {
+	var fingerprint, messageID string
+	err := tx.QueryRowContext(ctx, `SELECT request_fingerprint, message_id
+		FROM agent_message_operations WHERE operation_key_digest = ?`, keyDigest).
+		Scan(&fingerprint, &messageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	return fingerprint, messageID, true, nil
 }
 
 func scanAgentMessages(rows *sql.Rows) ([]domain.AgentMessage, error) {

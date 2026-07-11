@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 19
+const LatestSchemaVersion = 20
 
 type migration struct {
 	Version    int
@@ -760,6 +760,20 @@ var agentCoordinatorStatements = []string{
 	);`,
 	`CREATE INDEX idx_agent_graph_snapshots_latest
 		ON agent_graph_snapshots(run_id, version DESC);`,
+}
+
+var agentInboxProtocolStatements = []string{
+	`ALTER TABLE agent_messages ADD COLUMN semantic TEXT NOT NULL DEFAULT 'message'
+		CHECK(semantic IN ('message', 'wake', 'dependency'));`,
+	`CREATE TABLE agent_message_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		message_id TEXT NOT NULL UNIQUE,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(message_id) REFERENCES agent_messages(id) ON DELETE CASCADE,
+		CHECK(length(operation_key_digest) = 64),
+		CHECK(length(request_fingerprint) = 64)
+	);`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {

@@ -1,9 +1,11 @@
 package domain
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"sort"
 	"strings"
@@ -24,6 +26,8 @@ const (
 	MaxAgentMessageHistory      = 4096
 	MaxAgentMessageBatch        = 32
 	MaxAgentMessagePayloadBytes = 16 * 1024
+	MinAgentOperationKeyBytes   = 16
+	MaxAgentOperationKeyBytes   = 256
 	MaxAgentGraphSnapshotBytes  = 128 * 1024
 	MaxAgentGraphSnapshots      = 32
 )
@@ -62,6 +66,32 @@ const (
 	AgentMessageConsumed AgentMessageStatus = "consumed"
 )
 
+type AgentMessageSemantic string
+
+const (
+	AgentMessageSemanticMessage    AgentMessageSemantic = "message"
+	AgentMessageSemanticWake       AgentMessageSemantic = "wake"
+	AgentMessageSemanticDependency AgentMessageSemantic = "dependency"
+)
+
+type AgentDependencyState string
+
+const (
+	AgentDependencySatisfied AgentDependencyState = "satisfied"
+	AgentDependencyFailed    AgentDependencyState = "failed"
+	AgentDependencyCancelled AgentDependencyState = "cancelled"
+)
+
+type AgentWakePayload struct {
+	Reason string `json:"reason"`
+}
+
+type AgentDependencyPayload struct {
+	DependencyID string               `json:"dependency_id"`
+	State        AgentDependencyState `json:"state"`
+	Reason       string               `json:"reason,omitempty"`
+}
+
 type AgentNode struct {
 	ID              string
 	RunID           string
@@ -92,6 +122,7 @@ type AgentMessage struct {
 	RecipientAgentID string
 	Sequence         int64
 	Kind             AgentMessageKind
+	Semantic         AgentMessageSemantic
 	PayloadJSON      string
 	Status           AgentMessageStatus
 	CreatedAt        time.Time
@@ -142,6 +173,25 @@ func ValidAgentMessageKind(kind AgentMessageKind) bool {
 
 func ValidAgentMessageStatus(status AgentMessageStatus) bool {
 	return status == AgentMessagePending || status == AgentMessageConsumed
+}
+
+func ValidAgentMessageSemantic(semantic AgentMessageSemantic) bool {
+	switch semantic {
+	case AgentMessageSemanticMessage, AgentMessageSemanticWake, AgentMessageSemanticDependency:
+		return true
+	default:
+		return false
+	}
+}
+
+func NormalizeAgentOperationKey(value string) (string, error) {
+	if !utf8.ValidString(value) || strings.TrimSpace(value) != value ||
+		len([]byte(value)) < MinAgentOperationKeyBytes || len([]byte(value)) > MaxAgentOperationKeyBytes ||
+		strings.ContainsRune(value, 0) {
+		return "", fmt.Errorf("agent operation key must be normalized UTF-8 between %d and %d bytes",
+			MinAgentOperationKeyBytes, MaxAgentOperationKeyBytes)
+	}
+	return value, nil
 }
 
 func (a AgentNode) Terminal() bool {
@@ -276,6 +326,18 @@ func (m AgentMessage) Validate() error {
 	if !ValidAgentMessageKind(m.Kind) {
 		return fmt.Errorf("invalid agent message kind %q", m.Kind)
 	}
+	if !ValidAgentMessageSemantic(m.Semantic) {
+		return fmt.Errorf("invalid agent message semantic %q", m.Semantic)
+	}
+	if m.Semantic == AgentMessageSemanticWake && m.Kind != AgentMessageControl {
+		return errors.New("wake semantic requires a control message")
+	}
+	if m.Semantic == AgentMessageSemanticDependency && m.Kind != AgentMessageNotification {
+		return errors.New("dependency semantic requires a notification message")
+	}
+	if m.Semantic == AgentMessageSemanticDependency && m.SenderAgentID == "" {
+		return errors.New("dependency notification requires an agent sender")
+	}
 	if !ValidAgentMessageStatus(m.Status) {
 		return fmt.Errorf("invalid agent message status %q", m.Status)
 	}
@@ -285,6 +347,16 @@ func (m AgentMessage) Validate() error {
 	var object map[string]any
 	if err := json.Unmarshal([]byte(m.PayloadJSON), &object); err != nil || object == nil {
 		return errors.New("agent message payload must be a JSON object")
+	}
+	switch m.Semantic {
+	case AgentMessageSemanticWake:
+		if _, err := DecodeAgentWakePayload(m.PayloadJSON); err != nil {
+			return err
+		}
+	case AgentMessageSemanticDependency:
+		if _, err := DecodeAgentDependencyPayload(m.PayloadJSON); err != nil {
+			return err
+		}
 	}
 	if m.CreatedAt.IsZero() {
 		return errors.New("agent message created_at is required")
@@ -364,4 +436,50 @@ func validAgentIdentity(value string, allowEmpty bool) bool {
 	}
 	return utf8.ValidString(value) && strings.TrimSpace(value) == value &&
 		utf8.RuneCountInString(value) <= MaxAgentIdentityRunes
+}
+
+func DecodeAgentWakePayload(payloadJSON string) (AgentWakePayload, error) {
+	var payload AgentWakePayload
+	if err := decodeStrictAgentPayload(payloadJSON, &payload); err != nil {
+		return AgentWakePayload{}, fmt.Errorf("invalid wake payload: %w", err)
+	}
+	payload.Reason = strings.TrimSpace(payload.Reason)
+	if payload.Reason == "" || !utf8.ValidString(payload.Reason) ||
+		utf8.RuneCountInString(payload.Reason) > 1024 {
+		return AgentWakePayload{}, errors.New("wake reason must contain between 1 and 1024 characters")
+	}
+	return payload, nil
+}
+
+func DecodeAgentDependencyPayload(payloadJSON string) (AgentDependencyPayload, error) {
+	var payload AgentDependencyPayload
+	if err := decodeStrictAgentPayload(payloadJSON, &payload); err != nil {
+		return AgentDependencyPayload{}, fmt.Errorf("invalid dependency payload: %w", err)
+	}
+	payload.DependencyID = strings.TrimSpace(payload.DependencyID)
+	payload.Reason = strings.TrimSpace(payload.Reason)
+	if !validAgentIdentity(payload.DependencyID, false) {
+		return AgentDependencyPayload{}, errors.New("dependency id is invalid")
+	}
+	switch payload.State {
+	case AgentDependencySatisfied, AgentDependencyFailed, AgentDependencyCancelled:
+	default:
+		return AgentDependencyPayload{}, errors.New("dependency state is invalid")
+	}
+	if !utf8.ValidString(payload.Reason) || utf8.RuneCountInString(payload.Reason) > 1024 {
+		return AgentDependencyPayload{}, errors.New("dependency reason exceeds 1024 characters")
+	}
+	return payload, nil
+}
+
+func decodeStrictAgentPayload(payloadJSON string, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader([]byte(payloadJSON)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return errors.New("payload does not match its schema")
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return errors.New("payload contains trailing data")
+	}
+	return nil
 }
