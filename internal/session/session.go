@@ -96,6 +96,7 @@ type Store interface {
 	approval.GrantStore
 	toolbudget.Store
 	artifact.Store
+	policy.DecisionRecorder
 
 	SaveSession(ctx context.Context, session Session) error
 	GetSession(ctx context.Context, id string) (Session, error)

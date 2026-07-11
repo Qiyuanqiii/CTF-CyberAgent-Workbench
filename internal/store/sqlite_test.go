@@ -113,6 +113,14 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 	if runArtifactTable != "run_artifacts" {
 		t.Fatalf("schema v14 Run artifact table is missing: %q", runArtifactTable)
 	}
+	var structuredOperationTable string
+	if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master
+		WHERE type = 'table' AND name = 'structured_tool_operations'`).Scan(&structuredOperationTable); err != nil {
+		t.Fatal(err)
+	}
+	if structuredOperationTable != "structured_tool_operations" {
+		t.Fatalf("schema v15 structured tool operation table is missing: %q", structuredOperationTable)
+	}
 	var grantColumn int
 	if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('tool_approvals') WHERE name = 'grant_id'`).Scan(&grantColumn); err != nil {
 		t.Fatal(err)
@@ -296,6 +304,8 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 		t.Fatal(err)
 	}
 	for _, statement := range []string{
+		`DROP TABLE structured_tool_operations`,
+		`DELETE FROM schema_migrations WHERE version = 15`,
 		`DROP TABLE run_artifacts`,
 		`DELETE FROM schema_migrations WHERE version = 14`,
 		`DROP TABLE script_process_proposals`,

@@ -70,7 +70,7 @@ func (s *SQLiteStore) CreateSessionGrant(ctx context.Context, request approval.C
 	if err := requireGrantableRunTx(ctx, tx, binding.RunID); err != nil {
 		return approval.GrantResult{}, err
 	}
-	grant, found, err := findActiveSessionGrantTx(ctx, tx, approval.GrantQuery{
+	grant, found, err := findActiveSessionGrant(ctx, tx, approval.GrantQuery{
 		RunID: binding.RunID, SessionID: normalized.SessionID, WorkspaceID: normalized.WorkspaceID,
 		ToolName: normalized.ToolName, ActionClass: normalized.ActionClass,
 	})
@@ -262,19 +262,7 @@ func (s *SQLiteStore) AuthorizeApprovalWithSessionGrant(ctx context.Context, pro
 }
 
 func (s *SQLiteStore) FindActiveSessionGrant(ctx context.Context, query approval.GrantQuery) (approval.SessionGrant, bool, error) {
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return approval.SessionGrant{}, false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	grant, found, err := findActiveSessionGrantTx(ctx, tx, query)
-	if err != nil {
-		return approval.SessionGrant{}, false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return approval.SessionGrant{}, false, err
-	}
-	return grant, found, nil
+	return findActiveSessionGrant(ctx, s.db, query)
 }
 
 func (s *SQLiteStore) GetSessionGrant(ctx context.Context, id string) (approval.SessionGrant, error) {
@@ -339,7 +327,9 @@ func (s *SQLiteStore) ListSessionGrants(ctx context.Context, filter approval.Gra
 	return grants, rows.Err()
 }
 
-func findActiveSessionGrantTx(ctx context.Context, tx *sql.Tx, query approval.GrantQuery) (approval.SessionGrant, bool, error) {
+func findActiveSessionGrant(ctx context.Context, queryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, query approval.GrantQuery) (approval.SessionGrant, bool, error) {
 	query.RunID = strings.TrimSpace(query.RunID)
 	query.SessionID = strings.TrimSpace(query.SessionID)
 	query.WorkspaceID = strings.TrimSpace(query.WorkspaceID)
@@ -367,7 +357,7 @@ func findActiveSessionGrantTx(ctx context.Context, tx *sql.Tx, query approval.Gr
 		sqlText += ` AND approval_session_grants.run_id = ?`
 		args = append(args, query.RunID)
 	}
-	grant, err := getSessionGrantRow(tx.QueryRowContext(ctx, sqlText, args...))
+	grant, err := getSessionGrantRow(queryer.QueryRowContext(ctx, sqlText, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return approval.SessionGrant{}, false, nil
 	}

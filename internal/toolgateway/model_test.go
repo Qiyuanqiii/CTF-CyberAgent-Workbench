@@ -15,6 +15,7 @@ func TestApprovalModesAndToolClassesAreStable(t *testing.T) {
 	tests := map[ToolName]ActionClass{
 		ReadFileTool: ClassWorkspaceRead, ListWorkspaceTool: ClassWorkspaceRead,
 		ReplaceFileTool: ClassWorkspaceWrite, ShellTool: ClassShell,
+		ScriptProcessTool: ClassProcess, WorkItemCreateTool: ClassRunMemory, NoteCreateTool: ClassRunMemory,
 	}
 	for name, want := range tests {
 		got, ok := ClassForTool(name)

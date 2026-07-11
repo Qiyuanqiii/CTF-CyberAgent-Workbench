@@ -253,11 +253,17 @@ func TestToolCallBudgetIsAtomicAndBoundToRunScope(t *testing.T) {
 }
 
 func TestConcurrentToolCallBudgetNeverOverspends(t *testing.T) {
-	st, err := Open(filepath.Join(t.TempDir(), "tool-budget-concurrent.db"))
+	path := filepath.Join(t.TempDir(), "tool-budget-concurrent.db")
+	st, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
+	other, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
 	ctx := context.Background()
 	_, run, err := application.NewRunService(st).Create(ctx, application.CreateRunRequest{
 		Goal: "concurrent budget", Profile: "code", WorkspaceID: "ws-concurrent",
@@ -271,12 +277,13 @@ func TestConcurrentToolCallBudgetNeverOverspends(t *testing.T) {
 		ToolName: "read_file", ActionClass: "workspace_read",
 	}
 	results := make([]error, 16)
+	stores := []*SQLiteStore{st, other}
 	var wait sync.WaitGroup
 	for index := range results {
 		wait.Add(1)
 		go func(index int) {
 			defer wait.Done()
-			_, results[index] = st.ChargeToolCall(ctx, request)
+			_, results[index] = stores[index%len(stores)].ChargeToolCall(ctx, request)
 		}(index)
 	}
 	wait.Wait()

@@ -173,7 +173,7 @@ Work items and notes are stored independently from LLM messages. Context constru
 
 The current P3 implementation persists both surfaces. Schema v9 WorkItems use optimistic versions, composite same-Run dependency keys, cycle checks, legal transitions, and transactional `work_item.created/changed` events. Schema v10 Notes add category, visibility, Owner, tags, source references, Evidence IDs, pinning, archive/restore, and transactional `note.created/changed` events. Root context includes `run`, `root`, and `owner=root` Notes but excludes another owner's memory.
 
-Before each model call, a generic Context Section selector ranks the latest compacted summary, bounded active Work Board, pinned Notes, and category-weighted Notes under an 8,192-token estimate. `model.started` records included and omitted `kind/source_id/tokens` metadata so provenance survives restart, while Note bodies remain outside the event. Model-driven root `finish` is rejected through protocol repair while active work remains and checked again under the final SQLite write transaction. Model-authored WorkItem/Note mutation tools are not yet registered in the current Tool Gateway.
+Before each model call, a generic Context Section selector ranks the latest compacted summary, bounded active Work Board, pinned Notes, and category-weighted Notes under an 8,192-token estimate. `model.started` records included and omitted `kind/source_id/tokens` metadata so provenance survives restart, while Note bodies remain outside the event. Model-driven root `finish` is rejected through protocol repair while active work remains and checked again under the final SQLite write transaction. Schema v15 registers create-only WorkItem/Note tools in the Tool Gateway; RunSupervisor does not dispatch Provider ToolCalls yet, so the model loop remains read-only until that adapter is audited.
 
 ## Lifecycle Protocol
 
@@ -220,7 +220,11 @@ Schema v13 promotes scripts out of legacy Shell ToolRuns into `script_process_pr
 
 Schema v14 adds `run_artifacts`. A Run-bound terminal Shell or ScriptProcess, a failed FileEdit diagnostic, or an automatic workspace read/list invocation captures each non-empty stdout/stderr stream before the ordinary Result is truncated. The Artifact Store requires exact Run/Session/Workspace and persisted source linkage, normalizes UTF-8, applies redaction again at the Gateway and Store boundaries, stores at most 4 MiB per stream, and computes SHA-256 over the redacted content. The row and metadata-only `artifact.created` event commit atomically. Replaying a completed proposal reuses `(run_id, source_id, stream)`; different content or metadata conflicts. A capture failure after terminal proposal completion is recoverable by replay without repeating the approval or tool lifecycle event. The legacy v1 `artifacts` table remains a generated-file path registry for old Task workflows; it is intentionally separate from the content-bearing, Run-scoped v14 table.
 
-Existing `tool_runs` and `file_edits` remain compatibility proposal records, while typed script processes use their own v13 table. `tool_approvals` is the single authorization fact used to gate every privileged transition, and transactional Run-event projection is preserved. Gateway Results enforce 128 KiB stdout, 32 KiB stderr, valid UTF-8, MIME metadata, truncation flags, secret redaction, and Artifact reference metadata; the larger redacted Artifact remains separately inspectable and hash-verifiable. Store JSON redaction parses payloads with exact numbers, redacts string values recursively, and re-encodes them so escaped nested JSON cannot be corrupted. Payloads are capped at 1 MiB, 64 levels, and 100,000 nodes. Model-authored WorkItem/Note tools remain P5 work.
+Schema v15 adds automatic, create-only `work_item_create` and `note_create` actions under the new `run_memory` class. Calls carry a typed JSON payload and a non-serializable operation key, while Run, Session, Workspace, and requester identity come from the Go control plane. Strict decoding, normalization, dependency-ID shape validation, required identity checks, and executor availability happen before the budget charge. Policy and the authoritative persisted Run/Session/Workspace binding check happen after charging because a well-formed attempted call consumes budget. Denied calls append a durable decision without mutation; allowed calls atomically commit the redacted entity, allowed decision, domain event, `tool.completed`, and `structured_tool_operations` ledger row. The ledger stores only a domain-separated operation-key digest and normalized request fingerprint. Same-key/same-intent retries return the original target, changed intent conflicts, and concurrent calls from independent SQLite connections converge on one row. SQLite connections use immediate write transactions with the existing busy timeout to avoid deferred read-to-write lock races. Replays, conflicts, scope failures, and denials still count as invocations; malformed input does not.
+
+Structured-memory Results contain metadata only and therefore do not create output Artifacts. Create is automatic because it is additive and reversible through operator lifecycle commands; update, complete, cancel, archive, and restore remain outside the model tool surface. RunSupervisor still rejects Provider ToolCalls, so registering these schemas does not silently enable autonomous mutation.
+
+Existing `tool_runs` and `file_edits` remain compatibility proposal records, while typed script processes use their own v13 table. `tool_approvals` is the single authorization fact used to gate every privileged transition, and transactional Run-event projection is preserved. Gateway Results enforce 128 KiB stdout, 32 KiB stderr, valid UTF-8, MIME metadata, truncation flags, secret redaction, and Artifact reference metadata; the larger redacted Artifact remains separately inspectable and hash-verifiable. Store JSON redaction parses payloads with exact numbers, redacts string values recursively, and re-encodes them so escaped nested JSON cannot be corrupted. Payloads are capped at 1 MiB, 64 levels, and 100,000 nodes.
 
 ## Sandbox
 
@@ -307,7 +311,7 @@ CLI and headless mode print persisted events. Bubble Tea consumes the bounded in
 
 ## Persistence
 
-SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, `v6` adds cumulative token and model-time budget counters, `v7` adds bounded pending input recovery, `v8` adds protocol-repair phase/reason recovery, `v9` adds the Run-scoped Work Board, `v10` adds Notes plus normalized tag/source/Evidence relationships, `v11` adds durable approvals, `v12` adds Session grants and tool budgets, `v13` adds typed script processes, and `v14` adds Run output Artifacts. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
+SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, `v6` adds cumulative token and model-time budget counters, `v7` adds bounded pending input recovery, `v8` adds protocol-repair phase/reason recovery, `v9` adds the Run-scoped Work Board, `v10` adds Notes plus normalized tag/source/Evidence relationships, `v11` adds durable approvals, `v12` adds Session grants and tool budgets, `v13` adds typed script processes, `v14` adds Run output Artifacts, and `v15` adds idempotent structured-memory operation facts. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
 
 ```text
 missions
@@ -325,6 +329,7 @@ run_tool_usage
 run_tool_calls
 script_process_proposals
 run_artifacts
+structured_tool_operations
 ```
 
 Later migrations add:
@@ -353,6 +358,8 @@ internal/report/            Findings, evidence, report projections
 internal/skills/            Skill registry and loading
 internal/llm/               Provider interfaces and routing
 internal/tools/             Tool definitions and workspace-safe tools
+internal/toolgateway/       Unified scope, policy, approval, budget, execution, and result boundary
+internal/runmutation/       Content-free idempotency identity and fingerprints
 internal/sandbox/           Backend interfaces and Docker/local runners
 internal/store/             SQLite stores and migrations
 internal/session/           Compatibility conversation service

@@ -55,17 +55,28 @@ func (s *WorkItemService) Create(ctx context.Context, req CreateWorkItemRequest)
 	if s == nil || s.store == nil {
 		return domain.WorkItem{}, apperror.New(apperror.CodeFailedPrecondition, "work item store is required")
 	}
-	runID := strings.TrimSpace(req.RunID)
-	if runID == "" {
-		return domain.WorkItem{}, apperror.New(apperror.CodeInvalidArgument, "work item run id is required")
-	}
-	run, err := s.mutableRun(ctx, runID)
+	_, item, event, err := s.prepareCreate(ctx, req)
 	if err != nil {
 		return domain.WorkItem{}, err
 	}
+	if err := s.store.CreateWorkItem(ctx, item, event); err != nil {
+		return domain.WorkItem{}, apperror.Normalize(err)
+	}
+	return s.store.GetWorkItem(ctx, item.ID)
+}
+
+func (s *WorkItemService) prepareCreate(ctx context.Context, req CreateWorkItemRequest) (domain.Run, domain.WorkItem, events.Event, error) {
+	runID := strings.TrimSpace(req.RunID)
+	if runID == "" {
+		return domain.Run{}, domain.WorkItem{}, events.Event{}, apperror.New(apperror.CodeInvalidArgument, "work item run id is required")
+	}
+	run, err := s.mutableRun(ctx, runID)
+	if err != nil {
+		return domain.Run{}, domain.WorkItem{}, events.Event{}, err
+	}
 	priority, err := domain.ParseWorkItemPriority(req.Priority)
 	if err != nil {
-		return domain.WorkItem{}, apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+		return domain.Run{}, domain.WorkItem{}, events.Event{}, apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
 	}
 	now := time.Now().UTC()
 	item := domain.WorkItem{
@@ -77,7 +88,7 @@ func (s *WorkItemService) Create(ctx context.Context, req CreateWorkItemRequest)
 		AcceptanceCriteria: slices.Clone(req.AcceptanceCriteria), Dependencies: slices.Clone(req.Dependencies),
 	})
 	if err != nil {
-		return domain.WorkItem{}, err
+		return domain.Run{}, domain.WorkItem{}, events.Event{}, err
 	}
 	item.Title = details.Title
 	item.Description = details.Description
@@ -85,19 +96,16 @@ func (s *WorkItemService) Create(ctx context.Context, req CreateWorkItemRequest)
 	item.AcceptanceCriteria = details.AcceptanceCriteria
 	item.Dependencies = details.Dependencies
 	if err := item.Validate(); err != nil {
-		return domain.WorkItem{}, apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+		return domain.Run{}, domain.WorkItem{}, events.Event{}, apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
 	}
 	event, err := events.New(run.ID, run.MissionID, events.WorkItemCreatedEvent, "work_item_service", item.ID, map[string]any{
 		"title": item.Title, "status": item.Status, "priority": item.Priority, "owner": item.Owner,
 		"dependency_ids": item.Dependencies, "acceptance_count": len(item.AcceptanceCriteria), "version": item.Version,
 	})
 	if err != nil {
-		return domain.WorkItem{}, err
+		return domain.Run{}, domain.WorkItem{}, events.Event{}, err
 	}
-	if err := s.store.CreateWorkItem(ctx, item, event); err != nil {
-		return domain.WorkItem{}, apperror.Normalize(err)
-	}
-	return s.store.GetWorkItem(ctx, item.ID)
+	return run, item, event, nil
 }
 
 func (s *WorkItemService) Get(ctx context.Context, id string) (domain.WorkItem, error) {

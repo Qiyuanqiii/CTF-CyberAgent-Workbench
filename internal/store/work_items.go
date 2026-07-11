@@ -20,17 +20,8 @@ const maxWorkItemListLimit = 500
 
 func (s *SQLiteStore) CreateWorkItem(ctx context.Context, item domain.WorkItem, event events.Event) error {
 	item = redactAndNormalizeWorkItem(item)
-	if err := item.Validate(); err != nil {
-		return apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
-	}
-	if item.Version != 1 || item.Status != domain.WorkItemPending {
-		return apperror.New(apperror.CodeInvalidArgument, "new work item must be pending at version 1")
-	}
-	if event.Type != events.WorkItemCreatedEvent || event.SubjectID != item.ID || event.RunID != item.RunID {
-		return apperror.New(apperror.CodeInvalidArgument, "work item create event does not match the item")
-	}
-	if err := event.Validate(); err != nil {
-		return apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+	if err := validateNewWorkItem(item, event); err != nil {
+		return err
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
@@ -44,6 +35,32 @@ func (s *SQLiteStore) CreateWorkItem(ctx context.Context, item domain.WorkItem, 
 	if event.MissionID != missionID {
 		return apperror.New(apperror.CodeInvalidArgument, "work item create event mission does not match the run")
 	}
+	if err := insertNewWorkItemTx(ctx, tx, item); err != nil {
+		return err
+	}
+	if _, err := insertRunEventTx(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func validateNewWorkItem(item domain.WorkItem, event events.Event) error {
+	if err := item.Validate(); err != nil {
+		return apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+	}
+	if item.Version != 1 || item.Status != domain.WorkItemPending {
+		return apperror.New(apperror.CodeInvalidArgument, "new work item must be pending at version 1")
+	}
+	if event.Type != events.WorkItemCreatedEvent || event.SubjectID != item.ID || event.RunID != item.RunID {
+		return apperror.New(apperror.CodeInvalidArgument, "work item create event does not match the item")
+	}
+	if err := event.Validate(); err != nil {
+		return apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+	}
+	return nil
+}
+
+func insertNewWorkItemTx(ctx context.Context, tx *sql.Tx, item domain.WorkItem) error {
 	if err := ensureWorkItemDependenciesTx(ctx, tx, item.RunID, item.ID, item.Dependencies); err != nil {
 		return err
 	}
@@ -59,13 +76,7 @@ func (s *SQLiteStore) CreateWorkItem(ctx context.Context, item domain.WorkItem, 
 		item.Version, ts(item.CreatedAt), ts(item.UpdatedAt), nullableTS(item.CompletedAt)); err != nil {
 		return err
 	}
-	if err := replaceWorkItemDependenciesTx(ctx, tx, item); err != nil {
-		return err
-	}
-	if _, err := insertRunEventTx(ctx, tx, event); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return replaceWorkItemDependenciesTx(ctx, tx, item)
 }
 
 func (s *SQLiteStore) GetWorkItem(ctx context.Context, id string) (domain.WorkItem, error) {

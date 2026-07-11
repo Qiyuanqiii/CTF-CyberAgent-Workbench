@@ -241,6 +241,10 @@ func (s *memoryStore) GetToolCallUsage(context.Context, string) (toolbudget.Usag
 	return toolbudget.Usage{Remaining: -1}, nil
 }
 
+func (s *memoryStore) RecordPolicyDecision(context.Context, policy.DecisionRecord) error {
+	return nil
+}
+
 func (s *memoryStore) CaptureToolOutput(_ context.Context, request artifact.CaptureRequest) ([]artifact.Descriptor, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -205,6 +205,12 @@ func TestSQLiteUpgradesSchemaV13ToRunArtifactsWithoutLosingScriptProcess(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.db.ExecContext(ctx, `DROP TABLE structured_tool_operations`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version = 15`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.db.ExecContext(ctx, `DROP TABLE run_artifacts`); err != nil {
 		t.Fatal(err)
 	}

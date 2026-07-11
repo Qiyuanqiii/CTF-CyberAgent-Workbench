@@ -1,6 +1,8 @@
 package toolgateway
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -31,16 +33,19 @@ const (
 type ToolName string
 
 const (
-	ReadFileTool      ToolName = "read_file"
-	ListWorkspaceTool ToolName = "list_workspace"
-	ShellTool         ToolName = "shell"
-	ReplaceFileTool   ToolName = "replace_file"
-	ScriptProcessTool ToolName = "script_process"
+	ReadFileTool       ToolName = "read_file"
+	ListWorkspaceTool  ToolName = "list_workspace"
+	ShellTool          ToolName = "shell"
+	ReplaceFileTool    ToolName = "replace_file"
+	ScriptProcessTool  ToolName = "script_process"
+	WorkItemCreateTool ToolName = "work_item_create"
+	NoteCreateTool     ToolName = "note_create"
 )
 
 func (n ToolName) Valid() bool {
 	switch n {
-	case ReadFileTool, ListWorkspaceTool, ShellTool, ReplaceFileTool, ScriptProcessTool:
+	case ReadFileTool, ListWorkspaceTool, ShellTool, ReplaceFileTool, ScriptProcessTool,
+		WorkItemCreateTool, NoteCreateTool:
 		return true
 	default:
 		return false
@@ -54,11 +59,12 @@ const (
 	ClassWorkspaceWrite ActionClass = "workspace_write"
 	ClassShell          ActionClass = "shell"
 	ClassProcess        ActionClass = "process"
+	ClassRunMemory      ActionClass = "run_memory"
 )
 
 func (c ActionClass) Valid() bool {
 	switch c {
-	case ClassWorkspaceRead, ClassWorkspaceWrite, ClassShell, ClassProcess:
+	case ClassWorkspaceRead, ClassWorkspaceWrite, ClassShell, ClassProcess, ClassRunMemory:
 		return true
 	default:
 		return false
@@ -75,6 +81,8 @@ func ClassForTool(name ToolName) (ActionClass, bool) {
 		return ClassShell, true
 	case ScriptProcessTool:
 		return ClassProcess, true
+	case WorkItemCreateTool, NoteCreateTool:
+		return ClassRunMemory, true
 	default:
 		return "", false
 	}
@@ -121,7 +129,9 @@ func (s Status) Valid() bool {
 type ToolCall struct {
 	Name          ToolName          `json:"name"`
 	Arguments     map[string]string `json:"arguments"`
+	Payload       json.RawMessage   `json:"payload,omitempty"`
 	InvocationID  string            `json:"invocation_id,omitempty"`
+	OperationKey  string            `json:"-"`
 	RunID         string            `json:"run_id,omitempty"`
 	SessionID     string            `json:"session_id,omitempty"`
 	WorkspaceID   string            `json:"workspace_id,omitempty"`
@@ -131,7 +141,9 @@ type ToolCall struct {
 
 func NormalizeToolCall(call ToolCall) (ToolCall, error) {
 	call.Name = ToolName(strings.TrimSpace(string(call.Name)))
+	call.Payload = append(json.RawMessage(nil), bytes.TrimSpace(call.Payload)...)
 	call.InvocationID = strings.TrimSpace(call.InvocationID)
+	call.OperationKey = strings.TrimSpace(call.OperationKey)
 	call.RunID = strings.TrimSpace(call.RunID)
 	call.SessionID = strings.TrimSpace(call.SessionID)
 	call.WorkspaceID = strings.TrimSpace(call.WorkspaceID)
@@ -141,7 +153,8 @@ func NormalizeToolCall(call ToolCall) (ToolCall, error) {
 		return ToolCall{}, fmt.Errorf("unsupported tool %q", call.Name)
 	}
 	for label, value := range map[string]string{
-		"invocation id": call.InvocationID, "run id": call.RunID, "session id": call.SessionID,
+		"invocation id": call.InvocationID, "operation key": call.OperationKey,
+		"run id": call.RunID, "session id": call.SessionID,
 		"workspace id": call.WorkspaceID, "requester": call.RequestedBy,
 	} {
 		if !utf8.ValidString(value) {
@@ -150,6 +163,15 @@ func NormalizeToolCall(call ToolCall) (ToolCall, error) {
 		if len([]rune(value)) > MaxToolIdentityRunes {
 			return ToolCall{}, fmt.Errorf("tool %s exceeds %d characters", label, MaxToolIdentityRunes)
 		}
+	}
+	if strings.ContainsRune(call.OperationKey, 0) {
+		return ToolCall{}, errors.New("tool operation key cannot contain NUL")
+	}
+	if len(call.Payload) > MaxArgumentValueBytes {
+		return ToolCall{}, fmt.Errorf("tool payload exceeds %d bytes", MaxArgumentValueBytes)
+	}
+	if len(call.Payload) > 0 && (!utf8.Valid(call.Payload) || !json.Valid(call.Payload)) {
+		return ToolCall{}, errors.New("tool payload must be valid UTF-8 JSON")
 	}
 	if !utf8.ValidString(call.WorkspaceRoot) {
 		return ToolCall{}, errors.New("tool workspace root must be valid UTF-8")
@@ -186,7 +208,8 @@ func (c ToolCall) Validate() error {
 	if err != nil {
 		return err
 	}
-	if normalized.Name != c.Name || normalized.InvocationID != c.InvocationID || normalized.RunID != c.RunID || normalized.SessionID != c.SessionID ||
+	if normalized.Name != c.Name || !bytes.Equal(normalized.Payload, c.Payload) || normalized.InvocationID != c.InvocationID ||
+		normalized.OperationKey != c.OperationKey || normalized.RunID != c.RunID || normalized.SessionID != c.SessionID ||
 		normalized.WorkspaceID != c.WorkspaceID || normalized.WorkspaceRoot != c.WorkspaceRoot || normalized.RequestedBy != c.RequestedBy ||
 		!maps.Equal(normalized.Arguments, c.Arguments) {
 		return errors.New("tool call must be normalized")

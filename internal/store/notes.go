@@ -17,17 +17,8 @@ const maxNoteListLimit = 500
 
 func (s *SQLiteStore) CreateNote(ctx context.Context, note domain.Note, event events.Event) error {
 	note = redactAndNormalizeNote(note)
-	if err := note.Validate(); err != nil {
-		return apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
-	}
-	if note.Version != 1 || note.Status != domain.NoteActive {
-		return apperror.New(apperror.CodeInvalidArgument, "new note must be active at version 1")
-	}
-	if event.Type != events.NoteCreatedEvent || event.SubjectID != note.ID || event.RunID != note.RunID {
-		return apperror.New(apperror.CodeInvalidArgument, "note create event does not match the note")
-	}
-	if err := event.Validate(); err != nil {
-		return apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+	if err := validateNewNote(note, event); err != nil {
+		return err
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
@@ -41,6 +32,32 @@ func (s *SQLiteStore) CreateNote(ctx context.Context, note domain.Note, event ev
 	if event.MissionID != missionID {
 		return apperror.New(apperror.CodeInvalidArgument, "note create event mission does not match the run")
 	}
+	if err := insertNewNoteTx(ctx, tx, note); err != nil {
+		return err
+	}
+	if _, err := insertRunEventTx(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func validateNewNote(note domain.Note, event events.Event) error {
+	if err := note.Validate(); err != nil {
+		return apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+	}
+	if note.Version != 1 || note.Status != domain.NoteActive {
+		return apperror.New(apperror.CodeInvalidArgument, "new note must be active at version 1")
+	}
+	if event.Type != events.NoteCreatedEvent || event.SubjectID != note.ID || event.RunID != note.RunID {
+		return apperror.New(apperror.CodeInvalidArgument, "note create event does not match the note")
+	}
+	if err := event.Validate(); err != nil {
+		return apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+	}
+	return nil
+}
+
+func insertNewNoteTx(ctx context.Context, tx *sql.Tx, note domain.Note) error {
 	if _, err := tx.ExecContext(ctx, `INSERT INTO notes
 		(id, run_id, title, content, category, visibility, owner, status, pinned, version, created_at, updated_at, archived_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, note.ID, note.RunID, note.Title, note.Content,
@@ -48,13 +65,7 @@ func (s *SQLiteStore) CreateNote(ctx context.Context, note domain.Note, event ev
 		ts(note.CreatedAt), ts(note.UpdatedAt), nullableTS(note.ArchivedAt)); err != nil {
 		return err
 	}
-	if err := replaceNoteRelationsTx(ctx, tx, note); err != nil {
-		return err
-	}
-	if _, err := insertRunEventTx(ctx, tx, event); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return replaceNoteRelationsTx(ctx, tx, note)
 }
 
 func (s *SQLiteStore) GetNote(ctx context.Context, id string) (domain.Note, error) {

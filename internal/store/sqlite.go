@@ -46,7 +46,7 @@ func Open(path string) (*SQLiteStore, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite3", path)
+	db, err := sql.Open("sqlite3", sqliteDSN(path))
 	if err != nil {
 		return nil, err
 	}
@@ -66,6 +66,14 @@ func Open(path string) (*SQLiteStore, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func sqliteDSN(path string) string {
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return path + separator + "_txlock=immediate"
 }
 
 func (s *SQLiteStore) Close() error {
@@ -201,6 +209,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 12, Name: "session grants and tool budgets", Statements: sessionGrantAndToolBudgetStatements},
 		{Version: 13, Name: "typed script process proposals", Statements: typedScriptProcessStatements},
 		{Version: 14, Name: "run tool output artifacts", Statements: runArtifactStatements},
+		{Version: 15, Name: "structured memory tool operations", Statements: structuredToolOperationStatements},
 	})
 }
 

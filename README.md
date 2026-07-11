@@ -25,6 +25,8 @@ schema v13 将 `script_process.v1` 提升为独立类型化提案。`script run`
 
 schema v14 新增 Run 级工具输出 Artifact。终态 Shell、ScriptProcess、失败的 FileEdit 以及 Run 绑定的工作区读取，会在结果截断前捕获最多 4 MiB 的完整脱敏文本，记录 MIME、UTF-8、SHA-256、字节数、来源调用与 `artifact.created` 事件。常规 Result 仍限制为 128 KiB stdout 和 32 KiB stderr；Artifact 哈希基于脱敏后正文，并可通过 `artifact list/show/read/verify` 检查。
 
+schema v15 新增 create-only 的 `work_item_create` 与 `note_create` 结构化记忆工具。调用必须绑定准确的 Run、Session 与 Workspace，先经过严格 JSON schema、工具预算和 Policy，再把业务记录、`policy.decision`、领域事件、`tool.completed` 与幂等操作账本原子提交。原始 operation key 不落库；相同 key 与相同意图安全重放，不同意图返回冲突；Note 内容和工具参数在输出、事件与持久化边界脱敏。当前可通过 CLI 或未来 Provider adapter 调用，但 RunSupervisor 仍拒绝模型返回的 ToolCall，自动模型工具循环留到下一切片。
+
 ### English
 
 CyberAgent Workbench is a local AI agent workbench powered by Go for coding, code review, security learning, scripting, and controlled cybersecurity analysis. It brings model calls, long-context memory, workspace files, policy checks, approvals, execution budgets, and event history into one resumable runtime, so work can continue after a process restart and every action remains inspectable.
@@ -45,6 +47,8 @@ Schema v13 promotes `script_process.v1` to a first-class typed proposal. `script
 
 Schema v14 adds Run-scoped tool-output Artifacts. Terminal Shell and ScriptProcess output, failed FileEdit diagnostics, and Run-bound workspace reads are captured before Result truncation as up to 4 MiB of complete redacted text with MIME, UTF-8 encoding, SHA-256, byte count, source linkage, and an `artifact.created` event. Ordinary Results remain capped at 128 KiB stdout and 32 KiB stderr. Artifact hashes cover the redacted content and can be inspected through `artifact list/show/read/verify`.
 
+Schema v15 adds create-only `work_item_create` and `note_create` structured-memory tools. Every call is bound to an exact Run, Session, and Workspace, then passes strict JSON validation, the Run tool budget, and Policy before the business record, `policy.decision`, domain event, `tool.completed`, and idempotency ledger commit atomically. Raw operation keys are never stored; identical intent replays safely, changed intent conflicts, and Note content and tool payloads are redacted at output, event, and persistence boundaries. The tools are available through the CLI and a future Provider adapter, while RunSupervisor still rejects model ToolCalls until the next audited slice adds the model tool loop.
+
 ## 核心能力 / Core Capabilities
 
 - **可恢复运行 / Resumable runs:** durable checkpoints, bounded execution, restart recovery, graceful terminal cancellation, and explicit lifecycle actions.
@@ -52,15 +56,15 @@ Schema v14 adds Run-scoped tool-output Artifacts. Terminal Shell and ScriptProce
 - **长上下文与结构化记忆 / Long-context memory:** persisted sessions, automatic compaction, durable categorized Notes, visibility rules, and token-budgeted source selection.
 - **结构化任务板 / Structured Work Board:** Run-scoped work items, dependency and cycle checks, optimistic versions, transactional events, and bounded Supervisor context.
 - **本地工作区 / Local workspace:** scoped file access, safe reads, hashed Run artifacts, and reviewable edit proposals.
-- **统一工具网关 / Unified Tool Gateway:** normalized calls, trusted workspace binding, policy decisions, shared review, first-class non-executable `script_process.v1` proposals, bounded UTF-8 results, MIME metadata, and compatibility adapters.
+- **统一工具网关 / Unified Tool Gateway:** normalized calls, trusted workspace binding, policy decisions, shared review, first-class non-executable `script_process.v1` proposals, create-only structured WorkItem/Note tools, bounded UTF-8 results, MIME metadata, and compatibility adapters.
 - **安全与审批 / Safety and approval:** policy checks, secret redaction, automatic low-risk reads, durable per-call approvals, revocable scoped Session grants, atomic Run tool budgets, permanent denial, and dry-run command completion.
 - **完整审计链 / Audit trail:** append-only Run events for messages, context source provenance, bounded text-free stream progress, model calls, Notes, policy decisions, tool proposals, file edits, and content-free Artifact metadata.
 - **CLI 与 TUI / CLI and TUI:** a scriptable CLI plus a Bubble Tea interface with live model progress and audited cancellation.
 - **可扩展架构 / Extensible architecture:** Go control plane with planned HTTP/WebSocket, TypeScript UI, Docker sandbox, and Rust analyzer boundaries.
 
 > [!NOTE]
-> 当前版本仍在积极开发中。真实工具自动执行、多 Agent 协作、Web UI 和 CTF 自动求解尚未开放。<br>
-> This project is under active development. Autonomous tool execution, multi-agent coordination, the Web UI, and automated CTF solving are not enabled yet.
+> 当前版本仍在积极开发中。Provider 自动工具循环、真实 Shell/Docker 执行、多 Agent 协作、Web UI 和 CTF 自动求解尚未开放。<br>
+> This project is under active development. Provider-driven tool loops, real Shell/Docker execution, multi-agent coordination, the Web UI, and automated CTF solving are not enabled yet.
 
 **密钥边界 / Secret boundary:** 应用不会持久化 API key；可选在线 Provider 只从当前进程环境变量读取密钥。<br>
 The application never persists API keys; optional live providers read them only from the current process environment.
@@ -95,6 +99,10 @@ go run ./cmd/cyberagent run finish <run-id> --summary "review complete"
 go run ./cmd/cyberagent run fail <run-id> --reason "blocked by provider"
 go run ./cmd/cyberagent run checkpoint <run-id>
 go run ./cmd/cyberagent run usage <run-id>
+go run ./cmd/cyberagent tool schema
+go run ./cmd/cyberagent tool schema work_item_create
+go run ./cmd/cyberagent tool invoke work_item_create --run <run-id> --operation-key <stable-key> --payload-file .\work-item.json
+go run ./cmd/cyberagent tool invoke note_create --run <run-id> --operation-key <stable-key> --payload-file .\note.json
 go run ./cmd/cyberagent todo create <run-id> "inspect parser" --priority high --acceptance "tests pass"
 go run ./cmd/cyberagent todo create <run-id> "write tests" --depends-on <work-id>
 go run ./cmd/cyberagent todo list <run-id> --status pending,blocked
@@ -153,13 +161,13 @@ Local runtime databases, workspace data, environment files, API keys, IDE metada
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable no-tool root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, and exactly one restart-safe lifecycle-protocol repair. P3 includes migration v9 WorkItems, migration v10 Notes, transactional relationships/events, `todo` and `note` CLI lifecycles, root/owner visibility, token-budgeted memory selection, and durable context provenance. P5 now includes the unified Tool Gateway, trusted workspace scope binding, schema v11 durable per-call approvals, schema v12 revocable Session grants and atomic Run tool-call accounting, schema v13 first-class typed script processes, and schema v14 source-bound hashed output Artifacts. Real Local/Docker command execution remains disabled. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, application-owned active-call query/cancellation, Bubble Tea live metadata and `Ctrl+X` cancellation, durable model events, and exactly one restart-safe lifecycle-protocol repair. P3 includes migration v9 WorkItems, migration v10 Notes, transactional relationships/events, `todo` and `note` CLI lifecycles, root/owner visibility, token-budgeted memory selection, durable context provenance, and schema v15 create-only structured memory tools. P5 now includes the unified Tool Gateway, trusted workspace scope binding, schema v11 durable per-call approvals, schema v12 revocable Session grants and atomic Run tool-call accounting, schema v13 first-class typed script processes, schema v14 source-bound hashed output Artifacts, and the v15 idempotent mutation ledger. Provider-driven tool dispatch and real Local/Docker command execution remain disabled. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
 TUI quick controls: `cyberagent tui` opens a session picker. In chat, `Tab` switches focus, `PgUp/PgDn` scroll messages, `j/k` select tool runs, `a` approves, `d` denies, `Ctrl+X` requests cancellation of the current model call, `Ctrl+R` refreshes, and `Esc` quits when idle. Busy sends cannot be closed accidentally with `Esc`; cancel or wait first. The status line renders provider/model, attempt, chunk/byte progress, cancellation, disconnect, and terminal state without exposing raw model text. Attached workspaces render in the side panel with local directory counts for attachments, scripts, outputs, logs, and writeups.
 
 Workspace file reads and model-bound messages pass through heuristic secret redaction for common API keys, bearer tokens, GitHub tokens, AWS access keys, JWTs, and private-key blocks.
 
-File changes, Shell proposals, and typed script-process proposals enter the same Tool Gateway review service and Run-event stream. The schema v11 approval ledger is inspectable through `approval list/show`; review idempotency survives restart, while a conflicting reuse of the same key is rejected. Schema v12 Session grants are managed through `approval grant create/list/show/revoke`, and `run usage` exposes durable tool consumption. Schema v13 stores script processes separately from legacy Shell ToolRuns and makes initial Run creation recoverably idempotent. Schema v14 stores redacted full-stream evidence separately from bounded Results and links each Artifact to its exact proposal or invocation. `edit propose` and session `/write` normally persist a redacted diff without changing the workspace; an explicitly created matching Session grant may authorize and apply the edit immediately, with the grant ID recorded on the approval fact. Shell and script-process approval still produce dry-run output only.
+File changes, Shell proposals, typed script-process proposals, and create-only structured memory calls enter the same Tool Gateway and Run-event stream. The schema v11 approval ledger is inspectable through `approval list/show`; review idempotency survives restart, while a conflicting reuse of the same key is rejected. Schema v12 Session grants are managed through `approval grant create/list/show/revoke`, and `run usage` exposes durable tool consumption. Schema v13 stores script processes separately from legacy Shell ToolRuns and makes initial Run creation recoverably idempotent. Schema v14 stores redacted full-stream evidence separately from bounded Results and links each Artifact to its exact proposal or invocation. Schema v15 stores only operation-key digests and normalized request fingerprints for WorkItem/Note creation. `edit propose` and session `/write` normally persist a redacted diff without changing the workspace; an explicitly created matching Session grant may authorize and apply the edit immediately, with the grant ID recorded on the approval fact. Shell and script-process approval still produce dry-run output only.
 
 ## 可选在线 Provider / Optional Online Providers
 

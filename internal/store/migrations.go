@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 14
+const LatestSchemaVersion = 15
 
 type migration struct {
 	Version    int
@@ -430,6 +430,59 @@ var runArtifactStatements = []string{
 		ON run_artifacts(run_id, created_at, id);`,
 	`CREATE INDEX idx_run_artifacts_source_stream
 		ON run_artifacts(source_id, stream, created_at);`,
+}
+
+var structuredToolOperationStatements = []string{
+	`CREATE TABLE structured_tool_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		invocation_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL DEFAULT '',
+		tool_name TEXT NOT NULL,
+		target_kind TEXT NOT NULL,
+		target_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+		FOREIGN KEY(invocation_id) REFERENCES run_tool_calls(id) ON DELETE RESTRICT,
+		UNIQUE(tool_name, target_id),
+		CHECK(length(operation_key_digest) = 64 AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64 AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK((target_kind = 'work_item' AND tool_name = 'work_item_create')
+			OR (target_kind = 'note' AND tool_name = 'note_create'))
+	);`,
+	`CREATE INDEX idx_structured_tool_operations_run_created_at
+		ON structured_tool_operations(run_id, created_at, operation_key_digest);`,
+	`CREATE TRIGGER trg_structured_tool_operation_invocation_scope
+		BEFORE INSERT ON structured_tool_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM run_tool_calls
+			WHERE id = NEW.invocation_id AND run_id = NEW.run_id AND session_id = NEW.session_id
+				AND workspace_id = NEW.workspace_id AND tool_name = NEW.tool_name
+				AND action_class = 'run_memory'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'structured tool invocation scope mismatch');
+		END;`,
+	`CREATE TRIGGER trg_structured_tool_operation_work_item_target
+		BEFORE INSERT ON structured_tool_operations
+		WHEN NEW.target_kind = 'work_item'
+			AND NOT EXISTS (SELECT 1 FROM work_items WHERE id = NEW.target_id AND run_id = NEW.run_id)
+		BEGIN
+			SELECT RAISE(ABORT, 'structured tool WorkItem target mismatch');
+		END;`,
+	`CREATE TRIGGER trg_structured_tool_operation_note_target
+		BEFORE INSERT ON structured_tool_operations
+		WHEN NEW.target_kind = 'note'
+			AND NOT EXISTS (SELECT 1 FROM notes WHERE id = NEW.target_id AND run_id = NEW.run_id)
+		BEGIN
+			SELECT RAISE(ABORT, 'structured tool Note target mismatch');
+		END;`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {

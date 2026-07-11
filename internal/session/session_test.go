@@ -290,6 +290,10 @@ func (m *memorySessionStore) GetToolCallUsage(context.Context, string) (toolbudg
 	return toolbudget.Usage{Remaining: -1}, nil
 }
 
+func (m *memorySessionStore) RecordPolicyDecision(context.Context, policy.DecisionRecord) error {
+	return nil
+}
+
 func (m *memorySessionStore) CaptureToolOutput(context.Context, artifact.CaptureRequest) ([]artifact.Descriptor, error) {
 	return nil, errNotFound("Run artifact")
 }

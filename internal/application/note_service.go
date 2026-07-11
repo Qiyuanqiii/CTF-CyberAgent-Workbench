@@ -61,28 +61,39 @@ func (s *NoteService) Create(ctx context.Context, req CreateNoteRequest) (domain
 	if s == nil || s.store == nil {
 		return domain.Note{}, apperror.New(apperror.CodeFailedPrecondition, "note store is required")
 	}
-	runID := strings.TrimSpace(req.RunID)
-	if runID == "" {
-		return domain.Note{}, apperror.New(apperror.CodeInvalidArgument, "note run id is required")
-	}
-	run, err := s.mutableRun(ctx, runID)
+	_, note, event, err := s.prepareCreate(ctx, req)
 	if err != nil {
 		return domain.Note{}, err
 	}
+	if err := s.store.CreateNote(ctx, note, event); err != nil {
+		return domain.Note{}, apperror.Normalize(err)
+	}
+	return s.store.GetNote(ctx, note.ID)
+}
+
+func (s *NoteService) prepareCreate(ctx context.Context, req CreateNoteRequest) (domain.Run, domain.Note, events.Event, error) {
+	runID := strings.TrimSpace(req.RunID)
+	if runID == "" {
+		return domain.Run{}, domain.Note{}, events.Event{}, apperror.New(apperror.CodeInvalidArgument, "note run id is required")
+	}
+	run, err := s.mutableRun(ctx, runID)
+	if err != nil {
+		return domain.Run{}, domain.Note{}, events.Event{}, err
+	}
 	category, err := domain.ParseNoteCategory(req.Category)
 	if err != nil {
-		return domain.Note{}, apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+		return domain.Run{}, domain.Note{}, events.Event{}, apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
 	}
 	visibility, err := domain.ParseNoteVisibility(req.Visibility)
 	if err != nil {
-		return domain.Note{}, apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+		return domain.Run{}, domain.Note{}, events.Event{}, apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
 	}
 	details, err := normalizeServiceNoteDetails(domain.NoteDetails{
 		Title: req.Title, Content: req.Content, Category: category, Visibility: visibility, Owner: req.Owner,
 		Tags: slices.Clone(req.Tags), SourceRefs: slices.Clone(req.SourceRefs), EvidenceIDs: slices.Clone(req.EvidenceIDs), Pinned: req.Pinned,
 	})
 	if err != nil {
-		return domain.Note{}, err
+		return domain.Run{}, domain.Note{}, events.Event{}, err
 	}
 	now := time.Now().UTC()
 	note := domain.Note{
@@ -92,7 +103,7 @@ func (s *NoteService) Create(ctx context.Context, req CreateNoteRequest) (domain
 		Pinned: details.Pinned, Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := note.Validate(); err != nil {
-		return domain.Note{}, apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+		return domain.Run{}, domain.Note{}, events.Event{}, apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
 	}
 	event, err := events.New(run.ID, run.MissionID, events.NoteCreatedEvent, "note_service", note.ID, map[string]any{
 		"title": note.Title, "category": note.Category, "visibility": note.Visibility, "owner": note.Owner,
@@ -100,12 +111,9 @@ func (s *NoteService) Create(ctx context.Context, req CreateNoteRequest) (domain
 		"pinned": note.Pinned, "status": note.Status, "version": note.Version,
 	})
 	if err != nil {
-		return domain.Note{}, err
+		return domain.Run{}, domain.Note{}, events.Event{}, err
 	}
-	if err := s.store.CreateNote(ctx, note, event); err != nil {
-		return domain.Note{}, apperror.Normalize(err)
-	}
-	return s.store.GetNote(ctx, note.ID)
+	return run, note, event, nil
 }
 
 func (s *NoteService) Get(ctx context.Context, id string) (domain.Note, error) {

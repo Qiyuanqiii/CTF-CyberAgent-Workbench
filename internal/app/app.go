@@ -89,10 +89,12 @@ func (a *App) newRunSupervisor() *application.RunSupervisor {
 }
 
 func (a *App) newToolGateway() *toolgateway.Gateway {
-	return toolgateway.New(a.store, a.checker).WithWorkspaceRootResolver(func(ctx context.Context, workspaceID string) (string, error) {
-		rec, err := a.store.GetWorkspaceByID(ctx, workspaceID)
-		return rec.RootPath, err
-	})
+	return toolgateway.New(a.store, a.checker).
+		WithStructuredMemoryExecutor(application.NewStructuredMemoryToolExecutor(a.store)).
+		WithWorkspaceRootResolver(func(ctx context.Context, workspaceID string) (string, error) {
+			rec, err := a.store.GetWorkspaceByID(ctx, workspaceID)
+			return rec.RootPath, err
+		})
 }
 
 func (a *App) registerEnvProviders() {
@@ -215,7 +217,7 @@ func (a *App) printHelp() {
 	fmt.Fprintln(a.out, "  cyberagent model list|set")
 	fmt.Fprintln(a.out, "  cyberagent context compact|show")
 	fmt.Fprintln(a.out, "  cyberagent session create|list|send|history")
-	fmt.Fprintln(a.out, "  cyberagent tool list|show|approve|deny")
+	fmt.Fprintln(a.out, "  cyberagent tool schema|invoke|list|show|approve|deny")
 	fmt.Fprintln(a.out, "  cyberagent edit propose|list|show|approve|deny")
 	fmt.Fprintln(a.out, "  cyberagent approval list|show|grant")
 	fmt.Fprintln(a.out, "  cyberagent artifact list|show|read|verify")

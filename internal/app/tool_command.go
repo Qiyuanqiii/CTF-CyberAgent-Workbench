@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/scriptprocess"
 	"cyberagent-workbench/internal/toolgateway"
@@ -31,6 +35,10 @@ func (a *App) toolCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	switch args[0] {
+	case "schema":
+		return a.toolSchema(args[1:])
+	case "invoke":
+		return a.toolInvoke(ctx, args[1:])
 	case "list":
 		return a.toolList(ctx, args[1:])
 	case "show":
@@ -42,6 +50,125 @@ func (a *App) toolCommand(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown tool subcommand %q", args[0])
 	}
+}
+
+func (a *App) toolSchema(args []string) error {
+	fs := newFlagSet("tool schema", a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 1 {
+		return errors.New("usage: cyberagent tool schema [work_item_create|note_create]")
+	}
+	var value any = toolgateway.StructuredMemoryToolDefinitions()
+	if fs.NArg() == 1 {
+		definition, found := toolgateway.StructuredMemoryToolDefinition(toolgateway.ToolName(fs.Arg(0)))
+		if !found {
+			return fmt.Errorf("structured tool %q was not found", fs.Arg(0))
+		}
+		value = definition
+	}
+	encoded, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(a.out, string(encoded))
+	return nil
+}
+
+func (a *App) toolInvoke(ctx context.Context, args []string) error {
+	fs := newFlagSet("tool invoke", a.errOut)
+	runID := fs.String("run", "", "Run id")
+	operationKey := fs.String("operation-key", "", "stable idempotency key")
+	payload := fs.String("payload", "", "JSON tool payload")
+	payloadFile := fs.String("payload-file", "", "UTF-8 file containing the JSON tool payload")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"run": true, "operation-key": true, "payload": true, "payload-file": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 || strings.TrimSpace(*runID) == "" || strings.TrimSpace(*operationKey) == "" ||
+		(flagWasSet(fs, "payload") == flagWasSet(fs, "payload-file")) {
+		return errors.New("usage: cyberagent tool invoke <tool> --run <id> --operation-key <key> (--payload <json> | --payload-file <path>)")
+	}
+	tool := toolgateway.ToolName(strings.TrimSpace(fs.Arg(0)))
+	if _, found := toolgateway.StructuredMemoryToolDefinition(tool); !found {
+		return fmt.Errorf("tool %q is not an invocable structured memory tool", tool)
+	}
+	rawPayload := []byte(*payload)
+	if flagWasSet(fs, "payload-file") {
+		var err error
+		rawPayload, err = readStructuredToolPayload(*payloadFile)
+		if err != nil {
+			return err
+		}
+	}
+	run, err := a.store.GetRun(ctx, strings.TrimSpace(*runID))
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(run.SessionID) == "" {
+		return errors.New("structured tool Run must have an attached Session")
+	}
+	mission, err := a.store.GetMission(ctx, run.MissionID)
+	if err != nil {
+		return err
+	}
+	outcome, err := a.newToolGateway().Invoke(ctx, toolgateway.ToolCall{
+		Name: tool, Payload: json.RawMessage(rawPayload), OperationKey: *operationKey,
+		RunID: run.ID, SessionID: run.SessionID, WorkspaceID: mission.WorkspaceID, RequestedBy: "cli",
+	})
+	if err != nil {
+		return err
+	}
+	if outcome.Result == nil {
+		return errors.New("structured tool invocation did not return a result")
+	}
+	if !outcome.Decision.Allowed {
+		fmt.Fprintf(a.out, "tool %s denied\nrun: %s\nreason: %s\n", tool, run.ID, outcome.Decision.Reason)
+		return apperror.New(apperror.CodePolicyDenied,
+			"policy denied structured tool invocation: "+outcome.Decision.Reason)
+	}
+	fmt.Fprintf(a.out, "tool %s %s\nrun: %s\ndecision: %s\n", tool, outcome.Result.Status, run.ID, outcome.Decision.Approval)
+	keys := make([]string, 0, len(outcome.Result.Metadata))
+	for key := range outcome.Result.Metadata {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		fmt.Fprintf(a.out, "%s: %s\n", key, outcome.Result.Metadata[key])
+	}
+	return nil
+}
+
+func readStructuredToolPayload(path string) ([]byte, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, errors.New("structured tool payload file path is required")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() {
+		return nil, fmt.Errorf("structured tool payload file %s is a directory", path)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, toolgateway.MaxStructuredMemoryPayloadBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > toolgateway.MaxStructuredMemoryPayloadBytes {
+		return nil, fmt.Errorf("structured tool payload exceeds %d bytes", toolgateway.MaxStructuredMemoryPayloadBytes)
+	}
+	if !utf8.Valid(data) {
+		return nil, errors.New("structured tool payload file is not valid UTF-8")
+	}
+	return data, nil
 }
 
 func (a *App) toolList(ctx context.Context, args []string) error {
