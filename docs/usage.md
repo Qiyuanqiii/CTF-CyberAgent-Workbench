@@ -203,11 +203,11 @@ Session chat is the main path for generic AI agent features. Ordinary text in a 
 
 ## Unified Tool Gateway
 
-The Gateway validates exact argument schemas, binds calls to a Run/Session/Workspace scope, atomically charges the Run tool-call budget, runs policy checks, selects an approval mode, and normalizes execution results. `read_file` and `list_workspace` use automatic approval only when scope and policy allow them. `replace_file`, `shell`, and `script_process` normally use per-call approval. A policy denial is terminal and cannot be converted into approval by a grant or later review. Schema v11 persists each per-call decision with a request fingerprint, Run/Session association, and immutable idempotency operation before the compatibility proposal advances. Schema v12 persists revocable Session grants scoped to one Run, Session, Workspace, Tool, and ActionClass; terminal Runs and archived Sessions cannot create or consume them. Schema v13 stores typed script processes and makes initial Script Run creation atomic and recoverably idempotent.
+The Gateway validates exact argument schemas, binds calls to a Run/Session/Workspace scope, atomically charges the Run tool-call budget, runs policy checks, selects an approval mode, and normalizes execution results. `read_file` and `list_workspace` use automatic approval only when scope and policy allow them. `replace_file`, `shell`, and `script_process` normally use per-call approval. A policy denial is terminal and cannot be converted into approval by a grant or later review. Schema v11 persists each per-call decision with a request fingerprint, Run/Session association, and immutable idempotency operation before the compatibility proposal advances. Schema v12 persists revocable Session grants scoped to one Run, Session, Workspace, Tool, and ActionClass; terminal Runs and archived Sessions cannot create or consume them. Schema v13 stores typed script processes and makes initial Script Run creation atomic and recoverably idempotent. Schema v14 stores source-bound tool-output Artifacts and projects metadata-only creation events.
 
 New CLI Runs default to 100 tool calls and may set `--max-tool-calls`; zero means unlimited for compatibility. Every valid Run-bound Gateway invocation consumes one call, including Policy-denied attempts. The first attempted call beyond the limit records one `tool.budget_exhausted` event, subsequent attempts return `RESOURCE_EXHAUSTED` without duplicating that event, and `run usage <run-id>` shows consumed, limit, remaining, and exhaustion time.
 
-Text output is valid UTF-8, secret-redacted, MIME-labelled, and bounded to 128 KiB stdout, 32 KiB stderr, and 64 KiB proposal previews. Truncation is explicit. The Gateway does not currently capture oversized output as an Artifact. No production CLI path invokes LocalSandbox; script-process proposals remain deliberately non-executable.
+Text output is valid UTF-8, secret-redacted, MIME-labelled, and bounded to 128 KiB stdout, 32 KiB stderr, and 64 KiB proposal previews. Truncation is explicit. Before this Result projection, each non-empty Run-bound output stream is captured as at most 4 MiB of redacted Artifact content with SHA-256, byte size, MIME, encoding, source proposal/invocation, and Run scope. Hashes cover the redacted content. An explicit `read_file` maximum still bounds what the tool returns and therefore what its Artifact contains. No production CLI path invokes LocalSandbox; script-process proposals remain deliberately non-executable.
 
 ## File Edit Proposals
 
@@ -236,7 +236,19 @@ cyberagent tool approve <proposal-id>
 cyberagent tool deny <proposal-id> --reason "not needed"
 ```
 
-`tool list` combines legacy Shell ToolRuns and typed ScriptProcess proposals and sorts them by update time. `tool show/approve/deny` resolves the proposal type from the durable approval ledger, so callers do not select an implementation-specific manager. `/run` creates a Shell `tool_runs` proposal; `script run` creates a v13 `script_process_proposals` record. A matching active Shell Session grant can authorize Shell automatically, but Shell and ScriptProcess completion remain dry-run. File edits continue to use `edit show/approve/deny`. Real command execution stays disabled until Sandbox isolation and Artifact capture are complete.
+`tool list` combines legacy Shell ToolRuns and typed ScriptProcess proposals and sorts them by update time. `tool show/approve/deny` resolves the proposal type from the durable approval ledger, so callers do not select an implementation-specific manager. `/run` creates a Shell `tool_runs` proposal; `script run` creates a v13 `script_process_proposals` record. A matching active Shell Session grant can authorize Shell automatically, but Shell and ScriptProcess completion remain dry-run. File edits continue to use `edit show/approve/deny`. Terminal tool detail and approval output include associated Artifact IDs. Real command execution stays disabled until Sandbox isolation, network/resource policy, cancellation, and execution-specific evidence export pass a separate audit.
+
+## Run Artifacts
+
+```powershell
+cyberagent artifact list --run <run-id>
+cyberagent artifact list --source <proposal-or-invocation-id> --stream stdout
+cyberagent artifact show <artifact-id>
+cyberagent artifact read <artifact-id> --max-bytes 65536
+cyberagent artifact verify <artifact-id>
+```
+
+`artifact list` and `artifact show` expose metadata without printing content. `artifact read` loads and verifies the stored size and SHA-256 first, then prints at most the requested UTF-8-safe byte limit; its default is 64 KiB and maximum is 4 MiB. `artifact verify` reloads the blob and reports the verified digest and size. Capture is idempotent by Run, source, and stream. Reusing a source with changed content or MIME is a conflict, and a Policy-denied proposal creates no output Artifact.
 
 ## Approval Ledger
 

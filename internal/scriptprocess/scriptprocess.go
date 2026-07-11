@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"cyberagent-workbench/internal/artifact"
 )
 
 const (
@@ -23,8 +25,8 @@ const (
 	MaxArgumentBytes        = 8192
 	MaxIdentityRunes        = 256
 	MaxPolicyReasonRunes    = 2048
-	MaxStdoutBytes          = 128 * 1024
-	MaxStderrBytes          = 32 * 1024
+	MaxStdoutBytes          = artifact.MaxContentBytes
+	MaxStderrBytes          = artifact.MaxContentBytes
 	MaxEncodedProposalBytes = 64 * 1024
 )
 

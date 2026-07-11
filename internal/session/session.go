@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"cyberagent-workbench/internal/approval"
+	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/contextmgr"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/idgen"
@@ -94,6 +95,7 @@ type Store interface {
 	approval.Store
 	approval.GrantStore
 	toolbudget.Store
+	artifact.Store
 
 	SaveSession(ctx context.Context, session Session) error
 	GetSession(ctx context.Context, id string) (Session, error)

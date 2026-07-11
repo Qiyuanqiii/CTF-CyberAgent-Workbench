@@ -125,6 +125,10 @@ func TestScriptRunPersistsPolicyDenialWithoutExecution(t *testing.T) {
 		!strings.Contains(timeline, "approval.requested") || !strings.Contains(timeline, "approval.decided") {
 		t.Fatalf("denial events missing: code=%d stderr=%s events=%s", eventCode, eventErr, timeline)
 	}
+	artifacts, artifactErr, artifactCode := executeTestCommand(t, "artifact", "list", "--run", runID)
+	if artifactCode != 0 || !strings.Contains(artifacts, "no Run artifacts") {
+		t.Fatalf("policy denial created output evidence: code=%d stderr=%s output=%s", artifactCode, artifactErr, artifacts)
+	}
 }
 
 func TestScriptRunIdempotentReplayDoesNotDuplicateRunOrBudgetCharge(t *testing.T) {

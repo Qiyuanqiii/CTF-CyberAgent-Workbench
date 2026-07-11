@@ -35,6 +35,7 @@ const (
 	ApprovalGrantRevokedEvent    = "approval.grant_revoked"
 	ToolBudgetChargedEvent       = "tool.budget_charged"
 	ToolBudgetExhaustedEvent     = "tool.budget_exhausted"
+	ArtifactCreatedEvent         = "artifact.created"
 	LegacyTaskAdaptedEvent       = "legacy.task_adapted"
 	SupervisorCheckpointedEvent  = "supervisor.checkpointed"
 	AgentTurnStartedEvent        = "agent.turn_started"

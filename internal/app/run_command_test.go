@@ -17,6 +17,7 @@ var toolIDPattern = regexp.MustCompile(`tool-[0-9]{14}-[a-f0-9]{12}`)
 var processIDPattern = regexp.MustCompile(`process-[0-9]{14}-[a-f0-9]{12}`)
 var editIDPattern = regexp.MustCompile(`edit-[0-9]{14}-[a-f0-9]{12}`)
 var approvalIDPattern = regexp.MustCompile(`approval-[0-9]{14}-[a-f0-9]{12}`)
+var artifactIDPattern = regexp.MustCompile(`artifact-[0-9]{14}-[a-f0-9]{12}`)
 
 func executeTestCommand(t *testing.T, args ...string) (string, string, int) {
 	t.Helper()

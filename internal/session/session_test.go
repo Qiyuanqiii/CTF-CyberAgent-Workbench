@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"cyberagent-workbench/internal/approval"
+	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/contextmgr"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/llm"
@@ -287,6 +288,18 @@ func (m *memorySessionStore) ChargeToolCall(context.Context, toolbudget.ChargeRe
 
 func (m *memorySessionStore) GetToolCallUsage(context.Context, string) (toolbudget.Usage, error) {
 	return toolbudget.Usage{Remaining: -1}, nil
+}
+
+func (m *memorySessionStore) CaptureToolOutput(context.Context, artifact.CaptureRequest) ([]artifact.Descriptor, error) {
+	return nil, errNotFound("Run artifact")
+}
+
+func (m *memorySessionStore) GetRunArtifact(context.Context, string) (artifact.Blob, error) {
+	return artifact.Blob{}, errNotFound("Run artifact")
+}
+
+func (m *memorySessionStore) ListRunArtifacts(context.Context, artifact.ListFilter) ([]artifact.Descriptor, error) {
+	return nil, nil
 }
 
 type errNotFound string

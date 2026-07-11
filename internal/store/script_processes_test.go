@@ -261,6 +261,12 @@ func TestSQLiteUpgradesSchemaV12ToTypedScriptProcessesWithoutLosingRunOrGrant(t 
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.db.ExecContext(ctx, `DROP TABLE run_artifacts`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version = 14`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.db.ExecContext(ctx, `DROP TABLE script_process_proposals`); err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +292,7 @@ func TestSQLiteUpgradesSchemaV12ToTypedScriptProcessesWithoutLosingRunOrGrant(t 
 	}
 	version, err := st.SchemaVersion(ctx)
 	if err != nil || version != LatestSchemaVersion {
-		t.Fatalf("v12 database did not migrate to v13: version=%d err=%v", version, err)
+		t.Fatalf("v12 database did not migrate to latest: version=%d err=%v", version, err)
 	}
 	service, _ := newScriptProcessTestService(t, st)
 	created, err := service.Create(ctx, scriptProcessTestRequest("post-migration-script", "value"))

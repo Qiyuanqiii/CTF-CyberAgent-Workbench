@@ -135,7 +135,7 @@ func (g *Gateway) CreateScriptProcessRun(ctx context.Context, request ScriptRunC
 	if err != nil {
 		return ScriptRunCreateResult{}, err
 	}
-	outcome, mapErr := g.outcomeFromScriptProcess(call, stored.Process, nil)
+	outcome, mapErr := g.outcomeFromScriptProcess(ctx, call, stored.Process, nil)
 	if mapErr != nil {
 		return ScriptRunCreateResult{}, mapErr
 	}
@@ -172,7 +172,7 @@ func (g *Gateway) ProposeScriptProcess(ctx context.Context, call ToolCall, propo
 	if err != nil {
 		return Outcome{}, err
 	}
-	return g.outcomeFromScriptProcess(preparedCall, process, nil)
+	return g.outcomeFromScriptProcess(ctx, preparedCall, process, nil)
 }
 
 func (g *Gateway) prepareScriptProcessCall(ctx context.Context, call ToolCall, proposal ScriptProcessProposal) (ToolCall, ScriptProcessProposal, Decision, error) {
@@ -310,7 +310,7 @@ func newScriptProcess(call ToolCall, proposal ScriptProcessProposal, decision De
 	}
 }
 
-func (g *Gateway) outcomeFromScriptProcess(call ToolCall, process scriptprocess.Process, operationErr error) (Outcome, error) {
+func (g *Gateway) outcomeFromScriptProcess(ctx context.Context, call ToolCall, process scriptprocess.Process, operationErr error) (Outcome, error) {
 	call.Name = ScriptProcessTool
 	call.RunID = process.RunID
 	call.SessionID = process.SessionID
@@ -348,12 +348,18 @@ func (g *Gateway) outcomeFromScriptProcess(call ToolCall, process scriptprocess.
 	outcome := Outcome{Call: safeToolCall(call), Decision: decision, Proposal: proposal}
 	if status == StatusCompleted || status == StatusFailed {
 		completed := process.UpdatedAt
-		stdout, stdoutTruncated := boundResultText(process.Stdout, MaxResultStdoutBytes)
-		stderr, stderrTruncated := boundResultText(process.Stderr, MaxResultStderrBytes)
+		safeStdout := redact.String(strings.ToValidUTF8(process.Stdout, "?"))
+		safeStderr := redact.String(strings.ToValidUTF8(process.Stderr, "?"))
+		artifactMetadata, captureErr := g.captureTerminalArtifacts(ctx, call, process.ID,
+			safeStdout, safeStderr, "text/plain; charset=utf-8")
+		operationErr = errors.Join(operationErr, captureErr)
+		stdout, stdoutTruncated := boundResultText(safeStdout, MaxResultStdoutBytes)
+		stderr, stderrTruncated := boundResultText(safeStderr, MaxResultStderrBytes)
 		outcome.Execution = &Execution{Backend: "dry_run", Status: status, StartedAt: completed, CompletedAt: &completed}
 		outcome.Result = &Result{
 			Status: status, Stdout: stdout, Stderr: stderr, ExitCode: process.ExitCode,
-			MIME: "application/json", Truncated: stdoutTruncated || stderrTruncated, CompletedAt: completed,
+			MIME: "text/plain; charset=utf-8", Truncated: stdoutTruncated || stderrTruncated,
+			Metadata: artifactMetadata, CompletedAt: completed,
 		}
 	} else if status == StatusDenied {
 		outcome.Result = deniedResult(process.PolicyReason, process.UpdatedAt)

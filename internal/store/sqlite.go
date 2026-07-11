@@ -9,8 +9,10 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"cyberagent-workbench/internal/agent"
+	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/contextmgr"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/redact"
@@ -198,6 +200,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 11, Name: "durable tool approvals", Statements: durableApprovalStatements},
 		{Version: 12, Name: "session grants and tool budgets", Statements: sessionGrantAndToolBudgetStatements},
 		{Version: 13, Name: "typed script process proposals", Statements: typedScriptProcessStatements},
+		{Version: 14, Name: "run tool output artifacts", Statements: runArtifactStatements},
 	})
 }
 
@@ -559,10 +562,17 @@ func (s *SQLiteStore) SaveToolRun(ctx context.Context, run toolrun.ToolRun) (too
 	if strings.TrimSpace(run.Status) == "" {
 		run.Status = toolrun.StatusProposed
 	}
+	if !utf8.ValidString(run.Stdout) || !utf8.ValidString(run.Stderr) ||
+		len([]byte(run.Stdout)) > artifact.MaxContentBytes || len([]byte(run.Stderr)) > artifact.MaxContentBytes {
+		return toolrun.ToolRun{}, fmt.Errorf("tool output must be valid UTF-8 and at most %d bytes per stream", artifact.MaxContentBytes)
+	}
 	run.Command = redact.String(run.Command)
 	run.PolicyReason = redact.String(run.PolicyReason)
 	run.Stdout = redact.String(run.Stdout)
 	run.Stderr = redact.String(run.Stderr)
+	if len([]byte(run.Stdout)) > artifact.MaxContentBytes || len([]byte(run.Stderr)) > artifact.MaxContentBytes {
+		return toolrun.ToolRun{}, fmt.Errorf("redacted tool output exceeds %d bytes per stream", artifact.MaxContentBytes)
+	}
 	if run.CreatedAt.IsZero() {
 		run.CreatedAt = time.Now().UTC()
 	}

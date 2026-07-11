@@ -121,6 +121,7 @@ func (s Status) Valid() bool {
 type ToolCall struct {
 	Name          ToolName          `json:"name"`
 	Arguments     map[string]string `json:"arguments"`
+	InvocationID  string            `json:"invocation_id,omitempty"`
 	RunID         string            `json:"run_id,omitempty"`
 	SessionID     string            `json:"session_id,omitempty"`
 	WorkspaceID   string            `json:"workspace_id,omitempty"`
@@ -130,6 +131,7 @@ type ToolCall struct {
 
 func NormalizeToolCall(call ToolCall) (ToolCall, error) {
 	call.Name = ToolName(strings.TrimSpace(string(call.Name)))
+	call.InvocationID = strings.TrimSpace(call.InvocationID)
 	call.RunID = strings.TrimSpace(call.RunID)
 	call.SessionID = strings.TrimSpace(call.SessionID)
 	call.WorkspaceID = strings.TrimSpace(call.WorkspaceID)
@@ -139,7 +141,8 @@ func NormalizeToolCall(call ToolCall) (ToolCall, error) {
 		return ToolCall{}, fmt.Errorf("unsupported tool %q", call.Name)
 	}
 	for label, value := range map[string]string{
-		"run id": call.RunID, "session id": call.SessionID, "workspace id": call.WorkspaceID, "requester": call.RequestedBy,
+		"invocation id": call.InvocationID, "run id": call.RunID, "session id": call.SessionID,
+		"workspace id": call.WorkspaceID, "requester": call.RequestedBy,
 	} {
 		if !utf8.ValidString(value) {
 			return ToolCall{}, fmt.Errorf("tool %s must be valid UTF-8", label)
@@ -183,7 +186,7 @@ func (c ToolCall) Validate() error {
 	if err != nil {
 		return err
 	}
-	if normalized.Name != c.Name || normalized.RunID != c.RunID || normalized.SessionID != c.SessionID ||
+	if normalized.Name != c.Name || normalized.InvocationID != c.InvocationID || normalized.RunID != c.RunID || normalized.SessionID != c.SessionID ||
 		normalized.WorkspaceID != c.WorkspaceID || normalized.WorkspaceRoot != c.WorkspaceRoot || normalized.RequestedBy != c.RequestedBy ||
 		!maps.Equal(normalized.Arguments, c.Arguments) {
 		return errors.New("tool call must be normalized")

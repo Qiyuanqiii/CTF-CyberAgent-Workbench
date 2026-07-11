@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/scriptprocess"
 	"cyberagent-workbench/internal/toolgateway"
 	"cyberagent-workbench/internal/toolrun"
@@ -125,13 +126,16 @@ func (a *App) toolShow(ctx context.Context, args []string) error {
 			return err
 		}
 		printToolRun(a.out, run)
-		return nil
+		return a.printSourceArtifacts(ctx, run.ID)
 	case toolgateway.ScriptProcessTool:
 		process, err := gateway.ScriptProcesses().Get(ctx, fs.Arg(0))
 		if err != nil {
 			return err
 		}
-		return printScriptProcess(a.out, process)
+		if err := printScriptProcess(a.out, process); err != nil {
+			return err
+		}
+		return a.printSourceArtifacts(ctx, process.ID)
 	case toolgateway.ReplaceFileTool:
 		return errors.New("file edit proposals are inspected with `cyberagent edit show`")
 	default:
@@ -193,8 +197,31 @@ func (a *App) reviewToolProposal(ctx context.Context, request toolgateway.Review
 	if outcome.Result != nil && strings.TrimSpace(outcome.Result.Stderr) != "" {
 		fmt.Fprintln(a.errOut, outcome.Result.Stderr)
 	}
+	if outcome.Result != nil {
+		keys := make([]string, 0, len(outcome.Result.Metadata))
+		for key := range outcome.Result.Metadata {
+			if strings.HasPrefix(key, "artifact_") {
+				keys = append(keys, key)
+			}
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			fmt.Fprintf(a.out, "%s: %s\n", key, outcome.Result.Metadata[key])
+		}
+	}
 	if request.Action == toolgateway.ReviewDeny && strings.TrimSpace(outcome.Decision.Reason) != "" {
 		fmt.Fprintf(a.out, "reason: %s\n", outcome.Decision.Reason)
+	}
+	return nil
+}
+
+func (a *App) printSourceArtifacts(ctx context.Context, sourceID string) error {
+	descriptors, err := a.newToolGateway().Artifacts().List(ctx, artifact.ListFilter{SourceID: sourceID})
+	if err != nil {
+		return err
+	}
+	for _, descriptor := range descriptors {
+		fmt.Fprintf(a.out, "artifact_%s: %s\n", descriptor.Stream, descriptor.ID)
 	}
 	return nil
 }

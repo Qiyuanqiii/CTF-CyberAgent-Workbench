@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 13
+const LatestSchemaVersion = 14
 
 type migration struct {
 	Version    int
@@ -397,6 +397,39 @@ var typedScriptProcessStatements = []string{
 		ON script_process_proposals(session_id, status, updated_at);`,
 	`CREATE INDEX idx_script_process_workspace_status_updated_at
 		ON script_process_proposals(workspace_id, status, updated_at);`,
+}
+
+var runArtifactStatements = []string{
+	`CREATE TABLE run_artifacts (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL DEFAULT '',
+		source_id TEXT NOT NULL,
+		tool_name TEXT NOT NULL,
+		stream TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		mime TEXT NOT NULL,
+		encoding TEXT NOT NULL,
+		sha256 TEXT NOT NULL,
+		size_bytes INTEGER NOT NULL,
+		content TEXT NOT NULL,
+		redacted INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+		UNIQUE(run_id, source_id, stream),
+		CHECK(stream IN ('stdout', 'stderr')),
+		CHECK(kind = 'tool_output'),
+		CHECK(encoding = 'utf-8'),
+		CHECK(length(sha256) = 64),
+		CHECK(size_bytes > 0 AND size_bytes <= 4194304),
+		CHECK(redacted IN (0, 1))
+	);`,
+	`CREATE INDEX idx_run_artifacts_run_created_at
+		ON run_artifacts(run_id, created_at, id);`,
+	`CREATE INDEX idx_run_artifacts_source_stream
+		ON run_artifacts(source_id, stream, created_at);`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {
