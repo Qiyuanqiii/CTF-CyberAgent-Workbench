@@ -27,16 +27,17 @@ type NoteService struct {
 }
 
 type CreateNoteRequest struct {
-	RunID       string
-	Title       string
-	Content     string
-	Category    string
-	Visibility  string
-	Owner       string
-	Tags        []string
-	SourceRefs  []string
-	EvidenceIDs []string
-	Pinned      bool
+	RunID        string
+	Title        string
+	Content      string
+	Category     string
+	Visibility   string
+	Owner        string
+	OwnerAgentID string
+	Tags         []string
+	SourceRefs   []string
+	EvidenceIDs  []string
+	Pinned       bool
 }
 
 type UpdateNoteRequest struct {
@@ -47,6 +48,7 @@ type UpdateNoteRequest struct {
 	Category        *string
 	Visibility      *string
 	Owner           *string
+	OwnerAgentID    *string
 	Tags            *[]string
 	SourceRefs      *[]string
 	EvidenceIDs     *[]string
@@ -90,7 +92,8 @@ func (s *NoteService) prepareCreate(ctx context.Context, req CreateNoteRequest) 
 	}
 	details, err := normalizeServiceNoteDetails(domain.NoteDetails{
 		Title: req.Title, Content: req.Content, Category: category, Visibility: visibility, Owner: req.Owner,
-		Tags: slices.Clone(req.Tags), SourceRefs: slices.Clone(req.SourceRefs), EvidenceIDs: slices.Clone(req.EvidenceIDs), Pinned: req.Pinned,
+		OwnerAgentID: req.OwnerAgentID,
+		Tags:         slices.Clone(req.Tags), SourceRefs: slices.Clone(req.SourceRefs), EvidenceIDs: slices.Clone(req.EvidenceIDs), Pinned: req.Pinned,
 	})
 	if err != nil {
 		return domain.Run{}, domain.Note{}, events.Event{}, err
@@ -98,7 +101,8 @@ func (s *NoteService) prepareCreate(ctx context.Context, req CreateNoteRequest) 
 	now := time.Now().UTC()
 	note := domain.Note{
 		ID: idgen.New("note"), RunID: run.ID, Title: details.Title, Content: details.Content,
-		Category: details.Category, Visibility: details.Visibility, Owner: details.Owner, Tags: details.Tags,
+		Category: details.Category, Visibility: details.Visibility, Owner: details.Owner,
+		OwnerAgentID: details.OwnerAgentID, Tags: details.Tags,
 		SourceRefs: details.SourceRefs, EvidenceIDs: details.EvidenceIDs, Status: domain.NoteActive,
 		Pinned: details.Pinned, Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -107,7 +111,8 @@ func (s *NoteService) prepareCreate(ctx context.Context, req CreateNoteRequest) 
 	}
 	event, err := events.New(run.ID, run.MissionID, events.NoteCreatedEvent, "note_service", note.ID, map[string]any{
 		"title": note.Title, "category": note.Category, "visibility": note.Visibility, "owner": note.Owner,
-		"tags": note.Tags, "evidence_ids": note.EvidenceIDs, "source_count": len(note.SourceRefs),
+		"owner_agent_id": note.OwnerAgentID,
+		"tags":           note.Tags, "evidence_ids": note.EvidenceIDs, "source_count": len(note.SourceRefs),
 		"pinned": note.Pinned, "status": note.Status, "version": note.Version,
 	})
 	if err != nil {
@@ -137,6 +142,7 @@ func (s *NoteService) Update(ctx context.Context, req UpdateNoteRequest) (domain
 		return domain.Note{}, apperror.New(apperror.CodeFailedPrecondition, "note store is required")
 	}
 	if req.Title == nil && req.Content == nil && req.Category == nil && req.Visibility == nil && req.Owner == nil &&
+		req.OwnerAgentID == nil &&
 		req.Tags == nil && req.SourceRefs == nil && req.EvidenceIDs == nil && req.Pinned == nil {
 		return domain.Note{}, apperror.New(apperror.CodeInvalidArgument, "note update requires at least one changed field")
 	}
@@ -154,7 +160,8 @@ func (s *NoteService) Update(ctx context.Context, req UpdateNoteRequest) (domain
 	}
 	details := domain.NoteDetails{
 		Title: current.Title, Content: current.Content, Category: current.Category, Visibility: current.Visibility,
-		Owner: current.Owner, Tags: slices.Clone(current.Tags), SourceRefs: slices.Clone(current.SourceRefs),
+		Owner: current.Owner, OwnerAgentID: current.OwnerAgentID, Tags: slices.Clone(current.Tags),
+		SourceRefs:  slices.Clone(current.SourceRefs),
 		EvidenceIDs: slices.Clone(current.EvidenceIDs), Pinned: current.Pinned,
 	}
 	if req.Title != nil {
@@ -182,6 +189,9 @@ func (s *NoteService) Update(ctx context.Context, req UpdateNoteRequest) (domain
 	}
 	if req.Owner != nil {
 		details.Owner = *req.Owner
+	}
+	if req.OwnerAgentID != nil {
+		details.OwnerAgentID = *req.OwnerAgentID
 	}
 	if req.Tags != nil {
 		details.Tags = slices.Clone(*req.Tags)
@@ -319,6 +329,9 @@ func changedApplicationNoteFields(left domain.Note, right domain.Note) []string 
 	}
 	if left.Owner != right.Owner {
 		fields = append(fields, "owner")
+	}
+	if left.OwnerAgentID != right.OwnerAgentID {
+		fields = append(fields, "owner_agent_id")
 	}
 	if !slices.Equal(left.Tags, right.Tags) {
 		fields = append(fields, "tags")

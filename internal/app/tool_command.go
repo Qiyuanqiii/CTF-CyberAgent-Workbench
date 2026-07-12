@@ -114,9 +114,14 @@ func (a *App) toolInvoke(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	root, _, err := a.store.RegisterRootAgent(ctx, run.ID)
+	if err != nil {
+		return err
+	}
 	outcome, err := a.newToolGateway().Invoke(ctx, toolgateway.ToolCall{
 		Name: tool, Payload: json.RawMessage(rawPayload), OperationKey: *operationKey,
-		RunID: run.ID, SessionID: run.SessionID, WorkspaceID: mission.WorkspaceID, RequestedBy: "cli",
+		RunID: run.ID, AgentID: root.ID, SessionID: run.SessionID,
+		WorkspaceID: mission.WorkspaceID, RequestedBy: "cli",
 	})
 	if err != nil {
 		return err

@@ -824,7 +824,11 @@ func (m *Model) renderWorkItems(width int, height int) string {
 			item.Priority, item.Title), width))
 	}
 	selected := m.runContext.WorkItems[m.selectedWorkItem]
-	detail := fmt.Sprintf("owner=%s deps=%d v=%d", defaultText(selected.Owner, "-"),
+	owner := selected.Owner
+	if owner == "" {
+		owner = selected.OwnerAgentID
+	}
+	detail := fmt.Sprintf("owner=%s deps=%d v=%d", defaultText(owner, "-"),
 		len(selected.Dependencies), selected.Version)
 	if selected.BlockedReason != "" {
 		detail += " blocked=" + singleLine(selected.BlockedReason)
@@ -860,7 +864,12 @@ func (m *Model) renderNotes(width int, height int) string {
 			note.Visibility, note.Title), width))
 	}
 	selected := m.runContext.Notes[m.selectedNote]
-	lines = append(lines, truncate("status="+string(selected.Status)+" v="+fmt.Sprint(selected.Version), width))
+	owner := selected.Owner
+	if owner == "" {
+		owner = selected.OwnerAgentID
+	}
+	lines = append(lines, truncate("status="+string(selected.Status)+" owner="+defaultText(owner, "-")+
+		" v="+fmt.Sprint(selected.Version), width))
 	lines = append(lines, truncate(singleLine(selected.Content), width))
 	return strings.Join(windowTop(lines, height+1), "\n")
 }

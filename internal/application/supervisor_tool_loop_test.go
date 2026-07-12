@@ -44,6 +44,11 @@ func TestRunSupervisorExecutesAllowlistedStructuredToolAndContinuesModel(t *test
 	if err != nil || len(items) != 1 || items[0].Title != "Inspect parser" {
 		t.Fatalf("structured WorkItem was not created: %#v err=%v", items, err)
 	}
+	root, found, err := st.GetRootAgent(ctx, run.ID)
+	if err != nil || !found || items[0].OwnerAgentID != root.ID {
+		t.Fatalf("structured WorkItem was not bound to the calling root Agent: item=%#v root=%#v found=%t err=%v",
+			items[0], root, found, err)
+	}
 	requests := provider.Requests()
 	if len(requests) != 2 || len(requests[0].Tools) != 2 || hasToolResults(requests[0]) ||
 		!hasToolResult(requests[1], "work_item") {

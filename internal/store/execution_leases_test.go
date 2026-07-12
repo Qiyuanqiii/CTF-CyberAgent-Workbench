@@ -205,7 +205,7 @@ func TestSQLiteSchemaV17RebindsLegacyPendingSupervisorCheckpoint(t *testing.T) {
 	if _, _, err := st.ReleaseRunExecutionLease(ctx, lease); err != nil {
 		t.Fatal(err)
 	}
-	for _, statement := range []string{
+	for _, statement := range append(removeSchemaV22ForTestStatements(), []string{
 		`DROP TABLE agent_admission_operations`,
 		`DELETE FROM schema_migrations WHERE version = 21`,
 		`DROP TABLE agent_message_operations`,
@@ -221,7 +221,7 @@ func TestSQLiteSchemaV17RebindsLegacyPendingSupervisorCheckpoint(t *testing.T) {
 		`ALTER TABLE run_supervisor_checkpoints DROP COLUMN lease_generation`,
 		`ALTER TABLE run_supervisor_checkpoints DROP COLUMN lease_id`,
 		`DELETE FROM schema_migrations WHERE version = 17`,
-	} {
+	}...) {
 		if _, err := st.db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("downgrade v17 fixture with %q: %v", statement, err)
 		}

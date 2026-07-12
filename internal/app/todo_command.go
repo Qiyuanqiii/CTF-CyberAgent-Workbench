@@ -50,12 +50,14 @@ func (a *App) todoCreate(ctx context.Context, service *application.WorkItemServi
 	description := fs.String("description", "", "work item description")
 	priority := fs.String("priority", string(domain.WorkItemPriorityNormal), "low, normal, high, or critical")
 	owner := fs.String("owner", "", "work item owner")
+	ownerAgent := fs.String("owner-agent", "", "same-Run Agent id that owns the work item")
 	var acceptance stringListFlag
 	var dependencies stringListFlag
 	fs.Var(&acceptance, "acceptance", "acceptance criterion; repeat for multiple values")
 	fs.Var(&dependencies, "depends-on", "dependency work item id; repeat for multiple values")
 	if err := fs.Parse(reorderFlags(args, map[string]bool{
-		"description": true, "priority": true, "owner": true, "acceptance": true, "depends-on": true,
+		"description": true, "priority": true, "owner": true, "owner-agent": true,
+		"acceptance": true, "depends-on": true,
 	})); err != nil {
 		return err
 	}
@@ -64,7 +66,8 @@ func (a *App) todoCreate(ctx context.Context, service *application.WorkItemServi
 	}
 	item, err := service.Create(ctx, application.CreateWorkItemRequest{
 		RunID: fs.Arg(0), Title: strings.Join(fs.Args()[1:], " "), Description: *description,
-		Priority: *priority, Owner: *owner, AcceptanceCriteria: acceptance.values, Dependencies: dependencies.values,
+		Priority: *priority, Owner: *owner, OwnerAgentID: *ownerAgent,
+		AcceptanceCriteria: acceptance.values, Dependencies: dependencies.values,
 	})
 	if err != nil {
 		return err
@@ -77,8 +80,11 @@ func (a *App) todoList(ctx context.Context, service *application.WorkItemService
 	fs := newFlagSet("todo list", a.errOut)
 	statusValue := fs.String("status", "", "comma-separated work item statuses")
 	owner := fs.String("owner", "", "exact owner filter")
+	ownerAgent := fs.String("owner-agent", "", "exact owner Agent id filter")
 	limit := fs.Int("limit", 100, "maximum rows")
-	if err := fs.Parse(reorderFlags(args, map[string]bool{"status": true, "owner": true, "limit": true})); err != nil {
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"status": true, "owner": true, "owner-agent": true, "limit": true,
+	})); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -92,7 +98,7 @@ func (a *App) todoList(ctx context.Context, service *application.WorkItemService
 		return err
 	}
 	items, err := service.List(ctx, domain.WorkItemFilter{
-		RunID: fs.Arg(0), Statuses: statuses, Owner: *owner, Limit: *limit,
+		RunID: fs.Arg(0), Statuses: statuses, Owner: *owner, OwnerAgentID: *ownerAgent, Limit: *limit,
 	})
 	if err != nil {
 		return err
@@ -103,6 +109,9 @@ func (a *App) todoList(ctx context.Context, service *application.WorkItemService
 	}
 	for _, item := range items {
 		ownerValue := item.Owner
+		if ownerValue == "" {
+			ownerValue = item.OwnerAgentID
+		}
 		if ownerValue == "" {
 			ownerValue = "-"
 		}
@@ -124,8 +133,9 @@ func (a *App) todoShow(ctx context.Context, service *application.WorkItemService
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(a.out, "id: %s\nrun: %s\ntitle: %s\nstatus: %s\npriority: %s\nowner: %s\nversion: %d\ndescription: %s\n",
-		item.ID, item.RunID, item.Title, item.Status, item.Priority, item.Owner, item.Version, item.Description)
+	fmt.Fprintf(a.out, "id: %s\nrun: %s\ntitle: %s\nstatus: %s\npriority: %s\nowner: %s\nowner_agent: %s\nversion: %d\ndescription: %s\n",
+		item.ID, item.RunID, item.Title, item.Status, item.Priority, item.Owner, item.OwnerAgentID,
+		item.Version, item.Description)
 	printStringList(a.out, "acceptance", item.AcceptanceCriteria)
 	printStringList(a.out, "dependencies", item.Dependencies)
 	if item.BlockedReason != "" {
@@ -144,6 +154,7 @@ func (a *App) todoUpdate(ctx context.Context, service *application.WorkItemServi
 	description := fs.String("description", "", "replacement description")
 	priority := fs.String("priority", "", "replacement priority")
 	owner := fs.String("owner", "", "replacement owner; empty clears it")
+	ownerAgent := fs.String("owner-agent", "", "replacement owner Agent id; empty clears it")
 	version := fs.Int64("version", 0, "expected version; zero uses the current version")
 	clearAcceptance := fs.Bool("clear-acceptance", false, "clear acceptance criteria")
 	clearDependencies := fs.Bool("clear-dependencies", false, "clear dependencies")
@@ -152,7 +163,8 @@ func (a *App) todoUpdate(ctx context.Context, service *application.WorkItemServi
 	fs.Var(&acceptance, "acceptance", "replacement acceptance criterion; repeat for multiple values")
 	fs.Var(&dependencies, "depends-on", "replacement dependency id; repeat for multiple values")
 	if err := fs.Parse(reorderFlags(args, map[string]bool{
-		"title": true, "description": true, "priority": true, "owner": true, "version": true,
+		"title": true, "description": true, "priority": true, "owner": true, "owner-agent": true,
+		"version":    true,
 		"acceptance": true, "depends-on": true, "clear-acceptance": false, "clear-dependencies": false,
 	})); err != nil {
 		return err
@@ -173,6 +185,9 @@ func (a *App) todoUpdate(ctx context.Context, service *application.WorkItemServi
 	}
 	if visited["owner"] {
 		req.Owner = owner
+	}
+	if visited["owner-agent"] {
+		req.OwnerAgentID = ownerAgent
 	}
 	if acceptance.set || *clearAcceptance {
 		values := acceptance.values

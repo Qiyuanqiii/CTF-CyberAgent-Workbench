@@ -341,7 +341,7 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 	if _, err := st.db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
 		t.Fatal(err)
 	}
-	for _, statement := range []string{
+	for _, statement := range append(removeSchemaV22ForTestStatements(), []string{
 		`DROP TABLE agent_admission_operations`,
 		`DELETE FROM schema_migrations WHERE version = 21`,
 		`DROP TABLE agent_message_operations`,
@@ -373,7 +373,7 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 		`DROP TABLE approval_grant_operations`,
 		`DROP TABLE approval_session_grants`,
 		`DELETE FROM schema_migrations WHERE version = 12`,
-	} {
+	}...) {
 		if _, err := st.db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("remove schema v12 with %q: %v", statement, err)
 		}
@@ -385,7 +385,7 @@ func removeSchemaV12ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 
 func removeSchemaV16ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) {
 	t.Helper()
-	for _, statement := range []string{
+	for _, statement := range append(removeSchemaV22ForTestStatements(), []string{
 		`DROP TABLE agent_admission_operations`,
 		`DELETE FROM schema_migrations WHERE version = 21`,
 		`DROP TABLE agent_message_operations`,
@@ -404,10 +404,97 @@ func removeSchemaV16ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 		`DROP TABLE run_supervisor_tool_calls`,
 		`DROP TABLE run_supervisor_tool_rounds`,
 		`DELETE FROM schema_migrations WHERE version = 16`,
-	} {
+	}...) {
 		if _, err := st.db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("remove schema v16 with %q: %v", statement, err)
 		}
+	}
+}
+
+func removeSchemaV22ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_work_item_owner_agent_insert`,
+		`DROP TRIGGER trg_work_item_owner_agent_update`,
+		`DROP TRIGGER trg_note_owner_agent_insert`,
+		`DROP TRIGGER trg_note_owner_agent_update`,
+		`DROP INDEX idx_work_items_owner_agent`,
+		`DROP INDEX idx_notes_owner_agent`,
+		`ALTER TABLE work_items DROP COLUMN owner_agent_id`,
+		`ALTER TABLE notes DROP COLUMN owner_agent_id`,
+		`DELETE FROM schema_migrations WHERE version = 22`,
+	}
+}
+
+func TestSQLiteUpgradesV21MemoryRowsToOptionalAgentOwnership(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cyberagent.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	_, run := createWorkItemTestRun(t, ctx, st, "v21 memory ownership upgrade")
+	workService := application.NewWorkItemService(st)
+	legacyWork, err := workService.Create(ctx, application.CreateWorkItemRequest{
+		RunID: run.ID, Title: "legacy work", Owner: "legacy-worker",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noteService := application.NewNoteService(st)
+	legacyNote, err := noteService.Create(ctx, application.CreateNoteRequest{
+		RunID: run.ID, Title: "legacy note", Content: "preserved",
+		Visibility: string(domain.NoteVisibilityOwner), Owner: "legacy-writer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range removeSchemaV22ForTestStatements() {
+		if _, err := st.db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("simulate schema v21 with %q: %v", statement, err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, err := st.SchemaVersion(ctx)
+	if err != nil || version != LatestSchemaVersion {
+		t.Fatalf("schema v21 did not upgrade to %d: version=%d err=%v", LatestSchemaVersion, version, err)
+	}
+	loadedWork, err := st.GetWorkItem(ctx, legacyWork.ID)
+	if err != nil || loadedWork.Owner != "legacy-worker" || loadedWork.OwnerAgentID != "" {
+		t.Fatalf("legacy WorkItem ownership was not preserved: %#v err=%v", loadedWork, err)
+	}
+	loadedNote, err := st.GetNote(ctx, legacyNote.ID)
+	if err != nil || loadedNote.Owner != "legacy-writer" || loadedNote.OwnerAgentID != "" ||
+		loadedNote.Content != "preserved" {
+		t.Fatalf("legacy Note ownership was not preserved: %#v err=%v", loadedNote, err)
+	}
+	root, _, err := st.RegisterRootAgent(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootID := root.ID
+	updatedWork, err := application.NewWorkItemService(st).Update(ctx, application.UpdateWorkItemRequest{
+		ID: loadedWork.ID, ExpectedVersion: loadedWork.Version, OwnerAgentID: &rootID,
+	})
+	if err != nil || updatedWork.OwnerAgentID != root.ID {
+		t.Fatalf("upgraded WorkItem cannot adopt Agent ownership: %#v err=%v", updatedWork, err)
+	}
+	updatedNote, err := application.NewNoteService(st).Update(ctx, application.UpdateNoteRequest{
+		ID: loadedNote.ID, ExpectedVersion: loadedNote.Version, OwnerAgentID: &rootID,
+	})
+	if err != nil || updatedNote.OwnerAgentID != root.ID {
+		t.Fatalf("upgraded Note cannot adopt Agent ownership: %#v err=%v", updatedNote, err)
+	}
+	var migrationCount int
+	if err := st.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM schema_migrations WHERE version = 22`).Scan(&migrationCount); err != nil || migrationCount != 1 {
+		t.Fatalf("schema v22 migration ledger is inconsistent: count=%d err=%v", migrationCount, err)
 	}
 }
 

@@ -153,6 +153,7 @@ type WorkItemView struct {
 	Status             string     `json:"status"`
 	Priority           string     `json:"priority"`
 	Owner              string     `json:"owner,omitempty"`
+	OwnerAgentID       string     `json:"owner_agent_id,omitempty"`
 	AcceptanceCriteria []string   `json:"acceptance_criteria"`
 	Dependencies       []string   `json:"dependencies"`
 	BlockedReason      string     `json:"blocked_reason,omitempty"`
@@ -163,22 +164,23 @@ type WorkItemView struct {
 }
 
 type NoteView struct {
-	ID          string     `json:"id"`
-	RunID       string     `json:"run_id"`
-	Title       string     `json:"title"`
-	Content     string     `json:"content"`
-	Category    string     `json:"category"`
-	Visibility  string     `json:"visibility"`
-	Owner       string     `json:"owner,omitempty"`
-	Tags        []string   `json:"tags"`
-	SourceRefs  []string   `json:"source_refs"`
-	EvidenceIDs []string   `json:"evidence_ids"`
-	Status      string     `json:"status"`
-	Pinned      bool       `json:"pinned"`
-	Version     int64      `json:"version"`
-	CreatedAt   time.Time  `json:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at"`
-	ArchivedAt  *time.Time `json:"archived_at,omitempty"`
+	ID           string     `json:"id"`
+	RunID        string     `json:"run_id"`
+	Title        string     `json:"title"`
+	Content      string     `json:"content"`
+	Category     string     `json:"category"`
+	Visibility   string     `json:"visibility"`
+	Owner        string     `json:"owner,omitempty"`
+	OwnerAgentID string     `json:"owner_agent_id,omitempty"`
+	Tags         []string   `json:"tags"`
+	SourceRefs   []string   `json:"source_refs"`
+	EvidenceIDs  []string   `json:"evidence_ids"`
+	Status       string     `json:"status"`
+	Pinned       bool       `json:"pinned"`
+	Version      int64      `json:"version"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	ArchivedAt   *time.Time `json:"archived_at,omitempty"`
 }
 
 type ArtifactView struct {
@@ -284,6 +286,7 @@ func eventView(value events.Event) EventView {
 func workItemView(value domain.WorkItem) WorkItemView {
 	return WorkItemView{ID: value.ID, RunID: value.RunID, Title: value.Title, Description: value.Description,
 		Status: string(value.Status), Priority: string(value.Priority), Owner: value.Owner,
+		OwnerAgentID:       value.OwnerAgentID,
 		AcceptanceCriteria: append([]string{}, value.AcceptanceCriteria...),
 		Dependencies:       append([]string{}, value.Dependencies...), BlockedReason: value.BlockedReason,
 		Version: value.Version, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
@@ -293,7 +296,8 @@ func workItemView(value domain.WorkItem) WorkItemView {
 func noteView(value domain.Note) NoteView {
 	return NoteView{ID: value.ID, RunID: value.RunID, Title: value.Title, Content: value.Content,
 		Category: string(value.Category), Visibility: string(value.Visibility), Owner: value.Owner,
-		Tags: append([]string{}, value.Tags...), SourceRefs: append([]string{}, value.SourceRefs...),
+		OwnerAgentID: value.OwnerAgentID,
+		Tags:         append([]string{}, value.Tags...), SourceRefs: append([]string{}, value.SourceRefs...),
 		EvidenceIDs: append([]string{}, value.EvidenceIDs...), Status: string(value.Status),
 		Pinned: value.Pinned, Version: value.Version, CreatedAt: value.CreatedAt,
 		UpdatedAt: value.UpdatedAt, ArchivedAt: value.ArchivedAt}

@@ -32,6 +32,7 @@ type CreateWorkItemRequest struct {
 	Description        string
 	Priority           string
 	Owner              string
+	OwnerAgentID       string
 	AcceptanceCriteria []string
 	Dependencies       []string
 }
@@ -43,6 +44,7 @@ type UpdateWorkItemRequest struct {
 	Description        *string
 	Priority           *string
 	Owner              *string
+	OwnerAgentID       *string
 	AcceptanceCriteria *[]string
 	Dependencies       *[]string
 }
@@ -85,6 +87,7 @@ func (s *WorkItemService) prepareCreate(ctx context.Context, req CreateWorkItemR
 	}
 	details, err := normalizeServiceWorkItemDetails(item.ID, domain.WorkItemDetails{
 		Title: req.Title, Description: req.Description, Priority: priority, Owner: req.Owner,
+		OwnerAgentID:       req.OwnerAgentID,
 		AcceptanceCriteria: slices.Clone(req.AcceptanceCriteria), Dependencies: slices.Clone(req.Dependencies),
 	})
 	if err != nil {
@@ -93,6 +96,7 @@ func (s *WorkItemService) prepareCreate(ctx context.Context, req CreateWorkItemR
 	item.Title = details.Title
 	item.Description = details.Description
 	item.Owner = details.Owner
+	item.OwnerAgentID = details.OwnerAgentID
 	item.AcceptanceCriteria = details.AcceptanceCriteria
 	item.Dependencies = details.Dependencies
 	if err := item.Validate(); err != nil {
@@ -100,6 +104,7 @@ func (s *WorkItemService) prepareCreate(ctx context.Context, req CreateWorkItemR
 	}
 	event, err := events.New(run.ID, run.MissionID, events.WorkItemCreatedEvent, "work_item_service", item.ID, map[string]any{
 		"title": item.Title, "status": item.Status, "priority": item.Priority, "owner": item.Owner,
+		"owner_agent_id": item.OwnerAgentID,
 		"dependency_ids": item.Dependencies, "acceptance_count": len(item.AcceptanceCriteria), "version": item.Version,
 	})
 	if err != nil {
@@ -129,6 +134,7 @@ func (s *WorkItemService) Update(ctx context.Context, req UpdateWorkItemRequest)
 		return domain.WorkItem{}, apperror.New(apperror.CodeFailedPrecondition, "work item store is required")
 	}
 	if req.Title == nil && req.Description == nil && req.Priority == nil && req.Owner == nil &&
+		req.OwnerAgentID == nil &&
 		req.AcceptanceCriteria == nil && req.Dependencies == nil {
 		return domain.WorkItem{}, apperror.New(apperror.CodeInvalidArgument, "work item update requires at least one changed field")
 	}
@@ -146,6 +152,7 @@ func (s *WorkItemService) Update(ctx context.Context, req UpdateWorkItemRequest)
 	}
 	details := domain.WorkItemDetails{
 		Title: current.Title, Description: current.Description, Priority: current.Priority, Owner: current.Owner,
+		OwnerAgentID:       current.OwnerAgentID,
 		AcceptanceCriteria: slices.Clone(current.AcceptanceCriteria), Dependencies: slices.Clone(current.Dependencies),
 	}
 	changed := make([]string, 0, 6)
@@ -168,6 +175,10 @@ func (s *WorkItemService) Update(ctx context.Context, req UpdateWorkItemRequest)
 	if req.Owner != nil {
 		details.Owner = *req.Owner
 		changed = append(changed, "owner")
+	}
+	if req.OwnerAgentID != nil {
+		details.OwnerAgentID = *req.OwnerAgentID
+		changed = append(changed, "owner_agent_id")
 	}
 	if req.AcceptanceCriteria != nil {
 		details.AcceptanceCriteria = slices.Clone(*req.AcceptanceCriteria)

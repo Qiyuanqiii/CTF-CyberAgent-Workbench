@@ -18,8 +18,17 @@ func TestTodoCLIEndToEndWorkBoard(t *testing.T) {
 	if runID == "" {
 		t.Fatalf("missing run id: %s", createdRun)
 	}
+	graph, stderr, code := executeTestCommand(t, "run", "graph", runID)
+	if code != 0 {
+		t.Fatalf("run graph failed: %s", stderr)
+	}
+	rootAgentID := agentIDPattern.FindString(graph)
+	if rootAgentID == "" {
+		t.Fatalf("missing root Agent id: %s", graph)
+	}
 
-	createdDependency, stderr, code := executeTestCommand(t, "todo", "create", runID, "prepare fixtures", "--priority", "high", "--owner", "planner")
+	createdDependency, stderr, code := executeTestCommand(t, "todo", "create", runID, "prepare fixtures",
+		"--priority", "high", "--owner", "planner", "--owner-agent", rootAgentID)
 	if code != 0 {
 		t.Fatalf("dependency create failed: %s", stderr)
 	}
@@ -28,7 +37,8 @@ func TestTodoCLIEndToEndWorkBoard(t *testing.T) {
 		t.Fatalf("unexpected dependency output: %s", createdDependency)
 	}
 	createdItem, stderr, code := executeTestCommand(t, "todo", "create", runID, "implement parser",
-		"--priority", "critical", "--owner", "coder", "--depends-on", dependencyID,
+		"--priority", "critical", "--owner", "coder", "--owner-agent", rootAgentID,
+		"--depends-on", dependencyID,
 		"--acceptance", "unit tests pass", "--acceptance", "lint clean")
 	if code != 0 {
 		t.Fatalf("work item create failed: %s", stderr)
@@ -38,12 +48,14 @@ func TestTodoCLIEndToEndWorkBoard(t *testing.T) {
 		t.Fatalf("missing work item id: %s", createdItem)
 	}
 
-	listed, stderr, code := executeTestCommand(t, "todo", "list", runID, "--status", "pending,blocked")
+	listed, stderr, code := executeTestCommand(t, "todo", "list", runID, "--status", "pending,blocked",
+		"--owner-agent", rootAgentID)
 	if code != 0 || !strings.Contains(listed, itemID) || !strings.Contains(listed, dependencyID) || !strings.Contains(listed, "deps=1") {
 		t.Fatalf("unexpected todo list output=%s stderr=%s code=%d", listed, stderr, code)
 	}
 	shown, stderr, code := executeTestCommand(t, "todo", "show", itemID)
-	if code != 0 || !strings.Contains(shown, "acceptance[1]: lint clean") || !strings.Contains(shown, "dependencies[1]: "+dependencyID) {
+	if code != 0 || !strings.Contains(shown, "owner_agent: "+rootAgentID) ||
+		!strings.Contains(shown, "acceptance[1]: lint clean") || !strings.Contains(shown, "dependencies[1]: "+dependencyID) {
 		t.Fatalf("unexpected todo show output=%s stderr=%s code=%d", shown, stderr, code)
 	}
 
@@ -59,7 +71,9 @@ func TestTodoCLIEndToEndWorkBoard(t *testing.T) {
 		t.Fatalf("unexpected update output=%s stderr=%s code=%d", updated, stderr, code)
 	}
 	shown, stderr, code = executeTestCommand(t, "todo", "show", itemID)
-	if code != 0 || !strings.Contains(shown, "owner: reviewer") || !strings.Contains(shown, "acceptance: -") || !strings.Contains(shown, "blocked_reason: waiting for fixtures") {
+	if code != 0 || !strings.Contains(shown, "owner: reviewer") ||
+		!strings.Contains(shown, "owner_agent: "+rootAgentID) || !strings.Contains(shown, "acceptance: -") ||
+		!strings.Contains(shown, "blocked_reason: waiting for fixtures") {
 		t.Fatalf("updated item not visible output=%s stderr=%s code=%d", shown, stderr, code)
 	}
 	if _, stderr, code := executeTestCommand(t, "todo", "reopen", itemID, "--version", "2"); code != 4 || !strings.Contains(stderr, "changed concurrently") {

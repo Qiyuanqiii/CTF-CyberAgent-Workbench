@@ -438,6 +438,10 @@ func validAgentIdentity(value string, allowEmpty bool) bool {
 		utf8.RuneCountInString(value) <= MaxAgentIdentityRunes
 }
 
+func ValidAgentID(value string) bool {
+	return validAgentIdentity(value, false)
+}
+
 func DecodeAgentWakePayload(payloadJSON string) (AgentWakePayload, error) {
 	var payload AgentWakePayload
 	if err := decodeStrictAgentPayload(payloadJSON, &payload); err != nil {

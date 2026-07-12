@@ -84,6 +84,7 @@ func validateSingleQueryValues(values url.Values, keys ...string) error {
 			return apperror.New(apperror.CodeInvalidArgument, fmt.Sprintf("unknown query parameter %q", key))
 		}
 		if (key == "limit" || key == "cursor" || key == "mission_id" || key == "owner" ||
+			key == "owner_agent_id" ||
 			key == "pinned" || key == "source_id" || key == "stream" || key == "include_compacted") && len(items) != 1 {
 			return apperror.New(apperror.CodeInvalidArgument,
 				fmt.Sprintf("query parameter %q must appear exactly once", key))

@@ -12,6 +12,7 @@ import (
 )
 
 var runIDPattern = regexp.MustCompile(`run-[0-9]{14}-[a-f0-9]{12}`)
+var agentIDPattern = regexp.MustCompile(`agent-[0-9]{14}-[a-f0-9]{12}`)
 var sessionIDPattern = regexp.MustCompile(`sess-[0-9]{14}-[a-f0-9]{12}`)
 var toolIDPattern = regexp.MustCompile(`tool-[0-9]{14}-[a-f0-9]{12}`)
 var processIDPattern = regexp.MustCompile(`process-[0-9]{14}-[a-f0-9]{12}`)

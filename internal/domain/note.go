@@ -49,47 +49,51 @@ const (
 )
 
 type Note struct {
-	ID          string
-	RunID       string
-	Title       string
-	Content     string
-	Category    NoteCategory
-	Visibility  NoteVisibility
-	Owner       string
-	Tags        []string
-	SourceRefs  []string
-	EvidenceIDs []string
-	Status      NoteStatus
-	Pinned      bool
-	Version     int64
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	ArchivedAt  *time.Time
+	ID           string
+	RunID        string
+	Title        string
+	Content      string
+	Category     NoteCategory
+	Visibility   NoteVisibility
+	Owner        string
+	OwnerAgentID string
+	Tags         []string
+	SourceRefs   []string
+	EvidenceIDs  []string
+	Status       NoteStatus
+	Pinned       bool
+	Version      int64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	ArchivedAt   *time.Time
 }
 
 type NoteDetails struct {
-	Title       string
-	Content     string
-	Category    NoteCategory
-	Visibility  NoteVisibility
-	Owner       string
-	Tags        []string
-	SourceRefs  []string
-	EvidenceIDs []string
-	Pinned      bool
+	Title        string
+	Content      string
+	Category     NoteCategory
+	Visibility   NoteVisibility
+	Owner        string
+	OwnerAgentID string
+	Tags         []string
+	SourceRefs   []string
+	EvidenceIDs  []string
+	Pinned       bool
 }
 
 type NoteFilter struct {
-	RunID        string
-	Statuses     []NoteStatus
-	Categories   []NoteCategory
-	Visibilities []NoteVisibility
-	Owner        string
-	Viewer       string
-	Tags         []string
-	Pinned       *bool
-	Limit        int
-	Offset       int
+	RunID         string
+	Statuses      []NoteStatus
+	Categories    []NoteCategory
+	Visibilities  []NoteVisibility
+	Owner         string
+	OwnerAgentID  string
+	Viewer        string
+	ViewerAgentID string
+	Tags          []string
+	Pinned        *bool
+	Limit         int
+	Offset        int
 }
 
 func ParseNoteCategory(value string) (NoteCategory, error) {
@@ -194,6 +198,7 @@ func (n *Note) ApplyDetails(details NoteDetails, at time.Time) error {
 	n.Category = normalized.Category
 	n.Visibility = normalized.Visibility
 	n.Owner = normalized.Owner
+	n.OwnerAgentID = normalized.OwnerAgentID
 	n.Tags = normalized.Tags
 	n.SourceRefs = normalized.SourceRefs
 	n.EvidenceIDs = normalized.EvidenceIDs
@@ -227,6 +232,7 @@ func (n Note) Validate() error {
 	}
 	if details.Title != n.Title || details.Content != n.Content || details.Category != n.Category ||
 		details.Visibility != n.Visibility || details.Owner != n.Owner ||
+		details.OwnerAgentID != n.OwnerAgentID ||
 		!slices.Equal(details.Tags, n.Tags) || !slices.Equal(details.SourceRefs, n.SourceRefs) ||
 		!slices.Equal(details.EvidenceIDs, n.EvidenceIDs) {
 		return errors.New("note text, tags, and references must be normalized")
@@ -251,6 +257,7 @@ func NormalizeNoteDetails(details NoteDetails) (NoteDetails, error) {
 	details.Title = strings.TrimSpace(details.Title)
 	details.Content = strings.TrimSpace(details.Content)
 	details.Owner = strings.TrimSpace(details.Owner)
+	details.OwnerAgentID = strings.TrimSpace(details.OwnerAgentID)
 	if !utf8.ValidString(details.Title) {
 		return NoteDetails{}, errors.New("note title must be valid UTF-8")
 	}
@@ -259,6 +266,9 @@ func NormalizeNoteDetails(details NoteDetails) (NoteDetails, error) {
 	}
 	if !utf8.ValidString(details.Owner) {
 		return NoteDetails{}, errors.New("note owner must be valid UTF-8")
+	}
+	if !validAgentIdentity(details.OwnerAgentID, true) {
+		return NoteDetails{}, errors.New("note owner Agent identity is invalid")
 	}
 	if details.Category == "" {
 		details.Category = NoteObservation
@@ -284,10 +294,13 @@ func NormalizeNoteDetails(details NoteDetails) (NoteDetails, error) {
 	if !ValidNoteVisibility(details.Visibility) {
 		return NoteDetails{}, fmt.Errorf("invalid note visibility %q", details.Visibility)
 	}
+	if details.Visibility == NoteVisibilityOwner && details.Owner == "" && details.OwnerAgentID != "" {
+		details.Owner = details.OwnerAgentID
+	}
 	if runeCount(details.Owner) > MaxNoteOwnerRunes {
 		return NoteDetails{}, fmt.Errorf("note owner exceeds %d characters", MaxNoteOwnerRunes)
 	}
-	if details.Visibility == NoteVisibilityOwner && details.Owner == "" {
+	if details.Visibility == NoteVisibilityOwner && details.Owner == "" && details.OwnerAgentID == "" {
 		return NoteDetails{}, errors.New("owner-visible note requires an owner")
 	}
 	if details.Visibility != NoteVisibilityOwner && details.Owner != "" {
@@ -360,6 +373,7 @@ func normalizeNoteList(values []string, maxItems int, maxRunes int, label string
 func noteDetails(note Note) NoteDetails {
 	return NoteDetails{
 		Title: note.Title, Content: note.Content, Category: note.Category, Visibility: note.Visibility,
-		Owner: note.Owner, Tags: note.Tags, SourceRefs: note.SourceRefs, EvidenceIDs: note.EvidenceIDs, Pinned: note.Pinned,
+		Owner: note.Owner, OwnerAgentID: note.OwnerAgentID, Tags: note.Tags,
+		SourceRefs: note.SourceRefs, EvidenceIDs: note.EvidenceIDs, Pinned: note.Pinned,
 	}
 }

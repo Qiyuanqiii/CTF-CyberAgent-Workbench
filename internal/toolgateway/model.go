@@ -133,6 +133,7 @@ type ToolCall struct {
 	InvocationID    string            `json:"invocation_id,omitempty"`
 	OperationKey    string            `json:"-"`
 	RunID           string            `json:"run_id,omitempty"`
+	AgentID         string            `json:"agent_id,omitempty"`
 	SessionID       string            `json:"session_id,omitempty"`
 	WorkspaceID     string            `json:"workspace_id,omitempty"`
 	LeaseID         string            `json:"-"`
@@ -147,6 +148,7 @@ func NormalizeToolCall(call ToolCall) (ToolCall, error) {
 	call.InvocationID = strings.TrimSpace(call.InvocationID)
 	call.OperationKey = strings.TrimSpace(call.OperationKey)
 	call.RunID = strings.TrimSpace(call.RunID)
+	call.AgentID = strings.TrimSpace(call.AgentID)
 	call.SessionID = strings.TrimSpace(call.SessionID)
 	call.WorkspaceID = strings.TrimSpace(call.WorkspaceID)
 	call.LeaseID = strings.TrimSpace(call.LeaseID)
@@ -157,7 +159,7 @@ func NormalizeToolCall(call ToolCall) (ToolCall, error) {
 	}
 	for label, value := range map[string]string{
 		"invocation id": call.InvocationID, "operation key": call.OperationKey,
-		"run id": call.RunID, "session id": call.SessionID,
+		"run id": call.RunID, "agent id": call.AgentID, "session id": call.SessionID,
 		"workspace id": call.WorkspaceID, "lease id": call.LeaseID, "requester": call.RequestedBy,
 	} {
 		if !utf8.ValidString(value) {

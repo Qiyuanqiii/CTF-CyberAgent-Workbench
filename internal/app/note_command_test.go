@@ -22,13 +22,22 @@ func TestNoteCLIEndToEndLifecycle(t *testing.T) {
 	if runID == "" {
 		t.Fatalf("missing run id: %s", createdRun)
 	}
+	graph, stderr, code := executeTestCommand(t, "run", "graph", runID)
+	if code != 0 {
+		t.Fatalf("run graph failed: %s", stderr)
+	}
+	rootAgentID := agentIDPattern.FindString(graph)
+	if rootAgentID == "" {
+		t.Fatalf("missing root Agent id: %s", graph)
+	}
 	contentPath := filepath.Join(t.TempDir(), "note.txt")
 	if err := os.WriteFile(contentPath, []byte("Strict parser decision.\nKeep source metadata."), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	created, stderr, code := executeTestCommand(t, "note", "create", runID, "parser decision",
 		"--content-file", contentPath, "--category", "decision", "--visibility", "run", "--pin",
-		"--tag", "Security", "--tag", "parser", "--source", "docs/spec.md", "--evidence", "evidence-1")
+		"--owner-agent", rootAgentID, "--tag", "Security", "--tag", "parser",
+		"--source", "docs/spec.md", "--evidence", "evidence-1")
 	if code != 0 {
 		t.Fatalf("note create failed: %s", stderr)
 	}
@@ -36,12 +45,14 @@ func TestNoteCLIEndToEndLifecycle(t *testing.T) {
 	if noteID == "" || !strings.Contains(created, "version: 1") || !strings.Contains(created, "pinned: true") {
 		t.Fatalf("unexpected note create output: %s", created)
 	}
-	listed, stderr, code := executeTestCommand(t, "note", "list", runID, "--category", "decision", "--tag", "security", "--tag", "parser", "--pinned", "true")
+	listed, stderr, code := executeTestCommand(t, "note", "list", runID, "--category", "decision",
+		"--owner-agent", rootAgentID, "--tag", "security", "--tag", "parser", "--pinned", "true")
 	if code != 0 || !strings.Contains(listed, noteID) || !strings.Contains(listed, "pinned") || !strings.Contains(listed, "tags=2") {
 		t.Fatalf("unexpected note list output=%s stderr=%s code=%d", listed, stderr, code)
 	}
 	shown, stderr, code := executeTestCommand(t, "note", "show", noteID)
-	if code != 0 || !strings.Contains(shown, "Strict parser decision.") || !strings.Contains(shown, "tags[1]: parser") ||
+	if code != 0 || !strings.Contains(shown, "owner_agent: "+rootAgentID) ||
+		!strings.Contains(shown, "Strict parser decision.") || !strings.Contains(shown, "tags[1]: parser") ||
 		!strings.Contains(shown, "sources[1]: docs/spec.md") || !strings.Contains(shown, "evidence[1]: evidence-1") {
 		t.Fatalf("unexpected note show output=%s stderr=%s code=%d", shown, stderr, code)
 	}

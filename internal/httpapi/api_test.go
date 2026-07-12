@@ -42,6 +42,7 @@ type apiFixture struct {
 	store      *store.SQLiteStore
 	dbPath     string
 	run        domain.Run
+	root       domain.AgentNode
 	workItems  []domain.WorkItem
 	notes      []domain.Note
 	artifactID string
@@ -72,6 +73,10 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	root, _, err := st.RegisterRootAgent(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, message := range []session.Message{
 		session.NewMessage(run.SessionID, "user", "inspect the project"),
 		session.NewMessage(run.SessionID, "assistant", "inspection started"),
@@ -91,6 +96,7 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	for index := 1; index <= 3; index++ {
 		item, err := workService.Create(ctx, application.CreateWorkItemRequest{
 			RunID: run.ID, Title: fmt.Sprintf("API work item %d", index), Owner: "root",
+			OwnerAgentID:       root.ID,
 			AcceptanceCriteria: []string{fmt.Sprintf("criterion %d", index)},
 		})
 		if err != nil {
@@ -109,7 +115,7 @@ func newAPIFixture(t *testing.T) *apiFixture {
 		}
 		note, err := noteService.Create(ctx, application.CreateNoteRequest{
 			RunID: run.ID, Title: fmt.Sprintf("API note %d", index), Content: content,
-			Tags: []string{"api", fmt.Sprintf("page-%d", index)}, Pinned: index == 1,
+			OwnerAgentID: root.ID, Tags: []string{"api", fmt.Sprintf("page-%d", index)}, Pinned: index == 1,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -154,7 +160,8 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &apiFixture{api: api, store: st, dbPath: dbPath, run: run, workItems: workItems, notes: notes,
+	return &apiFixture{api: api, store: st, dbPath: dbPath, run: run, root: root,
+		workItems: workItems, notes: notes,
 		artifactID: reviewed.Result.Metadata["artifact_stdout_id"], secret: secret,
 		leaseID: acquiredLease.Lease.LeaseID, checkpoint: turn.Checkpoint, attempt: attempt}
 }
@@ -231,6 +238,14 @@ func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *te
 	if workItem.ID != fixture.workItems[0].ID {
 		t.Fatalf("unexpected WorkItem detail: %#v", workItem)
 	}
+	agentWorkResponse := fixture.get(t, "/api/v1/runs/"+fixture.run.ID+
+		"/work-items?owner_agent_id="+url.QueryEscape(fixture.root.ID))
+	var agentWorkItems []WorkItemView
+	decodeData(t, agentWorkResponse, &agentWorkItems)
+	if len(agentWorkItems) != 3 || agentWorkItems[0].OwnerAgentID != fixture.root.ID ||
+		workItem.OwnerAgentID != fixture.root.ID {
+		t.Fatalf("WorkItem Agent ownership is missing from API: list=%#v detail=%#v", agentWorkItems, workItem)
+	}
 
 	noteResponse := fixture.get(t, "/api/v1/runs/"+fixture.run.ID+"/notes?tag=api")
 	if strings.Contains(noteResponse.Body.String(), fixture.secret) || !strings.Contains(noteResponse.Body.String(), "[REDACTED:") {
@@ -245,6 +260,14 @@ func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *te
 	decodeData(t, fixture.get(t, "/api/v1/notes/"+fixture.notes[0].ID), &note)
 	if note.ID != fixture.notes[0].ID {
 		t.Fatalf("unexpected Note detail: %#v", note)
+	}
+	agentNoteResponse := fixture.get(t, "/api/v1/runs/"+fixture.run.ID+
+		"/notes?owner_agent_id="+url.QueryEscape(fixture.root.ID))
+	var agentNotes []NoteView
+	decodeData(t, agentNoteResponse, &agentNotes)
+	if len(agentNotes) != 3 || agentNotes[0].OwnerAgentID != fixture.root.ID ||
+		note.OwnerAgentID != fixture.root.ID {
+		t.Fatalf("Note Agent ownership is missing from API: list=%#v detail=%#v", agentNotes, note)
 	}
 
 	artifactResponse := fixture.get(t, "/api/v1/runs/"+fixture.run.ID+"/artifacts?stream=stdout")

@@ -1111,9 +1111,20 @@
           {
             "name": "owner",
             "in": "query",
-            "description": "Exact Note owner filter",
+            "description": "Exact legacy Note owner-label filter",
             "schema": {
               "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "name": "owner_agent_id",
+            "in": "query",
+            "description": "Exact Note owner Agent identity",
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
               "type": "string"
             }
           },
@@ -1381,9 +1392,20 @@
           {
             "name": "owner",
             "in": "query",
-            "description": "Exact WorkItem owner filter",
+            "description": "Exact legacy WorkItem owner-label filter",
             "schema": {
               "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "name": "owner_agent_id",
+            "in": "query",
+            "description": "Exact WorkItem owner Agent identity",
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
               "type": "string"
             }
           }
@@ -2288,6 +2310,11 @@
           "owner": {
             "type": "string"
           },
+          "owner_agent_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
           "pinned": {
             "type": "boolean"
           },
@@ -2910,6 +2937,11 @@
             "type": "string"
           },
           "owner": {
+            "type": "string"
+          },
+          "owner_agent_id": {
+            "maxLength": 256,
+            "minLength": 1,
             "type": "string"
           },
           "priority": {

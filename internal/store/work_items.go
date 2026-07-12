@@ -61,6 +61,9 @@ func validateNewWorkItem(item domain.WorkItem, event events.Event) error {
 }
 
 func insertNewWorkItemTx(ctx context.Context, tx *sql.Tx, item domain.WorkItem) error {
+	if err := requireAssignableAgentOwnerTx(ctx, tx, item.RunID, item.OwnerAgentID); err != nil {
+		return err
+	}
 	if err := ensureWorkItemDependenciesTx(ctx, tx, item.RunID, item.ID, item.Dependencies); err != nil {
 		return err
 	}
@@ -69,10 +72,11 @@ func insertNewWorkItemTx(ctx context.Context, tx *sql.Tx, item domain.WorkItem) 
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO work_items
-		(id, run_id, title, description, status, priority, owner, acceptance_json, blocked_reason,
+		(id, run_id, title, description, status, priority, owner, owner_agent_id, acceptance_json, blocked_reason,
 		 version, created_at, updated_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, item.ID, item.RunID, item.Title,
-		item.Description, item.Status, item.Priority, item.Owner, string(acceptanceJSON), item.BlockedReason,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, item.ID, item.RunID, item.Title,
+		item.Description, item.Status, item.Priority, item.Owner, nullableAgentID(item.OwnerAgentID),
+		string(acceptanceJSON), item.BlockedReason,
 		item.Version, ts(item.CreatedAt), ts(item.UpdatedAt), nullableTS(item.CompletedAt)); err != nil {
 		return err
 	}
@@ -98,6 +102,7 @@ func (s *SQLiteStore) GetWorkItem(ctx context.Context, id string) (domain.WorkIt
 func (s *SQLiteStore) ListWorkItems(ctx context.Context, filter domain.WorkItemFilter) ([]domain.WorkItem, error) {
 	filter.RunID = strings.TrimSpace(filter.RunID)
 	filter.Owner = strings.TrimSpace(filter.Owner)
+	filter.OwnerAgentID = strings.TrimSpace(filter.OwnerAgentID)
 	if filter.RunID == "" {
 		return nil, apperror.New(apperror.CodeInvalidArgument, "work item list run id is required")
 	}
@@ -127,6 +132,14 @@ func (s *SQLiteStore) ListWorkItems(ctx context.Context, filter domain.WorkItemF
 	if filter.Owner != "" {
 		query += ` AND owner = ?`
 		args = append(args, filter.Owner)
+	}
+	if filter.OwnerAgentID != "" {
+		if !domain.ValidAgentID(filter.OwnerAgentID) {
+			return nil, apperror.New(apperror.CodeInvalidArgument,
+				"work item owner Agent filter is invalid")
+		}
+		query += ` AND owner_agent_id = ?`
+		args = append(args, filter.OwnerAgentID)
 	}
 	limit := filter.Limit
 	if limit <= 0 {
@@ -215,6 +228,11 @@ func (s *SQLiteStore) UpdateWorkItem(ctx context.Context, item domain.WorkItem, 
 	if err := ensureWorkItemDependenciesTx(ctx, tx, item.RunID, item.ID, item.Dependencies); err != nil {
 		return err
 	}
+	if current.OwnerAgentID != item.OwnerAgentID {
+		if err := requireAssignableAgentOwnerTx(ctx, tx, item.RunID, item.OwnerAgentID); err != nil {
+			return err
+		}
+	}
 	if !slices.Equal(current.Dependencies, item.Dependencies) {
 		if err := rejectWorkItemDependencyCycleTx(ctx, tx, item.RunID, item.ID, item.Dependencies); err != nil {
 			return err
@@ -230,9 +248,10 @@ func (s *SQLiteStore) UpdateWorkItem(ctx context.Context, item domain.WorkItem, 
 		return err
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE work_items SET title = ?, description = ?, status = ?, priority = ?,
-		owner = ?, acceptance_json = ?, blocked_reason = ?, version = ?, updated_at = ?, completed_at = ?
+		owner = ?, owner_agent_id = ?, acceptance_json = ?, blocked_reason = ?, version = ?, updated_at = ?, completed_at = ?
 		WHERE id = ? AND run_id = ? AND version = ?`, item.Title, item.Description, item.Status, item.Priority,
-		item.Owner, string(acceptanceJSON), item.BlockedReason, item.Version, ts(item.UpdatedAt), nullableTS(item.CompletedAt),
+		item.Owner, nullableAgentID(item.OwnerAgentID), string(acceptanceJSON), item.BlockedReason,
+		item.Version, ts(item.UpdatedAt), nullableTS(item.CompletedAt),
 		item.ID, item.RunID, expectedVersion)
 	if err != nil {
 		return err
@@ -255,7 +274,7 @@ func (s *SQLiteStore) UpdateWorkItem(ctx context.Context, item domain.WorkItem, 
 	return tx.Commit()
 }
 
-const workItemSelect = `SELECT id, run_id, title, description, status, priority, owner, acceptance_json,
+const workItemSelect = `SELECT id, run_id, title, description, status, priority, owner, owner_agent_id, acceptance_json,
 	blocked_reason, version, created_at, updated_at, completed_at FROM work_items`
 
 func getWorkItemTx(ctx context.Context, tx *sql.Tx, id string) (domain.WorkItem, error) {
@@ -279,10 +298,12 @@ func scanWorkItem(row scanner) (domain.WorkItem, error) {
 	var created string
 	var updated string
 	var completed sql.NullString
+	var ownerAgentID sql.NullString
 	if err := row.Scan(&item.ID, &item.RunID, &item.Title, &item.Description, &status, &priority, &item.Owner,
-		&acceptanceJSON, &item.BlockedReason, &item.Version, &created, &updated, &completed); err != nil {
+		&ownerAgentID, &acceptanceJSON, &item.BlockedReason, &item.Version, &created, &updated, &completed); err != nil {
 		return domain.WorkItem{}, err
 	}
+	item.OwnerAgentID = ownerAgentID.String
 	item.Status = domain.WorkItemStatus(status)
 	item.Priority = domain.WorkItemPriority(priority)
 	if err := json.Unmarshal([]byte(acceptanceJSON), &item.AcceptanceCriteria); err != nil {
@@ -451,6 +472,7 @@ func redactAndNormalizeWorkItem(item domain.WorkItem) domain.WorkItem {
 		Description:        redact.String(item.Description),
 		Priority:           item.Priority,
 		Owner:              redact.String(item.Owner),
+		OwnerAgentID:       item.OwnerAgentID,
 		AcceptanceCriteria: redactStrings(item.AcceptanceCriteria),
 		Dependencies:       item.Dependencies,
 	})
@@ -459,6 +481,7 @@ func redactAndNormalizeWorkItem(item domain.WorkItem) domain.WorkItem {
 		item.Description = details.Description
 		item.Priority = details.Priority
 		item.Owner = details.Owner
+		item.OwnerAgentID = details.OwnerAgentID
 		item.AcceptanceCriteria = details.AcceptanceCriteria
 		item.Dependencies = details.Dependencies
 	}
@@ -477,13 +500,15 @@ func redactStrings(values []string) []string {
 func workItemDetails(item domain.WorkItem) domain.WorkItemDetails {
 	return domain.WorkItemDetails{
 		Title: item.Title, Description: item.Description, Priority: item.Priority, Owner: item.Owner,
+		OwnerAgentID:       item.OwnerAgentID,
 		AcceptanceCriteria: item.AcceptanceCriteria, Dependencies: item.Dependencies,
 	}
 }
 
 func sameWorkItemDetails(left domain.WorkItem, right domain.WorkItem) bool {
 	return left.Title == right.Title && left.Description == right.Description && left.Priority == right.Priority &&
-		left.Owner == right.Owner && slices.Equal(left.AcceptanceCriteria, right.AcceptanceCriteria) &&
+		left.Owner == right.Owner && left.OwnerAgentID == right.OwnerAgentID &&
+		slices.Equal(left.AcceptanceCriteria, right.AcceptanceCriteria) &&
 		slices.Equal(left.Dependencies, right.Dependencies)
 }
 

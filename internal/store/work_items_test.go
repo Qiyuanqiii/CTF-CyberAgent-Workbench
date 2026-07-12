@@ -119,6 +119,168 @@ func TestSQLiteWorkItemsRejectMissingCrossRunAndCyclicDependencies(t *testing.T)
 	}
 }
 
+func TestSQLiteAgentOwnedMemoryEnforcesRunAndViewerBoundaries(t *testing.T) {
+	st := openWorkItemTestStore(t)
+	ctx := context.Background()
+	mission, run := createWorkItemTestRun(t, ctx, st, "agent-owned memory")
+	started, err := application.NewRunService(st).Start(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run = started
+	root, _, err := st.RegisterRootAgent(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, replayed, err := st.AdmitSpecialist(ctx, domain.SpecialistAdmission{
+		AgentID: idgen.New("agent"), SessionID: idgen.New("sess"), RunID: run.ID,
+		ParentAgentID: root.ID, Title: "memory specialist",
+		Skills: []string{"note_create", "work_item_create"}, TurnLimit: 2, TokenLimit: 64,
+		MaxChildren: 2, CreatedAt: time.Now().UTC(),
+	}, "agent-memory-admission")
+	if err != nil || replayed {
+		t.Fatalf("specialist admission failed: child=%#v replayed=%t err=%v", child, replayed, err)
+	}
+
+	workService := application.NewWorkItemService(st)
+	item, err := workService.Create(ctx, application.CreateWorkItemRequest{
+		RunID: run.ID, Title: "specialist-owned work", OwnerAgentID: child.ID,
+	})
+	if err != nil || item.OwnerAgentID != child.ID {
+		t.Fatalf("Agent-owned WorkItem was not persisted: %#v err=%v", item, err)
+	}
+	filteredWork, err := st.ListWorkItems(ctx, domain.WorkItemFilter{
+		RunID: run.ID, OwnerAgentID: child.ID,
+	})
+	if err != nil || len(filteredWork) != 1 || filteredWork[0].ID != item.ID {
+		t.Fatalf("Agent-owned WorkItem filter failed: %#v err=%v", filteredWork, err)
+	}
+
+	noteService := application.NewNoteService(st)
+	childOnly, err := noteService.Create(ctx, application.CreateNoteRequest{
+		RunID: run.ID, Title: "private specialist note", Content: "child context",
+		Visibility: string(domain.NoteVisibilityOwner), OwnerAgentID: child.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runVisible, err := noteService.Create(ctx, application.CreateNoteRequest{
+		RunID: run.ID, Title: "shared specialist note", Content: "run context",
+		Visibility: string(domain.NoteVisibilityRun), OwnerAgentID: child.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyRoot, err := noteService.Create(ctx, application.CreateNoteRequest{
+		RunID: run.ID, Title: "legacy root note", Content: "legacy context",
+		Visibility: string(domain.NoteVisibilityOwner), Owner: "root",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootVisible, err := st.ListNotes(ctx, domain.NoteFilter{
+		RunID: run.ID, Viewer: "root", ViewerAgentID: root.ID,
+	})
+	if err != nil || !noteIDsEqual(rootVisible, []string{runVisible.ID, legacyRoot.ID}) {
+		t.Fatalf("root Agent crossed specialist owner visibility: %#v err=%v", rootVisible, err)
+	}
+	childVisible, err := st.ListNotes(ctx, domain.NoteFilter{RunID: run.ID, ViewerAgentID: child.ID})
+	if err != nil || !noteIDsEqual(childVisible, []string{childOnly.ID, runVisible.ID}) {
+		t.Fatalf("specialist Agent visibility is incomplete: %#v err=%v", childVisible, err)
+	}
+	ownedNotes, err := st.ListNotes(ctx, domain.NoteFilter{RunID: run.ID, OwnerAgentID: child.ID})
+	if err != nil || !noteIDsEqual(ownedNotes, []string{childOnly.ID, runVisible.ID}) {
+		t.Fatalf("Agent-owned Note filter failed: %#v err=%v", ownedNotes, err)
+	}
+	missingAgentID := idgen.New("agent")
+	if _, err := workService.Create(ctx, application.CreateWorkItemRequest{
+		RunID: run.ID, Title: "missing Agent work", OwnerAgentID: missingAgentID,
+	}); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("missing WorkItem owner returned code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	if _, err := noteService.Create(ctx, application.CreateNoteRequest{
+		RunID: run.ID, Title: "missing Agent note", Content: "must fail", OwnerAgentID: missingAgentID,
+	}); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("missing Note owner returned code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	rootVisibility := string(domain.NoteVisibilityRoot)
+	sharedPrivate, err := noteService.Update(ctx, application.UpdateNoteRequest{
+		ID: childOnly.ID, ExpectedVersion: childOnly.Version, Visibility: &rootVisibility,
+	})
+	if err != nil || sharedPrivate.Visibility != domain.NoteVisibilityRoot || sharedPrivate.Owner != "" ||
+		sharedPrivate.OwnerAgentID != child.ID {
+		t.Fatalf("Note visibility change lost authoritative Agent ownership: %#v err=%v", sharedPrivate, err)
+	}
+
+	_, otherRun := createWorkItemTestRun(t, ctx, st, "other Agent-owned memory")
+	otherRoot, _, err := st.RegisterRootAgent(ctx, otherRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workService.Create(ctx, application.CreateWorkItemRequest{
+		RunID: run.ID, Title: "cross-run work", OwnerAgentID: otherRoot.ID,
+	}); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("cross-Run WorkItem owner returned code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	if _, err := noteService.Create(ctx, application.CreateNoteRequest{
+		RunID: run.ID, Title: "cross-run note", Content: "must fail", OwnerAgentID: otherRoot.ID,
+	}); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("cross-Run Note owner returned code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	if _, err := st.ListNotes(ctx, domain.NoteFilter{
+		RunID: run.ID, ViewerAgentID: otherRoot.ID,
+	}); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("cross-Run Note viewer returned code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	if _, err := st.db.ExecContext(ctx, `UPDATE work_items SET owner_agent_id = ? WHERE id = ?`,
+		otherRoot.ID, item.ID); err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("WorkItem ownership trigger did not reject cross-Run Agent: %v", err)
+	}
+	if _, err := st.db.ExecContext(ctx, `UPDATE notes SET owner_agent_id = ? WHERE id = ?`,
+		otherRoot.ID, childOnly.ID); err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("Note ownership trigger did not reject cross-Run Agent: %v", err)
+	}
+
+	rootID := root.ID
+	updated, err := workService.Update(ctx, application.UpdateWorkItemRequest{
+		ID: item.ID, ExpectedVersion: item.Version, OwnerAgentID: &rootID,
+	})
+	if err != nil || updated.OwnerAgentID != root.ID || updated.Version != item.Version+1 {
+		t.Fatalf("WorkItem Agent reassignment failed: %#v err=%v", updated, err)
+	}
+	timeline, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var workOwnerAudited bool
+	var noteOwnerAudited bool
+	for _, event := range timeline {
+		workOwnerAudited = workOwnerAudited || (event.Type == events.WorkItemCreatedEvent &&
+			strings.Contains(event.PayloadJSON, child.ID))
+		noteOwnerAudited = noteOwnerAudited || (event.Type == events.NoteCreatedEvent &&
+			strings.Contains(event.PayloadJSON, child.ID))
+	}
+	if !workOwnerAudited || !noteOwnerAudited {
+		t.Fatalf("Agent memory ownership was not audited: work=%t note=%t mission=%s",
+			workOwnerAudited, noteOwnerAudited, mission.ID)
+	}
+	if _, err := application.NewRunService(st).Cancel(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(ctx, `UPDATE work_items SET owner_agent_id = ? WHERE id = ?`,
+		child.ID, item.ID); err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("WorkItem trigger accepted new terminal Agent ownership: %v", err)
+	}
+	if _, err := st.db.ExecContext(ctx, `UPDATE notes SET owner_agent_id = ? WHERE id = ?`,
+		root.ID, childOnly.ID); err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("Note trigger accepted new terminal Agent ownership: %v", err)
+	}
+	if _, err := st.db.ExecContext(ctx, `UPDATE notes SET owner_agent_id = owner_agent_id WHERE id = ?`,
+		childOnly.ID); err != nil {
+		t.Fatalf("Note trigger rejected unchanged terminal Agent ownership: %v", err)
+	}
+}
+
 func TestSQLiteWorkItemOptimisticConcurrencyAllowsOneWriter(t *testing.T) {
 	st := openWorkItemTestStore(t)
 	ctx := context.Background()

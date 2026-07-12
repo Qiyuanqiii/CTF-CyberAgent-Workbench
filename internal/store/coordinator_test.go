@@ -31,7 +31,7 @@ func TestSQLiteUpgradesV18AndLazilyRegistersExistingRoot(t *testing.T) {
 	if _, err := st.db.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
 		t.Fatal(err)
 	}
-	for _, statement := range []string{
+	for _, statement := range append(removeSchemaV22ForTestStatements(), []string{
 		`DROP TABLE agent_admission_operations`,
 		`DELETE FROM schema_migrations WHERE version = 21`,
 		`DROP TABLE agent_message_operations`,
@@ -41,7 +41,7 @@ func TestSQLiteUpgradesV18AndLazilyRegistersExistingRoot(t *testing.T) {
 		`DROP TABLE agent_nodes`,
 		`DELETE FROM run_events WHERE type LIKE 'agent.%'`,
 		`DELETE FROM schema_migrations WHERE version = 19`,
-	} {
+	}...) {
 		if _, err := st.db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("prepare v18 schema with %q: %v", statement, err)
 		}
@@ -344,13 +344,13 @@ func TestSQLiteUpgradesV19InboxToSemanticProtocol(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("v19 snapshot was not created: found=%t err=%v", found, err)
 	}
-	for _, statement := range []string{
+	for _, statement := range append(removeSchemaV22ForTestStatements(), []string{
 		`DROP TABLE agent_admission_operations`,
 		`DELETE FROM schema_migrations WHERE version = 21`,
 		`DROP TABLE agent_message_operations`,
 		`ALTER TABLE agent_messages DROP COLUMN semantic`,
 		`DELETE FROM schema_migrations WHERE version = 20`,
-	} {
+	}...) {
 		if _, err := st.db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("prepare v19 schema with %q: %v", statement, err)
 		}
@@ -485,6 +485,11 @@ func TestSQLiteUpgradesV20ToSpecialistAdmissionLedger(t *testing.T) {
 	root, found, err := st.GetRootAgent(ctx, run.ID)
 	if err != nil || !found {
 		t.Fatalf("root was not created: found=%t err=%v", found, err)
+	}
+	for _, statement := range removeSchemaV22ForTestStatements() {
+		if _, err := st.db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("remove schema v22 with %q: %v", statement, err)
+		}
 	}
 	if _, err := st.db.ExecContext(ctx, `DROP TABLE agent_admission_operations`); err != nil {
 		t.Fatal(err)

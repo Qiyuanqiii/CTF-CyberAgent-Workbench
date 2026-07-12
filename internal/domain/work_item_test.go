@@ -31,6 +31,11 @@ func TestWorkItemValidateAndNormalizeDetails(t *testing.T) {
 		!slices.Equal(item.AcceptanceCriteria, []string{"JSON output", "tests pass"}) {
 		t.Fatalf("details were not normalized: %#v", item)
 	}
+	if _, err := NormalizeWorkItemDetails("work-1", WorkItemDetails{
+		Title: "invalid Agent owner", OwnerAgentID: strings.Repeat("a", MaxAgentIdentityRunes+1),
+	}); err == nil {
+		t.Fatal("expected invalid WorkItem Agent ownership to fail")
+	}
 }
 
 func TestWorkItemTransitions(t *testing.T) {

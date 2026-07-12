@@ -50,7 +50,8 @@ func (e *StructuredMemoryToolExecutor) CreateWorkItem(ctx context.Context, scope
 	}
 	run, item, itemEvent, err := e.workItems.prepareCreate(ctx, CreateWorkItemRequest{
 		RunID: scope.RunID, Title: input.Title, Description: input.Description, Priority: input.Priority,
-		Owner: input.Owner, AcceptanceCriteria: input.AcceptanceCriteria, Dependencies: input.Dependencies,
+		Owner: input.Owner, OwnerAgentID: scope.AgentID,
+		AcceptanceCriteria: input.AcceptanceCriteria, Dependencies: input.Dependencies,
 	})
 	if err != nil {
 		return toolgateway.StructuredMutationResult{}, err
@@ -91,7 +92,8 @@ func (e *StructuredMemoryToolExecutor) CreateNote(ctx context.Context, scope too
 	}
 	run, note, noteEvent, err := e.notes.prepareCreate(ctx, CreateNoteRequest{
 		RunID: scope.RunID, Title: input.Title, Content: input.Content, Category: input.Category,
-		Visibility: input.Visibility, Owner: input.Owner, Tags: input.Tags, SourceRefs: input.SourceRefs,
+		Visibility: input.Visibility, Owner: input.Owner, OwnerAgentID: scope.AgentID,
+		Tags: input.Tags, SourceRefs: input.SourceRefs,
 		EvidenceIDs: input.EvidenceIDs, Pinned: input.Pinned,
 	})
 	if err != nil {
@@ -136,6 +138,7 @@ func structuredMemoryEvents(run domain.Run, scope toolgateway.StructuredMemoryCo
 		scope.InvocationID, map[string]any{
 			"context": "tool_run." + string(scope.Tool), "allowed": true, "needs_approval": false,
 			"risk": scope.PolicyDecision.Risk, "reason": scope.PolicyDecision.Reason,
+			"agent_id": scope.AgentID,
 		})
 	if err != nil {
 		return events.Event{}, events.Event{}, err
@@ -143,7 +146,7 @@ func structuredMemoryEvents(run domain.Run, scope toolgateway.StructuredMemoryCo
 	toolEvent, err := events.New(run.ID, run.MissionID, events.ToolCompletedEvent,
 		"structured_memory_tool", scope.InvocationID, map[string]any{
 			"invocation_id": scope.InvocationID, "tool_name": scope.Tool,
-			"target_id": targetID, "execution_backend": "run_memory",
+			"target_id": targetID, "agent_id": scope.AgentID, "execution_backend": "run_memory",
 		})
 	if err != nil {
 		return events.Event{}, events.Event{}, err
@@ -161,13 +164,15 @@ func structuredWorkItemFingerprint(scope toolgateway.StructuredMemoryContext, it
 		Description        string                  `json:"description"`
 		Priority           domain.WorkItemPriority `json:"priority"`
 		Owner              string                  `json:"owner"`
+		OwnerAgentID       string                  `json:"owner_agent_id"`
 		AcceptanceCriteria []string                `json:"acceptance_criteria"`
 		Dependencies       []string                `json:"dependencies"`
 	}{
 		RunID: scope.RunID, SessionID: scope.SessionID, WorkspaceID: scope.WorkspaceID,
 		RequestedBy: scope.RequestedBy, Title: item.Title, Description: item.Description,
-		Priority: item.Priority, Owner: item.Owner, AcceptanceCriteria: item.AcceptanceCriteria,
-		Dependencies: item.Dependencies,
+		Priority: item.Priority, Owner: item.Owner, OwnerAgentID: item.OwnerAgentID,
+		AcceptanceCriteria: item.AcceptanceCriteria,
+		Dependencies:       item.Dependencies,
 	}
 	encoded, err := json.Marshal(intent)
 	if err != nil {
@@ -178,23 +183,25 @@ func structuredWorkItemFingerprint(scope toolgateway.StructuredMemoryContext, it
 
 func structuredNoteFingerprint(scope toolgateway.StructuredMemoryContext, note domain.Note) (string, error) {
 	intent := struct {
-		RunID       string                `json:"run_id"`
-		SessionID   string                `json:"session_id"`
-		WorkspaceID string                `json:"workspace_id"`
-		RequestedBy string                `json:"requested_by"`
-		Title       string                `json:"title"`
-		Content     string                `json:"content"`
-		Category    domain.NoteCategory   `json:"category"`
-		Visibility  domain.NoteVisibility `json:"visibility"`
-		Owner       string                `json:"owner"`
-		Tags        []string              `json:"tags"`
-		SourceRefs  []string              `json:"source_refs"`
-		EvidenceIDs []string              `json:"evidence_ids"`
-		Pinned      bool                  `json:"pinned"`
+		RunID        string                `json:"run_id"`
+		SessionID    string                `json:"session_id"`
+		WorkspaceID  string                `json:"workspace_id"`
+		RequestedBy  string                `json:"requested_by"`
+		Title        string                `json:"title"`
+		Content      string                `json:"content"`
+		Category     domain.NoteCategory   `json:"category"`
+		Visibility   domain.NoteVisibility `json:"visibility"`
+		Owner        string                `json:"owner"`
+		OwnerAgentID string                `json:"owner_agent_id"`
+		Tags         []string              `json:"tags"`
+		SourceRefs   []string              `json:"source_refs"`
+		EvidenceIDs  []string              `json:"evidence_ids"`
+		Pinned       bool                  `json:"pinned"`
 	}{
 		RunID: scope.RunID, SessionID: scope.SessionID, WorkspaceID: scope.WorkspaceID,
 		RequestedBy: scope.RequestedBy, Title: note.Title, Content: note.Content, Category: note.Category,
-		Visibility: note.Visibility, Owner: note.Owner, Tags: note.Tags, SourceRefs: note.SourceRefs,
+		Visibility: note.Visibility, Owner: note.Owner, OwnerAgentID: note.OwnerAgentID,
+		Tags: note.Tags, SourceRefs: note.SourceRefs,
 		EvidenceIDs: note.EvidenceIDs, Pinned: note.Pinned,
 	}
 	encoded, err := json.Marshal(intent)

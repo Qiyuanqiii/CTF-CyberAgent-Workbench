@@ -58,10 +58,14 @@ func validateNewNote(note domain.Note, event events.Event) error {
 }
 
 func insertNewNoteTx(ctx context.Context, tx *sql.Tx, note domain.Note) error {
+	if err := requireAssignableAgentOwnerTx(ctx, tx, note.RunID, note.OwnerAgentID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO notes
-		(id, run_id, title, content, category, visibility, owner, status, pinned, version, created_at, updated_at, archived_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, note.ID, note.RunID, note.Title, note.Content,
-		note.Category, note.Visibility, note.Owner, note.Status, boolInt(note.Pinned), note.Version,
+		(id, run_id, title, content, category, visibility, owner, owner_agent_id, status, pinned, version, created_at, updated_at, archived_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, note.ID, note.RunID, note.Title, note.Content,
+		note.Category, note.Visibility, note.Owner, nullableAgentID(note.OwnerAgentID), note.Status,
+		boolInt(note.Pinned), note.Version,
 		ts(note.CreatedAt), ts(note.UpdatedAt), nullableTS(note.ArchivedAt)); err != nil {
 		return err
 	}
@@ -89,6 +93,8 @@ func (s *SQLiteStore) ListNotes(ctx context.Context, filter domain.NoteFilter) (
 	filter.RunID = strings.TrimSpace(filter.RunID)
 	filter.Owner = strings.TrimSpace(filter.Owner)
 	filter.Viewer = strings.TrimSpace(filter.Viewer)
+	filter.OwnerAgentID = strings.TrimSpace(filter.OwnerAgentID)
+	filter.ViewerAgentID = strings.TrimSpace(filter.ViewerAgentID)
 	if filter.RunID == "" {
 		return nil, apperror.New(apperror.CodeInvalidArgument, "note list run id is required")
 	}
@@ -131,20 +137,48 @@ func (s *SQLiteStore) ListNotes(ctx context.Context, filter domain.NoteFilter) (
 		query += ` AND owner = ?`
 		args = append(args, filter.Owner)
 	}
-	if filter.Viewer != "" {
-		if len(filter.Visibilities) > 0 || filter.Owner != "" {
+	if filter.OwnerAgentID != "" {
+		if !domain.ValidAgentID(filter.OwnerAgentID) {
+			return nil, apperror.New(apperror.CodeInvalidArgument, "note owner Agent filter is invalid")
+		}
+		query += ` AND owner_agent_id = ?`
+		args = append(args, filter.OwnerAgentID)
+	}
+	if filter.Viewer != "" || filter.ViewerAgentID != "" {
+		if len(filter.Visibilities) > 0 || filter.Owner != "" || filter.OwnerAgentID != "" {
 			return nil, apperror.New(apperror.CodeInvalidArgument, "note viewer cannot be combined with visibility or owner filters")
 		}
 		if len([]rune(filter.Viewer)) > domain.MaxNoteOwnerRunes {
 			return nil, apperror.New(apperror.CodeInvalidArgument, fmt.Sprintf("note viewer exceeds %d characters", domain.MaxNoteOwnerRunes))
 		}
-		if filter.Viewer == "root" {
-			query += ` AND (visibility IN (?, ?) OR (visibility = ? AND owner = ?))`
-			args = append(args, domain.NoteVisibilityRun, domain.NoteVisibilityRoot, domain.NoteVisibilityOwner, filter.Viewer)
-		} else {
-			query += ` AND (visibility = ? OR (visibility = ? AND owner = ?))`
-			args = append(args, domain.NoteVisibilityRun, domain.NoteVisibilityOwner, filter.Viewer)
+		viewerIsRoot := filter.Viewer == "root"
+		ownerChecks := make([]string, 0, 2)
+		ownerArgs := make([]any, 0, 2)
+		if filter.Viewer != "" {
+			ownerChecks = append(ownerChecks, "owner = ?")
+			ownerArgs = append(ownerArgs, filter.Viewer)
 		}
+		if filter.ViewerAgentID != "" {
+			if !domain.ValidAgentID(filter.ViewerAgentID) {
+				return nil, apperror.New(apperror.CodeInvalidArgument, "note viewer Agent identity is invalid")
+			}
+			viewerAgent, err := s.noteViewerAgent(ctx, filter.RunID, filter.ViewerAgentID)
+			if err != nil {
+				return nil, err
+			}
+			viewerIsRoot = viewerIsRoot || viewerAgent.Role == domain.AgentRoleRoot
+			ownerChecks = append(ownerChecks, "owner_agent_id = ?")
+			ownerArgs = append(ownerArgs, viewerAgent.ID)
+		}
+		ownerMatch := "(" + strings.Join(ownerChecks, " OR ") + ")"
+		if viewerIsRoot {
+			query += ` AND (visibility IN (?, ?) OR (visibility = ? AND ` + ownerMatch + `))`
+			args = append(args, domain.NoteVisibilityRun, domain.NoteVisibilityRoot, domain.NoteVisibilityOwner)
+		} else {
+			query += ` AND (visibility = ? OR (visibility = ? AND ` + ownerMatch + `))`
+			args = append(args, domain.NoteVisibilityRun, domain.NoteVisibilityOwner)
+		}
+		args = append(args, ownerArgs...)
 	}
 	if filter.Pinned != nil {
 		query += ` AND pinned = ?`
@@ -247,10 +281,16 @@ func (s *SQLiteStore) UpdateNote(ctx context.Context, note domain.Note, expected
 	if event.MissionID != missionID {
 		return apperror.New(apperror.CodeInvalidArgument, "note change event mission does not match the run")
 	}
+	if current.OwnerAgentID != note.OwnerAgentID {
+		if err := requireAssignableAgentOwnerTx(ctx, tx, note.RunID, note.OwnerAgentID); err != nil {
+			return err
+		}
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE notes SET title = ?, content = ?, category = ?, visibility = ?,
-		owner = ?, status = ?, pinned = ?, version = ?, updated_at = ?, archived_at = ?
+		owner = ?, owner_agent_id = ?, status = ?, pinned = ?, version = ?, updated_at = ?, archived_at = ?
 		WHERE id = ? AND run_id = ? AND version = ?`, note.Title, note.Content, note.Category, note.Visibility,
-		note.Owner, note.Status, boolInt(note.Pinned), note.Version, ts(note.UpdatedAt), nullableTS(note.ArchivedAt),
+		note.Owner, nullableAgentID(note.OwnerAgentID), note.Status, boolInt(note.Pinned), note.Version,
+		ts(note.UpdatedAt), nullableTS(note.ArchivedAt),
 		note.ID, note.RunID, expectedVersion)
 	if err != nil {
 		return err
@@ -273,7 +313,7 @@ func (s *SQLiteStore) UpdateNote(ctx context.Context, note domain.Note, expected
 	return tx.Commit()
 }
 
-const noteSelect = `SELECT id, run_id, title, content, category, visibility, owner, status, pinned,
+const noteSelect = `SELECT id, run_id, title, content, category, visibility, owner, owner_agent_id, status, pinned,
 	version, created_at, updated_at, archived_at FROM notes`
 
 func getNoteTx(ctx context.Context, tx *sql.Tx, id string) (domain.Note, error) {
@@ -298,10 +338,12 @@ func scanNote(row scanner) (domain.Note, error) {
 	var created string
 	var updated string
 	var archived sql.NullString
+	var ownerAgentID sql.NullString
 	if err := row.Scan(&note.ID, &note.RunID, &note.Title, &note.Content, &category, &visibility,
-		&note.Owner, &status, &pinned, &note.Version, &created, &updated, &archived); err != nil {
+		&note.Owner, &ownerAgentID, &status, &pinned, &note.Version, &created, &updated, &archived); err != nil {
 		return domain.Note{}, err
 	}
+	note.OwnerAgentID = ownerAgentID.String
 	note.Category = domain.NoteCategory(category)
 	note.Visibility = domain.NoteVisibility(visibility)
 	note.Status = domain.NoteStatus(status)
@@ -442,7 +484,8 @@ func validateNoteReplacement(current domain.Note, next domain.Note) error {
 	expected := current
 	if err := expected.ApplyDetails(domain.NoteDetails{
 		Title: next.Title, Content: next.Content, Category: next.Category, Visibility: next.Visibility,
-		Owner: next.Owner, Tags: next.Tags, SourceRefs: next.SourceRefs, EvidenceIDs: next.EvidenceIDs, Pinned: next.Pinned,
+		Owner: next.Owner, OwnerAgentID: next.OwnerAgentID, Tags: next.Tags,
+		SourceRefs: next.SourceRefs, EvidenceIDs: next.EvidenceIDs, Pinned: next.Pinned,
 	}, next.UpdatedAt); err != nil {
 		return apperror.Wrap(apperror.CodeFailedPrecondition, err.Error(), err)
 	}
@@ -451,7 +494,8 @@ func validateNoteReplacement(current domain.Note, next domain.Note) error {
 
 func sameNoteDetails(left domain.Note, right domain.Note) bool {
 	return left.Title == right.Title && left.Content == right.Content && left.Category == right.Category &&
-		left.Visibility == right.Visibility && left.Owner == right.Owner && left.Pinned == right.Pinned &&
+		left.Visibility == right.Visibility && left.Owner == right.Owner &&
+		left.OwnerAgentID == right.OwnerAgentID && left.Pinned == right.Pinned &&
 		slices.Equal(left.Tags, right.Tags) && slices.Equal(left.SourceRefs, right.SourceRefs) &&
 		slices.Equal(left.EvidenceIDs, right.EvidenceIDs)
 }
@@ -459,7 +503,8 @@ func sameNoteDetails(left domain.Note, right domain.Note) bool {
 func redactAndNormalizeNote(note domain.Note) domain.Note {
 	details, err := domain.NormalizeNoteDetails(domain.NoteDetails{
 		Title: redact.String(note.Title), Content: redact.String(note.Content), Category: note.Category,
-		Visibility: note.Visibility, Owner: redact.String(note.Owner), Tags: redactStrings(note.Tags),
+		Visibility: note.Visibility, Owner: redact.String(note.Owner), OwnerAgentID: note.OwnerAgentID,
+		Tags:       redactStrings(note.Tags),
 		SourceRefs: redactStrings(note.SourceRefs), EvidenceIDs: redactStrings(note.EvidenceIDs), Pinned: note.Pinned,
 	})
 	if err == nil {
@@ -468,6 +513,7 @@ func redactAndNormalizeNote(note domain.Note) domain.Note {
 		note.Category = details.Category
 		note.Visibility = details.Visibility
 		note.Owner = details.Owner
+		note.OwnerAgentID = details.OwnerAgentID
 		note.Tags = details.Tags
 		note.SourceRefs = details.SourceRefs
 		note.EvidenceIDs = details.EvidenceIDs

@@ -308,7 +308,8 @@ func (s *RunSupervisor) stepWithLease(ctx context.Context, lease domain.RunExecu
 		return result, failure
 	}
 	notes, err := s.store.ListNotes(ctx, domain.NoteFilter{
-		RunID: turn.Run.ID, Statuses: []domain.NoteStatus{domain.NoteActive}, Viewer: "root", Limit: maxSupervisorNotes,
+		RunID: turn.Run.ID, Statuses: []domain.NoteStatus{domain.NoteActive},
+		Viewer: "root", ViewerAgentID: turn.Agent.ID, Limit: maxSupervisorNotes,
 	})
 	if err != nil {
 		failure := s.recordFailure(ctx, &result, err, 0)

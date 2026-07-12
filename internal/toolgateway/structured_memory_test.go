@@ -84,6 +84,9 @@ func TestStructuredMemoryToolDefinitionsAreValidAndCopied(t *testing.T) {
 			definition.Approval != ApprovalAutomatic || !json.Valid(definition.InputSchema) {
 			t.Fatalf("invalid structured tool definition: %#v", definition)
 		}
+		if strings.Contains(string(definition.InputSchema), "owner_agent_id") {
+			t.Fatalf("model-visible schema exposed control-plane Agent ownership: %s", definition.InputSchema)
+		}
 	}
 	definitions[0].InputSchema[0] = '['
 	fresh, found := StructuredMemoryToolDefinition(WorkItemCreateTool)
@@ -93,6 +96,14 @@ func TestStructuredMemoryToolDefinitionsAreValidAndCopied(t *testing.T) {
 	if _, _, err := decodeWorkItemCreateInput(json.RawMessage(
 		`{"title":"x","dependencies":["work-20260711123456-abcdef012345"]}`)); err != nil {
 		t.Fatalf("generated WorkItem dependency id was rejected: %v", err)
+	}
+	if _, _, err := decodeWorkItemCreateInput(json.RawMessage(
+		`{"title":"x","owner_agent_id":"agent-20260711123456-abcdef012345"}`)); err == nil {
+		t.Fatal("model payload was allowed to spoof WorkItem Agent ownership")
+	}
+	if _, _, err := decodeNoteCreateInput(json.RawMessage(
+		`{"title":"x","content":"y","owner_agent_id":"agent-20260711123456-abcdef012345"}`)); err == nil {
+		t.Fatal("model payload was allowed to spoof Note Agent ownership")
 	}
 }
 

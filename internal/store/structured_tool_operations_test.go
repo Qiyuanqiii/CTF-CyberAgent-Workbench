@@ -22,6 +22,10 @@ func TestStructuredSupervisorToolRejectsStaleLeaseBeforeBudgetAndEntityWrite(t *
 	st := openStructuredToolTestStore(t)
 	ctx := context.Background()
 	_, run := createStructuredToolTestRun(t, ctx, st, "stale structured supervisor")
+	root, _, err := st.RegisterRootAgent(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	first, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
 		RunID: run.ID, OwnerID: "structured-worker-a", TTL: 150 * time.Millisecond,
 	})
@@ -41,7 +45,7 @@ func TestStructuredSupervisorToolRejectsStaleLeaseBeforeBudgetAndEntityWrite(t *
 		Payload: mustStructuredPayload(t, toolgateway.NoteCreateInput{
 			Title: "Fenced note", Content: "must not be written by stale worker",
 		}),
-		OperationKey: "stale-supervisor-note", RunID: run.ID, SessionID: run.SessionID,
+		OperationKey: "stale-supervisor-note", RunID: run.ID, AgentID: root.ID, SessionID: run.SessionID,
 		WorkspaceID: "ws-structured", RequestedBy: "run_supervisor",
 		LeaseID: first.Lease.LeaseID, LeaseGeneration: first.Lease.Generation,
 	}

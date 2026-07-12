@@ -46,6 +46,7 @@ type StructuredMemoryContext struct {
 	InvocationID    string
 	OperationKey    string
 	RunID           string
+	AgentID         string
 	SessionID       string
 	WorkspaceID     string
 	LeaseID         string
@@ -60,6 +61,7 @@ func (c StructuredMemoryContext) Validate() error {
 	}
 	for label, value := range map[string]string{
 		"invocation id": c.InvocationID, "operation key": c.OperationKey, "run id": c.RunID,
+		"agent id":   c.AgentID,
 		"session id": c.SessionID, "workspace id": c.WorkspaceID, "requester": c.RequestedBy,
 		"lease id": c.LeaseID,
 	} {
@@ -70,11 +72,14 @@ func (c StructuredMemoryContext) Validate() error {
 	if c.InvocationID == "" || c.OperationKey == "" || c.RunID == "" || c.SessionID == "" || c.RequestedBy == "" {
 		return errors.New("structured memory invocation, operation, Run, Session, and requester are required")
 	}
+	if c.AgentID != "" && !domain.ValidAgentID(c.AgentID) {
+		return errors.New("structured memory Agent identity is invalid")
+	}
 	if (c.LeaseID == "") != (c.LeaseGeneration == 0) || c.LeaseGeneration < 0 {
 		return errors.New("structured memory execution lease identity and generation are inconsistent")
 	}
-	if c.RequestedBy == "run_supervisor" && c.LeaseID == "" {
-		return errors.New("supervisor structured memory execution requires a Run lease")
+	if c.RequestedBy == "run_supervisor" && (c.LeaseID == "" || c.AgentID == "") {
+		return errors.New("supervisor structured memory execution requires a Run lease and Agent identity")
 	}
 	if err := c.PolicyDecision.Validate(); err != nil {
 		return err
@@ -246,7 +251,7 @@ func (g *Gateway) invokeStructuredMemory(ctx context.Context, call ToolCall) (Ou
 	}
 	scope := StructuredMemoryContext{
 		Tool: call.Name, InvocationID: call.InvocationID, OperationKey: call.OperationKey,
-		RunID: call.RunID, SessionID: call.SessionID, WorkspaceID: call.WorkspaceID,
+		RunID: call.RunID, AgentID: call.AgentID, SessionID: call.SessionID, WorkspaceID: call.WorkspaceID,
 		LeaseID: call.LeaseID, LeaseGeneration: call.LeaseGeneration,
 		RequestedBy: call.RequestedBy, PolicyDecision: decision,
 	}

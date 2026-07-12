@@ -227,7 +227,7 @@ func (a *API) runEvents(request *http.Request, runID string) (any, *Page, error)
 
 func (a *API) runWorkItems(request *http.Request, runID string) (any, *Page, error) {
 	values := request.URL.Query()
-	if err := validateSingleQueryValues(values, "limit", "cursor", "status", "owner"); err != nil {
+	if err := validateSingleQueryValues(values, "limit", "cursor", "status", "owner", "owner_agent_id"); err != nil {
 		return nil, nil, err
 	}
 	if _, err := a.store.GetRun(request.Context(), runID); err != nil {
@@ -249,6 +249,13 @@ func (a *API) runWorkItems(request *http.Request, runID string) (any, *Page, err
 		}
 		filter.Owner = raw
 	}
+	if raw, ok := singleQueryValue(values, "owner_agent_id"); ok {
+		if !domain.ValidAgentID(raw) {
+			return nil, nil, apperror.New(apperror.CodeInvalidArgument,
+				"work item owner_agent_id filter is invalid")
+		}
+		filter.OwnerAgentID = raw
+	}
 	items, err := a.store.ListWorkItems(request.Context(), filter)
 	if err != nil {
 		return nil, nil, err
@@ -264,7 +271,7 @@ func (a *API) runWorkItems(request *http.Request, runID string) (any, *Page, err
 func (a *API) runNotes(request *http.Request, runID string) (any, *Page, error) {
 	values := request.URL.Query()
 	if err := validateSingleQueryValues(values, "limit", "cursor", "status", "category",
-		"visibility", "owner", "tag", "pinned"); err != nil {
+		"visibility", "owner", "owner_agent_id", "tag", "pinned"); err != nil {
 		return nil, nil, err
 	}
 	if _, err := a.store.GetRun(request.Context(), runID); err != nil {
@@ -289,6 +296,13 @@ func (a *API) runNotes(request *http.Request, runID string) (any, *Page, error) 
 			return nil, nil, err
 		}
 		filter.Owner = raw
+	}
+	if raw, ok := singleQueryValue(values, "owner_agent_id"); ok {
+		if !domain.ValidAgentID(raw) {
+			return nil, nil, apperror.New(apperror.CodeInvalidArgument,
+				"note owner_agent_id filter is invalid")
+		}
+		filter.OwnerAgentID = raw
 	}
 	if filter.Tags, err = queryTokens(values["tag"], domain.MaxNoteTags, domain.MaxNoteTagRunes, "note tag"); err != nil {
 		return nil, nil, err

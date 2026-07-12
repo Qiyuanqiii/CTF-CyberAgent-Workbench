@@ -44,6 +44,7 @@ type WorkItem struct {
 	Status             WorkItemStatus
 	Priority           WorkItemPriority
 	Owner              string
+	OwnerAgentID       string
 	AcceptanceCriteria []string
 	Dependencies       []string
 	BlockedReason      string
@@ -58,16 +59,18 @@ type WorkItemDetails struct {
 	Description        string
 	Priority           WorkItemPriority
 	Owner              string
+	OwnerAgentID       string
 	AcceptanceCriteria []string
 	Dependencies       []string
 }
 
 type WorkItemFilter struct {
-	RunID    string
-	Statuses []WorkItemStatus
-	Owner    string
-	Limit    int
-	Offset   int
+	RunID        string
+	Statuses     []WorkItemStatus
+	Owner        string
+	OwnerAgentID string
+	Limit        int
+	Offset       int
 }
 
 func ParseWorkItemStatus(value string) (WorkItemStatus, error) {
@@ -191,6 +194,7 @@ func (w *WorkItem) ApplyDetails(details WorkItemDetails, at time.Time) error {
 	w.Description = normalized.Description
 	w.Priority = normalized.Priority
 	w.Owner = normalized.Owner
+	w.OwnerAgentID = normalized.OwnerAgentID
 	w.AcceptanceCriteria = normalized.AcceptanceCriteria
 	w.Dependencies = normalized.Dependencies
 	w.UpdatedAt = at
@@ -221,12 +225,14 @@ func (w WorkItem) Validate() error {
 	}
 	details, err := NormalizeWorkItemDetails(w.ID, WorkItemDetails{
 		Title: w.Title, Description: w.Description, Priority: w.Priority, Owner: w.Owner,
+		OwnerAgentID:       w.OwnerAgentID,
 		AcceptanceCriteria: w.AcceptanceCriteria, Dependencies: w.Dependencies,
 	})
 	if err != nil {
 		return err
 	}
 	if details.Title != w.Title || details.Description != w.Description || details.Owner != w.Owner ||
+		details.OwnerAgentID != w.OwnerAgentID ||
 		!slices.Equal(details.AcceptanceCriteria, w.AcceptanceCriteria) || !slices.Equal(details.Dependencies, w.Dependencies) {
 		return errors.New("work item text and dependencies must be normalized")
 	}
@@ -263,6 +269,7 @@ func NormalizeWorkItemDetails(itemID string, details WorkItemDetails) (WorkItemD
 	details.Title = strings.TrimSpace(details.Title)
 	details.Description = strings.TrimSpace(details.Description)
 	details.Owner = strings.TrimSpace(details.Owner)
+	details.OwnerAgentID = strings.TrimSpace(details.OwnerAgentID)
 	if details.Priority == "" {
 		details.Priority = WorkItemPriorityNormal
 	}
@@ -277,6 +284,9 @@ func NormalizeWorkItemDetails(itemID string, details WorkItemDetails) (WorkItemD
 	}
 	if runeCount(details.Owner) > MaxWorkItemOwnerRunes {
 		return WorkItemDetails{}, fmt.Errorf("work item owner exceeds %d characters", MaxWorkItemOwnerRunes)
+	}
+	if !validAgentIdentity(details.OwnerAgentID, true) {
+		return WorkItemDetails{}, errors.New("work item owner Agent identity is invalid")
 	}
 	if !ValidWorkItemPriority(details.Priority) {
 		return WorkItemDetails{}, fmt.Errorf("invalid work item priority %q", details.Priority)

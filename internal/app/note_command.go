@@ -48,6 +48,7 @@ func (a *App) noteCreate(ctx context.Context, service *application.NoteService, 
 	category := fs.String("category", string(domain.NoteObservation), "note category")
 	visibility := fs.String("visibility", string(domain.NoteVisibilityRun), "run, root, or owner")
 	owner := fs.String("owner", "", "owner label for owner visibility")
+	ownerAgent := fs.String("owner-agent", "", "same-Run Agent id that owns the note")
 	pinned := fs.Bool("pin", false, "pin note for context selection")
 	var tags stringListFlag
 	var sources stringListFlag
@@ -56,7 +57,8 @@ func (a *App) noteCreate(ctx context.Context, service *application.NoteService, 
 	fs.Var(&sources, "source", "source reference; repeat for multiple values")
 	fs.Var(&evidence, "evidence", "evidence id; repeat for multiple values")
 	if err := fs.Parse(reorderFlags(args, map[string]bool{
-		"content": true, "content-file": true, "category": true, "visibility": true, "owner": true,
+		"content": true, "content-file": true, "category": true, "visibility": true,
+		"owner": true, "owner-agent": true,
 		"pin": false, "tag": true, "source": true, "evidence": true,
 	})); err != nil {
 		return err
@@ -76,7 +78,8 @@ func (a *App) noteCreate(ctx context.Context, service *application.NoteService, 
 	}
 	note, err := service.Create(ctx, application.CreateNoteRequest{
 		RunID: fs.Arg(0), Title: strings.Join(fs.Args()[1:], " "), Content: value,
-		Category: *category, Visibility: *visibility, Owner: *owner, Tags: tags.values,
+		Category: *category, Visibility: *visibility, Owner: *owner, OwnerAgentID: *ownerAgent,
+		Tags:       tags.values,
 		SourceRefs: sources.values, EvidenceIDs: evidence.values, Pinned: *pinned,
 	})
 	if err != nil {
@@ -92,12 +95,14 @@ func (a *App) noteList(ctx context.Context, service *application.NoteService, ar
 	categoryValue := fs.String("category", "", "comma-separated note categories")
 	visibilityValue := fs.String("visibility", "", "comma-separated note visibilities")
 	owner := fs.String("owner", "", "exact owner filter")
+	ownerAgent := fs.String("owner-agent", "", "exact owner Agent id filter")
 	pinnedValue := fs.String("pinned", "", "true or false")
 	limit := fs.Int("limit", 100, "maximum rows")
 	var tags stringListFlag
 	fs.Var(&tags, "tag", "required tag; repeat to require all tags")
 	if err := fs.Parse(reorderFlags(args, map[string]bool{
-		"status": true, "category": true, "visibility": true, "owner": true, "pinned": true, "limit": true, "tag": true,
+		"status": true, "category": true, "visibility": true, "owner": true, "owner-agent": true,
+		"pinned": true, "limit": true, "tag": true,
 	})); err != nil {
 		return err
 	}
@@ -125,7 +130,7 @@ func (a *App) noteList(ctx context.Context, service *application.NoteService, ar
 	}
 	notes, err := service.List(ctx, domain.NoteFilter{
 		RunID: fs.Arg(0), Statuses: statuses, Categories: categories, Visibilities: visibilities,
-		Owner: *owner, Tags: tags.values, Pinned: pinned, Limit: *limit,
+		Owner: *owner, OwnerAgentID: *ownerAgent, Tags: tags.values, Pinned: pinned, Limit: *limit,
 	})
 	if err != nil {
 		return err
@@ -169,6 +174,7 @@ func (a *App) noteUpdate(ctx context.Context, service *application.NoteService, 
 	category := fs.String("category", "", "replacement category")
 	visibility := fs.String("visibility", "", "replacement visibility")
 	owner := fs.String("owner", "", "replacement owner; empty clears it")
+	ownerAgent := fs.String("owner-agent", "", "replacement owner Agent id; empty clears it")
 	version := fs.Int64("version", 0, "expected version; zero uses the current version")
 	pin := fs.Bool("pin", false, "pin the note")
 	unpin := fs.Bool("unpin", false, "unpin the note")
@@ -183,8 +189,9 @@ func (a *App) noteUpdate(ctx context.Context, service *application.NoteService, 
 	fs.Var(&evidence, "evidence", "replacement evidence id; repeat for multiple values")
 	if err := fs.Parse(reorderFlags(args, map[string]bool{
 		"title": true, "content": true, "content-file": true, "category": true, "visibility": true,
-		"owner": true, "version": true, "pin": false, "unpin": false, "clear-tags": false,
-		"clear-sources": false, "clear-evidence": false, "tag": true, "source": true, "evidence": true,
+		"owner": true, "owner-agent": true, "version": true, "pin": false, "unpin": false,
+		"clear-tags": false, "clear-sources": false, "clear-evidence": false,
+		"tag": true, "source": true, "evidence": true,
 	})); err != nil {
 		return err
 	}
@@ -215,6 +222,9 @@ func (a *App) noteUpdate(ctx context.Context, service *application.NoteService, 
 	}
 	if visited["owner"] {
 		req.Owner = owner
+	}
+	if visited["owner-agent"] {
+		req.OwnerAgentID = ownerAgent
 	}
 	if *pin || *unpin {
 		value := *pin
@@ -365,8 +375,9 @@ func printNoteSummary(out io.Writer, action string, note domain.Note) {
 }
 
 func printNote(out io.Writer, note domain.Note) {
-	fmt.Fprintf(out, "id: %s\nrun: %s\ntitle: %s\nstatus: %s\ncategory: %s\nvisibility: %s\nowner: %s\npinned: %t\nversion: %d\ncontent:\n%s\n",
-		note.ID, note.RunID, note.Title, note.Status, note.Category, note.Visibility, note.Owner, note.Pinned, note.Version, note.Content)
+	fmt.Fprintf(out, "id: %s\nrun: %s\ntitle: %s\nstatus: %s\ncategory: %s\nvisibility: %s\nowner: %s\nowner_agent: %s\npinned: %t\nversion: %d\ncontent:\n%s\n",
+		note.ID, note.RunID, note.Title, note.Status, note.Category, note.Visibility, note.Owner,
+		note.OwnerAgentID, note.Pinned, note.Version, note.Content)
 	printStringList(out, "tags", note.Tags)
 	printStringList(out, "sources", note.SourceRefs)
 	printStringList(out, "evidence", note.EvidenceIDs)

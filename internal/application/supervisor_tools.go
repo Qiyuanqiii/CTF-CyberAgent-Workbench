@@ -107,8 +107,9 @@ func (s *RunSupervisor) invokeSupervisorTool(ctx context.Context, turn domain.Su
 	operationKey := supervisorToolOperationKey(call.RunID, call.Turn, name, json.RawMessage(call.PayloadJSON))
 	outcome, err := s.tools.Invoke(ctx, toolgateway.ToolCall{
 		Name: name, Payload: json.RawMessage(call.PayloadJSON), OperationKey: operationKey,
-		RunID: call.RunID, SessionID: turn.Run.SessionID, WorkspaceID: turn.Mission.WorkspaceID,
-		LeaseID: turn.Checkpoint.LeaseID, LeaseGeneration: turn.Checkpoint.LeaseGeneration,
+		RunID: call.RunID, AgentID: turn.Agent.ID, SessionID: turn.Run.SessionID,
+		WorkspaceID: turn.Mission.WorkspaceID,
+		LeaseID:     turn.Checkpoint.LeaseID, LeaseGeneration: turn.Checkpoint.LeaseGeneration,
 		RequestedBy: "run_supervisor",
 	})
 	completedAt := time.Now().UTC()

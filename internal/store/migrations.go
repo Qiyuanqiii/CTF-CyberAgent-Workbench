@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 21
+const LatestSchemaVersion = 22
 
 type migration struct {
 	Version    int
@@ -786,6 +786,75 @@ var specialistAdmissionStatements = []string{
 		CHECK(length(operation_key_digest) = 64),
 		CHECK(length(request_fingerprint) = 64)
 	);`,
+}
+
+var agentMemoryOwnershipStatements = []string{
+	`ALTER TABLE work_items ADD COLUMN owner_agent_id TEXT
+		REFERENCES agent_nodes(id) ON DELETE RESTRICT
+		CHECK(owner_agent_id IS NULL OR length(trim(owner_agent_id)) > 0);`,
+	`ALTER TABLE notes ADD COLUMN owner_agent_id TEXT
+		REFERENCES agent_nodes(id) ON DELETE RESTRICT
+		CHECK(owner_agent_id IS NULL OR length(trim(owner_agent_id)) > 0);`,
+	`CREATE INDEX idx_work_items_owner_agent
+		ON work_items(run_id, owner_agent_id)
+		WHERE owner_agent_id IS NOT NULL;`,
+	`CREATE INDEX idx_notes_owner_agent
+		ON notes(run_id, owner_agent_id)
+		WHERE owner_agent_id IS NOT NULL;`,
+	`CREATE TRIGGER trg_work_item_owner_agent_insert
+		BEFORE INSERT ON work_items
+		WHEN NEW.owner_agent_id IS NOT NULL AND NOT EXISTS (
+			SELECT 1 FROM agent_nodes owner
+			WHERE owner.id = NEW.owner_agent_id AND owner.run_id = NEW.run_id
+				AND owner.status NOT IN ('completed', 'failed', 'cancelled')
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'work item owner Agent does not belong to Run');
+		END;`,
+	`CREATE TRIGGER trg_work_item_owner_agent_update
+		BEFORE UPDATE OF owner_agent_id, run_id ON work_items
+		WHEN NEW.owner_agent_id IS NOT NULL AND (
+			NOT EXISTS (
+				SELECT 1 FROM agent_nodes owner
+				WHERE owner.id = NEW.owner_agent_id AND owner.run_id = NEW.run_id
+			) OR (
+				COALESCE(OLD.owner_agent_id, '') <> NEW.owner_agent_id AND EXISTS (
+					SELECT 1 FROM agent_nodes owner
+					WHERE owner.id = NEW.owner_agent_id
+						AND owner.status IN ('completed', 'failed', 'cancelled')
+				)
+			)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'work item owner Agent does not belong to Run');
+		END;`,
+	`CREATE TRIGGER trg_note_owner_agent_insert
+		BEFORE INSERT ON notes
+		WHEN NEW.owner_agent_id IS NOT NULL AND NOT EXISTS (
+			SELECT 1 FROM agent_nodes owner
+			WHERE owner.id = NEW.owner_agent_id AND owner.run_id = NEW.run_id
+				AND owner.status NOT IN ('completed', 'failed', 'cancelled')
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'note owner Agent does not belong to Run');
+		END;`,
+	`CREATE TRIGGER trg_note_owner_agent_update
+		BEFORE UPDATE OF owner_agent_id, run_id ON notes
+		WHEN NEW.owner_agent_id IS NOT NULL AND (
+			NOT EXISTS (
+				SELECT 1 FROM agent_nodes owner
+				WHERE owner.id = NEW.owner_agent_id AND owner.run_id = NEW.run_id
+			) OR (
+				COALESCE(OLD.owner_agent_id, '') <> NEW.owner_agent_id AND EXISTS (
+					SELECT 1 FROM agent_nodes owner
+					WHERE owner.id = NEW.owner_agent_id
+						AND owner.status IN ('completed', 'failed', 'cancelled')
+				)
+			)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'note owner Agent does not belong to Run');
+		END;`,
 }
 
 func (s *SQLiteStore) applyMigrations(ctx context.Context, migrations []migration) error {

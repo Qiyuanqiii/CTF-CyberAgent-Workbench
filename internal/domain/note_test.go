@@ -51,6 +51,15 @@ func TestNoteOwnerVisibilityRules(t *testing.T) {
 	if err != nil || details.Owner != "root" {
 		t.Fatalf("valid owner note failed: %#v err=%v", details, err)
 	}
+	agentID := "agent-20260711123456-abcdef012345"
+	agentDetails, err := NormalizeNoteDetails(NoteDetails{
+		Title: "Agent private", Content: "owner only", Visibility: NoteVisibilityOwner,
+		OwnerAgentID: agentID,
+	})
+	if err != nil || agentDetails.OwnerAgentID != agentID || agentDetails.Owner != agentID {
+		t.Fatalf("Agent-owned private note did not receive its compatibility label: %#v err=%v",
+			agentDetails, err)
+	}
 }
 
 func TestNoteArchiveRestoreLifecycle(t *testing.T) {
