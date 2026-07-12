@@ -46,6 +46,7 @@ const (
 	AgentStatusChangedEvent         = "agent.status_changed"
 	AgentMessageSentEvent           = "agent.message_sent"
 	AgentMessageConsumedEvent       = "agent.message_consumed"
+	AgentCompletionReportedEvent    = "agent.completion_reported"
 	AgentGraphSnapshottedEvent      = "agent.graph_snapshotted"
 	AgentTurnStartedEvent           = "agent.turn_started"
 	AgentTurnCompletedEvent         = "agent.turn_completed"

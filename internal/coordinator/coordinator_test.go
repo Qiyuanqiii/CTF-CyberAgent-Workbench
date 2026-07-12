@@ -45,7 +45,7 @@ func TestCoordinatorRestoresStableRootAndExactlyOnceInbox(t *testing.T) {
 		t.Fatalf("unexpected initial graph: %#v", initial)
 	}
 
-	rawSecret := "sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	rawSecret := "sk-" + strings.Repeat("a", 32)
 	sent, err := service.Send(ctx, coordinator.SendRequest{
 		RunID: run.ID, RecipientAgentID: root.ID, Kind: domain.AgentMessageInstruction,
 		Payload:        map[string]any{"goal": "inspect", "credential": rawSecret},
@@ -370,6 +370,58 @@ func TestSpecialistAdmissionIsOptInBoundedAndLifecycleSafe(t *testing.T) {
 		replayed.Agent.Status != domain.AgentCancelled {
 		t.Fatalf("terminal admission replay was not stable: result=%#v err=%v", replayed, err)
 	}
+}
+
+func TestCoordinatorBuildsStrictSpecialistCompletion(t *testing.T) {
+	stub := &completionStoreStub{}
+	service := coordinator.New(stub)
+	result, err := service.FinishSpecialist(context.Background(), coordinator.FinishSpecialistRequest{
+		RunID: " run-1 ", AgentID: " child-1 ", ParentAgentID: " root-1 ",
+		AttemptID: " attempt-1 ", IdempotencyKey: "coordinator-completion-0001",
+		Report: domain.CompletionReport{
+			Version: domain.CompletionReportVersion, Outcome: domain.CompletionOutcome(" SUCCEEDED "),
+			Summary: "  focused review complete  ", WorkItemIDs: []string{"work-2", "work-1"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Replayed || result.Completion.ID == "" || result.Completion.MessageID == "" ||
+		stub.operationKey != "coordinator-completion-0001" || stub.completion.RunID != "run-1" ||
+		stub.completion.AgentID != "child-1" || stub.completion.ParentAgentID != "root-1" ||
+		stub.completion.AttemptID != "attempt-1" ||
+		stub.completion.Report.Outcome != domain.CompletionSucceeded ||
+		stub.completion.Report.Summary != "focused review complete" ||
+		strings.Join(stub.completion.Report.WorkItemIDs, ",") != "work-1,work-2" ||
+		stub.completion.Report.NoteIDs == nil {
+		t.Fatalf("Coordinator built an invalid completion: result=%#v stored=%#v",
+			result, stub.completion)
+	}
+	invalid := coordinator.FinishSpecialistRequest{
+		RunID: "run-1", AgentID: "child-1", ParentAgentID: "root-1", AttemptID: "attempt-1",
+		IdempotencyKey: "coordinator-completion-0002",
+		Report: domain.CompletionReport{
+			Outcome: domain.CompletionSucceeded, Summary: "missing protocol version",
+		},
+	}
+	if _, err := service.FinishSpecialist(context.Background(), invalid); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("Coordinator accepted an unversioned completion: code=%s err=%v",
+			apperror.CodeOf(err), err)
+	}
+}
+
+type completionStoreStub struct {
+	coordinator.Store
+	completion   domain.AgentCompletion
+	operationKey string
+}
+
+func (s *completionStoreStub) FinishSpecialist(_ context.Context, completion domain.AgentCompletion,
+	operationKey string,
+) (domain.AgentCompletion, bool, error) {
+	s.completion = completion
+	s.operationKey = operationKey
+	return completion, false, nil
 }
 
 func countType(items []events.Event, eventType string) int {

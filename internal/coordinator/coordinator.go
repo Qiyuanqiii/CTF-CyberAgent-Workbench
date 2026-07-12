@@ -18,6 +18,9 @@ type Store interface {
 	ListAgentNodes(ctx context.Context, runID string) ([]domain.AgentNode, error)
 	AdmitSpecialist(ctx context.Context, admission domain.SpecialistAdmission,
 		operationKey string) (domain.AgentNode, bool, error)
+	FinishSpecialist(ctx context.Context, completion domain.AgentCompletion,
+		operationKey string) (domain.AgentCompletion, bool, error)
+	GetAgentCompletion(ctx context.Context, agentID string) (domain.AgentCompletion, bool, error)
 	SendAgentMessage(ctx context.Context, message domain.AgentMessage,
 		operationKey string) (domain.AgentMessage, bool, error)
 	ListAgentMessages(ctx context.Context, agentID string, pendingOnly bool, limit int) ([]domain.AgentMessage, error)

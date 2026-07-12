@@ -412,7 +412,7 @@ func removeSchemaV16ForTest(t *testing.T, st *SQLiteStore, ctx context.Context) 
 }
 
 func removeSchemaV22ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV23ForTestStatements(), []string{
 		`DROP TRIGGER trg_work_item_owner_agent_insert`,
 		`DROP TRIGGER trg_work_item_owner_agent_update`,
 		`DROP TRIGGER trg_note_owner_agent_insert`,
@@ -422,6 +422,18 @@ func removeSchemaV22ForTestStatements() []string {
 		`ALTER TABLE work_items DROP COLUMN owner_agent_id`,
 		`ALTER TABLE notes DROP COLUMN owner_agent_id`,
 		`DELETE FROM schema_migrations WHERE version = 22`,
+	}...)
+}
+
+func removeSchemaV23ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_agent_completion_running_child`,
+		`DROP TRIGGER trg_agent_completion_message_matches`,
+		`DROP TRIGGER trg_agent_completed_requires_report`,
+		`DROP TRIGGER trg_agent_completion_immutable`,
+		`DROP TABLE agent_completion_operations`,
+		`DROP TABLE agent_completion_reports`,
+		`DELETE FROM schema_migrations WHERE version = 23`,
 	}
 }
 

@@ -403,7 +403,7 @@ func TestSpecialistAdmissionIsAtomicPrivateAndReducesSupervisorBudget(t *testing
 	}
 	admission := domain.SpecialistAdmission{
 		AgentID: idgen.New("agent"), SessionID: idgen.New("sess"), RunID: run.ID,
-		ParentAgentID: root.ID, Title: "analyst sk-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ParentAgentID: root.ID, Title: "analyst " + "sk-" + strings.Repeat("a", 32),
 		Skills: []string{"model.chat"}, TurnLimit: 6, TokenLimit: 200,
 		MaxChildren: 2, CreatedAt: time.Now().UTC(),
 	}

@@ -174,6 +174,8 @@ The current hard limits are one root plus at most two depth-one children, 16 ass
 
 Schema v22 establishes Agent-owned Run memory without granting the model an identity selector. WorkItems and Notes retain the legacy bounded `owner` label and add nullable `owner_agent_id` references. Application and Store validation require normalized identity; transactional Store checks reject missing, terminal, or cross-Run owners; SQLite foreign keys and same-Run insert/update triggers defend direct writes. A Note may retain Agent ownership under `run` or `root` visibility, while `owner` visibility is evaluated against the viewer Agent. Agent-only private Notes mirror the Agent ID into the legacy label so v10's established CHECK constraint and old readers remain valid. Supervisor and CLI structured-memory calls inject the root identity from Go-owned Run state, and the model-facing tool schema has no `owner_agent_id` property.
 
+Schema v23 establishes the child completion boundary without starting a child model loop. `agent_completion.v1` permits only `succeeded` or `partial`, an 8 KiB/4,096-rune redacted summary, up to 16 child-owned WorkItem references, and up to 16 active parent-visible Note references. A successful report is rejected while the child owns active WorkItems; a partial report must reference every such item. The Store binds completion to the exact running Specialist attempt and direct root parent, then atomically inserts the immutable report and digest-only operation fact, writes one parent result inbox message, completes the child, archives its Session, appends metadata-only events, and snapshots the graph. Same-key concurrent retries return the original report, changed intent conflicts, stale attempts fail, and graph recovery rejects a completed Specialist whose report has been removed.
+
 ## Work Board and Notes
 
 Conversation history is not enough for long-running work. Each run therefore has two structured memory surfaces:
@@ -196,7 +198,7 @@ Autonomous/headless execution cannot finish with an arbitrary assistant paragrap
 - blocked agent: `agent.wait` with reason and awaited dependency;
 - cancellation: coordinator-owned transition, never model-owned.
 
-The current root implementation maps `wait` to a durable paused Run and resumes at the next turn, and it permits one bounded automatic repair for an invalid root response. Child actions and structured dependency records remain future Coordinator work.
+The current root implementation maps `wait` to a durable paused Run and resumes at the next turn, and it permits one bounded automatic repair for an invalid root response. The child `agent.finish` persistence contract now exists as an internal Coordinator method, but no model can invoke it until the child scheduler, usage accounting, and bounded inbox-to-context path are complete. Structured child dependency waiting remains future Coordinator work.
 
 ## Tool Gateway
 

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 22
+const LatestSchemaVersion = 23
 
 type migration struct {
 	Version    int
@@ -854,6 +854,92 @@ var agentMemoryOwnershipStatements = []string{
 		)
 		BEGIN
 			SELECT RAISE(ABORT, 'note owner Agent does not belong to Run');
+		END;`,
+}
+
+var agentCompletionReportStatements = []string{
+	`CREATE TABLE agent_completion_reports (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		agent_id TEXT NOT NULL UNIQUE,
+		parent_agent_id TEXT NOT NULL,
+		attempt_id TEXT NOT NULL,
+		protocol_version TEXT NOT NULL,
+		outcome TEXT NOT NULL,
+		summary TEXT NOT NULL,
+		work_item_ids_json TEXT NOT NULL,
+		note_ids_json TEXT NOT NULL,
+		message_id TEXT NOT NULL UNIQUE,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, parent_agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		FOREIGN KEY(message_id) REFERENCES agent_messages(id) ON DELETE CASCADE,
+		UNIQUE(run_id, id),
+		CHECK(agent_id <> parent_agent_id),
+		CHECK(length(trim(attempt_id)) > 0),
+		CHECK(protocol_version = 'agent_completion.v1'),
+		CHECK(outcome IN ('succeeded', 'partial')),
+		CHECK(length(trim(summary)) BETWEEN 1 AND 4096),
+		CHECK(length(CAST(summary AS BLOB)) <= 8192),
+		CHECK(json_valid(work_item_ids_json) AND json_type(work_item_ids_json) = 'array'),
+		CHECK(json_valid(note_ids_json) AND json_type(note_ids_json) = 'array'),
+		CHECK(length(CAST(work_item_ids_json AS BLOB)) <= 8192),
+		CHECK(length(CAST(note_ids_json AS BLOB)) <= 8192)
+	);`,
+	`CREATE INDEX idx_agent_completion_reports_run_created
+		ON agent_completion_reports(run_id, created_at, id);`,
+	`CREATE TABLE agent_completion_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		report_id TEXT NOT NULL UNIQUE,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(report_id) REFERENCES agent_completion_reports(id) ON DELETE CASCADE,
+		CHECK(length(operation_key_digest) = 64),
+		CHECK(length(request_fingerprint) = 64)
+	);`,
+	`CREATE TRIGGER trg_agent_completion_running_child
+		BEFORE INSERT ON agent_completion_reports
+		WHEN NOT EXISTS (
+			SELECT 1 FROM agent_nodes child
+			JOIN agent_nodes parent
+				ON parent.run_id = child.run_id AND parent.id = child.parent_id
+			WHERE child.run_id = NEW.run_id AND child.id = NEW.agent_id
+				AND parent.id = NEW.parent_agent_id
+				AND child.role = 'specialist' AND parent.role = 'root'
+				AND child.status = 'running' AND child.active_attempt_id = NEW.attempt_id
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'completion report requires the active Specialist attempt');
+		END;`,
+	`CREATE TRIGGER trg_agent_completion_message_matches
+		BEFORE INSERT ON agent_completion_reports
+		WHEN NOT EXISTS (
+			SELECT 1 FROM agent_messages message
+			WHERE message.id = NEW.message_id AND message.run_id = NEW.run_id
+				AND message.sender_agent_id = NEW.agent_id
+				AND message.recipient_agent_id = NEW.parent_agent_id
+				AND message.kind = 'result' AND message.semantic = 'message'
+				AND message.status = 'pending'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'completion report message does not match its Agent relationship');
+		END;`,
+	`CREATE TRIGGER trg_agent_completed_requires_report
+		BEFORE UPDATE OF status ON agent_nodes
+		WHEN OLD.role = 'specialist' AND NEW.status = 'completed' AND OLD.status <> 'completed'
+			AND NOT EXISTS (
+				SELECT 1 FROM agent_completion_reports report
+				WHERE report.run_id = NEW.run_id AND report.agent_id = NEW.id
+					AND report.attempt_id = OLD.active_attempt_id
+			)
+		BEGIN
+			SELECT RAISE(ABORT, 'completed Specialist requires a completion report');
+		END;`,
+	`CREATE TRIGGER trg_agent_completion_immutable
+		BEFORE UPDATE ON agent_completion_reports
+		BEGIN
+			SELECT RAISE(ABORT, 'completion report is immutable');
 		END;`,
 }
 
