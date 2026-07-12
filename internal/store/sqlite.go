@@ -228,6 +228,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 22, Name: "agent-owned work memory", Statements: agentMemoryOwnershipStatements},
 		{Version: 23, Name: "specialist completion reports", Statements: agentCompletionReportStatements},
 		{Version: 24, Name: "leased specialist attempts", Statements: specialistAttemptStatements},
+		{Version: 25, Name: "root inbox context delivery", Statements: rootInboxContextStatements},
 	})
 }
 

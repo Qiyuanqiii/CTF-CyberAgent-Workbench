@@ -51,11 +51,20 @@ type agentGraphMessageSnapshot struct {
 	CreatedAt        string                      `json:"created_at"`
 }
 
+type agentGraphDeliverySnapshot struct {
+	RootAgentID         string `json:"root_agent_id"`
+	SupervisorAttemptID string `json:"supervisor_attempt_id"`
+	Turn                int    `json:"turn"`
+	MessageID           string `json:"message_id"`
+	Ordinal             int    `json:"ordinal"`
+}
+
 type agentGraphSnapshotState struct {
-	ProtocolVersion string                      `json:"protocol_version"`
-	RootAgentID     string                      `json:"root_agent_id"`
-	Nodes           []agentGraphNodeSnapshot    `json:"nodes"`
-	PendingMessages []agentGraphMessageSnapshot `json:"pending_messages"`
+	ProtocolVersion string                       `json:"protocol_version"`
+	RootAgentID     string                       `json:"root_agent_id"`
+	Nodes           []agentGraphNodeSnapshot     `json:"nodes"`
+	PendingMessages []agentGraphMessageSnapshot  `json:"pending_messages"`
+	PreparedInbox   []agentGraphDeliverySnapshot `json:"prepared_inbox,omitempty"`
 }
 
 func (s *SQLiteStore) SnapshotAgentGraph(ctx context.Context, runID string) (domain.AgentGraphSnapshot, error) {
@@ -147,6 +156,9 @@ func (s *SQLiteStore) RestoreAgentGraph(ctx context.Context, runID string) (doma
 	if err := validateAgentAttemptProjectionTx(ctx, tx, nodes); err != nil {
 		return domain.AgentGraph{}, err
 	}
+	if err := validateRootInboxDeliveryProjectionTx(ctx, tx, nodes); err != nil {
+		return domain.AgentGraph{}, err
+	}
 	if err := validateAgentCompletionProjectionTx(ctx, tx, nodes); err != nil {
 		return domain.AgentGraph{}, err
 	}
@@ -169,6 +181,13 @@ func (s *SQLiteStore) RestoreAgentGraph(ctx context.Context, runID string) (doma
 	if err != nil {
 		return domain.AgentGraph{}, err
 	}
+	deliveries, err := listRootInboxDeliveriesTx(ctx, tx, rootInboxDeliverySelect+
+		` WHERE run_id = ? AND status = ?
+		ORDER BY root_agent_id, supervisor_attempt_id, ordinal`, runID,
+		domain.RootInboxDeliveryPrepared)
+	if err != nil {
+		return domain.AgentGraph{}, err
+	}
 	snapshot, found, err := latestAgentGraphSnapshotTx(ctx, tx, runID)
 	if err != nil {
 		return domain.AgentGraph{}, err
@@ -177,7 +196,7 @@ func (s *SQLiteStore) RestoreAgentGraph(ctx context.Context, runID string) (doma
 		return domain.AgentGraph{}, apperror.New(apperror.CodeFailedPrecondition,
 			"agent graph has no recovery snapshot")
 	}
-	stateJSON, err := marshalAgentGraphSnapshotState(rootID, nodes, messages)
+	stateJSON, err := marshalAgentGraphSnapshotState(rootID, nodes, messages, deliveries)
 	if err != nil {
 		return domain.AgentGraph{}, err
 	}
@@ -227,7 +246,14 @@ func createAgentGraphSnapshotTx(ctx context.Context, tx *sql.Tx,
 	if err != nil {
 		return domain.AgentGraphSnapshot{}, err
 	}
-	stateJSON, err := marshalAgentGraphSnapshotState(rootID, nodes, messages)
+	deliveries, err := listRootInboxDeliveriesTx(ctx, tx, rootInboxDeliverySelect+
+		` WHERE run_id = ? AND status = ?
+		ORDER BY root_agent_id, supervisor_attempt_id, ordinal`, run.ID,
+		domain.RootInboxDeliveryPrepared)
+	if err != nil {
+		return domain.AgentGraphSnapshot{}, err
+	}
+	stateJSON, err := marshalAgentGraphSnapshotState(rootID, nodes, messages, deliveries)
 	if err != nil {
 		return domain.AgentGraphSnapshot{}, err
 	}
@@ -311,7 +337,7 @@ func listPendingAgentMessagesTx(ctx context.Context, tx *sql.Tx,
 }
 
 func marshalAgentGraphSnapshotState(rootID string, nodes []domain.AgentNode,
-	messages []domain.AgentMessage,
+	messages []domain.AgentMessage, deliveries []domain.RootInboxDelivery,
 ) (string, error) {
 	state := agentGraphSnapshotState{
 		ProtocolVersion: domain.AgentGraphProtocolVersion,
@@ -346,6 +372,13 @@ func marshalAgentGraphSnapshotState(rootID string, nodes []domain.AgentNode,
 			Semantic:      semantic,
 			PayloadSHA256: fmt.Sprintf("%x", payloadHash[:]),
 			CreatedAt:     message.CreatedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+	for _, delivery := range deliveries {
+		state.PreparedInbox = append(state.PreparedInbox, agentGraphDeliverySnapshot{
+			RootAgentID:         delivery.RootAgentID,
+			SupervisorAttemptID: delivery.SupervisorAttemptID, Turn: delivery.Turn,
+			MessageID: delivery.MessageID, Ordinal: delivery.Ordinal,
 		})
 	}
 	return marshalRedactedJSON(state)

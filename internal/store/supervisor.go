@@ -1090,6 +1090,11 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	if err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}
+	committedInboxMessages, err := commitRootInboxContextTx(ctx, tx, run, agentNode,
+		checkpoint, time.Now().UTC())
+	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.PolicyDecisionEvent, "policy", checkpoint.AttemptID, map[string]any{
 		"context": "supervisor_assistant_response", "allowed": decision.Allowed,
 		"needs_approval": decision.NeedsApproval, "risk": decision.Risk, "reason": decision.Reason,
@@ -1100,7 +1105,7 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 		"agent_id": agentNode.ID, "turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
 		"user_message_id": userMessage.ID, "assistant_message_id": assistantMessage.ID,
 		"provider": response.Provider, "model": response.Model, "usage": response.Usage,
-		"lifecycle_action": action.Kind,
+		"lifecycle_action": action.Kind, "inbox_messages_committed": committedInboxMessages,
 	}); err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}

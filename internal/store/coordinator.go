@@ -386,6 +386,10 @@ func (s *SQLiteStore) ConsumeAgentMessages(ctx context.Context, agentID string, 
 	if err != nil {
 		return nil, err
 	}
+	if node.Role == domain.AgentRoleRoot && node.Status == domain.AgentRunning {
+		return nil, apperror.New(apperror.CodeFailedPrecondition,
+			"running root Agent inbox is reserved for Supervisor context delivery")
+	}
 	rows, err := tx.QueryContext(ctx, agentMessageSelect+` WHERE recipient_agent_id = ? AND status = ?
 		ORDER BY sequence LIMIT ?`, node.ID, domain.AgentMessagePending, limit)
 	if err != nil {
@@ -542,6 +546,11 @@ func syncRootAgentTx(ctx context.Context, tx *sql.Tx, run domain.Run, mission do
 		current.ActiveAttemptID != projection.ActiveAttemptID {
 		return domain.AgentNode{}, false, false, apperror.New(apperror.CodeConflict,
 			"root agent is bound to another active attempt")
+	}
+	if current.Status == domain.AgentRunning && projection.Status != domain.AgentRunning {
+		if _, err := supersedeRootInboxDeliveriesTx(ctx, tx, run, current.ID, "", at.UTC()); err != nil {
+			return domain.AgentNode{}, false, false, err
+		}
 	}
 	updated := current
 	updated.Status = projection.Status

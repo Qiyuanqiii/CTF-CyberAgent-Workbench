@@ -438,7 +438,7 @@ func removeSchemaV23ForTestStatements() []string {
 }
 
 func removeSchemaV24ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV25ForTestStatements(), []string{
 		`DROP TRIGGER trg_agent_attempt_running_child`,
 		`DROP TRIGGER trg_specialist_running_requires_attempt`,
 		`DROP TRIGGER trg_agent_attempt_terminal_child`,
@@ -452,6 +452,20 @@ func removeSchemaV24ForTestStatements() []string {
 		`DROP TABLE agent_attempt_mutations`,
 		`DROP TABLE agent_attempts`,
 		`DELETE FROM schema_migrations WHERE version = 24`,
+	}...)
+}
+
+func removeSchemaV25ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_root_inbox_delivery_insert`,
+		`DROP TRIGGER trg_root_inbox_delivery_commit`,
+		`DROP TRIGGER trg_root_inbox_delivery_active_supersede`,
+		`DROP TRIGGER trg_root_inbox_delivery_identity_immutable`,
+		`DROP TRIGGER trg_root_inbox_delivery_terminal_immutable`,
+		`DROP TRIGGER trg_root_inbox_delivery_prepared_delete`,
+		`DROP TRIGGER trg_agent_message_prepared_delivery`,
+		`DROP TABLE root_inbox_deliveries`,
+		`DELETE FROM schema_migrations WHERE version = 25`,
 	}
 }
 

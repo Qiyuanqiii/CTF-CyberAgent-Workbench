@@ -21,12 +21,6 @@ const agentCompletionSelect = `SELECT id, run_id, agent_id, parent_agent_id, att
 	protocol_version, outcome, summary, work_item_ids_json, note_ids_json, message_id, created_at
 	FROM agent_completion_reports`
 
-type completionInboxPayload struct {
-	ReportID string                  `json:"completion_report_id"`
-	AgentID  string                  `json:"agent_id"`
-	Report   domain.CompletionReport `json:"report"`
-}
-
 func (s *SQLiteStore) FinishSpecialist(ctx context.Context, completion domain.AgentCompletion,
 	operationKey string,
 ) (domain.AgentCompletion, bool, error) {
@@ -160,8 +154,8 @@ func (s *SQLiteStore) FinishSpecialist(ctx context.Context, completion domain.Ag
 		return domain.AgentCompletion{}, false, err
 	}
 
-	payloadJSON, err := marshalRedactedJSON(completionInboxPayload{
-		ReportID: completion.ID, AgentID: child.ID, Report: completion.Report,
+	payloadJSON, err := marshalRedactedJSON(domain.AgentCompletionInboxPayload{
+		CompletionReportID: completion.ID, AgentID: child.ID, Report: completion.Report,
 	})
 	if err != nil {
 		return domain.AgentCompletion{}, false, err

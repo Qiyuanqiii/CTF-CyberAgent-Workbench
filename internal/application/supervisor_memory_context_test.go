@@ -1,6 +1,7 @@
 package application
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ func TestSupervisorMemoryContextHonorsTokenBudgetAndPriority(t *testing.T) {
 	}
 	notes[0].Category = domain.NoteDecision
 	notes[0].Pinned = true
-	selection, err := supervisorMemoryContext(contextmgr.Summary{ID: 1, Content: strings.Repeat("summary ", 400)}, true, workItems, notes)
+	selection, err := supervisorMemoryContext(contextmgr.Summary{ID: 1, Content: strings.Repeat("summary ", 400)}, true, workItems, notes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,6 +44,44 @@ func TestSupervisorMemoryContextHonorsTokenBudgetAndPriority(t *testing.T) {
 	} {
 		if !hasContextSource(selection.IncludedSources, expected.kind, expected.id) {
 			t.Fatalf("priority source %s/%s was omitted: %#v", expected.kind, expected.id, selection)
+		}
+	}
+}
+
+func TestSupervisorMemoryContextAlwaysIncludesBoundedRootInboxFirst(t *testing.T) {
+	now := time.Now().UTC()
+	inbox := make([]domain.AgentMessage, domain.MaxRootInboxContextMessages)
+	for index := range inbox {
+		payload, err := json.Marshal(domain.AgentAttemptFailurePayload{
+			Version: domain.AgentAttemptFailureVersion,
+			AgentID: fmt.Sprintf("agent-child-%d", index), AttemptID: fmt.Sprintf("attempt-%d", index),
+			FailureCode: "provider_error", Reason: strings.Repeat("failure detail ", 200),
+			RetryScheduled: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		inbox[index] = domain.AgentMessage{
+			ID: fmt.Sprintf("message-%d", index), RunID: "run-1",
+			SenderAgentID: fmt.Sprintf("agent-child-%d", index), RecipientAgentID: "agent-root",
+			Sequence: int64(index + 1), Kind: domain.AgentMessageNotification,
+			Semantic: domain.AgentMessageSemanticMessage, PayloadJSON: string(payload),
+			Status: domain.AgentMessagePending, CreatedAt: now,
+		}
+	}
+	selection, err := supervisorMemoryContext(contextmgr.Summary{
+		ID: 9, Content: strings.Repeat("large summary context ", 1200),
+	}, true, nil, nil, inbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.EstimatedTokens > maxSupervisorMemoryTokens {
+		t.Fatalf("root inbox context exceeded memory budget: %#v", selection)
+	}
+	for _, message := range inbox {
+		if !hasContextSource(selection.IncludedSources, "agent_inbox", message.ID) {
+			t.Fatalf("bound root inbox message was omitted: message=%s selection=%#v",
+				message.ID, selection)
 		}
 	}
 }

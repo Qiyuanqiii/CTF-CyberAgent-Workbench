@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 24
+const LatestSchemaVersion = 25
 
 type migration struct {
 	Version    int
@@ -1117,6 +1117,145 @@ var specialistAttemptStatements = []string{
 		)
 		BEGIN
 			SELECT RAISE(ABORT, 'completion report requires a usage-recorded Agent attempt');
+		END;`,
+}
+
+var rootInboxContextStatements = []string{
+	`CREATE TABLE root_inbox_deliveries (
+		run_id TEXT NOT NULL,
+		root_agent_id TEXT NOT NULL,
+		supervisor_attempt_id TEXT NOT NULL,
+		turn_number INTEGER NOT NULL,
+		message_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		prepared_at TEXT NOT NULL,
+		resolved_at TEXT,
+		PRIMARY KEY(supervisor_attempt_id, message_id),
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, root_agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		FOREIGN KEY(message_id) REFERENCES agent_messages(id) ON DELETE CASCADE,
+		UNIQUE(supervisor_attempt_id, ordinal),
+		CHECK(turn_number > 0),
+		CHECK(ordinal BETWEEN 1 AND 4),
+		CHECK(status IN ('prepared', 'committed', 'superseded')),
+		CHECK((status = 'prepared' AND resolved_at IS NULL)
+			OR (status IN ('committed', 'superseded') AND resolved_at IS NOT NULL))
+	);`,
+	`CREATE UNIQUE INDEX idx_root_inbox_one_prepared_message
+		ON root_inbox_deliveries(message_id) WHERE status = 'prepared';`,
+	`CREATE UNIQUE INDEX idx_root_inbox_one_committed_message
+		ON root_inbox_deliveries(message_id) WHERE status = 'committed';`,
+	`CREATE INDEX idx_root_inbox_run_status
+		ON root_inbox_deliveries(run_id, status, prepared_at);`,
+	`CREATE TRIGGER trg_root_inbox_delivery_insert
+		BEFORE INSERT ON root_inbox_deliveries
+		WHEN NOT EXISTS (
+			SELECT 1 FROM run_supervisor_checkpoints checkpoint
+			JOIN runs run ON run.id = checkpoint.run_id
+			JOIN run_execution_leases lease ON lease.run_id = checkpoint.run_id
+			JOIN agent_nodes root
+				ON root.run_id = checkpoint.run_id AND root.id = NEW.root_agent_id
+			JOIN agent_messages message ON message.id = NEW.message_id
+			JOIN agent_nodes sender
+				ON sender.run_id = message.run_id AND sender.id = message.sender_agent_id
+			WHERE checkpoint.run_id = NEW.run_id
+				AND checkpoint.phase = 'turn_started'
+				AND checkpoint.attempt_id = NEW.supervisor_attempt_id
+				AND checkpoint.next_turn = NEW.turn_number
+				AND run.status = 'running'
+				AND lease.lease_id = checkpoint.lease_id
+				AND lease.generation = checkpoint.lease_generation
+				AND lease.status = 'active'
+				AND julianday(lease.expires_at) > julianday('now')
+				AND root.role = 'root' AND root.status = 'running'
+				AND root.active_attempt_id = checkpoint.attempt_id
+				AND message.run_id = NEW.run_id
+				AND message.recipient_agent_id = root.id
+				AND message.status = 'pending'
+				AND sender.role = 'specialist' AND sender.parent_id = root.id
+				AND (
+					(message.semantic = 'dependency' AND message.kind = 'notification')
+					OR (message.semantic = 'message' AND message.kind = 'result' AND EXISTS (
+						SELECT 1 FROM agent_completion_reports report
+						WHERE report.message_id = message.id AND report.agent_id = sender.id
+					))
+					OR (message.semantic = 'message' AND message.kind = 'notification' AND EXISTS (
+						SELECT 1 FROM agent_attempts attempt
+						WHERE attempt.notification_message_id = message.id
+							AND attempt.agent_id = sender.id AND attempt.status = 'crashed'
+					))
+				)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'root inbox delivery requires an eligible pending child message');
+		END;`,
+	`CREATE TRIGGER trg_root_inbox_delivery_commit
+		BEFORE UPDATE OF status, resolved_at ON root_inbox_deliveries
+		WHEN OLD.status = 'prepared' AND NEW.status = 'committed' AND NOT EXISTS (
+			SELECT 1 FROM run_supervisor_checkpoints checkpoint
+			JOIN runs run ON run.id = checkpoint.run_id
+			JOIN run_execution_leases lease ON lease.run_id = checkpoint.run_id
+			JOIN agent_nodes root
+				ON root.run_id = checkpoint.run_id AND root.id = OLD.root_agent_id
+			JOIN agent_messages message ON message.id = OLD.message_id
+			WHERE checkpoint.run_id = OLD.run_id
+				AND checkpoint.phase = 'turn_started'
+				AND checkpoint.attempt_id = OLD.supervisor_attempt_id
+				AND checkpoint.next_turn = OLD.turn_number
+				AND run.status = 'running'
+				AND lease.lease_id = checkpoint.lease_id
+				AND lease.generation = checkpoint.lease_generation
+				AND lease.status = 'active'
+				AND julianday(lease.expires_at) > julianday('now')
+				AND root.status = 'running' AND root.active_attempt_id = checkpoint.attempt_id
+				AND message.run_id = OLD.run_id
+				AND message.recipient_agent_id = root.id AND message.status = 'pending'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'root inbox delivery commit requires its active Supervisor attempt');
+		END;`,
+	`CREATE TRIGGER trg_root_inbox_delivery_active_supersede
+		BEFORE UPDATE OF status ON root_inbox_deliveries
+		WHEN OLD.status = 'prepared' AND NEW.status = 'superseded' AND EXISTS (
+			SELECT 1 FROM run_supervisor_checkpoints checkpoint
+			JOIN runs run ON run.id = checkpoint.run_id
+			JOIN agent_nodes root
+				ON root.run_id = checkpoint.run_id AND root.id = OLD.root_agent_id
+			WHERE checkpoint.run_id = OLD.run_id AND run.status = 'running'
+				AND checkpoint.phase = 'turn_started'
+				AND checkpoint.attempt_id = OLD.supervisor_attempt_id
+				AND root.status = 'running' AND root.active_attempt_id = OLD.supervisor_attempt_id
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'active root inbox delivery cannot be superseded');
+		END;`,
+	`CREATE TRIGGER trg_root_inbox_delivery_identity_immutable
+		BEFORE UPDATE OF run_id, root_agent_id, supervisor_attempt_id, turn_number,
+			message_id, ordinal, prepared_at ON root_inbox_deliveries
+		BEGIN
+			SELECT RAISE(ABORT, 'root inbox delivery identity is immutable');
+		END;`,
+	`CREATE TRIGGER trg_root_inbox_delivery_terminal_immutable
+		BEFORE UPDATE ON root_inbox_deliveries
+		WHEN OLD.status <> 'prepared'
+		BEGIN
+			SELECT RAISE(ABORT, 'terminal root inbox delivery is immutable');
+		END;`,
+	`CREATE TRIGGER trg_root_inbox_delivery_prepared_delete
+		BEFORE DELETE ON root_inbox_deliveries
+		WHEN OLD.status = 'prepared'
+		BEGIN
+			SELECT RAISE(ABORT, 'prepared root inbox delivery cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_agent_message_prepared_delivery
+		BEFORE UPDATE OF status, consumed_at ON agent_messages
+		WHEN OLD.status = 'pending' AND NEW.status = 'consumed' AND EXISTS (
+			SELECT 1 FROM root_inbox_deliveries delivery
+			WHERE delivery.message_id = OLD.id AND delivery.status = 'prepared'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'prepared root inbox message must commit through its Supervisor turn');
 		END;`,
 }
 

@@ -10,7 +10,7 @@ import (
 
 const (
 	AgentAttemptProtocolVersion        = "agent_attempt.v1"
-	AgentAttemptFailureProtocolVersion = "agent_attempt_failure.v1"
+	AgentAttemptFailureProtocolVersion = AgentAttemptFailureVersion
 	MaxAgentFailureCodeBytes           = 64
 	MaxAgentFailureReasonRunes         = 4096
 	MaxAgentFailureReasonBytes         = 8 * 1024

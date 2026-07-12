@@ -22,16 +22,6 @@ const agentAttemptSelect = `SELECT id, run_id, agent_id, parent_agent_id, lease_
 	execution_millis, usage_recorded_at, failure_code, failure_reason,
 	notification_message_id, started_at, updated_at, finished_at FROM agent_attempts`
 
-type agentAttemptFailurePayload struct {
-	Version        string `json:"version"`
-	AgentID        string `json:"agent_id"`
-	AttemptID      string `json:"attempt_id"`
-	FailureCode    string `json:"failure_code"`
-	Reason         string `json:"reason"`
-	RetryScheduled bool   `json:"retry_scheduled"`
-	Recovered      bool   `json:"recovered"`
-}
-
 func (s *SQLiteStore) BeginSpecialistAttempt(ctx context.Context, start domain.AgentAttemptStart,
 	operationKey string,
 ) (domain.AgentAttempt, bool, error) {
@@ -639,7 +629,7 @@ func crashAgentAttemptTx(ctx context.Context, tx *sql.Tx, run domain.Run,
 	}
 	retry := child.TurnsUsed < child.TurnLimit &&
 		(child.TokenLimit == 0 || child.TokensUsed < child.TokenLimit)
-	payloadJSON, err := marshalRedactedJSON(agentAttemptFailurePayload{
+	payloadJSON, err := marshalRedactedJSON(domain.AgentAttemptFailurePayload{
 		Version: domain.AgentAttemptFailureProtocolVersion, AgentID: child.ID, AttemptID: attempt.ID,
 		FailureCode: failure.Code, Reason: failure.Reason, RetryScheduled: retry, Recovered: recovered,
 	})
