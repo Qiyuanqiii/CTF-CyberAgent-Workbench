@@ -56,6 +56,11 @@ func TestSQLiteReadPagesUseStableOffsetsAndBoundedMetadataQueries(t *testing.T) 
 	if err != nil || len(messagePage) != 1 || messagePage[0].Content != "message 2" || !messagePage[0].Compacted {
 		t.Fatalf("message offset page is unstable: %#v err=%v", messagePage, err)
 	}
+	recent, err := st.ListRecentSessionMessages(ctx, messageSession.ID, true, 2)
+	if err != nil || len(recent) != 2 || recent[0].Content != "message 2" ||
+		recent[1].Content != "message 3" {
+		t.Fatalf("recent message page is not bounded and chronological: %#v err=%v", recent, err)
+	}
 
 	runService := application.NewRunService(st)
 	_, firstRun, err := runService.Create(ctx, application.CreateRunRequest{

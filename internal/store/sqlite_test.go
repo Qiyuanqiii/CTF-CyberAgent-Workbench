@@ -483,7 +483,7 @@ func removeSchemaV24ForTestStatements() []string {
 }
 
 func removeSchemaV25ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV26ForTestStatements(), []string{
 		`DROP TRIGGER trg_root_inbox_delivery_insert`,
 		`DROP TRIGGER trg_root_inbox_delivery_commit`,
 		`DROP TRIGGER trg_root_inbox_delivery_active_supersede`,
@@ -493,6 +493,18 @@ func removeSchemaV25ForTestStatements() []string {
 		`DROP TRIGGER trg_agent_message_prepared_delivery`,
 		`DROP TABLE root_inbox_deliveries`,
 		`DELETE FROM schema_migrations WHERE version = 25`,
+	}...)
+}
+
+func removeSchemaV26ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_specialist_model_call_sequence`,
+		`DROP TRIGGER trg_specialist_model_call_insert`,
+		`DROP TRIGGER trg_specialist_model_call_terminal_requires_lease`,
+		`DROP TRIGGER trg_specialist_model_call_identity_immutable`,
+		`DROP TRIGGER trg_specialist_model_call_terminal_immutable`,
+		`DROP TABLE specialist_model_calls`,
+		`DELETE FROM schema_migrations WHERE version = 26`,
 	}
 }
 

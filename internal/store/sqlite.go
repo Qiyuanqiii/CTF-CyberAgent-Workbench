@@ -247,6 +247,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 23, Name: "specialist completion reports", Statements: agentCompletionReportStatements},
 		{Version: 24, Name: "leased specialist attempts", Statements: specialistAttemptStatements},
 		{Version: 25, Name: "root inbox context delivery", Statements: rootInboxContextStatements},
+		{Version: 26, Name: "specialist model call ledger", Statements: specialistModelCallStatements},
 	})
 }
 

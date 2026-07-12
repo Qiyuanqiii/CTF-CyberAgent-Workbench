@@ -35,13 +35,23 @@ func (MockProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, e
 	}
 	last := lastUserMessage(req.Messages)
 	text := fmt.Sprintf("mock plan [%s]: inspect workspace context, keep actions scoped, produce a safe artifact for %q", model, last)
-	if req.JSONMode && req.Metadata["response_schema"] == "root_lifecycle.v1" {
-		encoded, _ := json.Marshal(map[string]string{
-			"version": "root_lifecycle.v1",
-			"action":  "continue",
-			"message": text,
-		})
-		text = string(encoded)
+	if req.JSONMode {
+		switch req.Metadata["response_schema"] {
+		case "root_lifecycle.v1":
+			encoded, _ := json.Marshal(map[string]string{
+				"version": "root_lifecycle.v1",
+				"action":  "continue",
+				"message": text,
+			})
+			text = string(encoded)
+		case "specialist_lifecycle.v1":
+			encoded, _ := json.Marshal(map[string]string{
+				"version": "specialist_lifecycle.v1",
+				"action":  "continue",
+				"message": text,
+			})
+			text = string(encoded)
+		}
 	}
 	raw, _ := json.Marshal(map[string]string{"provider": "mock", "model": model, "last_user": last})
 	return &ChatResponse{

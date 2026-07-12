@@ -77,6 +77,44 @@ func (s *SQLiteStore) ListSessionMessagesPage(ctx context.Context, sessionID str
 	return out, rows.Err()
 }
 
+func (s *SQLiteStore) ListRecentSessionMessages(ctx context.Context, sessionID string,
+	includeCompacted bool, limit int,
+) ([]session.Message, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, errors.New("session id is required")
+	}
+	if err := validateStoreReadPage(0, limit); err != nil {
+		return nil, err
+	}
+	query := `SELECT id, session_id, role, content, token_estimate, compacted, created_at
+		FROM session_messages WHERE session_id = ?`
+	if !includeCompacted {
+		query += ` AND compacted = 0`
+	}
+	query += ` ORDER BY id DESC LIMIT ?`
+	rows, err := s.db.QueryContext(ctx, query, sessionID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]session.Message, 0, limit)
+	for rows.Next() {
+		message, err := scanSessionMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, message)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for left, right := 0, len(out)-1; left < right; left, right = left+1, right-1 {
+		out[left], out[right] = out[right], out[left]
+	}
+	return out, nil
+}
+
 func (s *SQLiteStore) ListRunEventsPage(ctx context.Context, runID string,
 	offset int, limit int,
 ) ([]events.Event, error) {

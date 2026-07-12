@@ -522,52 +522,9 @@ func (s *SQLiteStore) mutateSpecialistUsage(ctx context.Context, ref domain.Agen
 			apperror.New(apperror.CodeConflict, "Specialist attempt usage was already recorded")
 	}
 	now := time.Now().UTC()
-	updatedAttempt := attempt
-	updatedAttempt.Usage = usage
-	updatedAttempt.UsageRecordedAt = &now
-	updatedAttempt.UpdatedAt = now
-	if err := updatedAttempt.Validate(); err != nil {
-		return domain.AgentAttempt{}, false, err
-	}
-	updatedTokens, err := supervisorAddCounter(child.TokensUsed, usage.TotalTokens,
-		"Specialist token")
+	updatedAttempt, _, err := applySpecialistUsageTx(ctx, tx, attempt, child, run, usage,
+		keyDigest, requestFingerprint, now)
 	if err != nil {
-		return domain.AgentAttempt{}, false, err
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE agent_attempts SET input_tokens = ?, output_tokens = ?,
-		total_tokens = ?, execution_millis = ?, usage_recorded_at = ?, updated_at = ?
-		WHERE id = ? AND status = ? AND usage_recorded_at IS NULL`, usage.InputTokens,
-		usage.OutputTokens, usage.TotalTokens, usage.ExecutionMillis, ts(now), ts(now), attempt.ID,
-		domain.AgentAttemptRunning)
-	if err != nil {
-		return domain.AgentAttempt{}, false, err
-	}
-	if err := requireSingleAgentAttemptUpdate(result, "Specialist usage changed concurrently"); err != nil {
-		return domain.AgentAttempt{}, false, err
-	}
-	updatedChild := child
-	updatedChild.TokensUsed = updatedTokens
-	updatedChild.Version++
-	updatedChild.UpdatedAt = now
-	if err := updatedChild.Validate(); err != nil {
-		return domain.AgentAttempt{}, false, err
-	}
-	result, err = tx.ExecContext(ctx, `UPDATE agent_nodes SET tokens_used = ?, version = ?, updated_at = ?
-		WHERE id = ? AND version = ? AND status = ? AND active_attempt_id = ?`,
-		updatedChild.TokensUsed, updatedChild.Version, ts(now), child.ID, child.Version,
-		domain.AgentRunning, attempt.ID)
-	if err != nil {
-		return domain.AgentAttempt{}, false, err
-	}
-	if err := requireSingleAgentAttemptUpdate(result, "Specialist changed during usage commit"); err != nil {
-		return domain.AgentAttempt{}, false, err
-	}
-	if err := insertAgentAttemptMutationTx(ctx, tx, keyDigest, requestFingerprint, attempt.ID,
-		"usage", now); err != nil {
-		return domain.AgentAttempt{}, false, err
-	}
-	if err := appendSupervisorEventTx(ctx, tx, run, events.AgentAttemptUsageRecordedEvent,
-		"agent_coordinator", attempt.ID, agentAttemptEventPayload(updatedAttempt, false)); err != nil {
 		return domain.AgentAttempt{}, false, err
 	}
 	if _, err := createAgentGraphSnapshotTx(ctx, tx, run); err != nil {
@@ -577,6 +534,71 @@ func (s *SQLiteStore) mutateSpecialistUsage(ctx context.Context, ref domain.Agen
 		return domain.AgentAttempt{}, false, err
 	}
 	return updatedAttempt, false, nil
+}
+
+func applySpecialistUsageTx(ctx context.Context, tx *sql.Tx, attempt domain.AgentAttempt,
+	child domain.AgentNode, run domain.Run, usage domain.AgentAttemptUsage,
+	keyDigest string, requestFingerprint string, now time.Time,
+) (domain.AgentAttempt, domain.AgentNode, error) {
+	if attempt.Status != domain.AgentAttemptRunning || attempt.UsageRecordedAt != nil ||
+		child.Status != domain.AgentRunning || child.ActiveAttemptID != attempt.ID ||
+		child.ID != attempt.AgentID || child.RunID != run.ID {
+		return domain.AgentAttempt{}, domain.AgentNode{},
+			apperror.New(apperror.CodeConflict, "Specialist usage target changed before commit")
+	}
+	if err := usage.Validate(); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, err
+	}
+	now = now.UTC()
+	updatedAttempt := attempt
+	updatedAttempt.Usage = usage
+	updatedAttempt.UsageRecordedAt = &now
+	updatedAttempt.UpdatedAt = now
+	if err := updatedAttempt.Validate(); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, err
+	}
+	updatedTokens, err := supervisorAddCounter(child.TokensUsed, usage.TotalTokens,
+		"Specialist token")
+	if err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE agent_attempts SET input_tokens = ?, output_tokens = ?,
+		total_tokens = ?, execution_millis = ?, usage_recorded_at = ?, updated_at = ?
+		WHERE id = ? AND status = ? AND usage_recorded_at IS NULL`, usage.InputTokens,
+		usage.OutputTokens, usage.TotalTokens, usage.ExecutionMillis, ts(now), ts(now), attempt.ID,
+		domain.AgentAttemptRunning)
+	if err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, err
+	}
+	if err := requireSingleAgentAttemptUpdate(result, "Specialist usage changed concurrently"); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, err
+	}
+	updatedChild := child
+	updatedChild.TokensUsed = updatedTokens
+	updatedChild.Version++
+	updatedChild.UpdatedAt = now
+	if err := updatedChild.Validate(); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, err
+	}
+	result, err = tx.ExecContext(ctx, `UPDATE agent_nodes SET tokens_used = ?, version = ?, updated_at = ?
+		WHERE id = ? AND version = ? AND status = ? AND active_attempt_id = ?`,
+		updatedChild.TokensUsed, updatedChild.Version, ts(now), child.ID, child.Version,
+		domain.AgentRunning, attempt.ID)
+	if err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, err
+	}
+	if err := requireSingleAgentAttemptUpdate(result, "Specialist changed during usage commit"); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, err
+	}
+	if err := insertAgentAttemptMutationTx(ctx, tx, keyDigest, requestFingerprint, attempt.ID,
+		"usage", now); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, err
+	}
+	if err := appendSupervisorEventTx(ctx, tx, run, events.AgentAttemptUsageRecordedEvent,
+		"agent_coordinator", attempt.ID, agentAttemptEventPayload(updatedAttempt, false)); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, err
+	}
+	return updatedAttempt, updatedChild, nil
 }
 
 func loadActiveAgentAttemptTx(ctx context.Context, tx *sql.Tx,

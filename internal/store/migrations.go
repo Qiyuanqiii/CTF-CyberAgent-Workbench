@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 25
+const LatestSchemaVersion = 26
 
 type migration struct {
 	Version    int
@@ -1256,6 +1256,161 @@ var rootInboxContextStatements = []string{
 		)
 		BEGIN
 			SELECT RAISE(ABORT, 'prepared root inbox message must commit through its Supervisor turn');
+		END;`,
+}
+
+var specialistModelCallStatements = []string{
+	`CREATE TABLE specialist_model_calls (
+		agent_attempt_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		agent_id TEXT NOT NULL,
+		model_attempt_number INTEGER NOT NULL,
+		transport_attempt INTEGER NOT NULL,
+		max_attempts INTEGER NOT NULL,
+		provider TEXT NOT NULL,
+		model TEXT NOT NULL,
+		input_fingerprint TEXT NOT NULL DEFAULT '',
+		action_fingerprint TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL,
+		outcome TEXT NOT NULL DEFAULT '',
+		error_text TEXT NOT NULL DEFAULT '',
+		retry_after_millis INTEGER NOT NULL DEFAULT 0,
+		retry_planned INTEGER NOT NULL DEFAULT 0,
+		elapsed_millis INTEGER NOT NULL DEFAULT 0,
+		stream_events INTEGER NOT NULL DEFAULT 0,
+		stream_bytes INTEGER NOT NULL DEFAULT 0,
+		input_tokens INTEGER NOT NULL DEFAULT 0,
+		output_tokens INTEGER NOT NULL DEFAULT 0,
+		total_tokens INTEGER NOT NULL DEFAULT 0,
+		usage_recorded INTEGER NOT NULL DEFAULT 0,
+		action_kind TEXT NOT NULL DEFAULT '',
+		report_outcome TEXT NOT NULL DEFAULT '',
+		policy_allowed INTEGER NOT NULL DEFAULT -1,
+		policy_needs_approval INTEGER NOT NULL DEFAULT 0,
+		policy_risk TEXT NOT NULL DEFAULT '',
+		policy_reason TEXT NOT NULL DEFAULT '',
+		user_message_id INTEGER,
+		assistant_message_id INTEGER,
+		started_at TEXT NOT NULL,
+		finished_at TEXT,
+		PRIMARY KEY(agent_attempt_id, model_attempt_number),
+		FOREIGN KEY(agent_attempt_id) REFERENCES agent_attempts(id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		FOREIGN KEY(user_message_id) REFERENCES session_messages(id),
+		FOREIGN KEY(assistant_message_id) REFERENCES session_messages(id),
+		CHECK(model_attempt_number > 0 AND transport_attempt = model_attempt_number),
+		CHECK(max_attempts BETWEEN 1 AND 5 AND model_attempt_number <= max_attempts),
+		CHECK(status IN ('started', 'completed', 'failed')),
+		CHECK(outcome IN ('', 'success', 'retryable', 'rate_limited', 'invalid_response', 'cancelled', 'permanent')),
+		CHECK(retry_after_millis >= 0 AND retry_planned IN (0, 1)),
+		CHECK(elapsed_millis >= 0 AND stream_events >= 0 AND stream_events <= 4096),
+		CHECK(stream_bytes >= 0 AND stream_bytes <= 65536),
+		CHECK(input_tokens >= 0 AND output_tokens >= 0 AND total_tokens >= 0),
+		CHECK(total_tokens >= input_tokens AND total_tokens >= output_tokens),
+		CHECK(usage_recorded IN (0, 1)),
+		CHECK(policy_allowed IN (-1, 0, 1) AND policy_needs_approval IN (0, 1)),
+		CHECK((status = 'started' AND outcome = '' AND error_text = ''
+			AND input_fingerprint = '' AND action_fingerprint = ''
+			AND retry_after_millis = 0 AND retry_planned = 0 AND elapsed_millis = 0
+			AND stream_events = 0 AND stream_bytes = 0 AND usage_recorded = 0
+			AND input_tokens = 0 AND output_tokens = 0 AND total_tokens = 0
+			AND action_kind = '' AND report_outcome = '' AND policy_allowed = -1
+			AND policy_needs_approval = 0 AND policy_risk = '' AND policy_reason = ''
+			AND user_message_id IS NULL AND assistant_message_id IS NULL AND finished_at IS NULL)
+		OR (status = 'completed' AND outcome = 'success' AND error_text = ''
+			AND length(input_fingerprint) = 64 AND length(action_fingerprint) = 64
+			AND retry_after_millis = 0 AND retry_planned = 0 AND usage_recorded = 1
+			AND action_kind IN ('continue', 'finish')
+			AND ((action_kind = 'continue' AND report_outcome = '')
+				OR (action_kind = 'finish' AND report_outcome IN ('succeeded', 'partial')))
+			AND policy_allowed IN (0, 1) AND length(trim(policy_reason)) > 0
+			AND ((policy_allowed = 1 AND policy_needs_approval = 0
+				AND user_message_id IS NOT NULL AND assistant_message_id IS NOT NULL)
+				OR ((policy_allowed = 0 OR policy_needs_approval = 1)
+					AND user_message_id IS NULL AND assistant_message_id IS NULL))
+			AND finished_at IS NOT NULL)
+		OR (status = 'failed' AND outcome IN ('retryable', 'rate_limited',
+				'invalid_response', 'cancelled', 'permanent')
+			AND input_fingerprint = '' AND action_fingerprint = ''
+			AND length(trim(error_text)) > 0 AND action_kind = '' AND report_outcome = ''
+			AND policy_allowed = -1 AND policy_needs_approval = 0
+			AND policy_risk = '' AND policy_reason = ''
+			AND user_message_id IS NULL AND assistant_message_id IS NULL
+			AND (usage_recorded = 1 OR (input_tokens = 0 AND output_tokens = 0 AND total_tokens = 0))
+			AND (retry_planned = 0 OR (usage_recorded = 0
+				AND outcome IN ('retryable', 'rate_limited')
+				AND model_attempt_number < max_attempts))
+			AND finished_at IS NOT NULL))
+	);`,
+	`CREATE UNIQUE INDEX idx_specialist_model_one_started
+		ON specialist_model_calls(agent_attempt_id) WHERE status = 'started';`,
+	`CREATE INDEX idx_specialist_model_agent_started
+		ON specialist_model_calls(agent_id, started_at, model_attempt_number);`,
+	`CREATE TRIGGER trg_specialist_model_call_sequence
+		BEFORE INSERT ON specialist_model_calls
+		WHEN NEW.model_attempt_number <> (
+			SELECT COUNT(*) + 1 FROM specialist_model_calls
+			WHERE agent_attempt_id = NEW.agent_attempt_id
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist model call is not the next attempt');
+		END;`,
+	`CREATE TRIGGER trg_specialist_model_call_insert
+		BEFORE INSERT ON specialist_model_calls
+		WHEN NOT EXISTS (
+			SELECT 1 FROM agent_attempts attempt
+			JOIN agent_nodes child
+				ON child.run_id = attempt.run_id AND child.id = attempt.agent_id
+			JOIN runs run ON run.id = attempt.run_id
+			JOIN run_execution_leases lease ON lease.run_id = attempt.run_id
+			WHERE attempt.id = NEW.agent_attempt_id AND attempt.run_id = NEW.run_id
+				AND attempt.agent_id = NEW.agent_id AND attempt.status = 'running'
+				AND attempt.usage_recorded_at IS NULL
+				AND child.role = 'specialist' AND child.status = 'running'
+				AND child.active_attempt_id = attempt.id AND run.status = 'running'
+				AND lease.lease_id = attempt.lease_id
+				AND lease.generation = attempt.lease_generation
+				AND lease.status = 'active' AND julianday(lease.expires_at) > julianday('now')
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist model call requires its active leased attempt');
+		END;`,
+	`CREATE TRIGGER trg_specialist_model_call_terminal_requires_lease
+		BEFORE UPDATE OF status ON specialist_model_calls
+		WHEN OLD.status = 'started' AND NEW.status <> 'started' AND NOT EXISTS (
+			SELECT 1 FROM agent_attempts attempt
+			JOIN agent_nodes child
+				ON child.run_id = attempt.run_id AND child.id = attempt.agent_id
+			JOIN runs run ON run.id = attempt.run_id
+			JOIN run_execution_leases lease ON lease.run_id = attempt.run_id
+			WHERE attempt.id = OLD.agent_attempt_id AND attempt.run_id = OLD.run_id
+				AND attempt.agent_id = OLD.agent_id AND attempt.status = 'running'
+				AND child.role = 'specialist' AND child.status = 'running'
+				AND child.active_attempt_id = attempt.id AND run.status = 'running'
+				AND lease.lease_id = attempt.lease_id
+				AND lease.generation = attempt.lease_generation
+				AND lease.status = 'active' AND julianday(lease.expires_at) > julianday('now')
+				AND ((NEW.usage_recorded = 0 AND attempt.usage_recorded_at IS NULL)
+					OR (NEW.usage_recorded = 1 AND attempt.usage_recorded_at IS NOT NULL
+						AND attempt.input_tokens = NEW.input_tokens
+						AND attempt.output_tokens = NEW.output_tokens
+						AND attempt.total_tokens = NEW.total_tokens))
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist model terminal requires its active leased usage state');
+		END;`,
+	`CREATE TRIGGER trg_specialist_model_call_identity_immutable
+		BEFORE UPDATE OF agent_attempt_id, run_id, agent_id, model_attempt_number,
+			transport_attempt, max_attempts, provider, model, started_at
+		ON specialist_model_calls
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist model call identity is immutable');
+		END;`,
+	`CREATE TRIGGER trg_specialist_model_call_terminal_immutable
+		BEFORE UPDATE ON specialist_model_calls
+		WHEN OLD.status <> 'started'
+		BEGIN
+			SELECT RAISE(ABORT, 'terminal Specialist model call is immutable');
 		END;`,
 }
 

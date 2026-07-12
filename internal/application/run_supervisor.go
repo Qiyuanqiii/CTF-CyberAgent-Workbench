@@ -745,77 +745,7 @@ func (s *RunSupervisor) finalizationResult(ctx context.Context, run domain.Run,
 func (s *RunSupervisor) withRunExecutionLease(ctx context.Context, runID string,
 	operation func(context.Context, domain.RunExecutionLease) error,
 ) error {
-	if err := s.leasePolicy.Validate(); err != nil {
-		return apperror.Wrap(apperror.CodeFailedPrecondition, "invalid run execution lease policy", err)
-	}
-	if strings.TrimSpace(s.leaseOwner) == "" {
-		return apperror.New(apperror.CodeFailedPrecondition, "run execution lease owner is required")
-	}
-	acquired, err := s.store.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
-		RunID: strings.TrimSpace(runID), OwnerID: s.leaseOwner, TTL: s.leasePolicy.TTL,
-	})
-	if err != nil {
-		return apperror.Normalize(err)
-	}
-	leaseCtx, cancelLease := context.WithCancel(ctx)
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	heartbeatErr := make(chan error, 1)
-	go func() {
-		defer close(done)
-		s.renewRunExecutionLease(leaseCtx, acquired.Lease, stop, heartbeatErr, cancelLease)
-	}()
-	operationErr := operation(leaseCtx, acquired.Lease)
-	close(stop)
-	cancelLease()
-	<-done
-	var renewalErr error
-	select {
-	case renewalErr = <-heartbeatErr:
-	default:
-	}
-	releaseCtx, cancelRelease := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-	_, _, releaseErr := s.store.ReleaseRunExecutionLease(releaseCtx, acquired.Lease)
-	cancelRelease()
-	if renewalErr != nil {
-		return errors.Join(apperror.Normalize(renewalErr), operationErr, releaseErr)
-	}
-	return errors.Join(operationErr, releaseErr)
-}
-
-func (s *RunSupervisor) renewRunExecutionLease(ctx context.Context, lease domain.RunExecutionLease,
-	stop <-chan struct{}, heartbeatErr chan<- error, cancel context.CancelFunc,
-) {
-	ticker := time.NewTicker(s.leasePolicy.RenewInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-stop:
-			return
-		case <-ticker.C:
-			timeout := minDuration(2*time.Second, s.leasePolicy.RenewInterval)
-			renewCtx, cancelRenew := context.WithTimeout(context.WithoutCancel(ctx), timeout)
-			_, err := s.store.RenewRunExecutionLease(renewCtx, lease, s.leasePolicy.TTL)
-			cancelRenew()
-			if err != nil {
-				select {
-				case heartbeatErr <- err:
-				default:
-				}
-				cancel()
-				return
-			}
-		}
-	}
-}
-
-func minDuration(left time.Duration, right time.Duration) time.Duration {
-	if left < right {
-		return left
-	}
-	return right
+	return withRunExecutionLease(ctx, s.store, runID, s.leaseOwner, s.leasePolicy, operation)
 }
 
 func (s *RunSupervisor) Checkpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error) {

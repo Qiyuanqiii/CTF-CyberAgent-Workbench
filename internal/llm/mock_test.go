@@ -51,6 +51,30 @@ func TestMockProviderRootLifecycleResponse(t *testing.T) {
 	}
 }
 
+func TestMockProviderSpecialistLifecycleResponse(t *testing.T) {
+	provider := NewMockProvider()
+	response, err := provider.Chat(context.Background(), ChatRequest{
+		Model: "mock-code", JSONMode: true,
+		Messages: []Message{{Role: "user", Content: "review one bounded concern"}},
+		Metadata: map[string]string{"response_schema": "specialist_lifecycle.v1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var action struct {
+		Version string `json:"version"`
+		Action  string `json:"action"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(response.Text), &action); err != nil {
+		t.Fatalf("mock Specialist lifecycle response is not JSON: %v", err)
+	}
+	if action.Version != "specialist_lifecycle.v1" || action.Action != "continue" ||
+		action.Message == "" {
+		t.Fatalf("unexpected mock Specialist lifecycle response: %#v", action)
+	}
+}
+
 func TestRouterDefaultRoutes(t *testing.T) {
 	router := NewDefaultRouter()
 	resp, err := router.Chat(context.Background(), "script", ChatRequest{
