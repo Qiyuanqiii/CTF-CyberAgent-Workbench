@@ -118,12 +118,12 @@ func (a *App) runFanout(ctx context.Context, args []string) error {
 
 func (a *App) runFanoutReport(ctx context.Context, args []string) error {
 	fs := newFlagSet("run fanout report", a.errOut)
-	format := fs.String("format", "markdown", "report format: markdown or json")
+	format := fs.String("format", "markdown", "report format: markdown, json, or sarif")
 	if err := fs.Parse(reorderFlags(args, map[string]bool{"format": true})); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return errors.New("usage: cyberagent run fanout report <execution-id> [--format markdown|json]")
+		return errors.New("usage: cyberagent run fanout report <execution-id> [--format markdown|json|sarif]")
 	}
 	value, _, err := application.NewFindingReportService(a.store).
 		GenerateReadOnlyFanout(ctx, fs.Arg(0))

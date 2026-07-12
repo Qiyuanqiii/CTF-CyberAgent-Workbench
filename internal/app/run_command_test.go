@@ -20,6 +20,7 @@ import (
 	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
+	reporting "cyberagent-workbench/internal/report"
 	"cyberagent-workbench/internal/store"
 	"cyberagent-workbench/internal/toolgateway"
 )
@@ -52,6 +53,17 @@ func TestCLIHelpListsRunGraphAndLease(t *testing.T) {
 	if code != 0 || stderr != "" || !strings.Contains(stdout, "checkpoint|graph|lease|finish") ||
 		!strings.Contains(stdout, "cyberagent report show") {
 		t.Fatalf("run graph or lease is missing from help: stdout=%s stderr=%s code=%d", stdout, stderr, code)
+	}
+}
+
+func TestReportCheckRejectsOutputFormatBeforeLookup(t *testing.T) {
+	t.Setenv("CYBERAGENT_HOME", t.TempDir())
+	_, stderr, code := executeTestCommand(t, "report", "check",
+		"report-"+strings.Repeat("a", 64), "--format", "yaml")
+	if code == 0 || !strings.Contains(stderr, "format must be text or json") ||
+		strings.Contains(stderr, "not found") {
+		t.Fatalf("report format validation was not fail-fast: stderr=%s code=%d",
+			stderr, code)
 	}
 }
 
@@ -241,6 +253,64 @@ func TestRunReadOnlyFanoutCLIPlansThenExecutesThroughReadOnlyGate(t *testing.T) 
 		len(validatedReport.Findings[0].ArtifactEvidence) != 1 {
 		t.Fatalf("validated JSON report drifted output=%s stderr=%s code=%d",
 			validatedJSON, stderr, code)
+	}
+	sarifJSON, stderr, code := executeTestCommand(t, "report", "show",
+		findingReport.ID, "--format", "sarif")
+	var sarifReport struct {
+		Version string `json:"version"`
+		Runs    []struct {
+			Results []struct {
+				Kind       string         `json:"kind"`
+				Level      string         `json:"level"`
+				Properties map[string]any `json:"properties"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if code != 0 || stderr != "" ||
+		json.Unmarshal([]byte(sarifJSON), &sarifReport) != nil ||
+		sarifReport.Version != reporting.SARIFVersion || len(sarifReport.Runs) != 1 ||
+		len(sarifReport.Runs[0].Results) != 1 ||
+		strings.Contains(sarifJSON, "baselineState") ||
+		strings.Contains(sarifJSON, "suppressions") {
+		t.Fatalf("stored SARIF report failed output=%s stderr=%s code=%d",
+			sarifJSON, stderr, code)
+	}
+	sarifResult := sarifReport.Runs[0].Results[0]
+	if sarifResult.Properties["cyberagentValidationStatus"] != "validated" ||
+		sarifResult.Kind != "fail" || sarifResult.Level != "note" {
+		t.Fatalf("validated-only SARIF boundary drifted: %#v", sarifResult)
+	}
+	checkText, stderr, code := executeTestCommand(t, "report", "check", findingReport.ID)
+	if code != 0 || stderr != "" || !strings.Contains(checkText, "matched: 0") ||
+		!strings.Contains(checkText, "passed: true") {
+		t.Fatalf("default report gate should ignore validated info output=%s stderr=%s code=%d",
+			checkText, stderr, code)
+	}
+	checkJSON, stderr, code := executeTestCommand(t, "report", "check", findingReport.ID,
+		"--min-severity", "info", "--format", "json")
+	var validatedGate reporting.GateResult
+	if code != apperror.ExitCode(apperror.New(apperror.CodeFailedPrecondition, "failed")) ||
+		!strings.Contains(stderr, "report check matched 1 validated finding") ||
+		json.Unmarshal([]byte(checkJSON), &validatedGate) != nil ||
+		validatedGate.MatchedCount != 1 || validatedGate.Passed {
+		t.Fatalf("validated report gate drifted output=%s stderr=%s code=%d",
+			checkJSON, stderr, code)
+	}
+	activeJSON, stderr, code := executeTestCommand(t, "report", "check", findingReport.ID,
+		"--fail-status", "active", "--min-severity", "info", "--format", "json")
+	var activeGate reporting.GateResult
+	if code != apperror.ExitCode(apperror.New(apperror.CodeFailedPrecondition, "failed")) ||
+		json.Unmarshal([]byte(activeJSON), &activeGate) != nil ||
+		activeGate.MatchedCount != 6 || activeGate.Passed {
+		t.Fatalf("active report gate did not admit drafts output=%s stderr=%s code=%d",
+			activeJSON, stderr, code)
+	}
+	disabledText, stderr, code := executeTestCommand(t, "report", "check", findingReport.ID,
+		"--fail-status", "none", "--min-severity", "info")
+	if code != 0 || stderr != "" || !strings.Contains(disabledText, "matched: 0") ||
+		!strings.Contains(disabledText, "passed: true") {
+		t.Fatalf("disabled report gate failed output=%s stderr=%s code=%d",
+			disabledText, stderr, code)
 	}
 	reportMarkdown, stderr, code := executeTestCommand(t, "report", "show",
 		findingReport.ID, "--format", "markdown")

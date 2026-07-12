@@ -193,6 +193,9 @@ func completedProjectionExecution(t *testing.T,
 	for _, finding := range findings {
 		allowed[finding.Path] = struct{}{}
 	}
+	if len(allowed) == 0 {
+		allowed["src/empty.go"] = struct{}{}
+	}
 	reportJSON, err := domain.EncodeReadOnlyFanoutReport(domain.ReadOnlyFanoutReport{
 		Version: domain.ReadOnlyFanoutReportVersion, Summary: "Bounded source audit.",
 		Findings: findings,

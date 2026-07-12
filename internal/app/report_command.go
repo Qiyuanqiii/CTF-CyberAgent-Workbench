@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
+	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
 	reporting "cyberagent-workbench/internal/report"
@@ -23,6 +25,8 @@ func (a *App) reportCommand(ctx context.Context, args []string) error {
 		return a.reportShow(ctx, args[1:])
 	case "finding":
 		return a.reportFindingCommand(ctx, args[1:])
+	case "check":
+		return a.reportCheck(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown report subcommand %q", args[0])
 	}
@@ -141,18 +145,89 @@ func (a *App) reportFindingVerify(ctx context.Context, args []string) error {
 
 func (a *App) reportShow(ctx context.Context, args []string) error {
 	fs := newFlagSet("report show", a.errOut)
-	format := fs.String("format", "markdown", "report format: markdown or json")
+	format := fs.String("format", "markdown", "report format: markdown, json, or sarif")
 	if err := fs.Parse(reorderFlags(args, map[string]bool{"format": true})); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return errors.New("usage: cyberagent report show <report-id> [--format markdown|json]")
+		return errors.New("usage: cyberagent report show <report-id> [--format markdown|json|sarif]")
 	}
 	value, err := application.NewFindingReportService(a.store).Get(ctx, fs.Arg(0))
 	if err != nil {
 		return err
 	}
 	return a.renderFindingReport(value, *format)
+}
+
+func (a *App) reportCheck(ctx context.Context, args []string) error {
+	fs := newFlagSet("report check", a.errOut)
+	failStatus := fs.String("fail-status", "validated",
+		"finding status gate: validated, active, or none")
+	minSeverity := fs.String("min-severity", "high",
+		"minimum source severity: info, low, medium, high, or critical")
+	format := fs.String("format", "text", "check output format: text or json")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"fail-status": true, "min-severity": true, "format": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent report check <report-id> [--fail-status validated|active|none] [--min-severity info|low|medium|high|critical] [--format text|json]")
+	}
+	outputFormat := strings.ToLower(strings.TrimSpace(*format))
+	if outputFormat != "text" && outputFormat != "json" {
+		return errors.New("report check format must be text or json")
+	}
+	status, err := reporting.ParseGateStatus(*failStatus)
+	if err != nil {
+		return err
+	}
+	severity, err := reporting.ParseGateSeverity(*minSeverity)
+	if err != nil {
+		return err
+	}
+	value, err := application.NewFindingReportService(a.store).Get(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	result, err := reporting.EvaluateGate(value, reporting.GatePolicy{
+		FailStatus: status, MinSeverity: severity,
+	})
+	if err != nil {
+		return err
+	}
+	switch outputFormat {
+	case "text":
+		if _, err := fmt.Fprintf(a.out,
+			"report: %s\nrun: %s\nprojection_digest: %s\n",
+			result.ReportID, result.RunID, result.ProjectionDigest); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(a.out, "fail_status: %s\nmin_severity: %s\n",
+			result.Policy.FailStatus, result.Policy.MinSeverity); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(a.out,
+			"findings: %d\ndraft: %d\nvalidated: %d\nrejected: %d\nmatched: %d\npassed: %t\n",
+			result.FindingCount, result.DraftCount, result.ValidatedCount,
+			result.RejectedCount, result.MatchedCount, result.Passed); err != nil {
+			return err
+		}
+	case "json":
+		encoded, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return err
+		}
+		if _, err := a.out.Write(append(encoded, '\n')); err != nil {
+			return err
+		}
+	}
+	if !result.Passed {
+		return apperror.New(apperror.CodeFailedPrecondition,
+			fmt.Sprintf("report check matched %d %s finding(s) at or above %s severity",
+				result.MatchedCount, result.Policy.FailStatus, result.Policy.MinSeverity))
+	}
+	return nil
 }
 
 func (a *App) renderFindingReport(value domain.FindingReport, formatValue string) error {

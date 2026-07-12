@@ -447,9 +447,13 @@ Artifact-backed Finding Validation 切片新增 schema v36、`finding_artifact_e
 
 功能复核覆盖两 SQLite Store 八路证据/决定并发各只写一条、同键重放、改判冲突、跨 Run Artifact 拒绝、无 Evidence 验证拒绝、零 Evidence 拒绝成功、决定后追加拒绝、原始 key 不落库、事件正文零泄露、v35->v36 数据保留、迁移前已篡改 Artifact 的哈希拒绝，以及真实 CLI 的 report->Artifact->attach->validate->verify->render 全链路。审计未发现未解决的高/中风险问题，并修复一项低风险语义缺口：Evidence 现在明确冻结并展示 Artifact 的 `redacted` 标志，避免把脱敏正文误认为原始字节。全仓普通测试、race、vet、staticcheck、模块校验与 `govulncheck` 已通过，当前可达漏洞为 0。
 
+Trust-aware SARIF and CI Gate 切片不增加数据库迁移，只在 `internal/report` 与 CLI 增加纯读取投影。`report show --format sarif` 生成 OASIS SARIF 2.1.0 Errata 01，包含五个稳定 severity rule、工作区相对且逐段转义的 URI、v35 Finding fingerprint、报告/Run/投影摘要和三类验证计数。只有带 operator `validated` 覆盖层的 Finding 会进入 `results`，Artifact 正文、Evidence note 和 validation reason 均不输出。`report check` 默认以 `validated/high` 阻断并返回现有 `FAILED_PRECONDITION` 退出码 4；`active` 必须显式指定才纳入 draft，`none` 可关闭阻断，rejected 永不匹配。文本与 JSON 输出都会在失败退出前完整写出，便于 CI 保存证据。
+
+本轮审计发现并修复一项中风险兼容性问题：初稿按 OASIS 语义把 draft/rejected 映射为 `result.kind=review/pass`，但 [GitHub Code Scanning 支持列表](https://docs.github.com/en/code-security/reference/code-scanning/sarif-files/sarif-support) 不消费 `kind`，这些结果仍可能显示为告警。最终实现因此收紧为 validated-only `results`，完整状态仍保留在 SQLite、Markdown/JSON 与 SARIF Run 汇总中。后续健壮性复核又修复三项低风险边界：公共 Go `GatePolicy` 现在拒绝可能 fail-open 的非规范化状态值；文本门禁传播输出写入错误；公开 SARIF 移除由完整 Evidence 元数据计算的集合摘要，只保留证据数量。定向测试覆盖确定性、空结果数组、URI/fingerprint、私密叙述隔离、默认/active/none 门禁和 CLI 退出码；真实二进制走完 report->Artifact->validate->SARIF/check，并通过 [OASIS 官方 schema](https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json) 校验。最终全仓普通测试、全仓 race、`go vet`、零告警 `staticcheck`、`go mod verify/tidy -diff`、凭据/运行产物扫描与 `govulncheck` 全部通过，可达漏洞为 0。
+
 ## 七、下一开发切片
 
-1. 为 P8 增加只读 SARIF/CI projection，明确区分 `draft`、`validated` 与 `rejected`，绝不把未验证模型声明提升为高置信结论；`accepted/fixed` 留给独立 remediation Evidence 状态机。
+1. 为 P8 增加独立的 `accepted/fixed` remediation Evidence 状态机；接受不能复用 validation 决定，修复必须引用新的可复核 Artifact Evidence，并保持历史不可变。
 2. schema v32 的显式 operator child schedule/continue 仍单独推进，只允许选择该 application 已 instructed 的 ready child，并复用 durable schedule、总预算、取消与恢复。
 3. React/Vite 后续从 `docs/openapi.json` 生成 client/DTO，并通过带 Authorization header 的 fetch 消费 SSE，不把 token 放入 URL、不重复实现 Go Policy。
 4. Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。

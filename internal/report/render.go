@@ -15,6 +15,7 @@ type Format string
 const (
 	FormatMarkdown Format = "markdown"
 	FormatJSON     Format = "json"
+	FormatSARIF    Format = "sarif"
 )
 
 func ParseFormat(value string) (Format, error) {
@@ -23,8 +24,8 @@ func ParseFormat(value string) (Format, error) {
 		value = string(FormatMarkdown)
 	}
 	format := Format(value)
-	if format != FormatMarkdown && format != FormatJSON {
-		return "", errors.New("report format must be markdown or json")
+	if format != FormatMarkdown && format != FormatJSON && format != FormatSARIF {
+		return "", errors.New("report format must be markdown, json, or sarif")
 	}
 	return format, nil
 }
@@ -42,6 +43,8 @@ func Render(value domain.FindingReport, format Format) ([]byte, error) {
 		return append(encoded, '\n'), nil
 	case FormatMarkdown:
 		return []byte(renderMarkdown(value)), nil
+	case FormatSARIF:
+		return renderSARIF(value)
 	default:
 		return nil, errors.New("report format is invalid")
 	}

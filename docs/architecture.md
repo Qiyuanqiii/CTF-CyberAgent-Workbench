@@ -329,7 +329,7 @@ Skills are versioned knowledge packages with metadata, applicability rules, prom
 
 A finding is not accepted because a model stated it. Schema v35 therefore projects every Fan-out result as `draft` and labels its provenance `model_assertion`. Schema v36 lets an operator attach frozen, same-Run Artifact Evidence and make one immutable `validated` or `rejected` decision. Validation is still distinct from acceptance: `accepted` and `fixed` transitions are intentionally unavailable. Generic finding categories include code defect, security weakness, failed test, policy violation, and improvement opportunity.
 
-Reports are projections built from persisted state, not mutable globals. Schema v35 provides deterministic Markdown and JSON with a stable source projection digest; schema v36 renders its validation overlay without changing that digest. Deduplication and validation rules are Go-owned. Optional model-assisted comparison cannot become authoritative. SARIF, CI annotations, acceptance, and remediation tracking follow.
+Reports are projections built from persisted state, not mutable globals. Schema v35 provides deterministic Markdown and JSON with a stable source projection digest; schema v36 renders its validation overlay without changing that digest. The current read-only SARIF 2.1.0 renderer exports only operator-validated Findings as `results`, while retaining all status counts as metadata. This stricter boundary is intentional because GitHub Code Scanning consumes only a SARIF subset and ignores `result.kind`; draft or rejected model claims therefore cannot become alerts by parser behavior. Stable severity rules, workspace-relative escaped URIs, and v35 Finding fingerprints support portable identity without exposing Artifact content or validation narratives. The adjacent CI gate defaults to validated/high and admits drafts only through an explicit `active` policy. Neither path writes Store state or calls a Provider. Deduplication, validation, rendering, and gate rules are Go-owned. Optional model-assisted comparison cannot become authoritative. Acceptance, remediation tracking, and platform-specific CI annotations follow.
 
 ## Events and Interfaces
 
@@ -431,7 +431,7 @@ finding_validation_operations
 agent_graph_snapshots
 ```
 
-Later migrations add acceptance/remediation history, SARIF projections, and CI annotations.
+Later migrations add acceptance/remediation history and platform-specific CI annotations. SARIF and the generic CI gate are read-only projections and require no schema migration.
 
 Existing tables remain available during migration. JSON files may be exported for portability but are not authoritative state.
 
