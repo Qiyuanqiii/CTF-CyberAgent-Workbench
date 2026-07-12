@@ -221,6 +221,17 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 			t.Fatalf("schema v32 Specialist delegation application table is missing: %q", table)
 		}
 	}
+	for _, name := range []string{"readonly_fanout_plans", "readonly_fanout_files",
+		"readonly_fanout_shards", "readonly_fanout_operations"} {
+		var table string
+		if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master
+			WHERE type = 'table' AND name = ?`, name).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		if table != name {
+			t.Fatalf("schema v33 read-only fan-out table is missing: %q", table)
+		}
+	}
 	for _, column := range []string{"lease_id", "lease_generation"} {
 		var count int
 		if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('run_supervisor_checkpoints')
@@ -700,7 +711,7 @@ func removeSchemaV31ForTestStatements() []string {
 }
 
 func removeSchemaV32ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV33ForTestStatements(), []string{
 		`DROP TRIGGER trg_specialist_delegation_application_operation_delete_immutable`,
 		`DROP TRIGGER trg_specialist_delegation_application_operation_immutable`,
 		`DROP TRIGGER trg_specialist_delegation_application_assignment_delete_immutable`,
@@ -717,6 +728,28 @@ func removeSchemaV32ForTestStatements() []string {
 		`DROP TABLE specialist_delegation_application_assignments`,
 		`DROP TABLE specialist_delegation_applications`,
 		`DELETE FROM schema_migrations WHERE version = 32`,
+	}...)
+}
+
+func removeSchemaV33ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_readonly_fanout_operation_delete_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_operation_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_shard_delete_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_shard_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_file_delete_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_file_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_plan_delete_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_plan_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_operation_insert`,
+		`DROP TRIGGER trg_readonly_fanout_shard_insert`,
+		`DROP TRIGGER trg_readonly_fanout_file_insert`,
+		`DROP TRIGGER trg_readonly_fanout_plan_insert`,
+		`DROP TABLE readonly_fanout_operations`,
+		`DROP TABLE readonly_fanout_shards`,
+		`DROP TABLE readonly_fanout_files`,
+		`DROP TABLE readonly_fanout_plans`,
+		`DELETE FROM schema_migrations WHERE version = 33`,
 	}
 }
 

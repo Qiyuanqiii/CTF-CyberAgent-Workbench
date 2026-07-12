@@ -64,6 +64,7 @@ const (
 	AgentDelegationInstructionDeliveredEvent = "agent.delegation_instruction_delivered"
 	AgentDelegationAppliedEvent              = "agent.delegation_applied"
 	AgentDelegationApplicationAbortedEvent   = "agent.delegation_application_aborted"
+	ReadOnlyFanoutPlannedEvent               = "readonly_fanout.planned"
 	AgentProtocolRepairRequestedEvent        = "agent.protocol_repair_requested"
 	AgentProtocolRepairStartedEvent          = "agent.protocol_repair_started"
 	AgentProtocolRepairCompletedEvent        = "agent.protocol_repair_completed"

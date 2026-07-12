@@ -46,6 +46,10 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runDelegations(ctx, args[1:])
 	case "delegation":
 		return a.runDelegation(ctx, args[1:])
+	case "fanouts":
+		return a.runFanouts(ctx, args[1:])
+	case "fanout":
+		return a.runFanout(ctx, args[1:])
 	case "lease":
 		return a.runExecutionLease(ctx, service, args[1:])
 	case "usage":
@@ -65,6 +69,107 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown run subcommand %q", args[0])
 	}
+}
+
+func (a *App) runFanouts(ctx context.Context, args []string) error {
+	fs := newFlagSet("run fanouts", a.errOut)
+	limit := fs.Int("limit", 20, "maximum read-only fan-out plans")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{"limit": true})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run fanouts <run-id> [--limit <n>]")
+	}
+	plans, err := a.store.ListReadOnlyFanoutPlans(ctx, fs.Arg(0), *limit)
+	if err != nil {
+		return err
+	}
+	if len(plans) == 0 {
+		fmt.Fprintln(a.out, "no read-only fan-out plans")
+		return nil
+	}
+	for _, plan := range plans {
+		fmt.Fprintf(a.out, "%s\tstatus=%s\ttier=%s\tparallelism=%d\tfiles=%d\tshards=%d\texecution_authorized=false\tcreated_at=%s\n",
+			plan.ID, plan.Status, plan.RequestedTier, plan.EffectiveParallelism,
+			plan.FileCount, plan.ShardCount, plan.CreatedAt.Format(time.RFC3339Nano))
+	}
+	return nil
+}
+
+func (a *App) runFanout(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: cyberagent run fanout plan <run-id> <goal> | show <plan-id>")
+	}
+	switch args[0] {
+	case "plan":
+		return a.runFanoutPlan(ctx, args[1:])
+	case "show":
+		return a.runFanoutShow(ctx, args[1:])
+	default:
+		return a.runFanoutShow(ctx, args)
+	}
+}
+
+func (a *App) runFanoutPlan(ctx context.Context, args []string) error {
+	fs := newFlagSet("run fanout plan", a.errOut)
+	tier := fs.String("tier", "auto", "parallelism cap: auto, 1, 2, 4, or 6")
+	scopePath := fs.String("path", ".", "workspace-relative directory scope")
+	operationKey := fs.String("operation-key", "", "stable planning operation key")
+	operator := fs.String("operator", "cli_operator", "operator identity")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"tier": true, "path": true, "operation-key": true, "operator": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 || strings.TrimSpace(*operationKey) == "" {
+		return errors.New("usage: cyberagent run fanout plan <run-id> <goal> --operation-key <key> [--tier auto|1|2|4|6] [--path <dir>] [--operator <id>]")
+	}
+	result, err := application.NewReadOnlyFanoutPlanService(a.store, a.checker).Create(ctx,
+		application.CreateReadOnlyFanoutPlanRequest{
+			RunID: fs.Arg(0), Goal: fs.Arg(1), ScopePath: *scopePath, Tier: *tier,
+			OperationKey: *operationKey, RequestedBy: *operator,
+		})
+	if err != nil {
+		return err
+	}
+	plan := result.Plan
+	fmt.Fprintf(a.out, "fanout_plan: %s\nrun: %s\nstatus: %s\nprotocol: %s\nrequested_tier: %s\neffective_parallelism: %d\nfiles: %d\nexcluded: %d\nshards: %d\nsnapshot_digest: %s\ncapability: workspace_readonly\nshell: false\nfile_write: false\nnetwork: false\nchild_spawn: false\nexecution_authorized: false\nreplayed: %t\n",
+		plan.ID, plan.RunID, plan.Status, plan.ProtocolVersion, plan.RequestedTier,
+		plan.EffectiveParallelism, plan.FileCount, plan.ExcludedCount, plan.ShardCount,
+		plan.SnapshotDigest, result.Replayed)
+	return nil
+}
+
+func (a *App) runFanoutShow(ctx context.Context, args []string) error {
+	fs := newFlagSet("run fanout show", a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run fanout show <plan-id>")
+	}
+	plan, err := a.store.GetReadOnlyFanoutPlan(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "fanout_plan: %s\nrun: %s\nworkspace: %s\nstatus: %s\nprotocol: %s\ngoal: %s\nscope: %s\nrequested_tier: %s\neffective_parallelism: %d\nfiles: %d\ntotal_bytes: %d\nexcluded: %d\nshards: %d\nsnapshot_digest: %s\ncapability_fingerprint: %s\ncapability: workspace_readonly\nexecution_authorized: false\ncreated_at: %s\n",
+		plan.ID, plan.RunID, plan.WorkspaceID, plan.Status, plan.ProtocolVersion,
+		plan.Goal, plan.ScopePath, plan.RequestedTier, plan.EffectiveParallelism,
+		plan.FileCount, plan.TotalBytes, plan.ExcludedCount, plan.ShardCount,
+		plan.SnapshotDigest, plan.CapabilityFingerprint,
+		plan.CreatedAt.Format(time.RFC3339Nano))
+	for _, shard := range plan.Shards {
+		fmt.Fprintf(a.out, "shard_%d: status=%s files=%d bytes=%d digest=%s\n",
+			shard.Ordinal, shard.Status, shard.FileCount, shard.TotalBytes,
+			shard.InputDigest)
+		for _, file := range plan.Files {
+			if file.ShardOrdinal == shard.Ordinal {
+				fmt.Fprintf(a.out, "  %d. %s bytes=%d sha256=%s\n", file.Ordinal,
+					file.RelativePath, file.SizeBytes, file.ContentSHA256)
+			}
+		}
+	}
+	return nil
 }
 
 func (a *App) runDelegations(ctx context.Context, args []string) error {

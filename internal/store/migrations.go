@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 32
+const LatestSchemaVersion = 33
 
 type migration struct {
 	Version    int
@@ -2788,6 +2788,227 @@ var specialistDelegationApplicationStatements = []string{
 		BEFORE DELETE ON specialist_delegation_application_operations
 		BEGIN
 			SELECT RAISE(ABORT, 'Specialist delegation application operation cannot be deleted');
+		END;`,
+}
+
+var readOnlyFanoutPlanStatements = []string{
+	`CREATE TABLE readonly_fanout_plans (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		scope_path TEXT NOT NULL,
+		goal TEXT NOT NULL,
+		protocol_version TEXT NOT NULL,
+		requested_tier TEXT NOT NULL,
+		effective_parallelism INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		capability_fingerprint TEXT NOT NULL,
+		snapshot_digest TEXT NOT NULL,
+		file_count INTEGER NOT NULL,
+		total_bytes INTEGER NOT NULL,
+		excluded_count INTEGER NOT NULL,
+		shard_count INTEGER NOT NULL,
+		requested_by TEXT NOT NULL,
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+		CHECK(protocol_version = 'readonly_fanout.v1'),
+		CHECK(requested_tier IN ('auto', '1', '2', '4', '6')),
+		CHECK(effective_parallelism BETWEEN 1 AND 6),
+		CHECK(status = 'planned'),
+		CHECK(capability_fingerprint = '735ca1ca0e0cdf09773b15aa7113e328744c6fde267f469c3f414648baf9e47b'
+			AND length(capability_fingerprint) = 64
+			AND capability_fingerprint = lower(capability_fingerprint)
+			AND capability_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(snapshot_digest) = 64 AND snapshot_digest = lower(snapshot_digest)
+			AND snapshot_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(file_count BETWEEN 1 AND 256),
+		CHECK(total_bytes BETWEEN 0 AND 786432),
+		CHECK(excluded_count BETWEEN 0 AND 20000),
+		CHECK(shard_count BETWEEN 1 AND 6 AND shard_count = effective_parallelism),
+		CHECK(scope_path = trim(scope_path) AND length(scope_path) BETWEEN 1 AND 2048
+			AND instr(scope_path, char(0)) = 0 AND instr(scope_path, char(92)) = 0
+			AND substr(scope_path, 1, 1) <> '/' AND scope_path <> '..'
+			AND scope_path NOT LIKE '../%' AND instr('/' || scope_path || '/', '/../') = 0),
+		CHECK(goal = trim(goal) AND length(goal) BETWEEN 1 AND 4096
+			AND length(CAST(goal AS BLOB)) <= 16384 AND instr(goal, char(0)) = 0),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0),
+		CHECK(version = 1 AND updated_at = created_at)
+	);`,
+	`CREATE INDEX idx_readonly_fanout_plans_run_created
+		ON readonly_fanout_plans(run_id, created_at, id);`,
+	`CREATE TABLE readonly_fanout_files (
+		plan_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		shard_ordinal INTEGER NOT NULL,
+		relative_path TEXT NOT NULL,
+		size_bytes INTEGER NOT NULL,
+		content_sha256 TEXT NOT NULL,
+		PRIMARY KEY(plan_id, ordinal),
+		UNIQUE(plan_id, relative_path),
+		FOREIGN KEY(plan_id) REFERENCES readonly_fanout_plans(id) ON DELETE RESTRICT,
+		CHECK(ordinal BETWEEN 1 AND 256),
+		CHECK(shard_ordinal BETWEEN 1 AND 6),
+		CHECK(size_bytes BETWEEN 0 AND 131072),
+		CHECK(length(content_sha256) = 64 AND content_sha256 = lower(content_sha256)
+			AND content_sha256 NOT GLOB '*[^0-9a-f]*'),
+		CHECK(relative_path = trim(relative_path) AND length(relative_path) BETWEEN 1 AND 2048
+			AND instr(relative_path, char(0)) = 0 AND instr(relative_path, char(92)) = 0
+			AND substr(relative_path, 1, 1) <> '/' AND relative_path NOT IN ('.', '..')
+			AND relative_path NOT LIKE '../%'
+			AND instr('/' || relative_path || '/', '/../') = 0)
+	);`,
+	`CREATE INDEX idx_readonly_fanout_files_shard
+		ON readonly_fanout_files(plan_id, shard_ordinal, ordinal);`,
+	`CREATE TABLE readonly_fanout_shards (
+		plan_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		file_count INTEGER NOT NULL,
+		total_bytes INTEGER NOT NULL,
+		input_digest TEXT NOT NULL,
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY(plan_id, ordinal),
+		FOREIGN KEY(plan_id) REFERENCES readonly_fanout_plans(id) ON DELETE RESTRICT,
+		CHECK(ordinal BETWEEN 1 AND 6),
+		CHECK(status = 'pending'),
+		CHECK(file_count BETWEEN 1 AND 256),
+		CHECK(total_bytes BETWEEN 0 AND 786432),
+		CHECK(length(input_digest) = 64 AND input_digest = lower(input_digest)
+			AND input_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(version = 1 AND updated_at = created_at)
+	);`,
+	`CREATE TABLE readonly_fanout_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		plan_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(plan_id) REFERENCES readonly_fanout_plans(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64
+			AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64
+			AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE TRIGGER trg_readonly_fanout_plan_insert
+		BEFORE INSERT ON readonly_fanout_plans
+		WHEN NOT EXISTS (
+			SELECT 1 FROM runs run
+			JOIN missions mission ON mission.id = run.mission_id
+			JOIN sessions active_session ON active_session.id = run.session_id
+			JOIN workspaces workspace ON workspace.id = NEW.workspace_id
+			WHERE run.id = NEW.run_id AND run.status = 'running'
+				AND mission.workspace_id = NEW.workspace_id
+				AND json_valid(mission.scope_json)
+				AND json_extract(mission.scope_json, '$.workspace_id') = NEW.workspace_id
+				AND json_extract(mission.scope_json, '$.network_mode') = 'disabled'
+				AND active_session.status = 'active'
+				AND active_session.workspace_id = NEW.workspace_id
+				AND julianday(NEW.created_at) >= julianday(run.created_at)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out plan binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_file_insert
+		BEFORE INSERT ON readonly_fanout_files
+		WHEN NOT EXISTS (
+			SELECT 1 FROM readonly_fanout_plans plan
+			WHERE plan.id = NEW.plan_id AND plan.status = 'planned'
+				AND NEW.ordinal <= plan.file_count
+				AND NEW.shard_ordinal <= plan.shard_count
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out file binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_shard_insert
+		BEFORE INSERT ON readonly_fanout_shards
+		WHEN NOT EXISTS (
+			SELECT 1 FROM readonly_fanout_plans plan
+			WHERE plan.id = NEW.plan_id AND plan.status = 'planned'
+				AND NEW.ordinal <= plan.shard_count
+				AND NEW.created_at = plan.created_at AND NEW.updated_at = plan.created_at
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out shard binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_operation_insert
+		BEFORE INSERT ON readonly_fanout_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM readonly_fanout_plans plan
+			WHERE plan.id = NEW.plan_id AND plan.run_id = NEW.run_id
+				AND plan.workspace_id = NEW.workspace_id
+				AND plan.requested_by = NEW.requested_by
+				AND plan.created_at = NEW.created_at
+				AND (SELECT COUNT(*) FROM readonly_fanout_files file
+					WHERE file.plan_id = plan.id) = plan.file_count
+				AND (SELECT COALESCE(SUM(file.size_bytes), 0)
+					FROM readonly_fanout_files file WHERE file.plan_id = plan.id) = plan.total_bytes
+				AND (SELECT COUNT(*) FROM readonly_fanout_shards shard
+					WHERE shard.plan_id = plan.id) = plan.shard_count
+				AND NOT EXISTS (
+					SELECT 1 FROM readonly_fanout_shards shard
+					WHERE shard.plan_id = plan.id AND (
+						shard.file_count != (SELECT COUNT(*) FROM readonly_fanout_files file
+							WHERE file.plan_id = plan.id AND file.shard_ordinal = shard.ordinal)
+						OR shard.total_bytes != (SELECT COALESCE(SUM(file.size_bytes), 0)
+							FROM readonly_fanout_files file
+							WHERE file.plan_id = plan.id AND file.shard_ordinal = shard.ordinal)))
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_plan_immutable
+		BEFORE UPDATE ON readonly_fanout_plans
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out plan is immutable');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_plan_delete_immutable
+		BEFORE DELETE ON readonly_fanout_plans
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out plan cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_file_immutable
+		BEFORE UPDATE ON readonly_fanout_files
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out file is immutable');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_file_delete_immutable
+		BEFORE DELETE ON readonly_fanout_files
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out file cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_shard_immutable
+		BEFORE UPDATE ON readonly_fanout_shards
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out shard is immutable');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_shard_delete_immutable
+		BEFORE DELETE ON readonly_fanout_shards
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out shard cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_operation_immutable
+		BEFORE UPDATE ON readonly_fanout_operations
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out operation is immutable');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_operation_delete_immutable
+		BEFORE DELETE ON readonly_fanout_operations
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out operation cannot be deleted');
 		END;`,
 }
 
