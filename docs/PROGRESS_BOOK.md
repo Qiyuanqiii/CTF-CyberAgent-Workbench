@@ -13,7 +13,7 @@
 - V2 Run-centric Runtime：约 99%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程活动模型取消。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P4 已完成 schema v19 单 root Coordinator、schema v20 可恢复 inbox、schema v21 internal-only Specialist admission、schema v22 Agent-owned memory 和 schema v23 CompletionReport：稳定 Agent 身份、有界幂等 inbox、严格 wake/dependency、最多两个 depth-1 child、独立 Session、Skill/预算预留、同 Run memory ownership、attempt-bound `agent.finish`、原子父 result inbox 与恢复快照；child model execution 继续关闭。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次。P9 已新增 loopback-only `api.v1` 读取面、独立授权的唯一取消 POST、由 Go DTO 生成且受 golden/live-route 测试保护的 OpenAPI 3.1 契约、有界可恢复 Run-event SSE，以及 Run-aware TUI 的 Work/Notes/ToolRounds/Tools 视图和批准一次/本会话操作；真实命令执行、通用 API 写入和非结构化记忆类模型工具继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程活动模型取消。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P4 已完成 schema v19 单 root Coordinator、schema v20 可恢复 inbox、schema v21 internal-only Specialist admission、schema v22 Agent-owned memory、schema v23 CompletionReport 和 schema v24 Specialist Attempt Runtime：稳定 Agent 身份、有界幂等 inbox、严格 wake/dependency、最多两个 depth-1 child、独立 Session、Skill/预算预留、同 Run memory ownership、lease-fenced Attempt、usage 计费、崩溃通知、接管恢复、attempt-bound `agent.finish` 与恢复快照；child model execution 和 root inbox context 继续关闭。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次。P9 已新增 loopback-only `api.v1` 读取面、独立授权的唯一取消 POST、由 Go DTO 生成且受 golden/live-route 测试保护的 OpenAPI 3.1 契约、有界可恢复 Run-event SSE，以及 Run-aware TUI 的 Work/Notes/ToolRounds/Tools 视图和批准一次/本会话操作；真实命令执行、通用 API 写入和非结构化记忆类模型工具继续关闭。
 
 ## 二、已完成功能
 
@@ -31,6 +31,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - Run pause/resume 只恢复因 Run 生命周期进入 waiting 的 child；Run complete/fail/cancel 原子终止 child、归档其 Session 并更新图快照。尚无 child model loop、公开 spawn 或模型自主 admission。
 - schema v22 为 WorkItem/Note 增加可选 `owner_agent_id`；Store 与 SQLite trigger 双重拒绝缺失、终态新分配和跨 Run Agent，v21 行与旧 `owner` 标签原地保留。
 - schema v23 增加严格 `agent_completion.v1`、`agent_completion_reports` 与摘要幂等账本；`agent.finish` 绑定 active attempt，并原子提交父 result inbox、child 完成、Session 归档、事件和快照。
+- schema v24 增加 `agent_attempts`/`agent_attempt_mutations`、turn/usage 预算计费、Run lease fencing、崩溃通知、暂停中断和 takeover recovery；默认 Coordinator 仍不具备 Specialist runtime capability。
 - Supervisor 与 `tool invoke` 从 Go-owned Run/Agent 状态注入所有者，模型 schema 不包含 `owner_agent_id`；CLI/TUI/HTTP/OpenAPI 可显示和过滤 Agent owner。root/Specialist 的 owner-only Notes 按真实 Agent 身份隔离。
 - 持久化 Session、Message、Task、Event、Artifact 和上下文摘要。
 - Codex 风格的长上下文压缩骨架，支持手动和自动压缩。
@@ -184,7 +185,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - 通用 HTTP 写入接口、TypeScript Web UI 和 Rust analyzer 进程；本地读取 API、metadata SSE 与精确取消控制已完成。
 - MCP Server、插件系统和远程任务能力。
 - 通用 Agent 稳定后的 CTF 自动分析与求解流程。
-- 子 Agent admission/scheduling、独立 Session/预算分配、消息唤醒与 WorkItem/Note Owner 外键；当前只开放单 root Coordinator，inbox 也尚未进入模型上下文。
+- 子 Agent admission、Attempt scheduling、独立 Session/预算计费、崩溃恢复、消息唤醒与 WorkItem/Note Owner 外键已完成；尚缺 child Provider loop、root inbox context projection 和受控并发编排。
 
 ## 五、审计结论
 
@@ -365,10 +366,14 @@ Specialist CompletionReport 切片新增 schema v23、严格 `agent_completion.v
 
 本轮代码与安全审计未发现未解决的高/中风险问题。Store 先验证原始 summary 上限再脱敏并复验，避免超大敏感字符串脱敏缩短后绕过；报告、父 result inbox、child terminal、Session archive、摘要 operation、三类元数据事件和图快照在一个 writer transaction 内提交。SQLite trigger 拒绝修改已提交报告。强制事件失败测试证明零残留，两条 SQLite 连接并发完成只生成一份报告/消息/operation；同键异意图冲突，不同键旧 attempt 失败，原始 key 与原始敏感摘要不落库。restore 会拒绝 completed child 缺失报告的篡改状态。发布门通过全仓 uncached tests、全仓 `-race`、`go vet`、零告警 `staticcheck` 与 `govulncheck`，可达漏洞为 0；仓库凭证模式和运行产物扫描为零，隔离 CLI smoke 创建 schema v23 Run 后清理临时目录。公开/model finish 与 spawn、child model loop、child usage scheduler 和真实 Shell/网络权限仍关闭。
 
+Specialist Attempt Runtime 切片新增 schema v24、`agent_attempt.v1`、`agent_attempts`、摘要型 `agent_attempt_mutations` 和默认关闭的 Coordinator runtime capability。每次调度绑定当前 Run execution lease/generation 并立即计入一个 turn；模型 usage 只允许记录一次并累计到 child token 预算。Attempt 可收敛为 `continued`、`finished`、`crashed` 或 `interrupted`，终态不可修改。CompletionReport 现在必须绑定当前租约且已记录 usage 的 Attempt。崩溃原因在 Store 边界脱敏后写入父 notification，预算耗尽时 child 失败并归档 Session；新 lease generation 会恰好一次回收旧 worker 遗留的 running Attempt。
+
+本轮代码与安全审计未发现未解决的高/中风险问题，并修复两项防御性缺口：终态 Attempt 的无变化锁定 UPDATE 会被不可变触发器拒绝，导致成功操作无法重放，锁定点现移到所属 Agent 行；v24 初稿只在 Go Store 校验 lease，现已把 Attempt 创建、usage 和 CompletionReport 的 active lease/generation/expiry 条件下沉到 SQLite trigger，直接写库也不能伪造或复用过期租约。Store 在同一 writer transaction 内提交 Attempt、预算、child、Session、父消息、摘要 operation、元数据事件与图快照。Run pause/wait/terminal 先中断 Attempt 再移动 child，restore 会校验尝试序号、累计 token、active projection 和 CompletionReport。测试覆盖 usage/continue/crash 重放、预算耗尽、强制事件失败零残留、双 Store 并发唯一调度、伪造租约直接写入拒绝、过期租约接管、旧 worker fencing、恰好一次恢复、暂停/恢复新 Attempt 和 v23 原地升级。发布门通过全仓 uncached tests、全仓 `-race`、`go vet`、零告警 `staticcheck` 与 `govulncheck`，可达漏洞为 0；生产代码凭据模式与受跟踪运行产物扫描为零。隔离真实二进制 smoke 完成 version、mock Provider、工作区初始化、schema v24 数据库打开、Run 创建/列举，并安全清理临时运行目录。公开 CLI/HTTP/model spawn、child 模型循环、root inbox context 和真实 Shell/网络权限仍关闭。
+
 ## 七、下一开发切片
 
-1. 增加仅 Go 内部可用的 child scheduler、预算消费和崩溃通知状态机，保持公开/model spawn 关闭。
-2. 让 root 在有界上下文中消费 dependency/result inbox，并验证重启后 exactly-once 提交。
+1. 让 root 在有界上下文中消费 dependency/result/notification inbox，并验证崩溃重启后的 exactly-once 消息提交；模型不能控制 cursor 或伪造 sender。
+2. 在该消息边界稳定后，把一个内部 Specialist no-tool model turn 接入现有 Provider、取消与 schema v24 Attempt usage，仍保持公开/model spawn 关闭。
 3. React/Vite 后续从 `docs/openapi.json` 生成 client/DTO，并通过带 Authorization header 的 fetch 消费 SSE，不把 token 放入 URL、不重复实现 Go Policy。
 4. Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
 

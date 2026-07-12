@@ -144,6 +144,9 @@ func (s *SQLiteStore) RestoreAgentGraph(ctx context.Context, runID string) (doma
 	if rootID == "" {
 		return domain.AgentGraph{}, apperror.New(apperror.CodeFailedPrecondition, "agent graph root is missing")
 	}
+	if err := validateAgentAttemptProjectionTx(ctx, tx, nodes); err != nil {
+		return domain.AgentGraph{}, err
+	}
 	if err := validateAgentCompletionProjectionTx(ctx, tx, nodes); err != nil {
 		return domain.AgentGraph{}, err
 	}

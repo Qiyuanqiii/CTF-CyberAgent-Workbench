@@ -31,6 +31,10 @@ func (c *Coordinator) FinishSpecialist(ctx context.Context,
 		return FinishSpecialistResult{}, apperror.New(apperror.CodeFailedPrecondition,
 			"agent coordinator store is required")
 	}
+	if !c.specialistRuntimeEnabled {
+		return FinishSpecialistResult{}, apperror.New(apperror.CodeFailedPrecondition,
+			"specialist runtime is disabled")
+	}
 	operationKey, err := domain.NormalizeAgentOperationKey(req.IdempotencyKey)
 	if err != nil {
 		return FinishSpecialistResult{}, apperror.Wrap(apperror.CodeInvalidArgument,

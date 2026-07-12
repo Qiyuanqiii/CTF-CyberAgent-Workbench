@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
@@ -374,7 +375,25 @@ func TestSpecialistAdmissionIsOptInBoundedAndLifecycleSafe(t *testing.T) {
 
 func TestCoordinatorBuildsStrictSpecialistCompletion(t *testing.T) {
 	stub := &completionStoreStub{}
-	service := coordinator.New(stub)
+	disabled := coordinator.New(stub)
+	if _, err := disabled.FinishSpecialist(context.Background(),
+		coordinator.FinishSpecialistRequest{}); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("default Coordinator enabled Specialist completion: code=%s err=%v",
+			apperror.CodeOf(err), err)
+	}
+	admissionOnly, err := coordinator.NewWithSpecialistAdmission(stub,
+		coordinator.SpecialistAdmissionPolicy{
+			MaxChildren: 1, MaxTurnsPerChild: 1, MaxTokensPerChild: 1,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admissionOnly.FinishSpecialist(context.Background(),
+		coordinator.FinishSpecialistRequest{}); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("admission-only Coordinator enabled execution: code=%s err=%v",
+			apperror.CodeOf(err), err)
+	}
+	service := coordinator.NewWithSpecialistRuntime(stub)
 	result, err := service.FinishSpecialist(context.Background(), coordinator.FinishSpecialistRequest{
 		RunID: " run-1 ", AgentID: " child-1 ", ParentAgentID: " root-1 ",
 		AttemptID: " attempt-1 ", IdempotencyKey: "coordinator-completion-0001",
@@ -410,10 +429,52 @@ func TestCoordinatorBuildsStrictSpecialistCompletion(t *testing.T) {
 	}
 }
 
+func TestCoordinatorSpecialistRuntimeIsExplicitAndBuildsLeasedAttempt(t *testing.T) {
+	stub := &runtimeStoreStub{}
+	disabled := coordinator.New(stub)
+	request := coordinator.StartSpecialistAttemptRequest{
+		RunID: " run-1 ", AgentID: " child-1 ", ParentAgentID: " root-1 ",
+		Lease: domain.RunExecutionLease{
+			RunID: "run-1", LeaseID: "lease-1", OwnerID: "worker-1", Generation: 2,
+			Status: domain.RunExecutionLeaseActive, AcquiredAt: time.Now().UTC(),
+			RenewedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute),
+		},
+		IdempotencyKey: "runtime-attempt-start-0001",
+	}
+	if _, err := disabled.StartSpecialistAttempt(context.Background(), request); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("default Coordinator enabled Specialist runtime: code=%s err=%v",
+			apperror.CodeOf(err), err)
+	}
+	enabled := coordinator.NewWithSpecialistRuntime(stub)
+	result, err := enabled.StartSpecialistAttempt(context.Background(), request)
+	if err != nil || result.Replayed || result.Attempt.ID == "" ||
+		stub.start.AttemptID != result.Attempt.ID || stub.start.RunID != "run-1" ||
+		stub.start.AgentID != "child-1" || stub.start.ParentAgentID != "root-1" ||
+		stub.start.Lease.Generation != 2 || stub.operationKey != request.IdempotencyKey ||
+		stub.start.StartedAt.IsZero() {
+		t.Fatalf("runtime Coordinator built an invalid attempt: result=%#v stored=%#v err=%v",
+			result, stub.start, err)
+	}
+}
+
 type completionStoreStub struct {
 	coordinator.Store
 	completion   domain.AgentCompletion
 	operationKey string
+}
+
+type runtimeStoreStub struct {
+	coordinator.Store
+	start        domain.AgentAttemptStart
+	operationKey string
+}
+
+func (s *runtimeStoreStub) BeginSpecialistAttempt(_ context.Context, start domain.AgentAttemptStart,
+	operationKey string,
+) (domain.AgentAttempt, bool, error) {
+	s.start = start
+	s.operationKey = operationKey
+	return domain.AgentAttempt{ID: start.AttemptID}, false, nil
 }
 
 func (s *completionStoreStub) FinishSpecialist(_ context.Context, completion domain.AgentCompletion,

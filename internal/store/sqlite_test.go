@@ -426,7 +426,7 @@ func removeSchemaV22ForTestStatements() []string {
 }
 
 func removeSchemaV23ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV24ForTestStatements(), []string{
 		`DROP TRIGGER trg_agent_completion_running_child`,
 		`DROP TRIGGER trg_agent_completion_message_matches`,
 		`DROP TRIGGER trg_agent_completed_requires_report`,
@@ -434,6 +434,24 @@ func removeSchemaV23ForTestStatements() []string {
 		`DROP TABLE agent_completion_operations`,
 		`DROP TABLE agent_completion_reports`,
 		`DELETE FROM schema_migrations WHERE version = 23`,
+	}...)
+}
+
+func removeSchemaV24ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_agent_attempt_running_child`,
+		`DROP TRIGGER trg_specialist_running_requires_attempt`,
+		`DROP TRIGGER trg_agent_attempt_terminal_child`,
+		`DROP TRIGGER trg_specialist_nonrunning_requires_terminal_attempt`,
+		`DROP TRIGGER trg_agent_attempt_identity_immutable`,
+		`DROP TRIGGER trg_agent_attempt_terminal_immutable`,
+		`DROP TRIGGER trg_agent_attempt_usage_immutable`,
+		`DROP TRIGGER trg_agent_attempt_usage_requires_lease`,
+		`DROP TRIGGER trg_agent_attempt_notification_matches`,
+		`DROP TRIGGER trg_completion_requires_agent_attempt`,
+		`DROP TABLE agent_attempt_mutations`,
+		`DROP TABLE agent_attempts`,
+		`DELETE FROM schema_migrations WHERE version = 24`,
 	}
 }
 

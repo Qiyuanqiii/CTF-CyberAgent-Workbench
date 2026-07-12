@@ -49,6 +49,7 @@ const (
 	AgentCompletionReportedEvent    = "agent.completion_reported"
 	AgentGraphSnapshottedEvent      = "agent.graph_snapshotted"
 	AgentTurnStartedEvent           = "agent.turn_started"
+	AgentAttemptUsageRecordedEvent  = "agent.usage_recorded"
 	AgentTurnCompletedEvent         = "agent.turn_completed"
 	AgentTurnFailedEvent            = "agent.turn_failed"
 	ModelStartedEvent               = "model.started"

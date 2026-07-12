@@ -347,6 +347,12 @@ func syncSpecialistLifecycleTx(ctx context.Context, tx *sql.Tx, run domain.Run,
 			return false, apperror.New(apperror.CodeConflict,
 				fmt.Sprintf("specialist Agent cannot transition from %s to %s", current.Status, target))
 		}
+		if current.Status == domain.AgentRunning {
+			failureCode := specialistLifecycleFailureCode(run.Status)
+			if _, err := interruptAgentAttemptTx(ctx, tx, run, current, failureCode, reason, at); err != nil {
+				return false, err
+			}
+		}
 		updated := current
 		updated.Status = target
 		updated.ActiveAttemptID = ""
@@ -395,4 +401,21 @@ func syncSpecialistLifecycleTx(ctx context.Context, tx *sql.Tx, run domain.Run,
 		changed = true
 	}
 	return changed, nil
+}
+
+func specialistLifecycleFailureCode(status domain.RunStatus) string {
+	switch status {
+	case domain.RunPaused:
+		return "run_paused"
+	case domain.RunWaitingApproval:
+		return "waiting_approval"
+	case domain.RunCompleted:
+		return "run_completed"
+	case domain.RunFailed:
+		return "run_failed"
+	case domain.RunCancelled:
+		return "run_cancelled"
+	default:
+		return "run_state_changed"
+	}
 }

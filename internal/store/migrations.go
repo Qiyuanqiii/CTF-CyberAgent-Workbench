@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 23
+const LatestSchemaVersion = 24
 
 type migration struct {
 	Version    int
@@ -940,6 +940,183 @@ var agentCompletionReportStatements = []string{
 		BEFORE UPDATE ON agent_completion_reports
 		BEGIN
 			SELECT RAISE(ABORT, 'completion report is immutable');
+		END;`,
+}
+
+var specialistAttemptStatements = []string{
+	`CREATE TABLE agent_attempts (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		agent_id TEXT NOT NULL,
+		parent_agent_id TEXT NOT NULL,
+		lease_id TEXT NOT NULL,
+		lease_generation INTEGER NOT NULL,
+		turn_number INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		input_tokens INTEGER NOT NULL DEFAULT 0,
+		output_tokens INTEGER NOT NULL DEFAULT 0,
+		total_tokens INTEGER NOT NULL DEFAULT 0,
+		execution_millis INTEGER NOT NULL DEFAULT 0,
+		usage_recorded_at TEXT,
+		failure_code TEXT NOT NULL DEFAULT '',
+		failure_reason TEXT NOT NULL DEFAULT '',
+		notification_message_id TEXT NOT NULL DEFAULT '',
+		started_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		finished_at TEXT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, parent_agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		UNIQUE(run_id, id),
+		UNIQUE(agent_id, turn_number),
+		CHECK(agent_id <> parent_agent_id),
+		CHECK(lease_generation > 0 AND turn_number > 0),
+		CHECK(status IN ('running', 'continued', 'finished', 'crashed', 'interrupted')),
+		CHECK(input_tokens >= 0 AND output_tokens >= 0 AND total_tokens >= 0 AND execution_millis >= 0),
+		CHECK(total_tokens >= input_tokens AND total_tokens >= output_tokens),
+		CHECK((usage_recorded_at IS NULL AND input_tokens = 0 AND output_tokens = 0
+			AND total_tokens = 0 AND execution_millis = 0) OR usage_recorded_at IS NOT NULL),
+		CHECK((status = 'running' AND finished_at IS NULL AND failure_code = ''
+			AND failure_reason = '' AND notification_message_id = '')
+			OR (status = 'continued' AND finished_at IS NOT NULL AND usage_recorded_at IS NOT NULL
+				AND failure_code = '' AND failure_reason = '' AND notification_message_id = '')
+			OR (status = 'finished' AND finished_at IS NOT NULL AND usage_recorded_at IS NOT NULL
+				AND failure_code = '' AND failure_reason = '' AND length(trim(notification_message_id)) > 0)
+			OR (status = 'crashed' AND finished_at IS NOT NULL AND length(trim(failure_code)) > 0
+				AND length(trim(failure_reason)) > 0 AND length(trim(notification_message_id)) > 0)
+			OR (status = 'interrupted' AND finished_at IS NOT NULL AND length(trim(failure_code)) > 0
+				AND length(trim(failure_reason)) > 0 AND notification_message_id = ''))
+	);`,
+	`CREATE UNIQUE INDEX idx_agent_attempts_one_running
+		ON agent_attempts(agent_id) WHERE status = 'running';`,
+	`CREATE INDEX idx_agent_attempts_run_status
+		ON agent_attempts(run_id, status, lease_generation, started_at);`,
+	`CREATE TABLE agent_attempt_mutations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		attempt_id TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(attempt_id) REFERENCES agent_attempts(id) ON DELETE CASCADE,
+		UNIQUE(attempt_id, kind),
+		CHECK(length(operation_key_digest) = 64),
+		CHECK(length(request_fingerprint) = 64),
+		CHECK(kind IN ('start', 'usage', 'continue', 'crash'))
+	);`,
+	`CREATE TRIGGER trg_agent_attempt_running_child
+		BEFORE INSERT ON agent_attempts
+		WHEN NOT EXISTS (
+			SELECT 1 FROM agent_nodes child
+			JOIN agent_nodes parent
+				ON parent.run_id = child.run_id AND parent.id = child.parent_id
+			JOIN runs run ON run.id = child.run_id
+			JOIN run_execution_leases lease ON lease.run_id = child.run_id
+			JOIN sessions child_session ON child_session.id = child.session_id
+			WHERE child.run_id = NEW.run_id AND child.id = NEW.agent_id
+				AND parent.id = NEW.parent_agent_id AND child.role = 'specialist'
+				AND parent.role = 'root' AND child.status = 'ready'
+				AND child.active_attempt_id = '' AND run.status = 'running'
+				AND lease.lease_id = NEW.lease_id
+				AND lease.generation = NEW.lease_generation AND lease.status = 'active'
+				AND julianday(lease.expires_at) > julianday('now')
+				AND child_session.status = 'active'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Agent attempt requires a ready Specialist in a running Run');
+		END;`,
+	`CREATE TRIGGER trg_specialist_running_requires_attempt
+		BEFORE UPDATE OF status, active_attempt_id ON agent_nodes
+		WHEN NEW.role = 'specialist' AND NEW.status = 'running' AND NOT EXISTS (
+			SELECT 1 FROM agent_attempts attempt
+			WHERE attempt.run_id = NEW.run_id AND attempt.agent_id = NEW.id
+				AND attempt.parent_agent_id = NEW.parent_id
+				AND attempt.id = NEW.active_attempt_id AND attempt.status = 'running'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'running Specialist requires a matching Agent attempt');
+		END;`,
+	`CREATE TRIGGER trg_agent_attempt_terminal_child
+		BEFORE UPDATE OF status ON agent_attempts
+		WHEN OLD.status = 'running' AND NEW.status <> 'running' AND NOT EXISTS (
+			SELECT 1 FROM agent_nodes child
+			WHERE child.run_id = OLD.run_id AND child.id = OLD.agent_id
+				AND child.status = 'running' AND child.active_attempt_id = OLD.id
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'terminal Agent attempt requires its running Specialist');
+		END;`,
+	`CREATE TRIGGER trg_specialist_nonrunning_requires_terminal_attempt
+		BEFORE UPDATE OF status, active_attempt_id ON agent_nodes
+		WHEN OLD.role = 'specialist' AND OLD.status = 'running' AND NEW.status <> 'running'
+			AND NOT EXISTS (
+				SELECT 1 FROM agent_attempts attempt
+				WHERE attempt.run_id = OLD.run_id AND attempt.agent_id = OLD.id
+					AND attempt.id = OLD.active_attempt_id AND attempt.status <> 'running'
+			)
+		BEGIN
+			SELECT RAISE(ABORT, 'non-running Specialist requires a terminal Agent attempt');
+		END;`,
+	`CREATE TRIGGER trg_agent_attempt_identity_immutable
+		BEFORE UPDATE OF id, run_id, agent_id, parent_agent_id, lease_id, lease_generation,
+			turn_number, started_at ON agent_attempts
+		BEGIN
+			SELECT RAISE(ABORT, 'Agent attempt identity is immutable');
+		END;`,
+	`CREATE TRIGGER trg_agent_attempt_terminal_immutable
+		BEFORE UPDATE ON agent_attempts
+		WHEN OLD.status <> 'running'
+		BEGIN
+			SELECT RAISE(ABORT, 'terminal Agent attempt is immutable');
+		END;`,
+	`CREATE TRIGGER trg_agent_attempt_usage_immutable
+		BEFORE UPDATE OF input_tokens, output_tokens, total_tokens, execution_millis,
+			usage_recorded_at ON agent_attempts
+		WHEN OLD.usage_recorded_at IS NOT NULL
+		BEGIN
+			SELECT RAISE(ABORT, 'Agent attempt usage is immutable');
+		END;`,
+	`CREATE TRIGGER trg_agent_attempt_usage_requires_lease
+		BEFORE UPDATE OF input_tokens, output_tokens, total_tokens, execution_millis,
+			usage_recorded_at ON agent_attempts
+		WHEN OLD.usage_recorded_at IS NULL AND NEW.usage_recorded_at IS NOT NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM run_execution_leases lease
+				WHERE lease.run_id = OLD.run_id AND lease.lease_id = OLD.lease_id
+					AND lease.generation = OLD.lease_generation AND lease.status = 'active'
+					AND julianday(lease.expires_at) > julianday('now')
+			)
+		BEGIN
+			SELECT RAISE(ABORT, 'Agent attempt usage requires its active Run lease');
+		END;`,
+	`CREATE TRIGGER trg_agent_attempt_notification_matches
+		BEFORE UPDATE OF status, notification_message_id ON agent_attempts
+		WHEN NEW.status IN ('finished', 'crashed') AND NOT EXISTS (
+			SELECT 1 FROM agent_messages message
+			WHERE message.id = NEW.notification_message_id AND message.run_id = NEW.run_id
+				AND message.sender_agent_id = NEW.agent_id
+				AND message.recipient_agent_id = NEW.parent_agent_id
+				AND message.status = 'pending'
+				AND ((NEW.status = 'finished' AND message.kind = 'result')
+					OR (NEW.status = 'crashed' AND message.kind = 'notification'))
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'terminal Agent attempt notification does not match its parent message');
+		END;`,
+	`CREATE TRIGGER trg_completion_requires_agent_attempt
+		BEFORE INSERT ON agent_completion_reports
+		WHEN NOT EXISTS (
+			SELECT 1 FROM agent_attempts attempt
+			JOIN run_execution_leases lease ON lease.run_id = attempt.run_id
+			WHERE attempt.id = NEW.attempt_id AND attempt.run_id = NEW.run_id
+				AND attempt.agent_id = NEW.agent_id
+				AND attempt.parent_agent_id = NEW.parent_agent_id
+				AND attempt.status = 'running' AND attempt.usage_recorded_at IS NOT NULL
+				AND lease.lease_id = attempt.lease_id
+				AND lease.generation = attempt.lease_generation AND lease.status = 'active'
+				AND julianday(lease.expires_at) > julianday('now')
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'completion report requires a usage-recorded Agent attempt');
 		END;`,
 }
 

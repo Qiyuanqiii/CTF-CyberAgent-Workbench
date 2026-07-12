@@ -130,6 +130,23 @@ func (s *SQLiteStore) FinishSpecialist(ctx context.Context, completion domain.Ag
 		return domain.AgentCompletion{}, false, apperror.New(apperror.CodeFailedPrecondition,
 			"Agent completion does not match the active Specialist attempt")
 	}
+	attempt, attemptChild, attemptRun, err := loadActiveAgentAttemptTx(ctx, tx,
+		domain.AgentAttemptRef{
+			RunID: completion.RunID, AgentID: completion.AgentID, AttemptID: completion.AttemptID,
+		})
+	if err != nil {
+		return domain.AgentCompletion{}, false, err
+	}
+	if attempt.UsageRecordedAt == nil {
+		return domain.AgentCompletion{}, false, apperror.New(apperror.CodeFailedPrecondition,
+			"Agent completion requires recorded model usage")
+	}
+	if completion.CreatedAt.Before(*attempt.UsageRecordedAt) {
+		return domain.AgentCompletion{}, false, apperror.New(apperror.CodeInvalidArgument,
+			"Agent completion cannot predate recorded model usage")
+	}
+	child = attemptChild
+	run = attemptRun
 	parent, err := scanAgentNode(tx.QueryRowContext(ctx, agentNodeSelect+` WHERE id = ?`,
 		completion.ParentAgentID))
 	if err != nil {
@@ -143,29 +160,6 @@ func (s *SQLiteStore) FinishSpecialist(ctx context.Context, completion domain.Ag
 		return domain.AgentCompletion{}, false, err
 	}
 
-	var pending, history int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_messages
-		WHERE recipient_agent_id = ? AND status = ?`, parent.ID, domain.AgentMessagePending).
-		Scan(&pending); err != nil {
-		return domain.AgentCompletion{}, false, err
-	}
-	if pending >= domain.MaxAgentInboxMessages {
-		return domain.AgentCompletion{}, false,
-			apperror.New(apperror.CodeResourceExhausted, "parent Agent inbox is full")
-	}
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_messages
-		WHERE recipient_agent_id = ?`, parent.ID).Scan(&history); err != nil {
-		return domain.AgentCompletion{}, false, err
-	}
-	if history >= domain.MaxAgentMessageHistory {
-		return domain.AgentCompletion{}, false,
-			apperror.New(apperror.CodeResourceExhausted, "parent Agent message history is full")
-	}
-	var sequence int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(sequence), 0) + 1 FROM agent_messages
-		WHERE recipient_agent_id = ?`, parent.ID).Scan(&sequence); err != nil {
-		return domain.AgentCompletion{}, false, err
-	}
 	payloadJSON, err := marshalRedactedJSON(completionInboxPayload{
 		ReportID: completion.ID, AgentID: child.ID, Report: completion.Report,
 	})
@@ -178,18 +172,11 @@ func (s *SQLiteStore) FinishSpecialist(ctx context.Context, completion domain.Ag
 	}
 	message := domain.AgentMessage{
 		ID: completion.MessageID, RunID: run.ID, SenderAgentID: child.ID,
-		RecipientAgentID: parent.ID, Sequence: sequence, Kind: domain.AgentMessageResult,
+		RecipientAgentID: parent.ID, Kind: domain.AgentMessageResult,
 		Semantic: domain.AgentMessageSemanticMessage, PayloadJSON: payloadJSON,
 		Status: domain.AgentMessagePending, CreatedAt: completion.CreatedAt,
 	}
-	if err := message.Validate(); err != nil {
-		return domain.AgentCompletion{}, false, err
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_messages
-		(id, run_id, sender_agent_id, recipient_agent_id, sequence, kind, semantic, payload_json,
-		status, created_at, consumed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-		message.ID, message.RunID, message.SenderAgentID, message.RecipientAgentID, message.Sequence,
-		message.Kind, message.Semantic, message.PayloadJSON, message.Status, ts(message.CreatedAt)); err != nil {
+	if err := insertBoundedAgentMessageTx(ctx, tx, &message); err != nil {
 		return domain.AgentCompletion{}, false, err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO agent_completion_reports
@@ -207,6 +194,28 @@ func (s *SQLiteStore) FinishSpecialist(ctx context.Context, completion domain.Ag
 		return domain.AgentCompletion{}, false, err
 	}
 
+	updatedAttempt := attempt
+	updatedAttempt.Status = domain.AgentAttemptFinished
+	updatedAttempt.NotificationMessageID = message.ID
+	updatedAttempt.UpdatedAt = completion.CreatedAt
+	attemptFinished := completion.CreatedAt
+	updatedAttempt.FinishedAt = &attemptFinished
+	if err := updatedAttempt.Validate(); err != nil {
+		return domain.AgentCompletion{}, false, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE agent_attempts SET status = ?,
+		notification_message_id = ?, updated_at = ?, finished_at = ?
+		WHERE id = ? AND status = ? AND usage_recorded_at IS NOT NULL`,
+		updatedAttempt.Status, updatedAttempt.NotificationMessageID, ts(updatedAttempt.UpdatedAt),
+		ts(updatedAttempt.FinishedAt.UTC()), attempt.ID, domain.AgentAttemptRunning)
+	if err != nil {
+		return domain.AgentCompletion{}, false, err
+	}
+	if err := requireSingleAgentAttemptUpdate(result,
+		"Specialist attempt changed during completion"); err != nil {
+		return domain.AgentCompletion{}, false, err
+	}
+
 	updatedChild := child
 	updatedChild.Status = domain.AgentCompleted
 	updatedChild.ActiveAttemptID = ""
@@ -221,7 +230,7 @@ func (s *SQLiteStore) FinishSpecialist(ctx context.Context, completion domain.Ag
 	if err := updatedChild.Validate(); err != nil {
 		return domain.AgentCompletion{}, false, err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE agent_nodes SET status = ?, active_attempt_id = '',
+	result, err = tx.ExecContext(ctx, `UPDATE agent_nodes SET status = ?, active_attempt_id = '',
 		status_reason = ?, version = ?, updated_at = ?, finished_at = ?
 		WHERE id = ? AND version = ? AND status = ? AND active_attempt_id = ?`,
 		updatedChild.Status, updatedChild.StatusReason, updatedChild.Version, ts(updatedChild.UpdatedAt),
@@ -253,6 +262,10 @@ func (s *SQLiteStore) FinishSpecialist(ctx context.Context, completion domain.Ag
 			apperror.New(apperror.CodeConflict, "Specialist Session was not active during completion")
 	}
 
+	if err := appendSupervisorEventTx(ctx, tx, run, events.AgentTurnCompletedEvent,
+		"agent_coordinator", attempt.ID, agentAttemptEventPayload(updatedAttempt, false)); err != nil {
+		return domain.AgentCompletion{}, false, err
+	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.AgentCompletionReportedEvent,
 		"agent_coordinator", completion.ID, map[string]any{
 			"agent_id": child.ID, "parent_agent_id": parent.ID,
@@ -429,6 +442,17 @@ func validateAgentCompletionProjectionTx(ctx context.Context, tx *sql.Tx,
 			if !found || completion.RunID != node.RunID || completion.ParentAgentID != node.ParentID {
 				return apperror.New(apperror.CodeFailedPrecondition,
 					"completed Specialist is missing its completion report")
+			}
+			attempt, attemptErr := scanAgentAttempt(tx.QueryRowContext(ctx,
+				agentAttemptSelect+` WHERE id = ?`, completion.AttemptID))
+			if attemptErr != nil && !errors.Is(attemptErr, sql.ErrNoRows) {
+				return attemptErr
+			}
+			if attemptErr == nil && (attempt.RunID != node.RunID || attempt.AgentID != node.ID ||
+				attempt.ParentAgentID != node.ParentID || attempt.Status != domain.AgentAttemptFinished ||
+				attempt.NotificationMessageID != completion.MessageID) {
+				return apperror.New(apperror.CodeFailedPrecondition,
+					"completed Specialist does not match its durable Agent attempt")
 			}
 			continue
 		}

@@ -324,23 +324,29 @@ func prepareRunningSpecialist(t *testing.T, ctx context.Context, st *SQLiteStore
 	if err != nil || replayed {
 		t.Fatalf("specialist admission failed: child=%#v replayed=%t err=%v", child, replayed, err)
 	}
-	attemptID := idgen.New("attempt")
-	now := time.Now().UTC()
-	result, err := st.db.ExecContext(ctx, `UPDATE agent_nodes SET status = ?, active_attempt_id = ?,
-		status_reason = '', version = version + 1, updated_at = ? WHERE id = ? AND status = ?`,
-		domain.AgentRunning, attemptID, ts(now), child.ID, domain.AgentReady)
-	if err != nil {
-		t.Fatal(err)
+	lease := acquireTestRunExecutionLease(t, ctx, st, run.ID)
+	attempt, replayed, err := st.BeginSpecialistAttempt(ctx, domain.AgentAttemptStart{
+		AttemptID: idgen.New("attempt"), RunID: run.ID, AgentID: child.ID,
+		ParentAgentID: root.ID, Lease: lease, StartedAt: time.Now().UTC(),
+	}, "completion-specialist-start")
+	if err != nil || replayed {
+		t.Fatalf("test Specialist was not scheduled: attempt=%#v replayed=%t err=%v",
+			attempt, replayed, err)
 	}
-	rows, err := result.RowsAffected()
-	if err != nil || rows != 1 {
-		t.Fatalf("test Specialist was not started: rows=%d err=%v", rows, err)
+	attempt, replayed, err = st.RecordSpecialistAttemptUsage(ctx, domain.AgentAttemptRef{
+		RunID: run.ID, AgentID: child.ID, AttemptID: attempt.ID,
+	}, domain.AgentAttemptUsage{
+		InputTokens: 4, OutputTokens: 3, TotalTokens: 7, ExecutionMillis: 10,
+	}, "completion-specialist-usage")
+	if err != nil || replayed {
+		t.Fatalf("test Specialist usage was not recorded: attempt=%#v replayed=%t err=%v",
+			attempt, replayed, err)
 	}
 	child, err = st.GetAgentNode(ctx, child.ID)
-	if err != nil || child.Status != domain.AgentRunning || child.ActiveAttemptID != attemptID {
+	if err != nil || child.Status != domain.AgentRunning || child.ActiveAttemptID != attempt.ID {
 		t.Fatalf("running Specialist projection is invalid: child=%#v err=%v", child, err)
 	}
-	return mission, run, root, child, attemptID
+	return mission, run, root, child, attempt.ID
 }
 
 func newCompletionTestValue(runID string, parentID string, childID string, attemptID string,

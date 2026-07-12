@@ -227,6 +227,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 21, Name: "bounded specialist admission", Statements: specialistAdmissionStatements},
 		{Version: 22, Name: "agent-owned work memory", Statements: agentMemoryOwnershipStatements},
 		{Version: 23, Name: "specialist completion reports", Statements: agentCompletionReportStatements},
+		{Version: 24, Name: "leased specialist attempts", Statements: specialistAttemptStatements},
 	})
 }
 

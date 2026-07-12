@@ -21,6 +21,17 @@ type Store interface {
 	FinishSpecialist(ctx context.Context, completion domain.AgentCompletion,
 		operationKey string) (domain.AgentCompletion, bool, error)
 	GetAgentCompletion(ctx context.Context, agentID string) (domain.AgentCompletion, bool, error)
+	BeginSpecialistAttempt(ctx context.Context, start domain.AgentAttemptStart,
+		operationKey string) (domain.AgentAttempt, bool, error)
+	RecordSpecialistAttemptUsage(ctx context.Context, ref domain.AgentAttemptRef,
+		usage domain.AgentAttemptUsage, operationKey string) (domain.AgentAttempt, bool, error)
+	ContinueSpecialistAttempt(ctx context.Context, ref domain.AgentAttemptRef,
+		operationKey string) (domain.AgentAttempt, bool, error)
+	CrashSpecialistAttempt(ctx context.Context, request domain.AgentAttemptFailureRequest,
+		operationKey string) (domain.AgentAttempt, bool, error)
+	RecoverSpecialistAttempts(ctx context.Context, lease domain.RunExecutionLease) ([]domain.AgentAttempt, error)
+	GetAgentAttempt(ctx context.Context, attemptID string) (domain.AgentAttempt, bool, error)
+	ListAgentAttempts(ctx context.Context, agentID string) ([]domain.AgentAttempt, error)
 	SendAgentMessage(ctx context.Context, message domain.AgentMessage,
 		operationKey string) (domain.AgentMessage, bool, error)
 	ListAgentMessages(ctx context.Context, agentID string, pendingOnly bool, limit int) ([]domain.AgentMessage, error)
@@ -31,8 +42,9 @@ type Store interface {
 }
 
 type Coordinator struct {
-	store            Store
-	specialistPolicy *SpecialistAdmissionPolicy
+	store                    Store
+	specialistPolicy         *SpecialistAdmissionPolicy
+	specialistRuntimeEnabled bool
 }
 
 type SendRequest struct {
