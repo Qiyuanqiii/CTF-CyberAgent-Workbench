@@ -59,12 +59,22 @@ type agentGraphDeliverySnapshot struct {
 	Ordinal             int    `json:"ordinal"`
 }
 
+type agentGraphSpecialistDeliverySnapshot struct {
+	AgentID        string `json:"agent_id"`
+	ParentAgentID  string `json:"parent_agent_id"`
+	AgentAttemptID string `json:"agent_attempt_id"`
+	Turn           int64  `json:"turn"`
+	MessageID      string `json:"message_id"`
+	Ordinal        int    `json:"ordinal"`
+}
+
 type agentGraphSnapshotState struct {
-	ProtocolVersion string                       `json:"protocol_version"`
-	RootAgentID     string                       `json:"root_agent_id"`
-	Nodes           []agentGraphNodeSnapshot     `json:"nodes"`
-	PendingMessages []agentGraphMessageSnapshot  `json:"pending_messages"`
-	PreparedInbox   []agentGraphDeliverySnapshot `json:"prepared_inbox,omitempty"`
+	ProtocolVersion           string                                 `json:"protocol_version"`
+	RootAgentID               string                                 `json:"root_agent_id"`
+	Nodes                     []agentGraphNodeSnapshot               `json:"nodes"`
+	PendingMessages           []agentGraphMessageSnapshot            `json:"pending_messages"`
+	PreparedInbox             []agentGraphDeliverySnapshot           `json:"prepared_inbox,omitempty"`
+	PreparedSpecialistContext []agentGraphSpecialistDeliverySnapshot `json:"prepared_specialist_context,omitempty"`
 }
 
 func (s *SQLiteStore) SnapshotAgentGraph(ctx context.Context, runID string) (domain.AgentGraphSnapshot, error) {
@@ -159,6 +169,9 @@ func (s *SQLiteStore) RestoreAgentGraph(ctx context.Context, runID string) (doma
 	if err := validateRootInboxDeliveryProjectionTx(ctx, tx, nodes); err != nil {
 		return domain.AgentGraph{}, err
 	}
+	if err := validateSpecialistContextDeliveryProjectionTx(ctx, tx, nodes); err != nil {
+		return domain.AgentGraph{}, err
+	}
 	if err := validateAgentCompletionProjectionTx(ctx, tx, nodes); err != nil {
 		return domain.AgentGraph{}, err
 	}
@@ -181,9 +194,16 @@ func (s *SQLiteStore) RestoreAgentGraph(ctx context.Context, runID string) (doma
 	if err != nil {
 		return domain.AgentGraph{}, err
 	}
-	deliveries, err := listRootInboxDeliveriesTx(ctx, tx, rootInboxDeliverySelect+
+	rootDeliveries, err := listRootInboxDeliveriesTx(ctx, tx, rootInboxDeliverySelect+
 		` WHERE run_id = ? AND status = ?
 		ORDER BY root_agent_id, supervisor_attempt_id, ordinal`, runID,
+		domain.RootInboxDeliveryPrepared)
+	if err != nil {
+		return domain.AgentGraph{}, err
+	}
+	specialistDeliveries, err := listSpecialistContextDeliveriesTx(ctx, tx,
+		specialistContextDeliverySelect+` WHERE run_id = ? AND status = ?
+		ORDER BY agent_id, agent_attempt_id, ordinal`, runID,
 		domain.RootInboxDeliveryPrepared)
 	if err != nil {
 		return domain.AgentGraph{}, err
@@ -196,7 +216,8 @@ func (s *SQLiteStore) RestoreAgentGraph(ctx context.Context, runID string) (doma
 		return domain.AgentGraph{}, apperror.New(apperror.CodeFailedPrecondition,
 			"agent graph has no recovery snapshot")
 	}
-	stateJSON, err := marshalAgentGraphSnapshotState(rootID, nodes, messages, deliveries)
+	stateJSON, err := marshalAgentGraphSnapshotState(rootID, nodes, messages, rootDeliveries,
+		specialistDeliveries)
 	if err != nil {
 		return domain.AgentGraph{}, err
 	}
@@ -246,14 +267,22 @@ func createAgentGraphSnapshotTx(ctx context.Context, tx *sql.Tx,
 	if err != nil {
 		return domain.AgentGraphSnapshot{}, err
 	}
-	deliveries, err := listRootInboxDeliveriesTx(ctx, tx, rootInboxDeliverySelect+
+	rootDeliveries, err := listRootInboxDeliveriesTx(ctx, tx, rootInboxDeliverySelect+
 		` WHERE run_id = ? AND status = ?
 		ORDER BY root_agent_id, supervisor_attempt_id, ordinal`, run.ID,
 		domain.RootInboxDeliveryPrepared)
 	if err != nil {
 		return domain.AgentGraphSnapshot{}, err
 	}
-	stateJSON, err := marshalAgentGraphSnapshotState(rootID, nodes, messages, deliveries)
+	specialistDeliveries, err := listSpecialistContextDeliveriesTx(ctx, tx,
+		specialistContextDeliverySelect+` WHERE run_id = ? AND status = ?
+		ORDER BY agent_id, agent_attempt_id, ordinal`, run.ID,
+		domain.RootInboxDeliveryPrepared)
+	if err != nil {
+		return domain.AgentGraphSnapshot{}, err
+	}
+	stateJSON, err := marshalAgentGraphSnapshotState(rootID, nodes, messages, rootDeliveries,
+		specialistDeliveries)
 	if err != nil {
 		return domain.AgentGraphSnapshot{}, err
 	}
@@ -337,7 +366,8 @@ func listPendingAgentMessagesTx(ctx context.Context, tx *sql.Tx,
 }
 
 func marshalAgentGraphSnapshotState(rootID string, nodes []domain.AgentNode,
-	messages []domain.AgentMessage, deliveries []domain.RootInboxDelivery,
+	messages []domain.AgentMessage, rootDeliveries []domain.RootInboxDelivery,
+	specialistDeliveries []domain.SpecialistContextDelivery,
 ) (string, error) {
 	state := agentGraphSnapshotState{
 		ProtocolVersion: domain.AgentGraphProtocolVersion,
@@ -374,12 +404,20 @@ func marshalAgentGraphSnapshotState(rootID string, nodes []domain.AgentNode,
 			CreatedAt:     message.CreatedAt.UTC().Format(time.RFC3339Nano),
 		})
 	}
-	for _, delivery := range deliveries {
+	for _, delivery := range rootDeliveries {
 		state.PreparedInbox = append(state.PreparedInbox, agentGraphDeliverySnapshot{
 			RootAgentID:         delivery.RootAgentID,
 			SupervisorAttemptID: delivery.SupervisorAttemptID, Turn: delivery.Turn,
 			MessageID: delivery.MessageID, Ordinal: delivery.Ordinal,
 		})
+	}
+	for _, delivery := range specialistDeliveries {
+		state.PreparedSpecialistContext = append(state.PreparedSpecialistContext,
+			agentGraphSpecialistDeliverySnapshot{
+				AgentID: delivery.AgentID, ParentAgentID: delivery.ParentAgentID,
+				AgentAttemptID: delivery.AgentAttemptID, Turn: delivery.Turn,
+				MessageID: delivery.MessageID, Ordinal: delivery.Ordinal,
+			})
 	}
 	return marshalRedactedJSON(state)
 }

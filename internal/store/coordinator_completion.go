@@ -153,6 +153,10 @@ func (s *SQLiteStore) FinishSpecialist(ctx context.Context, completion domain.Ag
 	if err := validateCompletionReferencesTx(ctx, tx, child, completion.Report); err != nil {
 		return domain.AgentCompletion{}, false, err
 	}
+	if _, err := commitSpecialistContextTx(ctx, tx, run, child, parent, attempt,
+		completion.CreatedAt); err != nil {
+		return domain.AgentCompletion{}, false, err
+	}
 
 	payloadJSON, err := marshalRedactedJSON(domain.AgentCompletionInboxPayload{
 		CompletionReportID: completion.ID, AgentID: child.ID, Report: completion.Report,

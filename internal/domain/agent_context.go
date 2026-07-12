@@ -6,15 +6,21 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
 	RootInboxContextVersion       = "root_inbox_context.v1"
+	SpecialistContextVersion      = "specialist_context.v1"
+	SpecialistInstructionVersion  = "specialist_instruction.v1"
 	AgentAttemptFailureVersion    = "agent_attempt_failure.v1"
 	MaxRootInboxContextMessages   = 4
 	MaxRootInboxDeliveryHistory   = 256
 	MaxRootInboxContextTextRunes  = 1200
 	MaxRootInboxContextReferences = 4
+	MaxSpecialistContextMessages  = 4
+	MaxSpecialistDeliveryHistory  = 256
+	MaxSpecialistInstructionRunes = 1200
 )
 
 type RootInboxDeliveryStatus string
@@ -41,6 +47,14 @@ type AgentAttemptFailurePayload struct {
 	Recovered      bool   `json:"recovered"`
 }
 
+// AgentInstructionPayload is the only parent-to-Specialist message body that
+// can enter a child model context. Routing identity remains outside the model
+// payload and is verified against the durable Agent graph by the Store.
+type AgentInstructionPayload struct {
+	Version     string `json:"version"`
+	Instruction string `json:"instruction"`
+}
+
 type RootInboxDelivery struct {
 	RunID               string
 	RootAgentID         string
@@ -61,6 +75,59 @@ type RootInboxContextBatch struct {
 	Messages            []AgentMessage
 	PreparedAt          time.Time
 	Recovered           bool
+}
+
+type SpecialistContextDelivery struct {
+	RunID          string
+	AgentID        string
+	ParentAgentID  string
+	AgentAttemptID string
+	Turn           int64
+	MessageID      string
+	Ordinal        int
+	Status         RootInboxDeliveryStatus
+	PreparedAt     time.Time
+	ResolvedAt     *time.Time
+}
+
+type SpecialistContextBatch struct {
+	RunID          string
+	AgentID        string
+	ParentAgentID  string
+	AgentAttemptID string
+	Turn           int64
+	Messages       []AgentMessage
+	PreparedAt     time.Time
+	Recovered      bool
+}
+
+func (p AgentInstructionPayload) Validate() error {
+	if p.Version != SpecialistInstructionVersion {
+		return fmt.Errorf("unsupported Specialist instruction payload version %q", p.Version)
+	}
+	if !utf8.ValidString(p.Instruction) || strings.TrimSpace(p.Instruction) == "" {
+		return errors.New("specialist instruction is required and must be valid UTF-8")
+	}
+	if p.Instruction != strings.TrimSpace(p.Instruction) {
+		return errors.New("specialist instruction must be normalized")
+	}
+	if runeCount(p.Instruction) > MaxSpecialistInstructionRunes {
+		return fmt.Errorf("specialist instruction exceeds %d characters", MaxSpecialistInstructionRunes)
+	}
+	return nil
+}
+
+func DecodeAgentInstructionPayload(payloadJSON string) (AgentInstructionPayload, error) {
+	var payload AgentInstructionPayload
+	if err := decodeStrictAgentPayload(payloadJSON, &payload); err != nil {
+		return AgentInstructionPayload{}, fmt.Errorf("invalid Specialist instruction payload: %w", err)
+	}
+	payload.Version = strings.TrimSpace(payload.Version)
+	payload.Instruction = strings.TrimSpace(payload.Instruction)
+	if err := payload.Validate(); err != nil {
+		return AgentInstructionPayload{}, fmt.Errorf("invalid Specialist instruction payload: %w", err)
+	}
+	return payload, nil
 }
 
 func (p AgentCompletionInboxPayload) Validate() error {
@@ -145,6 +212,11 @@ func EligibleRootInboxMessage(message AgentMessage) bool {
 	return message.Kind == AgentMessageResult || message.Kind == AgentMessageNotification
 }
 
+func EligibleSpecialistContextMessage(message AgentMessage) bool {
+	return message.Kind == AgentMessageInstruction &&
+		message.Semantic == AgentMessageSemanticMessage
+}
+
 func (d RootInboxDelivery) Validate() error {
 	for _, value := range []string{
 		d.RunID, d.RootAgentID, d.SupervisorAttemptID, d.MessageID,
@@ -199,6 +271,67 @@ func (b RootInboxContextBatch) Validate() error {
 	unique = slices.Compact(unique)
 	if len(unique) != len(seen) {
 		return errors.New("root inbox context contains duplicate messages")
+	}
+	return nil
+}
+
+func (d SpecialistContextDelivery) Validate() error {
+	for _, value := range []string{
+		d.RunID, d.AgentID, d.ParentAgentID, d.AgentAttemptID, d.MessageID,
+	} {
+		if !validAgentIdentity(value, false) {
+			return errors.New("specialist context delivery identities are required and must be normalized")
+		}
+	}
+	if d.Turn <= 0 || d.Ordinal <= 0 || d.Ordinal > MaxSpecialistContextMessages {
+		return errors.New("specialist context delivery turn and ordinal are invalid")
+	}
+	if !ValidRootInboxDeliveryStatus(d.Status) || d.PreparedAt.IsZero() {
+		return errors.New("specialist context delivery status and prepared time are required")
+	}
+	if d.Status == RootInboxDeliveryPrepared {
+		if d.ResolvedAt != nil {
+			return errors.New("prepared Specialist context delivery cannot have a resolution time")
+		}
+		return nil
+	}
+	if d.ResolvedAt == nil || d.ResolvedAt.IsZero() || d.ResolvedAt.Before(d.PreparedAt) {
+		return errors.New("terminal Specialist context delivery requires a valid resolution time")
+	}
+	return nil
+}
+
+func (b SpecialistContextBatch) Validate() error {
+	for _, value := range []string{b.RunID, b.AgentID, b.ParentAgentID, b.AgentAttemptID} {
+		if !validAgentIdentity(value, false) {
+			return errors.New("specialist context identities are required and must be normalized")
+		}
+	}
+	if b.Turn <= 0 || b.PreparedAt.IsZero() || len(b.Messages) > MaxSpecialistContextMessages {
+		return errors.New("specialist context turn, prepared time, or message count is invalid")
+	}
+	seen := make([]string, 0, len(b.Messages))
+	var previousSequence int64
+	for _, message := range b.Messages {
+		if err := message.Validate(); err != nil {
+			return err
+		}
+		if message.RunID != b.RunID || message.RecipientAgentID != b.AgentID ||
+			message.SenderAgentID != b.ParentAgentID || message.Status != AgentMessagePending ||
+			!EligibleSpecialistContextMessage(message) || message.Sequence <= previousSequence {
+			return errors.New("specialist context contains an invalid or unordered message")
+		}
+		if _, err := DecodeAgentInstructionPayload(message.PayloadJSON); err != nil {
+			return err
+		}
+		seen = append(seen, message.ID)
+		previousSequence = message.Sequence
+	}
+	unique := append([]string(nil), seen...)
+	slices.Sort(unique)
+	unique = slices.Compact(unique)
+	if len(unique) != len(seen) {
+		return errors.New("specialist context contains duplicate messages")
 	}
 	return nil
 }

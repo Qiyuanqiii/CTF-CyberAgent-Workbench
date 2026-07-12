@@ -244,7 +244,15 @@ func (s *SQLiteStore) ContinueSpecialistAttempt(ctx context.Context, ref domain.
 		return domain.AgentAttempt{}, false,
 			apperror.New(apperror.CodeResourceExhausted, "Specialist has no budget for another turn")
 	}
+	parent, err := scanAgentNode(tx.QueryRowContext(ctx, agentNodeSelect+` WHERE id = ?`,
+		attempt.ParentAgentID))
+	if err != nil {
+		return domain.AgentAttempt{}, false, err
+	}
 	now := time.Now().UTC()
+	if _, err := commitSpecialistContextTx(ctx, tx, run, child, parent, attempt, now); err != nil {
+		return domain.AgentAttempt{}, false, err
+	}
 	updatedAttempt := attempt
 	updatedAttempt.Status = domain.AgentAttemptContinued
 	updatedAttempt.UpdatedAt = now
@@ -689,6 +697,12 @@ func crashAgentAttemptTx(ctx context.Context, tx *sql.Tx, run domain.Run,
 	if err := requireSingleAgentAttemptUpdate(result, "Specialist attempt changed before crash commit"); err != nil {
 		return domain.AgentAttempt{}, domain.AgentNode{}, err
 	}
+	if _, err := supersedeSpecialistContextDeliveriesTx(ctx, tx, run, child.ID, "", at); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, err
+	}
+	if err := pruneSupersededSpecialistContextDeliveriesTx(ctx, tx, run.ID); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, err
+	}
 	updatedChild := child
 	updatedChild.ActiveAttemptID = ""
 	updatedChild.Version++
@@ -780,6 +794,12 @@ func interruptAgentAttemptTx(ctx context.Context, tx *sql.Tx, run domain.Run,
 		return domain.AgentAttempt{}, err
 	}
 	if err := requireSingleAgentAttemptUpdate(result, "Specialist attempt changed before interruption"); err != nil {
+		return domain.AgentAttempt{}, err
+	}
+	if _, err := supersedeSpecialistContextDeliveriesTx(ctx, tx, run, child.ID, "", at); err != nil {
+		return domain.AgentAttempt{}, err
+	}
+	if err := pruneSupersededSpecialistContextDeliveriesTx(ctx, tx, run.ID); err != nil {
 		return domain.AgentAttempt{}, err
 	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.AgentTurnFailedEvent,

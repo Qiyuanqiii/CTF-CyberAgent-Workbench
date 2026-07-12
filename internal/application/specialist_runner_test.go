@@ -60,6 +60,120 @@ func TestSpecialistRunnerExecutesInternalNoToolContinuation(t *testing.T) {
 	})
 }
 
+func TestSpecialistRunnerInjectsOnlyParentInstructionAndChildOwnedMemory(t *testing.T) {
+	provider := &specialistTestProvider{responses: []llm.ChatResponse{{
+		Text: specialistResponse(t, domain.SpecialistAction{
+			Version: domain.SpecialistLifecycleVersion, Kind: domain.SpecialistActionContinue,
+			Message: "used the assigned child context",
+		}), Usage: llm.Usage{InputTokens: 8, OutputTokens: 2, TotalTokens: 10},
+	}}}
+	st, run, child, runner := newSpecialistRunnerFixture(t, provider,
+		domain.Budget{MaxTurns: 10}, 2, 128)
+	ctx := context.Background()
+	root, found, err := st.GetRootAgent(ctx, run.ID)
+	if err != nil || !found {
+		t.Fatalf("root Agent was not found: found=%t err=%v", found, err)
+	}
+	workService := application.NewWorkItemService(st)
+	childWork, err := workService.Create(ctx, application.CreateWorkItemRequest{
+		RunID: run.ID, Title: "child-owned review", Description: "inspect bounded evidence",
+		Priority: "high", OwnerAgentID: child.ID,
+		AcceptanceCriteria: []string{"produce a scoped conclusion"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootWork, err := workService.Create(ctx, application.CreateWorkItemRequest{
+		RunID: run.ID, Title: "root-only planning", OwnerAgentID: root.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noteService := application.NewNoteService(st)
+	childNote, err := noteService.Create(ctx, application.CreateNoteRequest{
+		RunID: run.ID, Title: "child evidence", Content: "bounded observation for the child",
+		Category: "observation", Visibility: "owner", OwnerAgentID: child.ID, Pinned: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootNote, err := noteService.Create(ctx, application.CreateNoteRequest{
+		RunID: run.ID, Title: "root private note", Content: "must not reach the child",
+		Category: "decision", Visibility: "root", OwnerAgentID: root.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instructionPayload, err := json.Marshal(domain.AgentInstructionPayload{
+		Version:     domain.SpecialistInstructionVersion,
+		Instruction: "Use the child-owned work and note; do not expand scope.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instruction, replayed, err := st.SendAgentMessage(ctx, domain.AgentMessage{
+		ID: idgen.New("agentmsg"), RunID: run.ID, SenderAgentID: root.ID,
+		RecipientAgentID: child.ID, Kind: domain.AgentMessageInstruction,
+		Semantic: domain.AgentMessageSemanticMessage, PayloadJSON: string(instructionPayload),
+	}, "specialist-runner-instruction-0001")
+	if err != nil || replayed {
+		t.Fatalf("parent instruction failed: message=%#v replayed=%t err=%v",
+			instruction, replayed, err)
+	}
+	result, err := runner.Step(ctx, run.ID, child.ID)
+	if err != nil || result.AttemptStatus != domain.AgentAttemptContinued ||
+		result.ParentInstructions != 1 || result.ContextRecovered ||
+		result.OwnedWorkItems != 1 || result.OwnedNotes != 1 ||
+		result.ContextSources != 4 || result.ContextOmitted != 0 ||
+		result.ContextTokens <= 0 || result.ContextTokens > result.ContextTokenBudget {
+		t.Fatalf("Specialist child context result is invalid: result=%#v err=%v", result, err)
+	}
+	if len(provider.requests) != 1 {
+		t.Fatalf("expected one Provider request, got %d", len(provider.requests))
+	}
+	request := provider.requests[0]
+	input := request.Messages[len(request.Messages)-1].Content
+	for _, required := range []string{
+		domain.SpecialistContextVersion, "Use the child-owned work", childWork.ID, childNote.ID,
+	} {
+		if !strings.Contains(input, required) {
+			t.Fatalf("Specialist input omitted %q: %s", required, input)
+		}
+	}
+	for _, forbidden := range []string{instruction.ID, rootWork.ID, rootNote.ID,
+		"root-only planning", "must not reach the child"} {
+		if strings.Contains(input, forbidden) {
+			t.Fatalf("Specialist input exposed forbidden context %q: %s", forbidden, input)
+		}
+	}
+	if request.Metadata["parent_instructions"] != "1" ||
+		request.Metadata["owned_work_items"] != "1" || request.Metadata["owned_notes"] != "1" ||
+		request.Metadata["context_sources"] != "4" {
+		t.Fatalf("Specialist context metadata is invalid: %#v", request.Metadata)
+	}
+	messages, err := st.ListAgentMessages(ctx, child.ID, false, 10)
+	if err != nil || len(messages) != 1 || messages[0].Status != domain.AgentMessageConsumed {
+		t.Fatalf("successful child turn did not consume its instruction: messages=%#v err=%v",
+			messages, err)
+	}
+	timeline, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelStarted := ""
+	for _, event := range timeline {
+		if event.Type == events.ModelStartedEvent && event.Source == "specialist_model_gateway" {
+			modelStarted = event.PayloadJSON
+		}
+	}
+	if modelStarted == "" || !strings.Contains(modelStarted, instruction.ID) ||
+		!strings.Contains(modelStarted, childWork.ID) || !strings.Contains(modelStarted, childNote.ID) ||
+		strings.Contains(modelStarted, "Use the child-owned work") ||
+		strings.Contains(modelStarted, "bounded observation for the child") {
+		t.Fatalf("Specialist context provenance leaked content or lost source IDs: %s", modelStarted)
+	}
+}
+
 func TestSpecialistRunnerFinishesWithCompletionReport(t *testing.T) {
 	report := domain.CompletionReport{
 		Version: domain.CompletionReportVersion, Outcome: domain.CompletionSucceeded,
@@ -271,7 +385,7 @@ func TestSpecialistRunnerRecoversExpiredWorkerBeforeFreshTurn(t *testing.T) {
 		domain.Budget{MaxTurns: 10}, 3, 32)
 	ctx := context.Background()
 	oldLease, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
-		RunID: run.ID, OwnerID: "expired-specialist-worker", TTL: 150 * time.Millisecond,
+		RunID: run.ID, OwnerID: "expired-specialist-worker", TTL: 500 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -281,23 +395,51 @@ func TestSpecialistRunnerRecoversExpiredWorkerBeforeFreshTurn(t *testing.T) {
 		t.Fatalf("root Agent was not found: found=%t err=%v", found, err)
 	}
 	oldAttemptID := idgen.New("attempt")
-	if _, _, err := st.BeginSpecialistAttempt(ctx, domain.AgentAttemptStart{
+	oldAttempt, _, err := st.BeginSpecialistAttempt(ctx, domain.AgentAttemptStart{
 		AttemptID: oldAttemptID, RunID: run.ID, AgentID: child.ID,
 		ParentAgentID: root.ID, Lease: oldLease.Lease, StartedAt: time.Now().UTC(),
-	}, "expired-specialist-start-0001"); err != nil {
+	}, "expired-specialist-start-0001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	instructionPayload, err := json.Marshal(domain.AgentInstructionPayload{
+		Version:     domain.SpecialistInstructionVersion,
+		Instruction: "Preserve this parent instruction across lease takeover.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instruction, replayed, err := st.SendAgentMessage(ctx, domain.AgentMessage{
+		ID: idgen.New("agentmsg"), RunID: run.ID, SenderAgentID: root.ID,
+		RecipientAgentID: child.ID, Kind: domain.AgentMessageInstruction,
+		Semantic: domain.AgentMessageSemanticMessage, PayloadJSON: string(instructionPayload),
+	}, "expired-specialist-instruction-0001")
+	if err != nil || replayed {
+		t.Fatalf("takeover instruction failed: message=%#v replayed=%t err=%v",
+			instruction, replayed, err)
+	}
+	if _, err := st.PrepareSpecialistContext(ctx, domain.AgentAttemptRef{
+		RunID: run.ID, AgentID: child.ID, AttemptID: oldAttempt.ID,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(time.Until(oldLease.Lease.ExpiresAt) + 30*time.Millisecond)
 	result, err := runner.Step(ctx, run.ID, child.ID)
 	if err != nil || result.RecoveredAttempts != 1 || result.Turn != 2 ||
-		result.AttemptStatus != domain.AgentAttemptContinued {
+		result.AttemptStatus != domain.AgentAttemptContinued || result.ParentInstructions != 1 {
 		t.Fatalf("fresh worker did not recover child: result=%#v err=%v", result, err)
 	}
-	oldAttempt, found, err := st.GetAgentAttempt(ctx, oldAttemptID)
+	oldAttempt, found, err = st.GetAgentAttempt(ctx, oldAttemptID)
 	if err != nil || !found || oldAttempt.Status != domain.AgentAttemptCrashed ||
 		oldAttempt.Failure.Code != "worker_lost" {
 		t.Fatalf("expired attempt was not fenced: attempt=%#v found=%t err=%v",
 			oldAttempt, found, err)
+	}
+	messages, err := st.ListAgentMessages(ctx, child.ID, false, 10)
+	if err != nil || len(messages) != 1 || messages[0].ID != instruction.ID ||
+		messages[0].Status != domain.AgentMessageConsumed {
+		t.Fatalf("takeover did not deliver instruction exactly once: messages=%#v err=%v",
+			messages, err)
 	}
 }
 

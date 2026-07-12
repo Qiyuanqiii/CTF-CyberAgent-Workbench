@@ -390,6 +390,10 @@ func (s *SQLiteStore) ConsumeAgentMessages(ctx context.Context, agentID string, 
 		return nil, apperror.New(apperror.CodeFailedPrecondition,
 			"running root Agent inbox is reserved for Supervisor context delivery")
 	}
+	if node.Role == domain.AgentRoleSpecialist && node.Status == domain.AgentRunning {
+		return nil, apperror.New(apperror.CodeFailedPrecondition,
+			"running Specialist inbox is reserved for Agent attempt context delivery")
+	}
 	rows, err := tx.QueryContext(ctx, agentMessageSelect+` WHERE recipient_agent_id = ? AND status = ?
 		ORDER BY sequence LIMIT ?`, node.ID, domain.AgentMessagePending, limit)
 	if err != nil {

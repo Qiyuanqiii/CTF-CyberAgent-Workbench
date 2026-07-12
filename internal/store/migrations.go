@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 26
+const LatestSchemaVersion = 27
 
 type migration struct {
 	Version    int
@@ -1411,6 +1411,158 @@ var specialistModelCallStatements = []string{
 		WHEN OLD.status <> 'started'
 		BEGIN
 			SELECT RAISE(ABORT, 'terminal Specialist model call is immutable');
+		END;`,
+}
+
+var specialistContextDeliveryStatements = []string{
+	`CREATE TABLE specialist_context_deliveries (
+		run_id TEXT NOT NULL,
+		agent_id TEXT NOT NULL,
+		parent_agent_id TEXT NOT NULL,
+		agent_attempt_id TEXT NOT NULL,
+		turn_number INTEGER NOT NULL,
+		message_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		prepared_at TEXT NOT NULL,
+		resolved_at TEXT,
+		PRIMARY KEY(agent_attempt_id, message_id),
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, parent_agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		FOREIGN KEY(agent_attempt_id) REFERENCES agent_attempts(id) ON DELETE CASCADE,
+		FOREIGN KEY(message_id) REFERENCES agent_messages(id) ON DELETE CASCADE,
+		UNIQUE(agent_attempt_id, ordinal),
+		CHECK(turn_number > 0),
+		CHECK(ordinal BETWEEN 1 AND 4),
+		CHECK(status IN ('prepared', 'committed', 'superseded')),
+		CHECK((status = 'prepared' AND resolved_at IS NULL)
+			OR (status IN ('committed', 'superseded') AND resolved_at IS NOT NULL))
+	);`,
+	`CREATE UNIQUE INDEX idx_specialist_context_one_prepared_message
+		ON specialist_context_deliveries(message_id) WHERE status = 'prepared';`,
+	`CREATE UNIQUE INDEX idx_specialist_context_one_committed_message
+		ON specialist_context_deliveries(message_id) WHERE status = 'committed';`,
+	`CREATE INDEX idx_specialist_context_run_status
+		ON specialist_context_deliveries(run_id, status, prepared_at);`,
+	`CREATE TRIGGER trg_specialist_context_delivery_insert
+		BEFORE INSERT ON specialist_context_deliveries
+		WHEN NOT EXISTS (
+			SELECT 1 FROM agent_attempts attempt
+			JOIN runs run ON run.id = attempt.run_id
+			JOIN run_execution_leases lease ON lease.run_id = attempt.run_id
+			JOIN agent_nodes child
+				ON child.run_id = attempt.run_id AND child.id = attempt.agent_id
+			JOIN agent_nodes parent
+				ON parent.run_id = attempt.run_id AND parent.id = attempt.parent_agent_id
+			JOIN agent_messages message ON message.id = NEW.message_id
+			WHERE attempt.id = NEW.agent_attempt_id
+				AND attempt.run_id = NEW.run_id AND attempt.agent_id = NEW.agent_id
+				AND attempt.parent_agent_id = NEW.parent_agent_id
+				AND attempt.turn_number = NEW.turn_number AND attempt.status = 'running'
+				AND attempt.usage_recorded_at IS NULL AND run.status = 'running'
+				AND lease.lease_id = attempt.lease_id
+				AND lease.generation = attempt.lease_generation
+				AND lease.status = 'active' AND julianday(lease.expires_at) > julianday('now')
+				AND child.role = 'specialist' AND child.status = 'running'
+				AND child.active_attempt_id = attempt.id AND child.parent_id = parent.id
+				AND parent.role = 'root' AND parent.status IN ('ready', 'running', 'waiting')
+				AND message.run_id = NEW.run_id
+				AND message.sender_agent_id = parent.id
+				AND message.recipient_agent_id = child.id
+				AND message.kind = 'instruction' AND message.semantic = 'message'
+				AND message.status = 'pending'
+				AND json_valid(message.payload_json)
+				AND json_type(message.payload_json) = 'object'
+				AND json_extract(message.payload_json, '$.version') = 'specialist_instruction.v1'
+				AND json_type(message.payload_json, '$.instruction') = 'text'
+				AND length(trim(json_extract(message.payload_json, '$.instruction'))) BETWEEN 1 AND 1200
+				AND (SELECT COUNT(*) FROM json_each(message.payload_json)) = 2
+				AND NOT EXISTS (
+					SELECT 1 FROM json_each(message.payload_json) field
+					WHERE field.key NOT IN ('version', 'instruction')
+				)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist context delivery requires an eligible pending parent instruction');
+		END;`,
+	`CREATE TRIGGER trg_specialist_context_delivery_commit
+		BEFORE UPDATE OF status, resolved_at ON specialist_context_deliveries
+		WHEN OLD.status = 'prepared' AND NEW.status = 'committed' AND NOT EXISTS (
+			SELECT 1 FROM agent_attempts attempt
+			JOIN runs run ON run.id = attempt.run_id
+			JOIN run_execution_leases lease ON lease.run_id = attempt.run_id
+			JOIN agent_nodes child
+				ON child.run_id = attempt.run_id AND child.id = attempt.agent_id
+			JOIN agent_messages message ON message.id = OLD.message_id
+			WHERE attempt.id = OLD.agent_attempt_id
+				AND attempt.run_id = OLD.run_id AND attempt.agent_id = OLD.agent_id
+				AND attempt.parent_agent_id = OLD.parent_agent_id
+				AND attempt.turn_number = OLD.turn_number AND attempt.status = 'running'
+				AND attempt.usage_recorded_at IS NOT NULL AND run.status = 'running'
+				AND lease.lease_id = attempt.lease_id
+				AND lease.generation = attempt.lease_generation
+				AND lease.status = 'active' AND julianday(lease.expires_at) > julianday('now')
+				AND child.status = 'running' AND child.active_attempt_id = attempt.id
+				AND message.run_id = OLD.run_id
+				AND message.sender_agent_id = OLD.parent_agent_id
+				AND message.recipient_agent_id = child.id
+				AND message.kind = 'instruction' AND message.semantic = 'message'
+				AND message.status = 'pending'
+				AND json_valid(message.payload_json)
+				AND json_type(message.payload_json) = 'object'
+				AND json_extract(message.payload_json, '$.version') = 'specialist_instruction.v1'
+				AND json_type(message.payload_json, '$.instruction') = 'text'
+				AND length(trim(json_extract(message.payload_json, '$.instruction'))) BETWEEN 1 AND 1200
+				AND (SELECT COUNT(*) FROM json_each(message.payload_json)) = 2
+				AND NOT EXISTS (
+					SELECT 1 FROM json_each(message.payload_json) field
+					WHERE field.key NOT IN ('version', 'instruction')
+				)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist context commit requires its active usage-recorded attempt');
+		END;`,
+	`CREATE TRIGGER trg_specialist_context_delivery_active_supersede
+		BEFORE UPDATE OF status ON specialist_context_deliveries
+		WHEN OLD.status = 'prepared' AND NEW.status = 'superseded' AND EXISTS (
+			SELECT 1 FROM agent_attempts attempt
+			JOIN runs run ON run.id = attempt.run_id
+			JOIN agent_nodes child
+				ON child.run_id = attempt.run_id AND child.id = attempt.agent_id
+			WHERE attempt.id = OLD.agent_attempt_id AND attempt.run_id = OLD.run_id
+				AND attempt.status = 'running' AND run.status = 'running'
+				AND child.status = 'running' AND child.active_attempt_id = attempt.id
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'active Specialist context delivery cannot be superseded');
+		END;`,
+	`CREATE TRIGGER trg_specialist_context_delivery_identity_immutable
+		BEFORE UPDATE OF run_id, agent_id, parent_agent_id, agent_attempt_id, turn_number,
+			message_id, ordinal, prepared_at ON specialist_context_deliveries
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist context delivery identity is immutable');
+		END;`,
+	`CREATE TRIGGER trg_specialist_context_delivery_terminal_immutable
+		BEFORE UPDATE ON specialist_context_deliveries
+		WHEN OLD.status <> 'prepared'
+		BEGIN
+			SELECT RAISE(ABORT, 'terminal Specialist context delivery is immutable');
+		END;`,
+	`CREATE TRIGGER trg_specialist_context_delivery_prepared_delete
+		BEFORE DELETE ON specialist_context_deliveries
+		WHEN OLD.status = 'prepared'
+		BEGIN
+			SELECT RAISE(ABORT, 'prepared Specialist context delivery cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_agent_message_prepared_specialist_delivery
+		BEFORE UPDATE OF status, consumed_at ON agent_messages
+		WHEN OLD.status = 'pending' AND NEW.status = 'consumed' AND EXISTS (
+			SELECT 1 FROM specialist_context_deliveries delivery
+			WHERE delivery.message_id = OLD.id AND delivery.status = 'prepared'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'prepared Specialist instruction must commit through its Agent attempt');
 		END;`,
 }
 

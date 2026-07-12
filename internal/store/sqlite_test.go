@@ -497,7 +497,7 @@ func removeSchemaV25ForTestStatements() []string {
 }
 
 func removeSchemaV26ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV27ForTestStatements(), []string{
 		`DROP TRIGGER trg_specialist_model_call_sequence`,
 		`DROP TRIGGER trg_specialist_model_call_insert`,
 		`DROP TRIGGER trg_specialist_model_call_terminal_requires_lease`,
@@ -505,6 +505,20 @@ func removeSchemaV26ForTestStatements() []string {
 		`DROP TRIGGER trg_specialist_model_call_terminal_immutable`,
 		`DROP TABLE specialist_model_calls`,
 		`DELETE FROM schema_migrations WHERE version = 26`,
+	}...)
+}
+
+func removeSchemaV27ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_specialist_context_delivery_insert`,
+		`DROP TRIGGER trg_specialist_context_delivery_commit`,
+		`DROP TRIGGER trg_specialist_context_delivery_active_supersede`,
+		`DROP TRIGGER trg_specialist_context_delivery_identity_immutable`,
+		`DROP TRIGGER trg_specialist_context_delivery_terminal_immutable`,
+		`DROP TRIGGER trg_specialist_context_delivery_prepared_delete`,
+		`DROP TRIGGER trg_agent_message_prepared_specialist_delivery`,
+		`DROP TABLE specialist_context_deliveries`,
+		`DELETE FROM schema_migrations WHERE version = 27`,
 	}
 }
 
