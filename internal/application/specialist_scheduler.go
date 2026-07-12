@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/idgen"
 )
 
-const MaxSpecialistScheduleRounds = 32
+const MaxSpecialistScheduleRounds = domain.MaxSpecialistScheduleRounds
 
 type SpecialistScheduleStopReason string
 
@@ -38,16 +40,25 @@ type SpecialistScheduleFailure struct {
 }
 
 type SpecialistScheduleResult struct {
+	ScheduleID        string
 	RunID             string
 	AgentIDs          []string
 	RoundsCompleted   int
 	TurnsStarted      int
 	RecoveredAttempts int
+	RecoveredSchedule bool
 	StopReason        SpecialistScheduleStopReason
 	UsageBefore       domain.RunAgentUsage
 	UsageAfter        domain.RunAgentUsage
 	Turns             []SpecialistTurnResult
 	Failures          []SpecialistScheduleFailure
+}
+
+type SpecialistScheduleStore interface {
+	StartSpecialistSchedule(ctx context.Context,
+		start domain.SpecialistScheduleStart) (domain.SpecialistScheduleStartResult, error)
+	FinishSpecialistSchedule(ctx context.Context,
+		finish domain.SpecialistScheduleFinish) (domain.SpecialistSchedule, error)
 }
 
 // SpecialistScheduler is an internal-only Run-level owner for child turns. It
@@ -72,6 +83,11 @@ func (s *SpecialistScheduler) Execute(ctx context.Context,
 		return result, apperror.New(apperror.CodeFailedPrecondition,
 			"Specialist scheduler dependencies are required")
 	}
+	scheduleStore, ok := s.runner.store.(SpecialistScheduleStore)
+	if !ok {
+		return result, apperror.New(apperror.CodeFailedPrecondition,
+			"Specialist scheduler requires a durable schedule store")
+	}
 	run, err := s.runner.store.GetRun(ctx, result.RunID)
 	if err != nil {
 		return result, apperror.Normalize(err)
@@ -82,7 +98,7 @@ func (s *SpecialistScheduler) Execute(ctx context.Context,
 	}
 	err = withRunExecutionLease(ctx, s.runner.store, run.ID, s.runner.leaseOwner,
 		s.runner.leasePolicy, func(leaseCtx context.Context, lease domain.RunExecutionLease) error {
-			return s.executeWithLease(leaseCtx, lease, request.MaxRounds, &result)
+			return s.executeWithLease(leaseCtx, lease, request.MaxRounds, scheduleStore, &result)
 		})
 	if err != nil && result.StopReason == "" &&
 		(ctx.Err() != nil || errors.Is(err, context.Canceled)) {
@@ -92,13 +108,9 @@ func (s *SpecialistScheduler) Execute(ctx context.Context,
 }
 
 func (s *SpecialistScheduler) executeWithLease(ctx context.Context,
-	lease domain.RunExecutionLease, maxRounds int, result *SpecialistScheduleResult,
-) error {
-	recovered, err := s.runner.store.RecoverSpecialistAttempts(ctx, lease)
-	if err != nil {
-		return apperror.Normalize(err)
-	}
-	result.RecoveredAttempts = len(recovered)
+	lease domain.RunExecutionLease, maxRounds int, scheduleStore SpecialistScheduleStore,
+	result *SpecialistScheduleResult,
+) (executeErr error) {
 	run, err := s.runner.store.GetRun(ctx, result.RunID)
 	if err != nil {
 		return apperror.Normalize(err)
@@ -109,6 +121,47 @@ func (s *SpecialistScheduler) executeWithLease(ctx context.Context,
 	}
 	result.UsageBefore = usage
 	result.UsageAfter = usage
+	scheduleID := idgen.New("schedule")
+	started, err := scheduleStore.StartSpecialistSchedule(ctx,
+		domain.SpecialistScheduleStart{
+			ID: scheduleID, RunID: result.RunID,
+			AgentIDs: append([]string(nil), result.AgentIDs...), MaxRounds: maxRounds,
+			Lease: lease, UsageBefore: usage, StartedAt: time.Now().UTC(),
+		})
+	if err != nil {
+		return apperror.Normalize(err)
+	}
+	result.ScheduleID = started.Schedule.ID
+	result.RecoveredSchedule = started.RecoveredSchedule
+	defer func() {
+		if recover() != nil {
+			if result.StopReason == "" {
+				result.StopReason = SpecialistScheduleChildError
+			}
+			executeErr = errors.Join(executeErr, apperror.New(apperror.CodeInternal,
+				"Specialist scheduler runtime panicked"))
+		}
+		status, stopReason, errorCode := specialistScheduleTerminal(result, executeErr, ctx)
+		finishCtx, cancelFinish := specialistEventContext(ctx)
+		_, finishErr := scheduleStore.FinishSpecialistSchedule(finishCtx,
+			domain.SpecialistScheduleFinish{
+				ID: result.ScheduleID, Lease: lease, Status: status,
+				StopReason: stopReason, RoundsCompleted: result.RoundsCompleted,
+				TurnsStarted:      result.TurnsStarted,
+				RecoveredAttempts: result.RecoveredAttempts,
+				UsageAfter:        result.UsageAfter, ErrorCode: errorCode,
+				FinishedAt: time.Now().UTC(),
+			})
+		cancelFinish()
+		if finishErr != nil {
+			executeErr = errors.Join(executeErr, apperror.Normalize(finishErr))
+		}
+	}()
+	recovered, err := s.runner.store.RecoverSpecialistAttempts(ctx, lease)
+	if err != nil {
+		return apperror.Normalize(err)
+	}
+	result.RecoveredAttempts = len(recovered)
 	if reason := specialistAggregateBudgetStop(run.Budget, usage); reason != "" {
 		result.StopReason = reason
 		return nil
@@ -176,6 +229,30 @@ func (s *SpecialistScheduler) executeWithLease(ctx context.Context,
 	}
 	result.StopReason = SpecialistScheduleRoundLimit
 	return nil
+}
+
+func specialistScheduleTerminal(result *SpecialistScheduleResult, err error,
+	ctx context.Context,
+) (domain.SpecialistScheduleStatus, string, string) {
+	stopReason := strings.TrimSpace(string(result.StopReason))
+	if err == nil {
+		if stopReason == "" {
+			stopReason = string(SpecialistScheduleNoReadyChild)
+		}
+		return domain.SpecialistScheduleCompleted, stopReason, ""
+	}
+	normalized := apperror.Normalize(err)
+	code := string(apperror.CodeOf(normalized))
+	if ctx.Err() != nil || apperror.CodeOf(normalized) == apperror.CodeCancelled {
+		if stopReason == "" {
+			stopReason = string(SpecialistScheduleCancelled)
+		}
+		return domain.SpecialistScheduleCancelled, stopReason, code
+	}
+	if stopReason == "" {
+		stopReason = string(SpecialistScheduleChildError)
+	}
+	return domain.SpecialistScheduleFailed, stopReason, code
 }
 
 func (s *SpecialistScheduler) scheduleCandidates(ctx context.Context, runID string,

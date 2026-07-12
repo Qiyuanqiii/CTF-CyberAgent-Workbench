@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	ModelCancellationPathTemplate = "/api/v1/runs/{run_id}/active-call/cancel"
-	MaxControlRequestBodyBytes    = 4 * 1024
+	ModelCancellationPathTemplate           = "/api/v1/runs/{run_id}/active-call/cancel"
+	SpecialistModelCancellationPathTemplate = "/api/v1/runs/{run_id}/agents/{agent_id}/active-call/cancel"
+	MaxControlRequestBodyBytes              = 4 * 1024
 )
 
 type ModelCancellationRequestView struct {
@@ -35,6 +36,30 @@ type ModelCancellationView struct {
 	Replayed     bool      `json:"replayed"`
 }
 
+type SpecialistModelCancellationView struct {
+	ID           string    `json:"id"`
+	RunID        string    `json:"run_id"`
+	AgentID      string    `json:"agent_id"`
+	AttemptID    string    `json:"attempt_id"`
+	ModelAttempt int       `json:"model_attempt"`
+	Status       string    `json:"status"`
+	RequestedAt  time.Time `json:"requested_at"`
+	Replayed     bool      `json:"replayed"`
+}
+
+func matchSpecialistModelCancellationPath(requestPath string) (string, string, bool) {
+	const prefix = "/api/v1/runs/"
+	if !strings.HasPrefix(requestPath, prefix) {
+		return "", "", false
+	}
+	segments := strings.Split(strings.TrimPrefix(requestPath, prefix), "/")
+	if len(segments) != 5 || segments[0] == "" || segments[1] != "agents" ||
+		segments[2] == "" || segments[3] != "active-call" || segments[4] != "cancel" {
+		return "", "", false
+	}
+	return segments[0], segments[2], true
+}
+
 func matchModelCancellationPath(requestPath string) (string, bool) {
 	const prefix = "/api/v1/runs/"
 	const suffix = "/active-call/cancel"
@@ -50,6 +75,18 @@ func matchModelCancellationPath(requestPath string) (string, bool) {
 
 func (a *API) serveModelCancellation(writer http.ResponseWriter, request *http.Request,
 	requestID string, runID string,
+) {
+	a.serveCancellation(writer, request, requestID, runID, "")
+}
+
+func (a *API) serveSpecialistModelCancellation(writer http.ResponseWriter,
+	request *http.Request, requestID string, runID string, agentID string,
+) {
+	a.serveCancellation(writer, request, requestID, runID, agentID)
+}
+
+func (a *API) serveCancellation(writer http.ResponseWriter, request *http.Request,
+	requestID string, runID string, agentID string,
 ) {
 	if !a.controlEnabled {
 		a.writeError(writer, requestID,
@@ -73,6 +110,12 @@ func (a *API) serveModelCancellation(writer http.ResponseWriter, request *http.R
 	if err := validatePathIdentity(runID); err != nil {
 		a.writeError(writer, requestID, err, 0)
 		return
+	}
+	if agentID != "" {
+		if err := validatePathIdentity(agentID); err != nil {
+			a.writeError(writer, requestID, err, 0)
+			return
+		}
 	}
 	if err := rejectQuery(request.URL.Query()); err != nil {
 		a.writeError(writer, requestID, err, 0)
@@ -108,15 +151,43 @@ func (a *API) serveModelCancellation(writer http.ResponseWriter, request *http.R
 		a.writeError(writer, requestID, err, 0)
 		return
 	}
-	result, err := a.store.RequestSupervisorModelCancellation(request.Context(), domain.RequestModelCancellation{
-		RunID: runID, AttemptID: view.AttemptID, ModelAttempt: view.ModelAttempt,
-		IdempotencyKey: key, Reason: view.Reason, RequestedBy: "http_control",
-	})
+	if agentID == "" {
+		result, err := a.store.RequestSupervisorModelCancellation(request.Context(), domain.RequestModelCancellation{
+			RunID: runID, AttemptID: view.AttemptID, ModelAttempt: view.ModelAttempt,
+			IdempotencyKey: key, Reason: view.Reason, RequestedBy: "http_control",
+		})
+		if err != nil {
+			a.writeError(writer, requestID, err, 0)
+			return
+		}
+		a.writeSuccessStatus(writer, requestID, modelCancellationView(result), nil,
+			http.StatusAccepted)
+		return
+	}
+	result, err := a.store.RequestSpecialistModelCancellation(request.Context(),
+		domain.RequestSpecialistModelCancellation{
+			RunID: runID, AgentID: agentID, AttemptID: view.AttemptID,
+			ModelAttempt: view.ModelAttempt, IdempotencyKey: key,
+			Reason: view.Reason, RequestedBy: "http_control",
+		})
 	if err != nil {
 		a.writeError(writer, requestID, err, 0)
 		return
 	}
-	a.writeSuccessStatus(writer, requestID, modelCancellationView(result), nil, http.StatusAccepted)
+	a.writeSuccessStatus(writer, requestID, specialistModelCancellationView(result), nil,
+		http.StatusAccepted)
+}
+
+func specialistModelCancellationView(
+	result domain.SpecialistModelCancellationResult,
+) SpecialistModelCancellationView {
+	value := result.Cancellation
+	return SpecialistModelCancellationView{
+		ID: value.ID, RunID: value.RunID, AgentID: value.AgentID,
+		AttemptID: value.AttemptID, ModelAttempt: value.ModelAttempt,
+		Status: string(value.Status), RequestedAt: value.RequestedAt,
+		Replayed: result.Replayed,
+	}
 }
 
 func validateJSONContentType(header http.Header) error {

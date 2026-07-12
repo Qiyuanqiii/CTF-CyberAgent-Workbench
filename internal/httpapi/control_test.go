@@ -15,6 +15,7 @@ import (
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
+	"cyberagent-workbench/internal/coordinator"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
@@ -178,6 +179,109 @@ func TestModelCancellationControlStopsProviderAcrossSQLiteConnections(t *testing
 	}
 }
 
+func TestSpecialistModelCancellationControlStopsExactChildAcrossSQLiteConnections(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "specialist-control-integration.db")
+	workerStore, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workerStore.Close()
+	provider := &httpControlBlockingProvider{entered: make(chan struct{})}
+	runs := application.NewRunService(workerStore)
+	_, run, err := runs.Create(t.Context(), application.CreateRunRequest{
+		Goal: "cancel one exact Specialist call through control API", Profile: "code",
+		ModelRoute: provider.Name() + "/model", Budget: domain.Budget{MaxTurns: 4},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = runs.Start(t.Context(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, found, err := workerStore.GetRootAgent(t.Context(), run.ID)
+	if err != nil || !found {
+		t.Fatalf("Specialist control root missing: found=%t err=%v", found, err)
+	}
+	coord, err := coordinator.NewWithSpecialistAdmission(workerStore,
+		coordinator.SpecialistAdmissionPolicy{
+			MaxChildren: 1, MaxTurnsPerChild: 2, MaxTokensPerChild: 64,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := coord.AdmitSpecialist(t.Context(), coordinator.AdmitSpecialistRequest{
+		RunID: run.ID, ParentAgentID: root.ID, Title: "cancellable Specialist",
+		Skills: []string{"model.chat"}, TurnLimit: 2, TokenLimit: 64,
+		IdempotencyKey: "http-specialist-admission-012345",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	runner := application.NewSpecialistRunner(workerStore, router,
+		policy.NewDefaultChecker()).WithModelCancellationPollInterval(10 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := runner.Step(ctx, run.ID, admitted.Agent.ID)
+		done <- err
+	}()
+	select {
+	case <-provider.entered:
+	case <-ctx.Done():
+		t.Fatal("Specialist Provider did not start before control request")
+	}
+	attempts, err := workerStore.ListAgentAttempts(ctx, admitted.Agent.ID)
+	if err != nil || len(attempts) != 1 || attempts[0].Status != domain.AgentAttemptRunning {
+		t.Fatalf("active Specialist Attempt missing: attempts=%#v err=%v", attempts, err)
+	}
+	controlStore, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer controlStore.Close()
+	api, err := New(controlStore, Config{
+		AccessToken: testAccessToken, ControlToken: testControlToken,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestPath := "/api/v1/runs/" + run.ID + "/agents/" + admitted.Agent.ID +
+		"/active-call/cancel"
+	body := `{"attempt_id":"` + attempts[0].ID + `","model_attempt":1,"reason":"operator child stop"}`
+	operationKey := "http-specialist-control-012345"
+	response := performControlPathRequest(t, api, requestPath, operationKey,
+		strings.NewReader(body))
+	var accepted SpecialistModelCancellationView
+	decodeDataStatus(t, response, http.StatusAccepted, &accepted)
+	if accepted.AgentID != admitted.Agent.ID || accepted.AttemptID != attempts[0].ID ||
+		accepted.ModelAttempt != 1 || accepted.Status != string(domain.ModelCancellationPending) {
+		t.Fatalf("unexpected Specialist cancellation response: %#v", accepted)
+	}
+	select {
+	case runErr := <-done:
+		if apperror.CodeOf(runErr) != apperror.CodeCancelled {
+			t.Fatalf("cancelled Specialist returned code=%s err=%v",
+				apperror.CodeOf(runErr), runErr)
+		}
+	case <-ctx.Done():
+		t.Fatal("Specialist control request did not stop the Provider")
+	}
+	resolved, err := controlStore.GetSpecialistModelCancellation(t.Context(), accepted.ID)
+	if err != nil || resolved.Status != domain.ModelCancellationResolved ||
+		resolved.Resolution != string(llm.OutcomeCancelled) {
+		t.Fatalf("Specialist cancellation did not resolve: %#v err=%v", resolved, err)
+	}
+	if strings.Contains(response.Body.String(), operationKey) ||
+		strings.Contains(response.Body.String(), `"lease_id"`) ||
+		strings.Contains(response.Body.String(), `"lease_generation"`) {
+		t.Fatalf("Specialist control response exposed private data: %s", response.Body.String())
+	}
+}
+
 type httpControlBlockingProvider struct {
 	entered chan struct{}
 	once    sync.Once
@@ -230,6 +334,21 @@ func performControlRequest(t *testing.T, api *API, method string, runID string, 
 	if contentType != "" {
 		request.Header.Set("Content-Type", contentType)
 	}
+	response := httptest.NewRecorder()
+	api.ServeHTTP(response, request)
+	return response
+}
+
+func performControlPathRequest(t *testing.T, api *API, requestPath string, key string,
+	body *strings.Reader,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1"+requestPath, body)
+	request.Host = "127.0.0.1:8765"
+	request.RemoteAddr = "127.0.0.1:45000"
+	request.Header.Set("Authorization", "Bearer "+testControlToken)
+	request.Header.Set("Idempotency-Key", key)
+	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, request)
 	return response

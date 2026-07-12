@@ -44,7 +44,8 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts", "event-stream", "openapi"}
 		if a.controlEnabled {
-			resources = append(resources, "model-cancellation-control")
+			resources = append(resources, "model-cancellation-control",
+				"specialist-model-cancellation-control")
 		}
 		return IndexView{APIVersion: Version, AppVersion: a.appVersion, Resources: resources}, nil, nil
 	case "/api/v1/health":

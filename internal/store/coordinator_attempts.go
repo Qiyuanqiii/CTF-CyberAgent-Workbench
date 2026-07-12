@@ -704,6 +704,14 @@ func crashAgentAttemptTx(ctx context.Context, tx *sql.Tx, run domain.Run,
 	if err := requireSingleAgentAttemptUpdate(result, "Specialist attempt changed before crash commit"); err != nil {
 		return domain.AgentAttempt{}, domain.AgentNode{}, err
 	}
+	cancellationResolution := "attempt_terminated"
+	if recovered {
+		cancellationResolution = "worker_lost"
+	}
+	if err := resolveTerminatedSpecialistModelCancellationsTx(ctx, tx, updatedAttempt,
+		cancellationResolution, at); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, err
+	}
 	if _, err := supersedeSpecialistContextDeliveriesTx(ctx, tx, run, child.ID, "", at); err != nil {
 		return domain.AgentAttempt{}, domain.AgentNode{}, err
 	}
@@ -805,6 +813,10 @@ func interruptAgentAttemptTx(ctx context.Context, tx *sql.Tx, run domain.Run,
 		return domain.AgentAttempt{}, err
 	}
 	if err := requireSingleAgentAttemptUpdate(result, "Specialist attempt changed before interruption"); err != nil {
+		return domain.AgentAttempt{}, err
+	}
+	if err := resolveTerminatedSpecialistModelCancellationsTx(ctx, tx, updated,
+		"attempt_terminated", at); err != nil {
 		return domain.AgentAttempt{}, err
 	}
 	if _, err := supersedeSpecialistContextDeliveriesTx(ctx, tx, run, child.ID, "", at); err != nil {

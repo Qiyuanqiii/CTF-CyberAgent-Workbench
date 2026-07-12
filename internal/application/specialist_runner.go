@@ -53,6 +53,8 @@ type SpecialistRunnerStore interface {
 		action domain.SpecialistAction, decision policy.Decision) (domain.AgentAttempt, error)
 	RecordSpecialistModelFailed(ctx context.Context, ref domain.AgentAttemptRef,
 		attempt llm.ModelAttempt, usage *llm.Usage) (domain.AgentAttempt, error)
+	ObserveSpecialistModelCancellation(ctx context.Context, ref domain.AgentAttemptRef,
+		attempt llm.ModelAttempt) (domain.SpecialistModelCancellation, bool, error)
 	RecordSpecialistProtocolFailure(ctx context.Context, ref domain.AgentAttemptRef,
 		attempt llm.ModelAttempt, usage llm.Usage, reason string,
 		requestRepair bool) (domain.AgentAttempt, error)
@@ -101,12 +103,13 @@ type specialistTurnLimits struct {
 // SpecialistRunner is an opt-in, internal-only no-tool child runtime. No CLI,
 // HTTP, or model-controlled spawn path constructs it.
 type SpecialistRunner struct {
-	store       SpecialistRunnerStore
-	router      *llm.Router
-	checker     policy.Checker
-	retryPolicy ModelRetryPolicy
-	leaseOwner  string
-	leasePolicy RunExecutionLeasePolicy
+	store                    SpecialistRunnerStore
+	router                   *llm.Router
+	checker                  policy.Checker
+	retryPolicy              ModelRetryPolicy
+	leaseOwner               string
+	leasePolicy              RunExecutionLeasePolicy
+	cancellationPollInterval time.Duration
 }
 
 func NewSpecialistRunner(store SpecialistRunnerStore, router *llm.Router,
@@ -115,7 +118,8 @@ func NewSpecialistRunner(store SpecialistRunnerStore, router *llm.Router,
 	return &SpecialistRunner{
 		store: store, router: router, checker: checker,
 		retryPolicy: DefaultModelRetryPolicy(), leaseOwner: idgen.New("specialist-worker"),
-		leasePolicy: DefaultRunExecutionLeasePolicy(),
+		leasePolicy:              DefaultRunExecutionLeasePolicy(),
+		cancellationPollInterval: 100 * time.Millisecond,
 	}
 }
 
@@ -142,6 +146,15 @@ func (r *SpecialistRunner) WithRunExecutionLeaseOwner(ownerID string) *Specialis
 	return r
 }
 
+func (r *SpecialistRunner) WithModelCancellationPollInterval(
+	interval time.Duration,
+) *SpecialistRunner {
+	if r != nil {
+		r.cancellationPollInterval = interval
+	}
+	return r
+}
+
 func (r *SpecialistRunner) Step(ctx context.Context, runID string,
 	agentID string,
 ) (SpecialistTurnResult, error) {
@@ -151,6 +164,11 @@ func (r *SpecialistRunner) Step(ctx context.Context, runID string,
 	if r == nil || r.store == nil || r.router == nil || r.checker == nil {
 		return result, apperror.New(apperror.CodeFailedPrecondition,
 			"Specialist runner dependencies are required")
+	}
+	if r.cancellationPollInterval <= 0 ||
+		r.cancellationPollInterval > maxModelCancellationPollInterval {
+		return result, apperror.New(apperror.CodeFailedPrecondition,
+			"Specialist model cancellation poll interval must be positive and bounded")
 	}
 	if result.RunID == "" || result.AgentID == "" {
 		return result, apperror.New(apperror.CodeInvalidArgument,
@@ -196,6 +214,11 @@ func (r *SpecialistRunner) stepWithLease(ctx context.Context,
 func (r *SpecialistRunner) stepReadyWithLease(ctx context.Context,
 	lease domain.RunExecutionLease, result *SpecialistTurnResult, limits specialistTurnLimits,
 ) error {
+	if r.cancellationPollInterval <= 0 ||
+		r.cancellationPollInterval > maxModelCancellationPollInterval {
+		return apperror.New(apperror.CodeFailedPrecondition,
+			"Specialist model cancellation poll interval must be positive and bounded")
+	}
 	if err := ctx.Err(); err != nil {
 		return apperror.Normalize(err)
 	}
@@ -486,14 +509,21 @@ func (r *SpecialistRunner) callModelWithRetry(ctx context.Context, run domain.Ru
 			return result, apperror.New(apperror.CodeConflict,
 				"Specialist model attempt is already active")
 		}
-		callCtx, cancelCall := specialistModelContext(ctx, run.Budget, consumedMillis,
-			budgetState.turnBaseMillis, maxTurnExecutionMillis)
 		startedAt := time.Now()
-		streamed, callErr := streamSpecialistModel(callCtx, r.router, modelRef, request)
+		streamed, callErr := func() (specialistStreamResult, error) {
+			budgetCtx, cancelBudget := specialistModelContext(ctx, run.Budget, consumedMillis,
+				budgetState.turnBaseMillis, maxTurnExecutionMillis)
+			defer cancelBudget()
+			callCtx, cancelCall := context.WithCancel(budgetCtx)
+			defer cancelCall()
+			stopCancellationWatch := r.watchSpecialistModelCancellation(callCtx, ref,
+				attempt, cancelCall)
+			defer stopCancellationWatch()
+			return streamSpecialistModel(callCtx, r.router, modelRef, request)
+		}()
 		attempt.Elapsed = time.Since(startedAt)
 		attempt.StreamEvents = streamed.Events
 		attempt.StreamBytes = streamed.Bytes
-		cancelCall()
 		result.Attempt = attempt
 		result.StreamEvents += streamed.Events
 		result.StreamBytes += streamed.Bytes

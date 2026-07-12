@@ -176,6 +176,17 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 			t.Fatalf("schema v18 model cancellation table is missing: %q", table)
 		}
 	}
+	for _, name := range []string{"specialist_schedules", "specialist_schedule_agents",
+		"specialist_model_cancellations", "specialist_model_cancellation_operations"} {
+		var table string
+		if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master
+			WHERE type = 'table' AND name = ?`, name).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		if table != name {
+			t.Fatalf("schema v29 Specialist control table is missing: %q", table)
+		}
+	}
 	for _, column := range []string{"lease_id", "lease_generation"} {
 		var count int
 		if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('run_supervisor_checkpoints')
@@ -523,7 +534,7 @@ func removeSchemaV27ForTestStatements() []string {
 }
 
 func removeSchemaV28ForTestStatements() []string {
-	statements := []string{
+	statements := append(removeSchemaV29ForTestStatements(), []string{
 		`DROP TRIGGER trg_agent_attempt_repair_resolution`,
 		`DROP TRIGGER trg_agent_attempt_usage_monotonic`,
 		`DROP TRIGGER trg_agent_attempt_usage_requires_lease`,
@@ -558,7 +569,7 @@ func removeSchemaV28ForTestStatements() []string {
 			policy_risk, policy_reason, user_message_id, assistant_message_id, started_at, finished_at
 		FROM specialist_model_calls_v28 WHERE protocol_repair = 0`,
 		`DROP TABLE specialist_model_calls_v28`,
-	}
+	}...)
 	statements = append(statements, specialistModelCallStatements[1:]...)
 	statements = append(statements,
 		`CREATE TRIGGER trg_agent_attempt_usage_immutable
@@ -584,6 +595,29 @@ func removeSchemaV28ForTestStatements() []string {
 		`DELETE FROM schema_migrations WHERE version = 28`,
 	)
 	return statements
+}
+
+func removeSchemaV29ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_specialist_model_cancellation_operation_immutable`,
+		`DROP TRIGGER trg_specialist_model_cancellation_terminal_immutable`,
+		`DROP TRIGGER trg_specialist_model_cancellation_identity_immutable`,
+		`DROP TRIGGER trg_specialist_model_cancellation_resolve`,
+		`DROP TRIGGER trg_specialist_model_cancellation_observe`,
+		`DROP TRIGGER trg_specialist_model_cancellation_transition`,
+		`DROP TRIGGER trg_specialist_model_cancellation_insert`,
+		`DROP TABLE specialist_model_cancellation_operations`,
+		`DROP TABLE specialist_model_cancellations`,
+		`DROP TRIGGER trg_specialist_schedule_agent_immutable`,
+		`DROP TRIGGER trg_specialist_schedule_terminal_immutable`,
+		`DROP TRIGGER trg_specialist_schedule_identity_immutable`,
+		`DROP TRIGGER trg_specialist_schedule_terminal`,
+		`DROP TRIGGER trg_specialist_schedule_agent_insert`,
+		`DROP TRIGGER trg_specialist_schedule_insert`,
+		`DROP TABLE specialist_schedule_agents`,
+		`DROP TABLE specialist_schedules`,
+		`DELETE FROM schema_migrations WHERE version = 29`,
+	}
 }
 
 func TestSQLiteUpgradesV21MemoryRowsToOptionalAgentOwnership(t *testing.T) {

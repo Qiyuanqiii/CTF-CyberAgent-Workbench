@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"cyberagent-workbench/internal/application"
+	"cyberagent-workbench/internal/coordinator"
+	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/llm"
 )
 
 func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testing.T) {
@@ -55,7 +61,11 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 			operations = append(operations, item.Get)
 		}
 		if item.Post != nil {
-			if path != ModelCancellationPathTemplate || item.Post.OperationID != "requestModelCancellation" ||
+			validControl := (path == ModelCancellationPathTemplate &&
+				item.Post.OperationID == "requestModelCancellation") ||
+				(path == SpecialistModelCancellationPathTemplate &&
+					item.Post.OperationID == "requestSpecialistModelCancellation")
+			if !validControl ||
 				item.Post.ReadOnly || item.Post.Responses["202"] == nil || item.Post.RequestBody == nil ||
 				len(item.Post.Security) != 1 || item.Post.Security[0]["ControlBearerAuth"] == nil {
 				t.Fatalf("path %s has an incomplete control operation: %#v", path, item.Post)
@@ -83,7 +93,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 	}
 	for path, item := range raw.Paths {
 		for method := range item {
-			if method != "get" && !(path == ModelCancellationPathTemplate && method == "post") {
+			if method != "get" && !((path == ModelCancellationPathTemplate ||
+				path == SpecialistModelCancellationPathTemplate) && method == "post") {
 				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
 			}
 		}
@@ -111,8 +122,11 @@ func TestOpenAPIGoldenDocumentMatchesGoDTOs(t *testing.T) {
 func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 	fixture := newAPIFixture(t)
 	fixture.api.eventStream = testEventStreamConfig(1, 100*time.Millisecond)
+	childRun, child, childAttempt, childModel :=
+		prepareOpenAPISpecialistCancellationTarget(t, fixture)
 	replacements := map[string]string{
 		"{run_id}":       fixture.run.ID,
+		"{agent_id}":     child.ID,
 		"{session_id}":   fixture.run.SessionID,
 		"{work_item_id}": fixture.workItems[0].ID,
 		"{note_id}":      fixture.notes[0].ID,
@@ -123,13 +137,25 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		for placeholder, value := range replacements {
 			requestPath = strings.ReplaceAll(requestPath, placeholder, value)
 		}
+		if spec.Path == SpecialistModelCancellationPathTemplate {
+			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", childRun.ID)
+			requestPath = strings.ReplaceAll(requestPath, "{agent_id}", child.ID)
+		}
 		t.Run(spec.OperationID, func(t *testing.T) {
 			var response *httptest.ResponseRecorder
 			expectedStatus := http.StatusOK
 			if spec.Control {
-				body := `{"attempt_id":"` + fixture.checkpoint.AttemptID + `","model_attempt":1}`
-				response = fixture.controlRequest(t, http.MethodPost, fixture.run.ID, testControlToken,
-					"openapi-live-operation-012345", "application/json", strings.NewReader(body))
+				attemptID := fixture.checkpoint.AttemptID
+				modelAttempt := 1
+				if spec.Path == SpecialistModelCancellationPathTemplate {
+					attemptID = childAttempt.ID
+					modelAttempt = childModel.Number
+				}
+				body := `{"attempt_id":"` + attemptID + `","model_attempt":` +
+					fmt.Sprint(modelAttempt) + `}`
+				response = performControlPathRequest(t, fixture.api, requestPath,
+					"openapi-live-operation-012345-"+spec.OperationID,
+					strings.NewReader(body))
 				expectedStatus = http.StatusAccepted
 			} else {
 				response = fixture.get(t, requestPath)
@@ -160,6 +186,70 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		"127.0.0.1:8765", "127.0.0.1:45000", nil)
 	assertAPIError(t, unauthorized, http.StatusUnauthorized, "POLICY_DENIED")
 	assertAPIError(t, fixture.get(t, OpenAPIPath+"?format=yaml"), http.StatusBadRequest, "INVALID_ARGUMENT")
+}
+
+func prepareOpenAPISpecialistCancellationTarget(t *testing.T,
+	fixture *apiFixture,
+) (domain.Run, domain.AgentNode, domain.AgentAttempt, llm.ModelAttempt) {
+	t.Helper()
+	ctx := t.Context()
+	runs := application.NewRunService(fixture.store)
+	_, run, err := runs.Create(ctx, application.CreateRunRequest{
+		Goal: "OpenAPI Specialist cancellation target", Profile: "code",
+		Budget: domain.Budget{MaxTurns: 4},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = runs.Start(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, found, err := fixture.store.GetRootAgent(ctx, run.ID)
+	if err != nil || !found {
+		t.Fatalf("OpenAPI Specialist root missing: found=%t err=%v", found, err)
+	}
+	coord, err := coordinator.NewWithSpecialistAdmission(fixture.store,
+		coordinator.SpecialistAdmissionPolicy{
+			MaxChildren: 1, MaxTurnsPerChild: 2, MaxTokensPerChild: 32,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitted, err := coord.AdmitSpecialist(ctx, coordinator.AdmitSpecialistRequest{
+		RunID: run.ID, ParentAgentID: root.ID,
+		Title: "OpenAPI cancellation target", Skills: []string{"model.chat"},
+		TurnLimit: 2, TokenLimit: 32,
+		IdempotencyKey: "openapi-specialist-admission-012345",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired, err := fixture.store.AcquireRunExecutionLease(ctx,
+		domain.AcquireRunExecutionLeaseRequest{
+			RunID: run.ID, OwnerID: "openapi-specialist-worker", TTL: time.Minute,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attemptID := "attempt-openapi-specialist-0001"
+	attempt, _, err := fixture.store.BeginSpecialistAttempt(ctx, domain.AgentAttemptStart{
+		AttemptID: attemptID, RunID: run.ID, AgentID: admitted.Agent.ID,
+		ParentAgentID: root.ID, Lease: acquired.Lease, StartedAt: time.Now().UTC(),
+	}, "openapi-specialist-start-012345")
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelAttempt := llm.ModelAttempt{
+		Number: 1, TransportAttempt: 1, MaxAttempts: 3,
+		Provider: "openapi-specialist", Model: "test-model",
+	}
+	if inserted, err := fixture.store.RecordSpecialistModelStarted(ctx,
+		domain.AgentAttemptRef{RunID: attempt.RunID, AgentID: attempt.AgentID,
+			AttemptID: attempt.ID}, modelAttempt); err != nil || !inserted {
+		t.Fatalf("OpenAPI Specialist model start inserted=%t err=%v", inserted, err)
+	}
+	return run, admitted.Agent, attempt, modelAttempt
 }
 
 func assertOpenAPISchemaOmits(t *testing.T, schemas map[string]map[string]any, name string, property string) {

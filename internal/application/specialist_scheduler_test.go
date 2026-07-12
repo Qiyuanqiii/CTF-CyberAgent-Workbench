@@ -14,6 +14,7 @@ import (
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/coordinator"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/store"
@@ -40,10 +41,34 @@ func TestSpecialistSchedulerRunsTwoChildrenConcurrentlyWithinOneLease(t *testing
 	close(provider.release)
 	got := waitForScheduleOutcome(t, done)
 	if got.err != nil || got.result.StopReason != application.SpecialistScheduleRoundLimit ||
+		got.result.ScheduleID == "" || got.result.RecoveredSchedule ||
 		got.result.RoundsCompleted != 1 || got.result.TurnsStarted != 2 ||
 		len(got.result.Turns) != 2 || provider.maximumConcurrency() != 2 {
 		t.Fatalf("bounded concurrent schedule failed: result=%#v max=%d err=%v",
 			got.result, provider.maximumConcurrency(), got.err)
+	}
+	schedule, err := st.GetSpecialistSchedule(context.Background(), got.result.ScheduleID)
+	if err != nil || schedule.Status != domain.SpecialistScheduleCompleted ||
+		schedule.StopReason != string(application.SpecialistScheduleRoundLimit) ||
+		schedule.RoundsCompleted != 1 || schedule.TurnsStarted != 2 ||
+		len(schedule.AgentIDs) != 2 {
+		t.Fatalf("durable schedule summary is invalid: schedule=%#v err=%v", schedule, err)
+	}
+	eventLog, err := st.ListRunEvents(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countEventType(eventLog, events.AgentScheduleStartedEvent) != 1 ||
+		countEventType(eventLog, events.AgentScheduleStoppedEvent) != 1 {
+		t.Fatalf("schedule lifecycle events are incomplete: %#v", eventLog)
+	}
+	for _, event := range eventLog {
+		if (event.Type == events.AgentScheduleStartedEvent ||
+			event.Type == events.AgentScheduleStoppedEvent) &&
+			(strings.Contains(event.PayloadJSON, `"lease_id"`) ||
+				strings.Contains(event.PayloadJSON, `"lease_generation"`)) {
+			t.Fatalf("schedule event exposed internal fencing identity: %s", event.PayloadJSON)
+		}
 	}
 	for index, turn := range got.result.Turns {
 		if turn.AgentID != got.result.AgentIDs[index] ||
@@ -217,6 +242,40 @@ func TestSpecialistSchedulerContainsChildPanicAndCancelsSibling(t *testing.T) {
 	}
 }
 
+func TestSpecialistSchedulerContainsCoordinatorPanicAndFailsSummary(t *testing.T) {
+	provider := newSchedulerBarrierProvider(t, llm.Usage{})
+	st, run, children, _ := newSpecialistSchedulerFixture(t, provider,
+		domain.Budget{MaxTurns: 20}, 4, 64)
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	runner := application.NewSpecialistRunner(&panicAgentListStore{SQLiteStore: st},
+		router, policy.NewDefaultChecker())
+	scheduler := application.NewSpecialistScheduler(runner)
+	result, err := scheduler.Execute(context.Background(), application.SpecialistScheduleRequest{
+		RunID: run.ID, AgentIDs: childIDs(children), MaxRounds: 1,
+	})
+	if apperror.CodeOf(err) != apperror.CodeInternal ||
+		result.StopReason != application.SpecialistScheduleChildError || result.ScheduleID == "" {
+		t.Fatalf("scheduler panic escaped containment: result=%#v code=%s err=%v",
+			result, apperror.CodeOf(err), err)
+	}
+	schedule, loadErr := st.GetSpecialistSchedule(context.Background(), result.ScheduleID)
+	if loadErr != nil || schedule.Status != domain.SpecialistScheduleFailed ||
+		schedule.StopReason != string(application.SpecialistScheduleChildError) ||
+		schedule.ErrorCode != string(apperror.CodeInternal) {
+		t.Fatalf("scheduler panic summary is invalid: schedule=%#v err=%v", schedule, loadErr)
+	}
+	eventLog, loadErr := st.ListRunEvents(context.Background(), run.ID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	for _, event := range eventLog {
+		if strings.Contains(event.PayloadJSON, "must-not-persist-scheduler-panic") {
+			t.Fatalf("scheduler panic payload reached events: %s", event.PayloadJSON)
+		}
+	}
+}
+
 func TestSpecialistSchedulerRechecksAggregateTokenBudget(t *testing.T) {
 	provider := newAggregateBudgetProvider(t)
 	st, run, children, scheduler := newSpecialistSchedulerFixture(t, provider,
@@ -330,6 +389,17 @@ func TestSpecialistSchedulerRecoversStaleAttemptBeforeConcurrentRound(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	usage, err := st.GetRunAgentUsage(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldScheduleID := "schedule-stale-worker-0001"
+	if _, err := st.StartSpecialistSchedule(ctx, domain.SpecialistScheduleStart{
+		ID: oldScheduleID, RunID: run.ID, AgentIDs: childIDs(children), MaxRounds: 2,
+		Lease: oldLease.Lease, UsageBefore: usage, StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	root, found, err := st.GetRootAgent(ctx, run.ID)
 	if err != nil || !found {
 		t.Fatalf("root Agent was not found: found=%t err=%v", found, err)
@@ -346,9 +416,17 @@ func TestSpecialistSchedulerRecoversStaleAttemptBeforeConcurrentRound(t *testing
 	result, err := scheduler.Execute(ctx, application.SpecialistScheduleRequest{
 		RunID: run.ID, AgentIDs: childIDs(children), MaxRounds: 1,
 	})
-	if err != nil || result.RecoveredAttempts != 1 || result.RoundsCompleted != 1 ||
+	if err != nil || result.RecoveredAttempts != 1 || !result.RecoveredSchedule ||
+		result.RoundsCompleted != 1 ||
 		result.TurnsStarted != 2 || result.StopReason != application.SpecialistScheduleRoundLimit {
 		t.Fatalf("stale attempt recovery did not converge: result=%#v err=%v", result, err)
+	}
+	oldSchedule, err := st.GetSpecialistSchedule(ctx, oldScheduleID)
+	if err != nil || oldSchedule.Status != domain.SpecialistScheduleAbandoned ||
+		oldSchedule.StopReason != "worker_lost" || oldSchedule.TurnsStarted != 1 ||
+		oldSchedule.RecoveredAttempts != 1 || oldSchedule.FinishedAt == nil {
+		t.Fatalf("stale schedule was not durably abandoned: schedule=%#v err=%v",
+			oldSchedule, err)
 	}
 	stale, found, err := st.GetAgentAttempt(ctx, staleID)
 	if err != nil || !found || stale.Status != domain.AgentAttemptCrashed ||
@@ -451,6 +529,16 @@ type schedulerBarrierProvider struct {
 	failAgent       string
 	panicAgent      string
 	blockSuccessful bool
+}
+
+type panicAgentListStore struct {
+	*store.SQLiteStore
+}
+
+func (*panicAgentListStore) ListAgentNodes(context.Context,
+	string,
+) ([]domain.AgentNode, error) {
+	panic("must-not-persist-scheduler-panic")
 }
 
 type aggregateBudgetProvider struct {

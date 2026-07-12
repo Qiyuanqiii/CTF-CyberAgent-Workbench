@@ -218,6 +218,11 @@ func (s *SQLiteStore) RecordSpecialistModelStarted(ctx context.Context,
 		modelAttempt.ProtocolRepair, modelAttempt.Provider, modelAttempt.Model, ts(now)); err != nil {
 		return false, err
 	}
+	if err := resolveSupersededSpecialistModelCancellationsTx(ctx, tx,
+		domain.AgentAttemptRef{RunID: attempt.RunID, AgentID: attempt.AgentID,
+			AttemptID: attempt.ID}, modelAttempt.Number, now); err != nil {
+		return false, err
+	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.ModelStartedEvent,
 		"specialist_model_gateway", specialistModelSubject(attempt.ID, modelAttempt.Number), map[string]any{
 			"agent_id": child.ID, "parent_agent_id": child.ParentID, "agent_attempt_id": attempt.ID,
@@ -519,6 +524,11 @@ func (s *SQLiteStore) recordSpecialistModelTerminal(ctx context.Context,
 	}
 	if err := requireSingleAgentAttemptUpdate(result,
 		"Specialist model call changed before terminal commit"); err != nil {
+		return domain.AgentAttempt{}, err
+	}
+	if err := resolveSpecialistModelCancellationTx(ctx, tx,
+		domain.AgentAttemptRef{RunID: attempt.RunID, AgentID: attempt.AgentID,
+			AttemptID: attempt.ID}, modelAttempt.Number, string(modelAttempt.Outcome), now); err != nil {
 		return domain.AgentAttempt{}, err
 	}
 	payload := map[string]any{

@@ -55,6 +55,8 @@ const (
 	AgentAttemptUsageRecordedEvent    = "agent.usage_recorded"
 	AgentTurnCompletedEvent           = "agent.turn_completed"
 	AgentTurnFailedEvent              = "agent.turn_failed"
+	AgentScheduleStartedEvent         = "agent.schedule_started"
+	AgentScheduleStoppedEvent         = "agent.schedule_stopped"
 	AgentProtocolRepairRequestedEvent = "agent.protocol_repair_requested"
 	AgentProtocolRepairStartedEvent   = "agent.protocol_repair_started"
 	AgentProtocolRepairCompletedEvent = "agent.protocol_repair_completed"

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 28
+const LatestSchemaVersion = 29
 
 type migration struct {
 	Version    int
@@ -1747,6 +1747,268 @@ var specialistProtocolRepairStatements = []string{
 				WHERE repair.agent_attempt_id = OLD.id AND repair.status = 'pending')))
 		BEGIN
 			SELECT RAISE(ABORT, 'Agent attempt requires a resolved Specialist repair');
+		END;`,
+}
+
+var specialistScheduleControlStatements = []string{
+	`CREATE TABLE specialist_schedules (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		lease_id TEXT NOT NULL,
+		lease_generation INTEGER NOT NULL,
+		max_rounds INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		stop_reason TEXT NOT NULL DEFAULT '',
+		rounds_completed INTEGER NOT NULL DEFAULT 0,
+		turns_started INTEGER NOT NULL DEFAULT 0,
+		recovered_attempts INTEGER NOT NULL DEFAULT 0,
+		before_root_tokens INTEGER NOT NULL,
+		before_specialist_tokens INTEGER NOT NULL,
+		before_total_tokens INTEGER NOT NULL,
+		before_root_execution_millis INTEGER NOT NULL,
+		before_specialist_execution_millis INTEGER NOT NULL,
+		before_total_execution_millis INTEGER NOT NULL,
+		after_root_tokens INTEGER NOT NULL,
+		after_specialist_tokens INTEGER NOT NULL,
+		after_total_tokens INTEGER NOT NULL,
+		after_root_execution_millis INTEGER NOT NULL,
+		after_specialist_execution_millis INTEGER NOT NULL,
+		after_total_execution_millis INTEGER NOT NULL,
+		error_code TEXT NOT NULL DEFAULT '',
+		started_at TEXT NOT NULL,
+		finished_at TEXT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		CHECK(lease_generation > 0 AND max_rounds BETWEEN 1 AND 32),
+		CHECK(status IN ('running', 'completed', 'failed', 'cancelled', 'abandoned')),
+		CHECK(rounds_completed BETWEEN 0 AND max_rounds
+			AND turns_started >= 0 AND recovered_attempts >= 0),
+		CHECK(before_root_tokens >= 0 AND before_specialist_tokens >= 0
+			AND before_total_tokens = before_root_tokens + before_specialist_tokens),
+		CHECK(before_root_execution_millis >= 0 AND before_specialist_execution_millis >= 0
+			AND before_total_execution_millis = before_root_execution_millis + before_specialist_execution_millis),
+		CHECK(after_root_tokens >= 0 AND after_specialist_tokens >= 0
+			AND after_total_tokens = after_root_tokens + after_specialist_tokens),
+		CHECK(after_root_execution_millis >= 0 AND after_specialist_execution_millis >= 0
+			AND after_total_execution_millis = after_root_execution_millis + after_specialist_execution_millis),
+		CHECK(length(stop_reason) <= 64 AND length(error_code) <= 64),
+		CHECK((status = 'running' AND stop_reason = '' AND error_code = ''
+			AND rounds_completed = 0 AND turns_started = 0 AND recovered_attempts = 0
+			AND before_root_tokens = after_root_tokens
+			AND before_specialist_tokens = after_specialist_tokens
+			AND before_total_tokens = after_total_tokens
+			AND before_root_execution_millis = after_root_execution_millis
+			AND before_specialist_execution_millis = after_specialist_execution_millis
+			AND before_total_execution_millis = after_total_execution_millis
+			AND finished_at IS NULL)
+			OR (status <> 'running' AND length(trim(stop_reason)) BETWEEN 1 AND 64
+				AND finished_at IS NOT NULL))
+	);`,
+	`CREATE TABLE specialist_schedule_agents (
+		schedule_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		agent_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		PRIMARY KEY(schedule_id, ordinal),
+		UNIQUE(schedule_id, agent_id),
+		FOREIGN KEY(schedule_id) REFERENCES specialist_schedules(id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		CHECK(ordinal BETWEEN 1 AND 2)
+	);`,
+	`CREATE UNIQUE INDEX idx_specialist_schedule_one_running
+		ON specialist_schedules(run_id) WHERE status = 'running';`,
+	`CREATE INDEX idx_specialist_schedule_run_started
+		ON specialist_schedules(run_id, started_at, id);`,
+	`CREATE TRIGGER trg_specialist_schedule_insert
+		BEFORE INSERT ON specialist_schedules
+		WHEN NOT EXISTS (
+			SELECT 1 FROM runs run
+			JOIN run_execution_leases lease ON lease.run_id = run.id
+			WHERE run.id = NEW.run_id AND run.status = 'running'
+				AND lease.lease_id = NEW.lease_id
+				AND lease.generation = NEW.lease_generation
+				AND lease.status = 'active' AND julianday(lease.expires_at) > julianday('now')
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist schedule requires its active Run lease');
+		END;`,
+	`CREATE TRIGGER trg_specialist_schedule_agent_insert
+		BEFORE INSERT ON specialist_schedule_agents
+		WHEN NOT EXISTS (
+			SELECT 1 FROM specialist_schedules schedule
+			JOIN agent_nodes child ON child.run_id = schedule.run_id
+				AND child.id = NEW.agent_id
+			JOIN agent_nodes parent ON parent.run_id = child.run_id
+				AND parent.id = child.parent_id
+			WHERE schedule.id = NEW.schedule_id AND schedule.run_id = NEW.run_id
+				AND schedule.status = 'running' AND child.role = 'specialist'
+				AND parent.role = 'root' AND parent.parent_id IS NULL
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist schedule target must be a direct child');
+		END;`,
+	`CREATE TRIGGER trg_specialist_schedule_terminal
+		BEFORE UPDATE OF status, stop_reason, rounds_completed, turns_started,
+			recovered_attempts, after_root_tokens, after_specialist_tokens,
+			after_total_tokens, after_root_execution_millis,
+			after_specialist_execution_millis, after_total_execution_millis,
+			error_code, finished_at ON specialist_schedules
+		WHEN OLD.status <> 'running' OR NEW.status = 'running' OR NOT EXISTS (
+			SELECT 1 FROM run_execution_leases lease
+			WHERE lease.run_id = OLD.run_id AND lease.status = 'active'
+				AND julianday(lease.expires_at) > julianday('now')
+				AND ((lease.lease_id = OLD.lease_id
+					AND lease.generation = OLD.lease_generation)
+					OR (NEW.status = 'abandoned'
+						AND lease.generation > OLD.lease_generation))
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist schedule terminal transition is not fenced');
+		END;`,
+	`CREATE TRIGGER trg_specialist_schedule_identity_immutable
+		BEFORE UPDATE OF id, run_id, lease_id, lease_generation, max_rounds,
+			before_root_tokens, before_specialist_tokens, before_total_tokens,
+			before_root_execution_millis, before_specialist_execution_millis,
+			before_total_execution_millis, started_at ON specialist_schedules
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist schedule identity is immutable');
+		END;`,
+	`CREATE TRIGGER trg_specialist_schedule_terminal_immutable
+		BEFORE UPDATE ON specialist_schedules
+		WHEN OLD.status <> 'running'
+		BEGIN
+			SELECT RAISE(ABORT, 'terminal Specialist schedule is immutable');
+		END;`,
+	`CREATE TRIGGER trg_specialist_schedule_agent_immutable
+		BEFORE UPDATE ON specialist_schedule_agents
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist schedule target is immutable');
+		END;`,
+	`CREATE TABLE specialist_model_cancellations (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		agent_id TEXT NOT NULL,
+		agent_attempt_id TEXT NOT NULL,
+		model_attempt INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		reason TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		requested_at TEXT NOT NULL,
+		observed_at TEXT,
+		resolved_at TEXT,
+		resolution TEXT NOT NULL DEFAULT '',
+		FOREIGN KEY(agent_attempt_id, model_attempt)
+			REFERENCES specialist_model_calls(agent_attempt_id, model_attempt_number) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		UNIQUE(run_id, agent_id, agent_attempt_id, model_attempt),
+		CHECK(model_attempt > 0),
+		CHECK(status IN ('pending', 'observed', 'resolved')),
+		CHECK(length(trim(reason)) BETWEEN 1 AND 1024),
+		CHECK(length(CAST(reason AS BLOB)) <= 4096),
+		CHECK(length(trim(requested_by)) BETWEEN 1 AND 256),
+		CHECK((status = 'pending' AND observed_at IS NULL AND resolved_at IS NULL AND resolution = '')
+			OR (status = 'observed' AND observed_at IS NOT NULL
+				AND resolved_at IS NULL AND resolution = '')
+			OR (status = 'resolved' AND resolved_at IS NOT NULL
+				AND length(trim(resolution)) BETWEEN 1 AND 64))
+	);`,
+	`CREATE INDEX idx_specialist_model_cancellations_pending
+		ON specialist_model_cancellations(run_id, agent_id, agent_attempt_id,
+			model_attempt, status);`,
+	`CREATE TABLE specialist_model_cancellation_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		cancellation_id TEXT NOT NULL UNIQUE,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(cancellation_id) REFERENCES specialist_model_cancellations(id) ON DELETE CASCADE
+	);`,
+	`CREATE TRIGGER trg_specialist_model_cancellation_operation_immutable
+		BEFORE UPDATE ON specialist_model_cancellation_operations
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist model cancellation operation is immutable');
+		END;`,
+	`CREATE TRIGGER trg_specialist_model_cancellation_insert
+		BEFORE INSERT ON specialist_model_cancellations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM specialist_model_calls call
+			JOIN agent_attempts attempt ON attempt.id = call.agent_attempt_id
+			JOIN agent_nodes child ON child.run_id = attempt.run_id
+				AND child.id = attempt.agent_id
+			JOIN runs run ON run.id = attempt.run_id
+			JOIN run_execution_leases lease ON lease.run_id = attempt.run_id
+			WHERE call.agent_attempt_id = NEW.agent_attempt_id
+				AND call.model_attempt_number = NEW.model_attempt
+				AND call.run_id = NEW.run_id AND call.agent_id = NEW.agent_id
+				AND call.status = 'started' AND attempt.run_id = NEW.run_id
+				AND attempt.agent_id = NEW.agent_id AND attempt.status = 'running'
+				AND child.role = 'specialist' AND child.status = 'running'
+				AND child.active_attempt_id = attempt.id AND run.status = 'running'
+				AND lease.lease_id = attempt.lease_id
+				AND lease.generation = attempt.lease_generation
+				AND lease.status = 'active' AND julianday(lease.expires_at) > julianday('now')
+				AND NOT EXISTS (SELECT 1 FROM specialist_model_calls later
+					WHERE later.agent_attempt_id = call.agent_attempt_id
+						AND later.model_attempt_number > call.model_attempt_number)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist model cancellation requires the latest active call');
+		END;`,
+	`CREATE TRIGGER trg_specialist_model_cancellation_transition
+		BEFORE UPDATE OF status, observed_at, resolved_at, resolution
+		ON specialist_model_cancellations
+		WHEN NOT ((OLD.status = 'pending' AND NEW.status IN ('observed', 'resolved'))
+			OR (OLD.status = 'observed' AND NEW.status = 'resolved'))
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist model cancellation transition is invalid');
+		END;`,
+	`CREATE TRIGGER trg_specialist_model_cancellation_observe
+		BEFORE UPDATE OF status ON specialist_model_cancellations
+		WHEN NEW.status = 'observed' AND NOT EXISTS (
+			SELECT 1 FROM specialist_model_calls call
+			JOIN agent_attempts attempt ON attempt.id = call.agent_attempt_id
+			JOIN agent_nodes child ON child.run_id = attempt.run_id AND child.id = attempt.agent_id
+			JOIN runs run ON run.id = attempt.run_id
+			JOIN run_execution_leases lease ON lease.run_id = attempt.run_id
+			WHERE call.agent_attempt_id = OLD.agent_attempt_id
+				AND call.model_attempt_number = OLD.model_attempt
+				AND call.status = 'started' AND attempt.status = 'running'
+				AND child.status = 'running' AND child.active_attempt_id = attempt.id
+				AND run.status = 'running'
+				AND lease.lease_id = attempt.lease_id
+				AND lease.generation = attempt.lease_generation
+				AND lease.status = 'active' AND julianday(lease.expires_at) > julianday('now')
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist model cancellation observation is not fenced');
+		END;`,
+	`CREATE TRIGGER trg_specialist_model_cancellation_resolve
+		BEFORE UPDATE OF status ON specialist_model_cancellations
+		WHEN NEW.status = 'resolved' AND NOT (
+			EXISTS (SELECT 1 FROM specialist_model_calls call
+				WHERE call.agent_attempt_id = OLD.agent_attempt_id
+					AND call.model_attempt_number = OLD.model_attempt
+					AND call.status <> 'started' AND call.outcome = NEW.resolution)
+			OR (NEW.resolution IN ('attempt_terminated', 'worker_lost', 'superseded')
+				AND EXISTS (SELECT 1 FROM agent_attempts attempt
+					WHERE attempt.id = OLD.agent_attempt_id AND attempt.status <> 'running'))
+			OR (NEW.resolution = 'superseded' AND EXISTS (
+				SELECT 1 FROM specialist_model_calls later
+				WHERE later.agent_attempt_id = OLD.agent_attempt_id
+					AND later.model_attempt_number > OLD.model_attempt))
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist model cancellation resolution is invalid');
+		END;`,
+	`CREATE TRIGGER trg_specialist_model_cancellation_identity_immutable
+		BEFORE UPDATE OF id, run_id, agent_id, agent_attempt_id, model_attempt,
+			reason, requested_by, requested_at ON specialist_model_cancellations
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist model cancellation identity is immutable');
+		END;`,
+	`CREATE TRIGGER trg_specialist_model_cancellation_terminal_immutable
+		BEFORE UPDATE ON specialist_model_cancellations
+		WHEN OLD.status = 'resolved'
+		BEGIN
+			SELECT RAISE(ABORT, 'resolved Specialist model cancellation is immutable');
 		END;`,
 }
 

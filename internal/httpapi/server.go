@@ -50,6 +50,8 @@ type Store interface {
 	GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error)
 	GetRunExecutionLease(ctx context.Context, runID string) (domain.RunExecutionLease, bool, error)
 	RequestSupervisorModelCancellation(ctx context.Context, request domain.RequestModelCancellation) (domain.ModelCancellationResult, error)
+	RequestSpecialistModelCancellation(ctx context.Context,
+		request domain.RequestSpecialistModelCancellation) (domain.SpecialistModelCancellationResult, error)
 	GetToolCallUsage(ctx context.Context, runID string) (toolbudget.Usage, error)
 	ListRunSupervisorToolRoundsPage(ctx context.Context, runID string, offset int, limit int) ([]domain.SupervisorToolRound, error)
 
@@ -212,6 +214,10 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 
 	if status, err := validateRequestBoundary(request); err != nil {
 		a.writeError(tracked, requestID, err, status)
+		return
+	}
+	if runID, agentID, matched := matchSpecialistModelCancellationPath(request.URL.Path); matched {
+		a.serveSpecialistModelCancellation(tracked, request, requestID, runID, agentID)
 		return
 	}
 	if runID, matched := matchModelCancellationPath(request.URL.Path); matched {
