@@ -92,8 +92,16 @@ func (a *App) runDelegations(ctx context.Context, args []string) error {
 		} else if found {
 			reviewStatus = string(review.Decision)
 		}
-		fmt.Fprintf(a.out, "%s\tstatus=%s\treview=%s\tassignments=%d\troot=%s\tcreated_at=%s\n",
-			proposal.ID, proposal.Status, reviewStatus, len(proposal.Spec.Assignments), proposal.RootAgentID,
+		applicationStatus := "none"
+		if applied, found, err := a.store.GetSpecialistDelegationApplicationByProposal(ctx,
+			proposal.ID); err != nil {
+			return err
+		} else if found {
+			applicationStatus = string(applied.Status)
+		}
+		fmt.Fprintf(a.out, "%s\tstatus=%s\treview=%s\tapplication=%s\tassignments=%d\troot=%s\tcreated_at=%s\n",
+			proposal.ID, proposal.Status, reviewStatus, applicationStatus,
+			len(proposal.Spec.Assignments), proposal.RootAgentID,
 			proposal.CreatedAt.Format(time.RFC3339Nano))
 	}
 	return nil
@@ -101,11 +109,13 @@ func (a *App) runDelegations(ctx context.Context, args []string) error {
 
 func (a *App) runDelegation(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run delegation [show] <proposal-id> | approve|reject <proposal-id> --operation-key <key>")
+		return errors.New("usage: cyberagent run delegation [show] <proposal-id> | approve|reject|apply <proposal-id> --operation-key <key>")
 	}
 	switch args[0] {
 	case "approve", "reject":
 		return a.runDelegationReview(ctx, args[0], args[1:])
+	case "apply":
+		return a.runDelegationApply(ctx, args[1:])
 	case "show":
 		return a.runDelegationShow(ctx, args[1:])
 	default:
@@ -125,7 +135,7 @@ func (a *App) runDelegationShow(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(a.out, "proposal: %s\nrun: %s\nroot_agent: %s\nstatus: %s\nprotocol: %s\nassignments: %d\nadmission_authorized: false\noperator_review_required: true\ncreated_at: %s\n",
+	fmt.Fprintf(a.out, "proposal: %s\nrun: %s\nroot_agent: %s\nstatus: %s\nprotocol: %s\nassignments: %d\nproposal_admission_authorized: false\noperator_review_required: true\ncreated_at: %s\n",
 		proposal.ID, proposal.RunID, proposal.RootAgentID, proposal.Status,
 		proposal.Spec.Version, len(proposal.Spec.Assignments),
 		proposal.CreatedAt.Format(time.RFC3339Nano))
@@ -144,6 +154,19 @@ func (a *App) runDelegationShow(ctx context.Context, args []string) error {
 		fmt.Fprintf(a.out, "review: %s\nreview_id: %s\nreviewed_by: %s\nreview_reason: %s\nreviewed_at: %s\napplication_required: true\n",
 			review.Decision, review.ID, review.ReviewedBy, review.Reason,
 			review.CreatedAt.Format(time.RFC3339Nano))
+	}
+	if applied, found, err := a.store.GetSpecialistDelegationApplicationByProposal(ctx,
+		proposal.ID); err != nil {
+		return err
+	} else if !found {
+		fmt.Fprintln(a.out, "application: none")
+	} else {
+		fmt.Fprintf(a.out, "application: %s\napplication_id: %s\napplication_version: %d\napplication_stop_code: %s\nscheduling_started: false\n",
+			applied.Status, applied.ID, applied.Version, applied.StopCode)
+		for _, assignment := range applied.Assignments {
+			fmt.Fprintf(a.out, "application_assignment_%d: status=%s agent=%s message=%s\n",
+				assignment.Ordinal, assignment.Status, assignment.AgentID, assignment.MessageID)
+		}
 	}
 	return nil
 }
@@ -176,6 +199,38 @@ func (a *App) runDelegationReview(ctx context.Context, action string, args []str
 	fmt.Fprintf(a.out, "review: %s\nproposal: %s\ndecision: %s\nreviewed_by: %s\nadmission_authorized: false\napplication_required: true\nreplayed: %t\n",
 		result.Review.ID, result.Review.ProposalID, result.Review.Decision,
 		result.Review.ReviewedBy, result.Replayed)
+	return nil
+}
+
+func (a *App) runDelegationApply(ctx context.Context, args []string) error {
+	fs := newFlagSet("run delegation apply", a.errOut)
+	operationKey := fs.String("operation-key", "", "stable application operation key")
+	operator := fs.String("operator", "cli_operator", "operator identity")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"operation-key": true, "operator": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 || strings.TrimSpace(*operationKey) == "" {
+		return errors.New("usage: cyberagent run delegation apply <proposal-id> --operation-key <key> [--operator <id>]")
+	}
+	service, err := application.NewDefaultSpecialistDelegationApplicationService(a.store, a.checker)
+	if err != nil {
+		return err
+	}
+	result, err := service.Apply(ctx, application.ApplySpecialistDelegationRequest{
+		ProposalID: fs.Arg(0), OperationKey: *operationKey, RequestedBy: *operator,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "application: %s\nproposal: %s\nstatus: %s\nassignments: %d\nadmission_authorized: true\nscheduling_started: false\nreplayed: %t\nrecovered: %t\n",
+		result.Application.ID, result.Application.ProposalID, result.Application.Status,
+		result.Application.AssignmentCount, result.Replayed, result.Recovered)
+	for _, assignment := range result.Application.Assignments {
+		fmt.Fprintf(a.out, "%d. status=%s agent=%s message=%s\n", assignment.Ordinal,
+			assignment.Status, assignment.AgentID, assignment.MessageID)
+	}
 	return nil
 }
 

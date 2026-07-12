@@ -58,6 +58,9 @@ func (s *SQLiteStore) StartSpecialistSchedule(ctx context.Context,
 		return domain.SpecialistScheduleStartResult{}, apperror.New(apperror.CodeFailedPrecondition,
 			"Specialist schedule requires a running Run")
 	}
+	if err := requireNoApplyingSpecialistDelegationApplicationTx(ctx, tx, run.ID); err != nil {
+		return domain.SpecialistScheduleStartResult{}, err
+	}
 	recovered := false
 	previous, found, err := getRunningSpecialistScheduleTx(ctx, tx, run.ID)
 	if err != nil {

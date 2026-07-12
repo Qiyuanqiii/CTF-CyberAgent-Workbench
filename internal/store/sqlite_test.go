@@ -209,6 +209,18 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 			t.Fatalf("schema v31 Specialist delegation review table is missing: %q", table)
 		}
 	}
+	for _, name := range []string{"specialist_delegation_applications",
+		"specialist_delegation_application_assignments",
+		"specialist_delegation_application_operations"} {
+		var table string
+		if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master
+			WHERE type = 'table' AND name = ?`, name).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		if table != name {
+			t.Fatalf("schema v32 Specialist delegation application table is missing: %q", table)
+		}
+	}
 	for _, column := range []string{"lease_id", "lease_generation"} {
 		var count int
 		if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('run_supervisor_checkpoints')
@@ -674,7 +686,7 @@ func removeSchemaV30ForTestStatements() []string {
 }
 
 func removeSchemaV31ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV32ForTestStatements(), []string{
 		`DROP TRIGGER trg_specialist_delegation_review_operation_delete_immutable`,
 		`DROP TRIGGER trg_specialist_delegation_review_operation_immutable`,
 		`DROP TRIGGER trg_specialist_delegation_review_delete_immutable`,
@@ -684,6 +696,27 @@ func removeSchemaV31ForTestStatements() []string {
 		`DROP TABLE specialist_delegation_review_operations`,
 		`DROP TABLE specialist_delegation_reviews`,
 		`DELETE FROM schema_migrations WHERE version = 31`,
+	}...)
+}
+
+func removeSchemaV32ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_specialist_delegation_application_operation_delete_immutable`,
+		`DROP TRIGGER trg_specialist_delegation_application_operation_immutable`,
+		`DROP TRIGGER trg_specialist_delegation_application_assignment_delete_immutable`,
+		`DROP TRIGGER trg_specialist_delegation_application_delete_immutable`,
+		`DROP TRIGGER trg_specialist_delegation_application_transition`,
+		`DROP TRIGGER trg_specialist_delegation_application_complete`,
+		`DROP TRIGGER trg_specialist_delegation_application_assignment_instructed`,
+		`DROP TRIGGER trg_specialist_delegation_application_assignment_admitted`,
+		`DROP TRIGGER trg_specialist_delegation_application_assignment_transition`,
+		`DROP TRIGGER trg_specialist_delegation_application_operation_insert`,
+		`DROP TRIGGER trg_specialist_delegation_application_assignment_insert`,
+		`DROP TRIGGER trg_specialist_delegation_application_insert`,
+		`DROP TABLE specialist_delegation_application_operations`,
+		`DROP TABLE specialist_delegation_application_assignments`,
+		`DROP TABLE specialist_delegation_applications`,
+		`DELETE FROM schema_migrations WHERE version = 32`,
 	}
 }
 

@@ -88,6 +88,10 @@ func (s *SQLiteStore) AdmitSpecialist(ctx context.Context, admission domain.Spec
 		}
 		return existing, true, nil
 	}
+	if err := requireSpecialistDelegationApplicationAdmissionTx(ctx, tx, admission.RunID,
+		keyDigest); err != nil {
+		return domain.AgentNode{}, false, err
+	}
 
 	run, mission, err := getCoordinatorRunTx(ctx, tx, admission.RunID)
 	if err != nil {

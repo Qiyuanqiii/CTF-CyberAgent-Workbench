@@ -240,6 +240,9 @@ func (s *SQLiteStore) TransitionRun(ctx context.Context, run domain.Run, expecte
 	if _, err := insertRunEventTx(ctx, tx, event); err != nil {
 		return err
 	}
+	if err := abortSpecialistDelegationApplicationsTx(ctx, tx, run, run.UpdatedAt); err != nil {
+		return err
+	}
 	mission, err := scanMission(tx.QueryRowContext(ctx, `SELECT id, goal, profile, workspace_id, scope_json,
 		created_at, updated_at FROM missions WHERE id = ?`, run.MissionID))
 	if err != nil {

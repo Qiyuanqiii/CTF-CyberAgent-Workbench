@@ -90,6 +90,9 @@ func (s *SQLiteStore) BeginSpecialistAttempt(ctx context.Context, start domain.A
 		return domain.AgentAttempt{}, false,
 			apperror.New(apperror.CodeFailedPrecondition, "Specialist scheduling requires a running Run")
 	}
+	if err := requireNoApplyingSpecialistDelegationApplicationTx(ctx, tx, run.ID); err != nil {
+		return domain.AgentAttempt{}, false, err
+	}
 	child, err := scanAgentNode(tx.QueryRowContext(ctx, agentNodeSelect+` WHERE id = ?`, start.AgentID))
 	if err != nil {
 		return domain.AgentAttempt{}, false, err

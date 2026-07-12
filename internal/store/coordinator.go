@@ -202,6 +202,10 @@ func (s *SQLiteStore) SendAgentMessage(ctx context.Context, message domain.Agent
 		}
 		return existing, true, nil
 	}
+	if err := requireSpecialistDelegationApplicationMessageTx(ctx, tx, message.RunID,
+		keyDigest, message.RecipientAgentID); err != nil {
+		return domain.AgentMessage{}, false, err
+	}
 	recipient, err := scanAgentNode(tx.QueryRowContext(ctx, agentNodeSelect+` WHERE id = ?`, message.RecipientAgentID))
 	if err != nil {
 		return domain.AgentMessage{}, false, err

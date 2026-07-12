@@ -15,6 +15,7 @@ import (
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/store"
 	"cyberagent-workbench/internal/toolgateway"
@@ -151,6 +152,70 @@ func TestRunDelegationReviewCLIIsExplicitAndIdempotent(t *testing.T) {
 	if code != apperror.ExitCode(apperror.New(apperror.CodeConflict, "conflict")) ||
 		!strings.Contains(stderr, "already approved") {
 		t.Fatalf("second decision did not conflict: stderr=%s code=%d", stderr, code)
+	}
+	st, err = store.Open(filepath.Join(home, "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelAttempt := llm.ModelAttempt{
+		Number: 1, TransportAttempt: 1, MaxAttempts: 1,
+		Provider: "test", Model: "test-model",
+	}
+	if inserted, err := st.RecordSupervisorModelStarted(ctx, turn.Checkpoint,
+		modelAttempt); err != nil || !inserted {
+		t.Fatalf("model start failed: inserted=%t err=%v", inserted, err)
+	}
+	modelAttempt.Outcome = llm.OutcomeSuccess
+	response := llm.ChatResponse{
+		Text: "delegation reviewed", Provider: "test", Model: "test-model",
+		Usage: llm.Usage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2},
+	}
+	checkpoint, err := st.RecordSupervisorModelCompleted(ctx, turn.Checkpoint,
+		modelAttempt, response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := st.CompleteSupervisorTurn(ctx, checkpoint, response,
+		domain.RootAction{
+			Version: domain.RootLifecycleVersion, Kind: domain.RootActionContinue,
+			Message: "delegation reviewed",
+		}, policy.Decision{Allowed: true, Reason: "allowed by test Policy"},
+		time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.ReleaseRunExecutionLease(ctx, acquisition.Lease); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	applicationKey := "delegation-cli-application-0001"
+	stdout, stderr, code = executeTestCommand(t, "run", "delegation", "apply", proposalID,
+		"--operation-key", applicationKey)
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "status: applied") ||
+		!strings.Contains(stdout, "admission_authorized: true") ||
+		!strings.Contains(stdout, "scheduling_started: false") ||
+		!strings.Contains(stdout, "replayed: false") || !agentIDPattern.MatchString(stdout) {
+		t.Fatalf("unexpected application output: stdout=%s stderr=%s code=%d", stdout, stderr, code)
+	}
+	stdout, stderr, code = executeTestCommand(t, "run", "delegation", "apply", proposalID,
+		"--operation-key", applicationKey)
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "replayed: true") {
+		t.Fatalf("application replay failed: stdout=%s stderr=%s code=%d", stdout, stderr, code)
+	}
+	stdout, stderr, code = executeTestCommand(t, "run", "delegation", proposalID)
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "application: applied") ||
+		!strings.Contains(stdout, "scheduling_started: false") {
+		t.Fatalf("application detail is incomplete: stdout=%s stderr=%s code=%d", stdout, stderr, code)
+	}
+	stdout, stderr, code = executeTestCommand(t, "run", "delegations", runID)
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "application=applied") {
+		t.Fatalf("application list is incomplete: stdout=%s stderr=%s code=%d", stdout, stderr, code)
+	}
+	stdout, stderr, code = executeTestCommand(t, "run", "graph", runID)
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "nodes: 2") ||
+		!strings.Contains(stdout, "role=specialist") || !strings.Contains(stdout, "status=ready") {
+		t.Fatalf("application graph is incomplete: stdout=%s stderr=%s code=%d", stdout, stderr, code)
 	}
 }
 

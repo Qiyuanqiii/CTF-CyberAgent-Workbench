@@ -70,6 +70,16 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunE
 		return domain.SupervisorTurn{}, apperror.New(apperror.CodeFailedPrecondition,
 			fmt.Sprintf("run %s is %s; supervisor requires running", run.ID, run.Status))
 	}
+	var applyingDelegations int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*)
+		FROM specialist_delegation_applications WHERE run_id = ? AND status = 'applying'`,
+		run.ID).Scan(&applyingDelegations); err != nil {
+		return domain.SupervisorTurn{}, err
+	}
+	if applyingDelegations != 0 {
+		return domain.SupervisorTurn{}, apperror.New(apperror.CodeFailedPrecondition,
+			"root Supervisor is reserved by an active delegation application")
+	}
 	mission, err := scanMission(tx.QueryRowContext(ctx, `SELECT id, goal, profile, workspace_id, scope_json,
 		created_at, updated_at FROM missions WHERE id = ?`, run.MissionID))
 	if err != nil {
@@ -1651,7 +1661,10 @@ func transitionSupervisorRunTx(ctx context.Context, tx *sql.Tx, run *domain.Run,
 		return err
 	}
 	_, err = insertRunEventTx(ctx, tx, statusEvent)
-	return err
+	if err != nil {
+		return err
+	}
+	return abortSpecialistDelegationApplicationsTx(ctx, tx, *run, at)
 }
 
 func supervisorAddCounter(current, delta int64, name string) (int64, error) {
