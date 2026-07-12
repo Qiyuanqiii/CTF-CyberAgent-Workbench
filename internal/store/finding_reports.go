@@ -26,6 +26,16 @@ const findingEvidenceSelect = `SELECT id, report_id, finding_id, run_id, ordinal
 	source_digest, relative_path, line_start, line_end, confidence, created_at
 	FROM finding_evidence`
 
+const findingArtifactEvidenceSelect = `SELECT id, report_id, finding_id, run_id,
+	ordinal, artifact_id, artifact_sha256, artifact_size_bytes, artifact_mime,
+	artifact_stream, artifact_tool, artifact_source_id, artifact_redacted,
+	attached_by, note, created_at
+	FROM finding_artifact_evidence`
+
+const findingValidationSelect = `SELECT id, report_id, finding_id, run_id,
+	from_status, status, decided_by, reason, artifact_evidence_count,
+	artifact_evidence_digest, version, created_at FROM finding_validation_decisions`
+
 func (s *SQLiteStore) EnsureReadOnlyFanoutFindingReport(ctx context.Context,
 	executionID string,
 ) (domain.FindingReport, bool, error) {
@@ -185,6 +195,29 @@ func (s *SQLiteStore) GetFindingReport(ctx context.Context,
 	return getFindingReport(ctx, s.db, id)
 }
 
+func (s *SQLiteStore) GetFinding(ctx context.Context, id string) (domain.Finding, error) {
+	id = strings.TrimSpace(id)
+	if !domain.ValidAgentID(id) || strings.ContainsRune(id, 0) {
+		return domain.Finding{}, apperror.New(
+			apperror.CodeInvalidArgument, "finding id is invalid")
+	}
+	var reportID string
+	if err := s.db.QueryRowContext(ctx, `SELECT report_id FROM findings WHERE id = ?`, id).
+		Scan(&reportID); err != nil {
+		return domain.Finding{}, err
+	}
+	report, err := getFindingReport(ctx, s.db, reportID)
+	if err != nil {
+		return domain.Finding{}, err
+	}
+	for _, finding := range report.Findings {
+		if finding.ID == id {
+			return finding, nil
+		}
+	}
+	return domain.Finding{}, sql.ErrNoRows
+}
+
 func getFindingReport(ctx context.Context, queryer readOnlyFanoutQueryer,
 	id string,
 ) (domain.FindingReport, error) {
@@ -237,6 +270,58 @@ func getFindingReport(ctx context.Context, queryer readOnlyFanoutQueryer,
 	}
 	for index := range report.Findings {
 		report.Findings[index].Evidence = evidenceByFinding[report.Findings[index].ID]
+	}
+	artifactRows, err := queryer.QueryContext(ctx, findingArtifactEvidenceSelect+
+		` WHERE report_id = ? ORDER BY finding_id, ordinal`, id)
+	if err != nil {
+		return domain.FindingReport{}, err
+	}
+	artifactEvidenceByFinding := make(map[string][]domain.FindingArtifactEvidence,
+		len(report.Findings))
+	for artifactRows.Next() {
+		evidence, err := scanFindingArtifactEvidence(artifactRows)
+		if err != nil {
+			_ = artifactRows.Close()
+			return domain.FindingReport{}, err
+		}
+		artifactEvidenceByFinding[evidence.FindingID] = append(
+			artifactEvidenceByFinding[evidence.FindingID], evidence)
+	}
+	if err := artifactRows.Err(); err != nil {
+		_ = artifactRows.Close()
+		return domain.FindingReport{}, err
+	}
+	if err := artifactRows.Close(); err != nil {
+		return domain.FindingReport{}, err
+	}
+	validationRows, err := queryer.QueryContext(ctx, findingValidationSelect+
+		` WHERE report_id = ? ORDER BY finding_id`, id)
+	if err != nil {
+		return domain.FindingReport{}, err
+	}
+	validationByFinding := make(map[string]*domain.FindingValidation, len(report.Findings))
+	for validationRows.Next() {
+		validation, err := scanFindingValidation(validationRows)
+		if err != nil {
+			_ = validationRows.Close()
+			return domain.FindingReport{}, err
+		}
+		copy := validation
+		validationByFinding[validation.FindingID] = &copy
+	}
+	if err := validationRows.Err(); err != nil {
+		_ = validationRows.Close()
+		return domain.FindingReport{}, err
+	}
+	if err := validationRows.Close(); err != nil {
+		return domain.FindingReport{}, err
+	}
+	for index := range report.Findings {
+		findingID := report.Findings[index].ID
+		if evidence, found := artifactEvidenceByFinding[findingID]; found {
+			report.Findings[index].ArtifactEvidence = evidence
+		}
+		report.Findings[index].Validation = validationByFinding[findingID]
 	}
 	if err := report.Validate(); err != nil {
 		return domain.FindingReport{}, apperror.Wrap(
@@ -303,6 +388,7 @@ func scanFinding(row scanner) (domain.Finding, error) {
 	}
 	value.CreatedAt = parseTS(createdAt)
 	value.Evidence = []domain.FindingEvidence{}
+	value.ArtifactEvidence = []domain.FindingArtifactEvidence{}
 	return value, nil
 }
 
@@ -318,4 +404,33 @@ func scanFindingEvidence(row scanner) (domain.FindingEvidence, error) {
 	}
 	value.CreatedAt = parseTS(createdAt)
 	return value, nil
+}
+
+func scanFindingArtifactEvidence(row scanner) (domain.FindingArtifactEvidence, error) {
+	var value domain.FindingArtifactEvidence
+	var redacted int
+	var createdAt string
+	if err := row.Scan(&value.ID, &value.ReportID, &value.FindingID, &value.RunID,
+		&value.Ordinal, &value.ArtifactID, &value.ArtifactSHA256, &value.ArtifactSize,
+		&value.ArtifactMIME, &value.ArtifactStream, &value.ArtifactTool,
+		&value.ArtifactSource, &redacted, &value.AttachedBy, &value.Note,
+		&createdAt); err != nil {
+		return domain.FindingArtifactEvidence{}, err
+	}
+	value.ArtifactRedacted = redacted != 0
+	value.CreatedAt = parseTS(createdAt)
+	return value, value.Validate()
+}
+
+func scanFindingValidation(row scanner) (domain.FindingValidation, error) {
+	var value domain.FindingValidation
+	var createdAt string
+	if err := row.Scan(&value.ID, &value.ReportID, &value.FindingID, &value.RunID,
+		&value.FromStatus, &value.Status, &value.DecidedBy, &value.Reason,
+		&value.ArtifactEvidenceCount, &value.ArtifactEvidenceDigest, &value.Version,
+		&createdAt); err != nil {
+		return domain.FindingValidation{}, err
+	}
+	value.CreatedAt = parseTS(createdAt)
+	return value, value.Validate()
 }

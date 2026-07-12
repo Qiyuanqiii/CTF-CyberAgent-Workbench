@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 35
+const LatestSchemaVersion = 36
 
 type migration struct {
 	Version    int
@@ -3684,6 +3684,240 @@ var findingReportStatements = []string{
 	`CREATE TRIGGER trg_finding_evidence_delete_immutable
 		BEFORE DELETE ON finding_evidence BEGIN
 			SELECT RAISE(ABORT, 'finding evidence cannot be deleted');
+		END;`,
+}
+
+var findingValidationStatements = []string{
+	`CREATE TABLE finding_artifact_evidence (
+		id TEXT PRIMARY KEY,
+		report_id TEXT NOT NULL,
+		finding_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		artifact_id TEXT NOT NULL,
+		artifact_sha256 TEXT NOT NULL,
+		artifact_size_bytes INTEGER NOT NULL,
+		artifact_mime TEXT NOT NULL,
+		artifact_stream TEXT NOT NULL,
+		artifact_tool TEXT NOT NULL,
+		artifact_source_id TEXT NOT NULL,
+		artifact_redacted INTEGER NOT NULL,
+		attached_by TEXT NOT NULL,
+		note TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(report_id) REFERENCES finding_reports(id) ON DELETE RESTRICT,
+		FOREIGN KEY(finding_id) REFERENCES findings(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(artifact_id) REFERENCES run_artifacts(id) ON DELETE RESTRICT,
+		UNIQUE(finding_id, ordinal),
+		UNIQUE(finding_id, artifact_id),
+		CHECK(ordinal BETWEEN 1 AND 64),
+		CHECK(length(artifact_sha256) = 64
+			AND artifact_sha256 = lower(artifact_sha256)
+			AND artifact_sha256 NOT GLOB '*[^0-9a-f]*'),
+		CHECK(artifact_size_bytes BETWEEN 1 AND 4194304),
+		CHECK(artifact_mime = trim(artifact_mime)
+			AND length(artifact_mime) BETWEEN 1 AND 256
+			AND instr(artifact_mime, char(0)) = 0),
+		CHECK(artifact_stream IN ('stdout', 'stderr')),
+		CHECK(artifact_redacted IN (0, 1)),
+		CHECK(artifact_tool = trim(artifact_tool)
+			AND length(artifact_tool) BETWEEN 1 AND 256
+			AND instr(artifact_tool, char(0)) = 0),
+		CHECK(artifact_source_id = trim(artifact_source_id)
+			AND length(artifact_source_id) BETWEEN 1 AND 256
+			AND instr(artifact_source_id, char(0)) = 0),
+		CHECK(attached_by = trim(attached_by) AND length(attached_by) BETWEEN 1 AND 256
+			AND instr(attached_by, char(0)) = 0),
+		CHECK(note = trim(note) AND length(note) BETWEEN 1 AND 2048
+			AND length(CAST(note AS BLOB)) <= 8192 AND instr(note, char(0)) = 0)
+	);`,
+	`CREATE INDEX idx_finding_artifact_evidence_report_finding
+		ON finding_artifact_evidence(report_id, finding_id, ordinal);`,
+	`CREATE TABLE finding_artifact_evidence_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		evidence_id TEXT NOT NULL UNIQUE,
+		finding_id TEXT NOT NULL,
+		artifact_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		attached_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(evidence_id) REFERENCES finding_artifact_evidence(id) ON DELETE RESTRICT,
+		FOREIGN KEY(finding_id) REFERENCES findings(id) ON DELETE RESTRICT,
+		FOREIGN KEY(artifact_id) REFERENCES run_artifacts(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64
+			AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64
+			AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(attached_by = trim(attached_by) AND length(attached_by) BETWEEN 1 AND 256
+			AND instr(attached_by, char(0)) = 0)
+	);`,
+	`CREATE TABLE finding_validation_decisions (
+		id TEXT PRIMARY KEY,
+		report_id TEXT NOT NULL,
+		finding_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		from_status TEXT NOT NULL,
+		status TEXT NOT NULL,
+		decided_by TEXT NOT NULL,
+		reason TEXT NOT NULL,
+		artifact_evidence_count INTEGER NOT NULL,
+		artifact_evidence_digest TEXT NOT NULL,
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(report_id) REFERENCES finding_reports(id) ON DELETE RESTRICT,
+		FOREIGN KEY(finding_id) REFERENCES findings(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(from_status = 'draft'),
+		CHECK(status IN ('validated', 'rejected')),
+		CHECK(decided_by = trim(decided_by) AND length(decided_by) BETWEEN 1 AND 256
+			AND instr(decided_by, char(0)) = 0),
+		CHECK(reason = trim(reason) AND length(reason) BETWEEN 1 AND 2048
+			AND length(CAST(reason AS BLOB)) <= 8192 AND instr(reason, char(0)) = 0),
+		CHECK(artifact_evidence_count BETWEEN 0 AND 64),
+		CHECK(length(artifact_evidence_digest) = 64
+			AND artifact_evidence_digest = lower(artifact_evidence_digest)
+			AND artifact_evidence_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(status != 'validated' OR artifact_evidence_count > 0),
+		CHECK(version = 1)
+	);`,
+	`CREATE INDEX idx_finding_validation_run_created
+		ON finding_validation_decisions(run_id, created_at, id);`,
+	`CREATE TABLE finding_validation_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		validation_id TEXT NOT NULL UNIQUE,
+		finding_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		status TEXT NOT NULL,
+		decided_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(validation_id) REFERENCES finding_validation_decisions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(finding_id) REFERENCES findings(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64
+			AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64
+			AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(status IN ('validated', 'rejected')),
+		CHECK(decided_by = trim(decided_by) AND length(decided_by) BETWEEN 1 AND 256
+			AND instr(decided_by, char(0)) = 0)
+	);`,
+	`CREATE TRIGGER trg_finding_artifact_evidence_insert
+		BEFORE INSERT ON finding_artifact_evidence
+		WHEN NOT EXISTS (
+			SELECT 1 FROM finding_reports report
+			JOIN findings finding ON finding.report_id = report.id
+			JOIN run_artifacts artifact ON artifact.id = NEW.artifact_id
+			WHERE report.id = NEW.report_id AND report.run_id = NEW.run_id
+				AND report.status = 'generated' AND finding.id = NEW.finding_id
+				AND finding.run_id = NEW.run_id AND finding.status = 'draft'
+				AND artifact.run_id = NEW.run_id
+				AND artifact.sha256 = NEW.artifact_sha256
+				AND artifact.size_bytes = NEW.artifact_size_bytes
+				AND artifact.mime = NEW.artifact_mime
+				AND artifact.stream = NEW.artifact_stream
+				AND artifact.tool_name = NEW.artifact_tool
+				AND artifact.source_id = NEW.artifact_source_id
+				AND artifact.redacted = NEW.artifact_redacted
+				AND artifact.created_at <= NEW.created_at
+				AND NEW.ordinal = 1 + (SELECT COUNT(*)
+					FROM finding_artifact_evidence existing
+					WHERE existing.finding_id = NEW.finding_id)
+				AND NOT EXISTS (SELECT 1 FROM finding_validation_decisions decision
+					WHERE decision.finding_id = NEW.finding_id)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'finding Artifact Evidence binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_finding_artifact_evidence_operation_insert
+		BEFORE INSERT ON finding_artifact_evidence_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM finding_artifact_evidence evidence
+			WHERE evidence.id = NEW.evidence_id
+				AND evidence.finding_id = NEW.finding_id
+				AND evidence.artifact_id = NEW.artifact_id
+				AND evidence.run_id = NEW.run_id
+				AND evidence.attached_by = NEW.attached_by
+				AND evidence.created_at = NEW.created_at
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'finding Artifact Evidence operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_finding_validation_insert
+		BEFORE INSERT ON finding_validation_decisions
+		WHEN NOT EXISTS (
+			SELECT 1 FROM finding_reports report
+			JOIN findings finding ON finding.report_id = report.id
+			WHERE report.id = NEW.report_id AND report.run_id = NEW.run_id
+				AND report.status = 'generated' AND finding.id = NEW.finding_id
+				AND finding.run_id = NEW.run_id AND finding.status = NEW.from_status
+				AND NEW.artifact_evidence_count = (SELECT COUNT(*)
+					FROM finding_artifact_evidence evidence
+					WHERE evidence.finding_id = NEW.finding_id)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'finding validation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_finding_validation_operation_insert
+		BEFORE INSERT ON finding_validation_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM finding_validation_decisions decision
+			WHERE decision.id = NEW.validation_id
+				AND decision.finding_id = NEW.finding_id
+				AND decision.run_id = NEW.run_id
+				AND decision.status = NEW.status
+				AND decision.decided_by = NEW.decided_by
+				AND decision.created_at = NEW.created_at
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'finding validation operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_run_artifact_update_immutable
+		BEFORE UPDATE ON run_artifacts BEGIN
+			SELECT RAISE(ABORT, 'run Artifact cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_run_artifact_delete_immutable
+		BEFORE DELETE ON run_artifacts BEGIN
+			SELECT RAISE(ABORT, 'run Artifact cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_finding_artifact_evidence_update_immutable
+		BEFORE UPDATE ON finding_artifact_evidence BEGIN
+			SELECT RAISE(ABORT, 'finding Artifact Evidence cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_finding_artifact_evidence_delete_immutable
+		BEFORE DELETE ON finding_artifact_evidence BEGIN
+			SELECT RAISE(ABORT, 'finding Artifact Evidence cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_finding_artifact_evidence_operation_update_immutable
+		BEFORE UPDATE ON finding_artifact_evidence_operations BEGIN
+			SELECT RAISE(ABORT, 'finding Artifact Evidence operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_finding_artifact_evidence_operation_delete_immutable
+		BEFORE DELETE ON finding_artifact_evidence_operations BEGIN
+			SELECT RAISE(ABORT, 'finding Artifact Evidence operation cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_finding_validation_update_immutable
+		BEFORE UPDATE ON finding_validation_decisions BEGIN
+			SELECT RAISE(ABORT, 'finding validation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_finding_validation_delete_immutable
+		BEFORE DELETE ON finding_validation_decisions BEGIN
+			SELECT RAISE(ABORT, 'finding validation cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_finding_validation_operation_update_immutable
+		BEFORE UPDATE ON finding_validation_operations BEGIN
+			SELECT RAISE(ABORT, 'finding validation operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_finding_validation_operation_delete_immutable
+		BEFORE DELETE ON finding_validation_operations BEGIN
+			SELECT RAISE(ABORT, 'finding validation operation cannot be deleted');
 		END;`,
 }
 

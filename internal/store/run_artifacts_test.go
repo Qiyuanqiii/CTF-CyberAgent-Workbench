@@ -90,11 +90,16 @@ func TestSQLiteRunArtifactCaptureIsIdempotentAuditedAndTamperEvident(t *testing.
 		t.Fatal("expected source-content mismatch rejection")
 	}
 	if _, err := st.db.ExecContext(ctx, `UPDATE run_artifacts SET content = ? WHERE id = ?`,
-		strings.Repeat("x", int(blob.SizeBytes)), artifactID); err != nil {
-		t.Fatal(err)
+		strings.Repeat("x", int(blob.SizeBytes)), artifactID); err == nil ||
+		!strings.Contains(err.Error(), "cannot be updated") {
+		t.Fatalf("Artifact mutation was not frozen: %v", err)
 	}
-	if _, err := st.GetRunArtifact(ctx, artifactID); err == nil || !strings.Contains(err.Error(), "hash") {
-		t.Fatalf("artifact content tampering was not detected: %v", err)
+	if loaded, err := st.GetRunArtifact(ctx, artifactID); err != nil || loaded.Content != blob.Content {
+		t.Fatalf("frozen Artifact changed after rejected mutation: %#v err=%v", loaded, err)
+	}
+	if _, err := st.db.ExecContext(ctx, `DELETE FROM run_artifacts WHERE id = ?`,
+		artifactID); err == nil || !strings.Contains(err.Error(), "cannot be deleted") {
+		t.Fatalf("Artifact deletion was not frozen: %v", err)
 	}
 }
 

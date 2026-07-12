@@ -36,6 +36,8 @@ var delegationReviewIDPattern = regexp.MustCompile(`delegation-review-[0-9]{14}-
 var fanoutPlanIDPattern = regexp.MustCompile(`fanout-plan-[0-9]{14}-[a-f0-9]{12}`)
 var fanoutExecutionIDPattern = regexp.MustCompile(`fanout-execution-[0-9]{14}-[a-f0-9]{12}`)
 var findingReportIDPattern = regexp.MustCompile(`report-[a-f0-9]{64}`)
+var findingArtifactEvidenceIDPattern = regexp.MustCompile(`finding-artifact-evidence-[0-9]{14}-[a-f0-9]{12}`)
+var findingValidationIDPattern = regexp.MustCompile(`finding-validation-[0-9]{14}-[a-f0-9]{12}`)
 
 func executeTestCommand(t *testing.T, args ...string) (string, string, int) {
 	t.Helper()
@@ -76,8 +78,9 @@ func TestRunReadOnlyFanoutCLIPlansThenExecutesThroughReadOnlyGate(t *testing.T) 
 		t.Fatalf("run create failed: %s", stderr)
 	}
 	runID := runIDPattern.FindString(created)
-	if runID == "" {
-		t.Fatalf("run id missing: %s", created)
+	sessionID := sessionIDPattern.FindString(created)
+	if runID == "" || sessionID == "" {
+		t.Fatalf("run or Session id missing: %s", created)
 	}
 	if _, stderr, code := executeTestCommand(t, "run", "start", runID); code != 0 {
 		t.Fatalf("run start failed: %s", stderr)
@@ -151,8 +154,9 @@ func TestRunReadOnlyFanoutCLIPlansThenExecutesThroughReadOnlyGate(t *testing.T) 
 	var findingReport domain.FindingReport
 	if code != 0 || stderr != "" || json.Unmarshal([]byte(reportJSON), &findingReport) != nil ||
 		findingReport.Status != domain.FindingReportGenerated ||
-		findingReport.SourceID != executionID || findingReport.FindingCount != 0 ||
-		findingReport.EvidenceCount != 0 || findingReportIDPattern.FindString(reportJSON) == "" {
+		findingReport.SourceID != executionID || findingReport.FindingCount != 6 ||
+		findingReport.EvidenceCount != 6 || len(findingReport.Findings) != 6 ||
+		findingReport.Severity.Info != 6 || findingReportIDPattern.FindString(reportJSON) == "" {
 		t.Fatalf("fan-out JSON report failed output=%s stderr=%s code=%d",
 			reportJSON, stderr, code)
 	}
@@ -162,12 +166,90 @@ func TestRunReadOnlyFanoutCLIPlansThenExecutesThroughReadOnlyGate(t *testing.T) 
 		t.Fatalf("fan-out report replay drifted output=%s stderr=%s code=%d",
 			reportReplay, stderr, code)
 	}
+	findingID := findingReport.Findings[0].ID
+	artifactProposal, stderr, code := executeTestCommand(t, "session", "send", sessionID,
+		"/run echo report-validation-evidence")
+	toolID := toolIDPattern.FindString(artifactProposal)
+	if code != 0 || stderr != "" || toolID == "" {
+		t.Fatalf("validation Artifact proposal failed output=%s stderr=%s code=%d",
+			artifactProposal, stderr, code)
+	}
+	artifactApproved, stderr, code := executeTestCommand(t, "tool", "approve", toolID)
+	artifactID := artifactIDPattern.FindString(artifactApproved)
+	if code != 0 || stderr != "" || artifactID == "" ||
+		!strings.Contains(artifactApproved, "artifact_stdout_id:") {
+		t.Fatalf("validation Artifact approval failed output=%s stderr=%s code=%d",
+			artifactApproved, stderr, code)
+	}
+	attached, stderr, code := executeTestCommand(t, "report", "finding", "attach",
+		findingID, artifactID, "--operation-key", "report-cli-evidence-0001",
+		"--note", "reproduced with frozen mock output")
+	evidenceID := findingArtifactEvidenceIDPattern.FindString(attached)
+	if code != 0 || stderr != "" || evidenceID == "" ||
+		!strings.Contains(attached, "attached") {
+		t.Fatalf("Artifact Evidence attach failed output=%s stderr=%s code=%d",
+			attached, stderr, code)
+	}
+	attachedReplay, stderr, code := executeTestCommand(t, "report", "finding", "attach",
+		findingID, artifactID, "--operation-key", "report-cli-evidence-0001",
+		"--note", "reproduced with frozen mock output")
+	if code != 0 || stderr != "" ||
+		findingArtifactEvidenceIDPattern.FindString(attachedReplay) != evidenceID ||
+		!strings.Contains(attachedReplay, "reused") {
+		t.Fatalf("Artifact Evidence replay drifted output=%s stderr=%s code=%d",
+			attachedReplay, stderr, code)
+	}
+	validated, stderr, code := executeTestCommand(t, "report", "finding", "validate",
+		findingID, "--operation-key", "report-cli-validation-0001",
+		"--reason", "frozen Artifact confirms the mock workflow")
+	validationID := findingValidationIDPattern.FindString(validated)
+	if code != 0 || stderr != "" || validationID == "" ||
+		!strings.Contains(validated, "status: validated") ||
+		!strings.Contains(validated, "artifact_evidence_count: 1") {
+		t.Fatalf("finding validation failed output=%s stderr=%s code=%d",
+			validated, stderr, code)
+	}
+	validatedReplay, stderr, code := executeTestCommand(t, "report", "finding", "validate",
+		findingID, "--operation-key", "report-cli-validation-0001",
+		"--reason", "frozen Artifact confirms the mock workflow")
+	if code != 0 || stderr != "" ||
+		findingValidationIDPattern.FindString(validatedReplay) != validationID ||
+		!strings.Contains(validatedReplay, "reused") {
+		t.Fatalf("finding validation replay drifted output=%s stderr=%s code=%d",
+			validatedReplay, stderr, code)
+	}
+	verified, stderr, code := executeTestCommand(t, "report", "finding", "verify", findingID)
+	if code != 0 || stderr != "" || !strings.Contains(verified, "status: validated") ||
+		!strings.Contains(verified, "artifact_evidence_count: 1") {
+		t.Fatalf("finding verification failed output=%s stderr=%s code=%d",
+			verified, stderr, code)
+	}
+	_, stderr, code = executeTestCommand(t, "report", "finding", "reject", findingID,
+		"--operation-key", "report-cli-rejection-0001", "--reason", "changed decision")
+	if code != apperror.ExitCode(apperror.New(apperror.CodeConflict, "conflict")) ||
+		!strings.Contains(stderr, "already validated") {
+		t.Fatalf("second finding decision did not conflict stderr=%s code=%d", stderr, code)
+	}
+	validatedJSON, stderr, code := executeTestCommand(t, "report", "show",
+		findingReport.ID, "--format", "json")
+	var validatedReport domain.FindingReport
+	if code != 0 || stderr != "" ||
+		json.Unmarshal([]byte(validatedJSON), &validatedReport) != nil ||
+		validatedReport.ProjectionDigest != findingReport.ProjectionDigest ||
+		validatedReport.Findings[0].Validation == nil ||
+		validatedReport.Findings[0].Validation.Status != domain.FindingStatusValidated ||
+		len(validatedReport.Findings[0].ArtifactEvidence) != 1 {
+		t.Fatalf("validated JSON report drifted output=%s stderr=%s code=%d",
+			validatedJSON, stderr, code)
+	}
 	reportMarkdown, stderr, code := executeTestCommand(t, "report", "show",
 		findingReport.ID, "--format", "markdown")
 	if code != 0 || stderr != "" ||
 		!strings.Contains(reportMarkdown, "# Read-only Fan-out Audit Report") ||
 		!strings.Contains(reportMarkdown, findingReport.ID) ||
-		!strings.Contains(reportMarkdown, "No draft findings were projected") {
+		!strings.Contains(reportMarkdown, "- Validated: 1") ||
+		!strings.Contains(reportMarkdown, "Artifact Evidence:") ||
+		!strings.Contains(reportMarkdown, "Mock review observation") {
 		t.Fatalf("stored Markdown report failed output=%s stderr=%s code=%d",
 			reportMarkdown, stderr, code)
 	}
@@ -187,7 +269,9 @@ func TestRunReadOnlyFanoutCLIPlansThenExecutesThroughReadOnlyGate(t *testing.T) 
 		strings.Count(timeline, events.ReadOnlyFanoutExecutionStartedEvent) != 1 ||
 		strings.Count(timeline, events.ReadOnlyFanoutShardCompletedEvent) != 6 ||
 		strings.Count(timeline, events.ReadOnlyFanoutExecutionCompletedEvent) != 1 ||
-		strings.Count(timeline, events.FindingReportGeneratedEvent) != 1 {
+		strings.Count(timeline, events.FindingReportGeneratedEvent) != 1 ||
+		strings.Count(timeline, events.FindingArtifactEvidenceAttachedEvent) != 1 ||
+		strings.Count(timeline, events.FindingValidationDecidedEvent) != 1 {
 		t.Fatalf("fan-out timeline drifted output=%s stderr=%s code=%d", timeline, stderr, code)
 	}
 }

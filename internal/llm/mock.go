@@ -52,10 +52,26 @@ func (MockProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, e
 			})
 			text = string(encoded)
 		case "readonly_fanout_report.v1":
+			findings := []map[string]any{}
+			var payload struct {
+				Files []struct {
+					Path string `json:"path"`
+				} `json:"files"`
+			}
+			if json.Unmarshal([]byte(last), &payload) == nil && len(payload.Files) > 0 &&
+				strings.TrimSpace(payload.Files[0].Path) != "" {
+				findings = append(findings, map[string]any{
+					"severity": "info", "category": "mock",
+					"title":  "Mock review observation",
+					"detail": "Deterministic mock finding for workflow verification.",
+					"path":   payload.Files[0].Path, "line_start": 1, "line_end": 1,
+					"confidence": 100,
+				})
+			}
 			encoded, _ := json.Marshal(map[string]any{
 				"version":  "readonly_fanout_report.v1",
 				"summary":  "Mock read-only audit completed for the assigned shard.",
-				"findings": []any{},
+				"findings": findings,
 			})
 			text = string(encoded)
 		}

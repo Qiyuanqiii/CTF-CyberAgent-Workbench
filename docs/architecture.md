@@ -161,6 +161,8 @@ Schema v34 implements that reread gate without changing the Agent graph. `ReadOn
 
 Schema v35 adds the first generic Finding/Evidence/Report projection without another model boundary. A completed read-only Fan-out execution is the immutable source. Go fingerprints severity, category, title, detail, path, and line range exactly; only equal facts deduplicate, severity disagreement remains separate, and duplicate confidence becomes the conservative minimum. Each source assertion remains an immutable `model_assertion` Evidence record bound to its v34 fingerprint and shard report digest. `finding_reports` is inserted as `building`, then can transition once to `generated` only when SQLite verifies source bindings, grouped/source counts, severity totals, and contiguous Finding/Evidence ordinals. Generated rows cannot be updated or deleted. Renderers rebuild byte-stable Markdown/JSON from SQLite. Every Finding starts `draft`: this projection records a model claim and provenance, not validation or acceptance.
 
+Schema v36 adds validation as an additive overlay instead of mutating that source projection. `finding_artifact_evidence` snapshots the identity, SHA-256, size, MIME, stream, tool, source, and redaction flag of one same-Run `run_artifacts` row after Go rereads and validates the full blob. Update/delete triggers freeze all Run Artifacts and every new evidence, decision, and operation row. A Finding may receive one `draft -> validated|rejected` decision; validation requires at least one Artifact Evidence record, while rejection may have none. The decision stores the exact ordered Evidence count and digest. Evidence cannot be appended after a decision. Separate digest-only operation ledgers make both mutations replay-safe across processes, while `finding.evidence_attached` and `finding.validation_decided` omit notes, reasons, and Artifact content. The v35 source projection digest deliberately excludes this overlay.
+
 Live call subscribers receive a versioned metadata-only envelope for snapshot, progress, cancellation request, completion, and failure. Each subscriber has a 32-event buffer; a slow subscriber is closed instead of blocking the Provider. This transient stream has no replay guarantee and intentionally has no model-text field. Future user-facing text streaming needs a separate Go-owned redaction and lifecycle-projection boundary.
 
 If a response fails strict `root_lifecycle.v1` parsing, the Supervisor persists a redacted diagnostic and requests exactly one protocol repair without replaying the raw output. Repair transport retries use their own bounded counter. Pending repair resumes after restart, exhausted repair never calls the Provider again, and request/start/completion/failure transitions are append-only Run events. Only a validated repaired response can reach Session history.
@@ -186,7 +188,7 @@ Schema v19 implements that first single-root slice. Every new Run receives one s
 
 The current hard limits are one root plus at most two depth-one children, at most two assignments per core delegation proposal, one immutable review and application per proposal, eight turns and 16,384 tokens per application-created child, 16 assigned Skills, 128 pending and 4,096 historical messages per inbox, 32 messages per manual consume batch, four root-context messages per Supervisor turn, four parent instructions per Specialist attempt, one child protocol repair per Attempt, 32 retained snapshots, and 32 internal scheduling rounds. The separate read-only Fan-out accepts execution caps of 1/2/4/6 without creating Agent nodes and permits at most three crash-recovery attempts per shard. Inbox payloads must be JSON objects with bounded ASCII field names; secret-shaped keys are rejected while string values pass through recursive redaction. Snapshot metadata includes a hash of each pending payload rather than a second payload copy. Schema v20 makes send intent idempotent through digest-only operation facts and gives `wake`/`dependency` strict semantics. Schema v21 keeps child admission absent from the default Coordinator and enables it only through an explicit Go-internal policy with parent-Skill subsets, dedicated Sessions, positive budget reservations, and root headroom. Schema v25 admits only protocol-backed direct-child messages into root context. Schema v26 adds one explicitly invoked internal child turn, schema v27 gives that turn recoverable direct-parent instructions plus bounded child-owned memory, schema v28 adds one isolated child lifecycle repair, schema v29 persists schedule boundaries plus exact child cancellation, schema v30 persists review-required root delegation suggestions, schema v31 records a separate non-authorizing operator decision, schema v32 applies it through existing admission/instruction paths without starting execution, schema v33 freezes a read-only Fan-out manifest, and schema v34 executes it through a lease-fenced no-tool gate. The current Go-internal Specialist scheduler can run two explicit ready children concurrently, but no public/model-driven approval, application, spawn, or autonomous scheduler exists.
 
-The first v35 report projection accepts at most 192 source Evidence rows and 192 draft Findings, matching six shards times the v34 per-shard limit of 32. A report with no model findings is valid and still carries a stable projection digest.
+The first v35 report projection accepts at most 192 source Evidence rows and 192 draft Findings, matching six shards times the v34 per-shard limit of 32. A report with no model findings is valid and still carries a stable projection digest. Schema v36 permits at most 64 Artifact Evidence records per Finding and exactly one operator decision.
 
 Schema v22 establishes Agent-owned Run memory without granting the model an identity selector. WorkItems and Notes retain the legacy bounded `owner` label and add nullable `owner_agent_id` references. Application and Store validation require normalized identity; transactional Store checks reject missing, terminal, or cross-Run owners; SQLite foreign keys and same-Run insert/update triggers defend direct writes. A Note may retain Agent ownership under `run` or `root` visibility, while `owner` visibility is evaluated against the viewer Agent. Agent-only private Notes mirror the Agent ID into the legacy label so v10's established CHECK constraint and old readers remain valid. Supervisor and CLI structured-memory calls inject the root identity from Go-owned Run state, and the model-facing tool schema has no `owner_agent_id` property.
 
@@ -325,9 +327,9 @@ Skills are versioned knowledge packages with metadata, applicability rules, prom
 
 ## Findings and Reports
 
-A finding is not accepted because a model stated it. Schema v35 therefore projects every Fan-out result as `draft` and labels its provenance `model_assertion`. It must later acquire independently validated or Artifact-backed evidence before acceptance. Generic finding categories include code defect, security weakness, failed test, policy violation, and improvement opportunity.
+A finding is not accepted because a model stated it. Schema v35 therefore projects every Fan-out result as `draft` and labels its provenance `model_assertion`. Schema v36 lets an operator attach frozen, same-Run Artifact Evidence and make one immutable `validated` or `rejected` decision. Validation is still distinct from acceptance: `accepted` and `fixed` transitions are intentionally unavailable. Generic finding categories include code defect, security weakness, failed test, policy violation, and improvement opportunity.
 
-Reports are projections built from persisted state, not mutable globals. Schema v35 provides deterministic Markdown and JSON with a stable projection digest. Deduplication is exact and Go-owned; optional model-assisted comparison cannot become authoritative. SARIF, CI annotations, validation transitions, and Artifact-backed evidence follow.
+Reports are projections built from persisted state, not mutable globals. Schema v35 provides deterministic Markdown and JSON with a stable source projection digest; schema v36 renders its validation overlay without changing that digest. Deduplication and validation rules are Go-owned. Optional model-assisted comparison cannot become authoritative. SARIF, CI annotations, acceptance, and remediation tracking follow.
 
 ## Events and Interfaces
 
@@ -350,6 +352,7 @@ readonly_fanout.shard_started / readonly_fanout.shard_completed
 readonly_fanout.shard_failed / readonly_fanout.shard_cancelled
 readonly_fanout.execution_completed / readonly_fanout.execution_failed / readonly_fanout.execution_cancelled
 report.generated
+finding.evidence_attached / finding.validation_decided
 supervisor.protocol_repair_requested / supervisor.protocol_repair_started
 supervisor.protocol_repair_completed / supervisor.protocol_repair_failed
 model.delta (bounded, text-free stream progress)
@@ -372,7 +375,7 @@ CLI and headless mode print persisted events. Bubble Tea consumes the bounded in
 
 ## Persistence
 
-SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, `v6` adds cumulative model budgets, `v7`-`v18` add resumable Supervisor, memory, approval, tool, Artifact, lease, and cancellation ledgers, `v19`-`v29` add the bounded Agent graph, inbox, Specialist runtime, context, repair, scheduling, and cancellation ledgers, `v30`-`v32` add review-gated core delegation proposal/review/application, `v33` freezes read-only Fan-out plans, `v34` adds lease-fenced Fan-out execution, and `v35` adds immutable generic Finding/Evidence/Report projections. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
+SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, `v6` adds cumulative model budgets, `v7`-`v18` add resumable Supervisor, memory, approval, tool, Artifact, lease, and cancellation ledgers, `v19`-`v29` add the bounded Agent graph, inbox, Specialist runtime, context, repair, scheduling, and cancellation ledgers, `v30`-`v32` add review-gated core delegation proposal/review/application, `v33` freezes read-only Fan-out plans, `v34` adds lease-fenced Fan-out execution, `v35` adds immutable generic Finding/Evidence/Report projections, and `v36` adds frozen Artifact Evidence plus immutable operator validation. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
 
 ```text
 missions
@@ -421,10 +424,14 @@ readonly_fanout_findings
 finding_reports
 findings
 finding_evidence
+finding_artifact_evidence
+finding_artifact_evidence_operations
+finding_validation_decisions
+finding_validation_operations
 agent_graph_snapshots
 ```
 
-Later migrations add validation-transition history, Artifact-backed evidence, SARIF projections, and CI annotations.
+Later migrations add acceptance/remediation history, SARIF projections, and CI annotations.
 
 Existing tables remain available during migration. JSON files may be exported for portability but are not authoritative state.
 

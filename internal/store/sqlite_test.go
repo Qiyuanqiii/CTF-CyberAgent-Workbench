@@ -254,6 +254,30 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 			t.Fatalf("schema v35 finding report table is missing: %q", table)
 		}
 	}
+	for _, name := range []string{"finding_artifact_evidence",
+		"finding_artifact_evidence_operations", "finding_validation_decisions",
+		"finding_validation_operations"} {
+		var table string
+		if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master
+			WHERE type = 'table' AND name = ?`, name).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		if table != name {
+			t.Fatalf("schema v36 finding validation table is missing: %q", table)
+		}
+	}
+	for _, name := range []string{"trg_run_artifact_update_immutable",
+		"trg_run_artifact_delete_immutable", "trg_finding_artifact_evidence_insert",
+		"trg_finding_validation_insert"} {
+		var trigger string
+		if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master
+			WHERE type = 'trigger' AND name = ?`, name).Scan(&trigger); err != nil {
+			t.Fatal(err)
+		}
+		if trigger != name {
+			t.Fatalf("schema v36 validation trigger is missing: %q", trigger)
+		}
+	}
 	for _, column := range []string{"lease_id", "lease_generation"} {
 		var count int
 		if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('run_supervisor_checkpoints')
@@ -807,7 +831,7 @@ func removeSchemaV34ForTestStatements() []string {
 }
 
 func removeSchemaV35ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV36ForTestStatements(), []string{
 		`DROP TRIGGER trg_finding_evidence_delete_immutable`,
 		`DROP TRIGGER trg_finding_evidence_update_immutable`,
 		`DROP TRIGGER trg_finding_delete_immutable`,
@@ -821,6 +845,30 @@ func removeSchemaV35ForTestStatements() []string {
 		`DROP TABLE findings`,
 		`DROP TABLE finding_reports`,
 		`DELETE FROM schema_migrations WHERE version = 35`,
+	}...)
+}
+
+func removeSchemaV36ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_finding_validation_operation_delete_immutable`,
+		`DROP TRIGGER trg_finding_validation_operation_update_immutable`,
+		`DROP TRIGGER trg_finding_validation_delete_immutable`,
+		`DROP TRIGGER trg_finding_validation_update_immutable`,
+		`DROP TRIGGER trg_finding_artifact_evidence_operation_delete_immutable`,
+		`DROP TRIGGER trg_finding_artifact_evidence_operation_update_immutable`,
+		`DROP TRIGGER trg_finding_artifact_evidence_delete_immutable`,
+		`DROP TRIGGER trg_finding_artifact_evidence_update_immutable`,
+		`DROP TRIGGER trg_run_artifact_delete_immutable`,
+		`DROP TRIGGER trg_run_artifact_update_immutable`,
+		`DROP TRIGGER trg_finding_validation_operation_insert`,
+		`DROP TRIGGER trg_finding_validation_insert`,
+		`DROP TRIGGER trg_finding_artifact_evidence_operation_insert`,
+		`DROP TRIGGER trg_finding_artifact_evidence_insert`,
+		`DROP TABLE finding_validation_operations`,
+		`DROP TABLE finding_validation_decisions`,
+		`DROP TABLE finding_artifact_evidence_operations`,
+		`DROP TABLE finding_artifact_evidence`,
+		`DELETE FROM schema_migrations WHERE version = 36`,
 	}
 }
 

@@ -75,6 +75,35 @@ func TestMockProviderSpecialistLifecycleResponse(t *testing.T) {
 	}
 }
 
+func TestMockProviderReadOnlyFanoutFindingIsDeterministicAndPathBound(t *testing.T) {
+	provider := NewMockProvider()
+	request := ChatRequest{
+		Model: "mock-code", JSONMode: true,
+		Messages: []Message{{Role: "user", Content: `{"files":[{"path":"src/a.go","content":"package a"}]}`}},
+		Metadata: map[string]string{"response_schema": "readonly_fanout_report.v1"},
+	}
+	first, err := provider.Chat(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := provider.Chat(context.Background(), request)
+	if err != nil || first.Text != second.Text {
+		t.Fatalf("mock fan-out response drifted: err=%v first=%s second=%s",
+			err, first.Text, second.Text)
+	}
+	var report struct {
+		Findings []struct {
+			Severity string `json:"severity"`
+			Path     string `json:"path"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(first.Text), &report); err != nil ||
+		len(report.Findings) != 1 || report.Findings[0].Severity != "info" ||
+		report.Findings[0].Path != "src/a.go" {
+		t.Fatalf("unexpected mock fan-out report: %#v err=%v", report, err)
+	}
+}
+
 func TestRouterDefaultRoutes(t *testing.T) {
 	router := NewDefaultRouter()
 	resp, err := router.Chat(context.Background(), "script", ChatRequest{

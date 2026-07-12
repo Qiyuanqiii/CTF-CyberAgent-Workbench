@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -19,6 +20,8 @@ const (
 	MaxFindingReportFindings                   = MaxReadOnlyFanoutParallelism * MaxReadOnlyFanoutFindings
 	MaxFindingReportEvidence                   = MaxFindingReportFindings
 	MaxFindingReportTitleRunes                 = 256
+	MaxFindingArtifactEvidence                 = 64
+	MaxFindingValidationTextRunes              = 2048
 )
 
 type FindingSeverity string
@@ -144,24 +147,153 @@ func (e FindingEvidence) Validate() error {
 	return nil
 }
 
+type FindingArtifactEvidence struct {
+	ID               string    `json:"id"`
+	ReportID         string    `json:"report_id"`
+	FindingID        string    `json:"finding_id"`
+	RunID            string    `json:"run_id"`
+	Ordinal          int       `json:"ordinal"`
+	ArtifactID       string    `json:"artifact_id"`
+	ArtifactSHA256   string    `json:"artifact_sha256"`
+	ArtifactSize     int64     `json:"artifact_size_bytes"`
+	ArtifactMIME     string    `json:"artifact_mime"`
+	ArtifactStream   string    `json:"artifact_stream"`
+	ArtifactTool     string    `json:"artifact_tool"`
+	ArtifactSource   string    `json:"artifact_source_id"`
+	ArtifactRedacted bool      `json:"artifact_redacted"`
+	AttachedBy       string    `json:"attached_by"`
+	Note             string    `json:"note"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+func (e FindingArtifactEvidence) Validate() error {
+	for _, value := range []string{e.ID, e.ReportID, e.FindingID, e.RunID,
+		e.ArtifactID, e.ArtifactTool, e.ArtifactSource, e.AttachedBy} {
+		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {
+			return errors.New("finding Artifact Evidence identities are invalid")
+		}
+	}
+	if e.Ordinal <= 0 || e.Ordinal > MaxFindingArtifactEvidence ||
+		!validLowerHexDigest(e.ArtifactSHA256) || e.ArtifactSize <= 0 ||
+		e.ArtifactSize > 4*1024*1024 ||
+		(e.ArtifactStream != "stdout" && e.ArtifactStream != "stderr") ||
+		!validFindingValidationText(e.Note) || e.CreatedAt.IsZero() {
+		return errors.New("finding Artifact Evidence is invalid")
+	}
+	if strings.TrimSpace(e.ArtifactMIME) != e.ArtifactMIME ||
+		len([]byte(e.ArtifactMIME)) > 256 {
+		return errors.New("finding Artifact Evidence MIME is invalid")
+	}
+	if _, _, err := mime.ParseMediaType(e.ArtifactMIME); err != nil {
+		return errors.New("finding Artifact Evidence MIME is invalid")
+	}
+	return nil
+}
+
+type FindingValidation struct {
+	ID                     string        `json:"id"`
+	ReportID               string        `json:"report_id"`
+	FindingID              string        `json:"finding_id"`
+	RunID                  string        `json:"run_id"`
+	FromStatus             FindingStatus `json:"from_status"`
+	Status                 FindingStatus `json:"status"`
+	DecidedBy              string        `json:"decided_by"`
+	Reason                 string        `json:"reason"`
+	ArtifactEvidenceCount  int           `json:"artifact_evidence_count"`
+	ArtifactEvidenceDigest string        `json:"artifact_evidence_digest"`
+	Version                int64         `json:"version"`
+	CreatedAt              time.Time     `json:"created_at"`
+}
+
+func (v FindingValidation) Validate() error {
+	for _, value := range []string{v.ID, v.ReportID, v.FindingID, v.RunID, v.DecidedBy} {
+		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {
+			return errors.New("finding validation identities are invalid")
+		}
+	}
+	if v.FromStatus != FindingStatusDraft ||
+		(v.Status != FindingStatusValidated && v.Status != FindingStatusRejected) ||
+		!validFindingValidationText(v.Reason) || v.ArtifactEvidenceCount < 0 ||
+		v.ArtifactEvidenceCount > MaxFindingArtifactEvidence ||
+		!validLowerHexDigest(v.ArtifactEvidenceDigest) || v.Version != 1 ||
+		v.CreatedAt.IsZero() ||
+		(v.Status == FindingStatusValidated && v.ArtifactEvidenceCount == 0) {
+		return errors.New("finding validation is invalid")
+	}
+	return nil
+}
+
+type FindingArtifactEvidenceOperation struct {
+	KeyDigest          string
+	RequestFingerprint string
+	EvidenceID         string
+	FindingID          string
+	ArtifactID         string
+	RunID              string
+	AttachedBy         string
+	CreatedAt          time.Time
+}
+
+func (o FindingArtifactEvidenceOperation) Validate() error {
+	for _, value := range []string{o.EvidenceID, o.FindingID, o.ArtifactID,
+		o.RunID, o.AttachedBy} {
+		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {
+			return errors.New("finding Artifact Evidence operation identities are invalid")
+		}
+	}
+	if !validLowerHexDigest(o.KeyDigest) ||
+		!validLowerHexDigest(o.RequestFingerprint) || o.CreatedAt.IsZero() {
+		return errors.New("finding Artifact Evidence operation is invalid")
+	}
+	return nil
+}
+
+type FindingValidationOperation struct {
+	KeyDigest          string
+	RequestFingerprint string
+	ValidationID       string
+	FindingID          string
+	RunID              string
+	Status             FindingStatus
+	DecidedBy          string
+	CreatedAt          time.Time
+}
+
+func (o FindingValidationOperation) Validate() error {
+	for _, value := range []string{o.ValidationID, o.FindingID, o.RunID, o.DecidedBy} {
+		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {
+			return errors.New("finding validation operation identities are invalid")
+		}
+	}
+	if !validLowerHexDigest(o.KeyDigest) ||
+		!validLowerHexDigest(o.RequestFingerprint) ||
+		(o.Status != FindingStatusValidated && o.Status != FindingStatusRejected) ||
+		o.CreatedAt.IsZero() {
+		return errors.New("finding validation operation is invalid")
+	}
+	return nil
+}
+
 type Finding struct {
-	ID           string            `json:"id"`
-	ReportID     string            `json:"report_id"`
-	RunID        string            `json:"run_id"`
-	Ordinal      int               `json:"ordinal"`
-	Fingerprint  string            `json:"fingerprint"`
-	Status       FindingStatus     `json:"status"`
-	Severity     FindingSeverity   `json:"severity"`
-	Category     string            `json:"category"`
-	Title        string            `json:"title"`
-	Detail       string            `json:"detail"`
-	RelativePath string            `json:"relative_path"`
-	LineStart    int               `json:"line_start"`
-	LineEnd      int               `json:"line_end"`
-	Confidence   int               `json:"confidence"`
-	Version      int64             `json:"version"`
-	CreatedAt    time.Time         `json:"created_at"`
-	Evidence     []FindingEvidence `json:"evidence"`
+	ID               string                    `json:"id"`
+	ReportID         string                    `json:"report_id"`
+	RunID            string                    `json:"run_id"`
+	Ordinal          int                       `json:"ordinal"`
+	Fingerprint      string                    `json:"fingerprint"`
+	Status           FindingStatus             `json:"status"`
+	Severity         FindingSeverity           `json:"severity"`
+	Category         string                    `json:"category"`
+	Title            string                    `json:"title"`
+	Detail           string                    `json:"detail"`
+	RelativePath     string                    `json:"relative_path"`
+	LineStart        int                       `json:"line_start"`
+	LineEnd          int                       `json:"line_end"`
+	Confidence       int                       `json:"confidence"`
+	Version          int64                     `json:"version"`
+	CreatedAt        time.Time                 `json:"created_at"`
+	Evidence         []FindingEvidence         `json:"evidence"`
+	ArtifactEvidence []FindingArtifactEvidence `json:"artifact_evidence,omitempty"`
+	Validation       *FindingValidation        `json:"validation,omitempty"`
 }
 
 func (f Finding) Validate() error {
@@ -205,6 +337,37 @@ func (f Finding) Validate() error {
 			return errors.New("finding evidence source is duplicated")
 		}
 		seenSources[sourceKey] = struct{}{}
+	}
+	seenArtifacts := make(map[string]struct{}, len(f.ArtifactEvidence))
+	for index, evidence := range f.ArtifactEvidence {
+		if err := evidence.Validate(); err != nil {
+			return err
+		}
+		if evidence.ReportID != f.ReportID || evidence.FindingID != f.ID ||
+			evidence.RunID != f.RunID || evidence.Ordinal != index+1 {
+			return errors.New("finding Artifact Evidence projection is inconsistent")
+		}
+		if _, found := seenArtifacts[evidence.ArtifactID]; found {
+			return errors.New("finding Artifact Evidence is duplicated")
+		}
+		seenArtifacts[evidence.ArtifactID] = struct{}{}
+	}
+	if len(f.ArtifactEvidence) > MaxFindingArtifactEvidence {
+		return errors.New("finding has too much Artifact Evidence")
+	}
+	if f.Validation != nil {
+		if err := f.Validation.Validate(); err != nil {
+			return err
+		}
+		if f.Validation.ReportID != f.ReportID || f.Validation.FindingID != f.ID ||
+			f.Validation.RunID != f.RunID ||
+			f.Validation.ArtifactEvidenceCount != len(f.ArtifactEvidence) {
+			return errors.New("finding validation projection is inconsistent")
+		}
+		digest, err := FindingArtifactEvidenceDigest(f.ArtifactEvidence)
+		if err != nil || digest != f.Validation.ArtifactEvidenceDigest {
+			return errors.New("finding validation Evidence digest is inconsistent")
+		}
 	}
 	return nil
 }
@@ -276,11 +439,31 @@ func FindingReportProjectionDigest(report FindingReport) (string, error) {
 	type projection FindingReport
 	copy := projection(report)
 	copy.ProjectionDigest = ""
+	copy.Findings = append([]Finding(nil), report.Findings...)
+	for index := range copy.Findings {
+		copy.Findings[index].ArtifactEvidence = nil
+		copy.Findings[index].Validation = nil
+	}
 	encoded, err := json.Marshal(copy)
 	if err != nil {
 		return "", err
 	}
 	return findingReportDigest("finding_report_projection.v1", string(encoded)), nil
+}
+
+func FindingArtifactEvidenceDigest(evidence []FindingArtifactEvidence) (string, error) {
+	encoded, err := json.Marshal(evidence)
+	if err != nil {
+		return "", err
+	}
+	return findingReportDigest("finding_artifact_evidence.v1", string(encoded)), nil
+}
+
+func validFindingValidationText(value string) bool {
+	return value != "" && utf8.ValidString(value) && strings.TrimSpace(value) == value &&
+		!strings.ContainsRune(value, 0) &&
+		utf8.RuneCountInString(value) <= MaxFindingValidationTextRunes &&
+		len([]byte(value)) <= MaxFindingValidationTextRunes*4
 }
 
 func findingReportDigest(parts ...string) string {

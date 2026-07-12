@@ -123,6 +123,68 @@ func TestRenderFindingReportIsDeterministicAndEscapesMarkdown(t *testing.T) {
 	}
 }
 
+func TestFindingValidationOverlayPreservesSourceProjectionAndEscapesNarrative(t *testing.T) {
+	findings := []domain.ReadOnlyFanoutFinding{{
+		Severity: domain.ReadOnlyFindingHigh, Category: "security",
+		Title: "Validated boundary", Detail: "A bounded claim.",
+		Path: "src/module-a.go", LineStart: 3, LineEnd: 3, Confidence: 80,
+	}}
+	execution, reportDigest := completedProjectionExecution(t, findings)
+	projected, err := ProjectReadOnlyFanout(execution, []ReadOnlyFanoutSourceFinding{{
+		ShardOrdinal: 1, Ordinal: 1, Fingerprint: strings.Repeat("f", 64),
+		ReportDigest: reportDigest, Finding: findings[0],
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceProjectionDigest := projected.ProjectionDigest
+	createdAt := projected.Findings[0].CreatedAt.Add(time.Second)
+	projected.Findings[0].ArtifactEvidence = []domain.FindingArtifactEvidence{{
+		ID: "artifact-evidence-render", ReportID: projected.ID,
+		FindingID: projected.Findings[0].ID, RunID: projected.RunID, Ordinal: 1,
+		ArtifactID: "artifact-render", ArtifactSHA256: strings.Repeat("a", 64),
+		ArtifactSize: 24, ArtifactMIME: "text/plain; charset=utf-8",
+		ArtifactStream: "stdout", ArtifactTool: "shell",
+		ArtifactSource: "tool-render", ArtifactRedacted: true, AttachedBy: "operator",
+		Note: "confirmed | evidence <tag>", CreatedAt: createdAt,
+	}}
+	evidenceDigest, err := domain.FindingArtifactEvidenceDigest(
+		projected.Findings[0].ArtifactEvidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected.Findings[0].Validation = &domain.FindingValidation{
+		ID: "finding-validation-render", ReportID: projected.ID,
+		FindingID: projected.Findings[0].ID, RunID: projected.RunID,
+		FromStatus: domain.FindingStatusDraft, Status: domain.FindingStatusValidated,
+		DecidedBy: "operator", Reason: "verified # decision </section>",
+		ArtifactEvidenceCount: 1, ArtifactEvidenceDigest: evidenceDigest,
+		Version: 1, CreatedAt: createdAt.Add(time.Second),
+	}
+	if err := projected.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	recomputed, err := domain.FindingReportProjectionDigest(projected)
+	if err != nil || recomputed != sourceProjectionDigest {
+		t.Fatalf("validation changed source projection digest: got=%s want=%s err=%v",
+			recomputed, sourceProjectionDigest, err)
+	}
+	encoded, err := Render(projected, FormatMarkdown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	for _, expected := range []string{
+		"- Validated: 1", "- Artifact Evidence records: 1", "- Status: `validated`",
+		"Model assertion evidence:", "Artifact Evidence:",
+		"confirmed \\| evidence &lt;tag&gt;", "verified \\# decision &lt;/section&gt;",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("validation report is missing %q:\n%s", expected, text)
+		}
+	}
+}
+
 func completedProjectionExecution(t *testing.T,
 	findings []domain.ReadOnlyFanoutFinding,
 ) (domain.ReadOnlyFanoutExecution, string) {
