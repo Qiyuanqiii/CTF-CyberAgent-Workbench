@@ -43,11 +43,27 @@ func (a *App) reportFindingCommand(ctx context.Context, args []string) error {
 		return a.reportFindingDecide(ctx, args[1:], domain.FindingStatusValidated)
 	case "reject":
 		return a.reportFindingDecide(ctx, args[1:], domain.FindingStatusRejected)
+	case "accept":
+		return a.reportFindingAccept(ctx, args[1:])
+	case "remediation":
+		return a.reportFindingRemediationCommand(ctx, args[1:])
+	case "fix":
+		return a.reportFindingFix(ctx, args[1:])
 	case "verify":
 		return a.reportFindingVerify(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown report finding subcommand %q", args[0])
 	}
+}
+
+func (a *App) reportFindingRemediationCommand(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("report finding remediation subcommand is required")
+	}
+	if args[0] != "attach" {
+		return fmt.Errorf("unknown report finding remediation subcommand %q", args[0])
+	}
+	return a.reportFindingRemediationAttach(ctx, args[1:])
 }
 
 func (a *App) reportFindingAttach(ctx context.Context, args []string) error {
@@ -123,6 +139,107 @@ func (a *App) reportFindingDecide(ctx context.Context, args []string,
 	return nil
 }
 
+func (a *App) reportFindingAccept(ctx context.Context, args []string) error {
+	fs := newFlagSet("report finding accept", a.errOut)
+	operationKey := fs.String("operation-key", "", "stable acceptance operation key")
+	operator := fs.String("operator", "cli_operator", "operator identity")
+	reason := fs.String("reason", "", "acceptance reason")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"operation-key": true, "operator": true, "reason": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 || strings.TrimSpace(*operationKey) == "" ||
+		strings.TrimSpace(*reason) == "" {
+		return errors.New("usage: cyberagent report finding accept <finding-id> --operation-key <key> --reason <text> [--operator <id>]")
+	}
+	result, err := application.NewFindingReportService(a.store).Accept(ctx,
+		application.DecideFindingAcceptanceRequest{
+			FindingID: fs.Arg(0), OperationKey: *operationKey,
+			Reason: *reason, DecidedBy: *operator,
+		})
+	if err != nil {
+		return err
+	}
+	verb := "recorded"
+	if result.Replayed {
+		verb = "reused"
+	}
+	fmt.Fprintf(a.out, "finding acceptance %s %s\n", result.Acceptance.ID, verb)
+	fmt.Fprintf(a.out, "finding: %s\nstatus: %s\nvalidation: %s\nvalidation_artifact_evidence_count: %d\nvalidation_artifact_evidence_digest: %s\n",
+		result.Acceptance.FindingID, result.Acceptance.Status,
+		result.Acceptance.ValidationID,
+		result.Acceptance.ValidationArtifactEvidenceCount,
+		result.Acceptance.ValidationArtifactEvidenceDigest)
+	return nil
+}
+
+func (a *App) reportFindingRemediationAttach(ctx context.Context, args []string) error {
+	fs := newFlagSet("report finding remediation attach", a.errOut)
+	operationKey := fs.String("operation-key", "", "stable remediation Evidence operation key")
+	operator := fs.String("operator", "cli_operator", "operator identity")
+	note := fs.String("note", "", "remediation Evidence note")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"operation-key": true, "operator": true, "note": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 || strings.TrimSpace(*operationKey) == "" ||
+		strings.TrimSpace(*note) == "" {
+		return errors.New("usage: cyberagent report finding remediation attach <finding-id> <artifact-id> --operation-key <key> --note <text> [--operator <id>]")
+	}
+	result, err := application.NewFindingReportService(a.store).
+		AttachRemediationEvidence(ctx, application.AttachFindingRemediationEvidenceRequest{
+			FindingID: fs.Arg(0), ArtifactID: fs.Arg(1), OperationKey: *operationKey,
+			AttachedBy: *operator, Note: *note,
+		})
+	if err != nil {
+		return err
+	}
+	verb := "attached"
+	if result.Replayed {
+		verb = "reused"
+	}
+	fmt.Fprintf(a.out, "finding remediation Evidence %s %s\n", result.Evidence.ID, verb)
+	fmt.Fprintf(a.out, "finding: %s\nartifact: %s\nordinal: %d\nsha256: %s\n",
+		result.Evidence.FindingID, result.Evidence.ArtifactID,
+		result.Evidence.Ordinal, result.Evidence.ArtifactSHA256)
+	return nil
+}
+
+func (a *App) reportFindingFix(ctx context.Context, args []string) error {
+	fs := newFlagSet("report finding fix", a.errOut)
+	operationKey := fs.String("operation-key", "", "stable fix operation key")
+	operator := fs.String("operator", "cli_operator", "operator identity")
+	reason := fs.String("reason", "", "fix reason")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"operation-key": true, "operator": true, "reason": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 || strings.TrimSpace(*operationKey) == "" ||
+		strings.TrimSpace(*reason) == "" {
+		return errors.New("usage: cyberagent report finding fix <finding-id> --operation-key <key> --reason <text> [--operator <id>]")
+	}
+	result, err := application.NewFindingReportService(a.store).Fix(ctx,
+		application.DecideFindingFixRequest{
+			FindingID: fs.Arg(0), OperationKey: *operationKey,
+			Reason: *reason, DecidedBy: *operator,
+		})
+	if err != nil {
+		return err
+	}
+	verb := "recorded"
+	if result.Replayed {
+		verb = "reused"
+	}
+	fmt.Fprintf(a.out, "finding fix %s %s\n", result.Fix.ID, verb)
+	fmt.Fprintf(a.out, "finding: %s\nstatus: %s\nacceptance: %s\nremediation_evidence_count: %d\nremediation_evidence_digest: %s\n",
+		result.Fix.FindingID, result.Fix.Status, result.Fix.AcceptanceID,
+		result.Fix.RemediationEvidenceCount, result.Fix.RemediationEvidenceDigest)
+	return nil
+}
+
 func (a *App) reportFindingVerify(ctx context.Context, args []string) error {
 	fs := newFlagSet("report finding verify", a.errOut)
 	if err := fs.Parse(args); err != nil {
@@ -137,9 +254,12 @@ func (a *App) reportFindingVerify(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Fprintf(a.out, "finding %s Artifact Evidence verified\n", result.FindingID)
-	fmt.Fprintf(a.out, "run: %s\nstatus: %s\nartifact_evidence_count: %d\nartifact_evidence_digest: %s\n",
-		result.RunID, result.Status, result.ArtifactEvidenceCount,
-		result.ArtifactEvidenceDigest)
+	fmt.Fprintf(a.out, "run: %s\nstatus: %s\nvalidation: %s\nvalidation_artifact_evidence_count: %d\nvalidation_artifact_evidence_digest: %s\n",
+		result.RunID, result.Status, result.ValidationID,
+		result.ArtifactEvidenceCount, result.ArtifactEvidenceDigest)
+	fmt.Fprintf(a.out, "acceptance: %s\nremediation_evidence_count: %d\nremediation_evidence_digest: %s\nfix: %s\n",
+		result.AcceptanceID, result.RemediationEvidenceCount,
+		result.RemediationEvidenceDigest, result.FixID)
 	return nil
 }
 
@@ -208,9 +328,10 @@ func (a *App) reportCheck(ctx context.Context, args []string) error {
 			return err
 		}
 		if _, err := fmt.Fprintf(a.out,
-			"findings: %d\ndraft: %d\nvalidated: %d\nrejected: %d\nmatched: %d\npassed: %t\n",
+			"findings: %d\ndraft: %d\nvalidated: %d\naccepted: %d\nfixed: %d\nrejected: %d\nmatched: %d\npassed: %t\n",
 			result.FindingCount, result.DraftCount, result.ValidatedCount,
-			result.RejectedCount, result.MatchedCount, result.Passed); err != nil {
+			result.AcceptedCount, result.FixedCount, result.RejectedCount,
+			result.MatchedCount, result.Passed); err != nil {
 			return err
 		}
 	case "json":

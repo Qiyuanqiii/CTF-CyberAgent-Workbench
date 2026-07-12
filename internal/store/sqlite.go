@@ -258,6 +258,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 34, Name: "bounded read-only fan-out execution", Statements: readOnlyFanoutExecutionStatements},
 		{Version: 35, Name: "deterministic finding report projection", Statements: findingReportStatements},
 		{Version: 36, Name: "Artifact-backed finding validation", Statements: findingValidationStatements},
+		{Version: 37, Name: "accepted and fixed finding remediation lifecycle", Statements: findingRemediationStatements},
 	})
 }
 

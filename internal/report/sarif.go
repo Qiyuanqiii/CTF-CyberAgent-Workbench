@@ -106,12 +106,14 @@ func renderSARIF(value domain.FindingReport) ([]byte, error) {
 	statusCounts := map[domain.FindingStatus]int{
 		domain.FindingStatusDraft:     0,
 		domain.FindingStatusValidated: 0,
+		domain.FindingStatusAccepted:  0,
+		domain.FindingStatusFixed:     0,
 		domain.FindingStatusRejected:  0,
 	}
 	for _, finding := range value.Findings {
 		status := effectiveFindingStatus(finding)
 		statusCounts[status]++
-		if status != domain.FindingStatusValidated {
+		if !confirmedUnresolvedFindingStatus(status) {
 			continue
 		}
 		result, err := newSARIFResult(value, finding, ruleIndexes[finding.Severity])
@@ -138,6 +140,8 @@ func renderSARIF(value domain.FindingReport) ([]byte, error) {
 				"cyberagentProjectionDigest": value.ProjectionDigest,
 				"cyberagentDraftCount":       statusCounts[domain.FindingStatusDraft],
 				"cyberagentValidatedCount":   statusCounts[domain.FindingStatusValidated],
+				"cyberagentAcceptedCount":    statusCounts[domain.FindingStatusAccepted],
+				"cyberagentFixedCount":       statusCounts[domain.FindingStatusFixed],
 				"cyberagentRejectedCount":    statusCounts[domain.FindingStatusRejected],
 			},
 		}},
@@ -168,8 +172,9 @@ func newSARIFResult(report domain.FindingReport, finding domain.Finding,
 	ruleIndex int,
 ) (sarifResult, error) {
 	status := effectiveFindingStatus(finding)
-	if status != domain.FindingStatusValidated {
-		return sarifResult{}, errors.New("only validated findings can be projected as SARIF results")
+	if !confirmedUnresolvedFindingStatus(status) {
+		return sarifResult{}, errors.New(
+			"only confirmed unresolved findings can be projected as SARIF results")
 	}
 	location := sarifPhysicalLocation{
 		ArtifactLocation: sarifArtifactLocation{URI: sarifURI(finding.RelativePath)},
@@ -189,7 +194,8 @@ func newSARIFResult(report domain.FindingReport, finding domain.Finding,
 		Properties: map[string]any{
 			"cyberagentFindingId":             finding.ID,
 			"cyberagentReportId":              report.ID,
-			"cyberagentValidationStatus":      status,
+			"cyberagentFindingStatus":         status,
+			"cyberagentValidationStatus":      finding.Validation.Status,
 			"cyberagentSourceSeverity":        finding.Severity,
 			"cyberagentCategory":              finding.Category,
 			"cyberagentConfidence":            finding.Confidence,
@@ -221,8 +227,9 @@ func sarifURI(relativePath string) string {
 }
 
 func effectiveFindingStatus(finding domain.Finding) domain.FindingStatus {
-	if finding.Validation != nil {
-		return finding.Validation.Status
-	}
-	return finding.Status
+	return finding.EffectiveStatus()
+}
+
+func confirmedUnresolvedFindingStatus(status domain.FindingStatus) bool {
+	return status == domain.FindingStatusValidated || status == domain.FindingStatusAccepted
 }

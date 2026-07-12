@@ -70,9 +70,11 @@ Schema v35 adds `run fanout report <execution-id> --format markdown|json`. It ac
 
 Schema v36 adds an explicit operator validation workflow. First create or approve a tool output Artifact in the same Run. `report finding attach` rereads and verifies the complete Artifact before recording immutable Evidence. `report finding validate` requires at least one attached Artifact; `report finding reject` may be used with no Artifact when the model assertion cannot be reproduced. A Finding can receive only one decision, and no Evidence can be attached afterward. Reusing the same operation key and intent returns the original row; changed intent or a second decision conflicts. `report finding verify` revalidates every Artifact blob and the decision's ordered Evidence digest. Notes and reasons are redacted and excluded from Run events. These commands do not mark a Finding accepted or fixed.
 
-The current v36 runtime also supports `report show <report-id> --format sarif`. This is a deterministic read-only SARIF 2.1.0 projection: it performs no Store mutation or Provider call, emits stable severity rules, workspace-relative percent-encoded paths, and the v35 Finding fingerprint, and excludes validation reasons, Evidence notes, and Artifact content. Only `validated` Findings appear in `results`. Draft and rejected counts remain in Run properties, but those claims are not emitted as results because GitHub Code Scanning ignores unsupported SARIF fields such as `result.kind` and would otherwise risk displaying an unvalidated alert.
+Schema v37 adds an independent operator remediation workflow. `report finding accept` requires an existing `validated` decision and freezes its ID, Evidence count, and digest; it does not reuse validation as implicit acceptance. Create or approve a new same-Run tool output only after acceptance, then attach it with `report finding remediation attach`. The Store compares durable Run-event sequence numbers, so an Artifact created before `finding.accepted` is rejected even if the system clock moved backward. A validation Artifact cannot be reused. `report finding fix` requires at least one fresh remediation Evidence record and freezes the ordered remediation set. Acceptance, remediation Evidence, and fix facts are immutable and replay-safe. `report finding verify` now validates both Artifact sets and every frozen snapshot.
 
-Use `report check <report-id>` as the scriptable CI gate. Its default policy is `--fail-status validated --min-severity high`; a match prints the complete text or JSON result and returns the stable `FAILED_PRECONDITION` CLI exit code 4. `--fail-status active` explicitly includes both draft and validated Findings, while `--fail-status none` disables failure. Rejected Findings never match. The command reads the persisted report and validation overlay only.
+`report show <report-id> --format sarif` is a deterministic read-only SARIF 2.1.0 projection: it performs no Store mutation or Provider call, emits stable severity rules, workspace-relative percent-encoded paths, and the v35 Finding fingerprint, and excludes validation, acceptance, remediation, and fix narratives plus Artifact content. Only confirmed unresolved `validated` and `accepted` Findings appear in `results`. `cyberagentValidationStatus` remains `validated` for both, while `cyberagentFindingStatus` distinguishes their lifecycle. Draft, fixed, and rejected counts remain in Run properties but are not emitted as results.
+
+Use `report check <report-id>` as the scriptable CI gate. Its default policy is `--fail-status validated --min-severity high`; a match prints the complete text or JSON result and returns the stable `FAILED_PRECONDITION` CLI exit code 4. This policy includes both validated and accepted unresolved Findings. `--fail-status active` additionally includes draft, while `--fail-status none` disables failure. Fixed and rejected Findings never match. The command reads persisted lifecycle facts only.
 
 `run execute` repeats that same durable step up to `--max-steps`; it stops immediately on root `finish` or `wait`. `--finish` remains an explicit operator fallback after a normal step limit and cannot complete a waiting Run. `run finish` and `run fail` atomically update the Run, Supervisor checkpoint, and event stream. Repeating the same terminal command or replaying the same committed lifecycle action is idempotent, while a conflicting terminal transition is rejected.
 
@@ -191,10 +193,14 @@ cyberagent run fanout show <plan-id>
 cyberagent run fanout execute <plan-id> --operation-key <stable-key> [--operator cli_operator] [--max-output-tokens 1024]
 cyberagent run fanout execution <execution-id>
 cyberagent run fanout report <execution-id> [--format markdown|json]
-cyberagent report show <report-id> [--format markdown|json]
+cyberagent report show <report-id> [--format markdown|json|sarif]
+cyberagent report check <report-id> [--fail-status validated|active|none] [--min-severity info|low|medium|high|critical] [--format text|json]
 cyberagent report finding attach <finding-id> <artifact-id> --operation-key <stable-key> --note <text> [--operator cli_operator]
 cyberagent report finding validate <finding-id> --operation-key <stable-key> --reason <text> [--operator cli_operator]
 cyberagent report finding reject <finding-id> --operation-key <stable-key> --reason <text> [--operator cli_operator]
+cyberagent report finding accept <finding-id> --operation-key <stable-key> --reason <text> [--operator cli_operator]
+cyberagent report finding remediation attach <finding-id> <fresh-artifact-id> --operation-key <stable-key> --note <text> [--operator cli_operator]
+cyberagent report finding fix <finding-id> --operation-key <stable-key> --reason <text> [--operator cli_operator]
 cyberagent report finding verify <finding-id>
 ```
 

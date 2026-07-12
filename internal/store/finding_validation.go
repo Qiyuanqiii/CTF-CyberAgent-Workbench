@@ -465,11 +465,11 @@ func normalizeFindingMutationError(err error) error {
 	message := strings.ToLower(err.Error())
 	if strings.Contains(message, "unique constraint failed") {
 		return apperror.Wrap(apperror.CodeConflict,
-			"finding validation fact already exists", err)
+			"finding lifecycle fact already exists", err)
 	}
 	if strings.Contains(message, "binding is invalid") {
 		return apperror.Wrap(apperror.CodeFailedPrecondition,
-			"finding validation binding was rejected", err)
+			"finding lifecycle binding was rejected", err)
 	}
 	return err
 }

@@ -65,6 +65,8 @@ type GateResult struct {
 	FindingCount     int        `json:"finding_count"`
 	DraftCount       int        `json:"draft_count"`
 	ValidatedCount   int        `json:"validated_count"`
+	AcceptedCount    int        `json:"accepted_count"`
+	FixedCount       int        `json:"fixed_count"`
 	RejectedCount    int        `json:"rejected_count"`
 	MatchedCount     int        `json:"matched_count"`
 	Passed           bool       `json:"passed"`
@@ -90,6 +92,10 @@ func EvaluateGate(value domain.FindingReport, policy GatePolicy) (GateResult, er
 			result.DraftCount++
 		case domain.FindingStatusValidated:
 			result.ValidatedCount++
+		case domain.FindingStatusAccepted:
+			result.AcceptedCount++
+		case domain.FindingStatusFixed:
+			result.FixedCount++
 		case domain.FindingStatusRejected:
 			result.RejectedCount++
 		default:
@@ -107,9 +113,12 @@ func EvaluateGate(value domain.FindingReport, policy GatePolicy) (GateResult, er
 func gateMatchesStatus(policy GateStatus, status domain.FindingStatus) bool {
 	switch policy {
 	case GateStatusValidated:
-		return status == domain.FindingStatusValidated
+		return status == domain.FindingStatusValidated ||
+			status == domain.FindingStatusAccepted
 	case GateStatusActive:
-		return status == domain.FindingStatusDraft || status == domain.FindingStatusValidated
+		return status == domain.FindingStatusDraft ||
+			status == domain.FindingStatusValidated ||
+			status == domain.FindingStatusAccepted
 	case GateStatusNone:
 		return false
 	default:

@@ -175,7 +175,8 @@ func TestFindingValidationOverlayPreservesSourceProjectionAndEscapesNarrative(t 
 	}
 	text := string(encoded)
 	for _, expected := range []string{
-		"- Validated: 1", "- Artifact Evidence records: 1", "- Status: `validated`",
+		"- Validated: 1", "- Validation Artifact Evidence records: 1",
+		"- Status: `validated`",
 		"Model assertion evidence:", "Artifact Evidence:",
 		"confirmed \\| evidence &lt;tag&gt;", "verified \\# decision &lt;/section&gt;",
 	} {

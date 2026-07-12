@@ -15,7 +15,7 @@
 
 V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程 root 活动模型取消。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P4 已完成 schema v19 单 root Coordinator、schema v20 可恢复 inbox、schema v21 internal-only Specialist admission、schema v22 Agent-owned memory、schema v23 CompletionReport、schema v24 Specialist Attempt Runtime、schema v25 root inbox context、schema v26 internal-only no-tool Specialist turn、schema v27 recoverable child context、schema v28 child lifecycle repair、schema v29 durable schedule/cross-process child cancellation、schema v30 review-gated delegation proposal、schema v31 non-authorizing operator review、schema v32 recoverable operator application、schema v33 immutable read-only Fan-out plan 与 schema v34 bounded read-only execution，以及最多两个 child 的 Go-internal 核心调度：稳定 Agent 身份、有界幂等 inbox、严格 wake/dependency、最多两个 depth-1 child、独立 Session、Skill/预算预留、同 Run memory ownership、lease-fenced Attempt、累计 usage 计费、崩溃通知、接管恢复、attempt-bound `agent.finish`、root/child 两阶段 exactly-once context、严格 child lifecycle、一次隔离修复、持久化调度摘要、精确 child-call 取消、root 提案/审阅/application/admission 权限分离、Agent/Message 中断恢复、取消扇出及 root+children+Fan-out SQLite 总预算复核均已落地。核心委派仍为两个 child；独立只读池可按 1/2/4/6 档调用无工具 JSON Provider，但不创建 Agent、Attempt、schedule，不提供写入、Shell、进程或网络能力。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具、schema v16 可恢复 Provider 工具批次，以及 schema v30 `agent_proposal` class。P9 已新增 loopback-only `api.v1` 读取面、独立授权的 root/Specialist 精确取消 POST、由 Go DTO 生成且受 golden/live-route 测试保护的 OpenAPI 3.1 契约、有界可恢复 Run-event SSE，以及 Run-aware TUI 的 Work/Notes/ToolRounds/Tools 视图和批准一次/本会话操作；真实命令执行、通用 API 写入和执行类模型工具继续关闭。
 
-P8 已推进到 schema v36：v35 把完成的 Fan-out execution 投影为通用 `draft` Finding、不可变 `model_assertion` Evidence 和可重建的 Markdown/JSON Report；v36 增加同 Run 冻结 Artifact Evidence、一次性 operator `validated/rejected` 决定与完整复核。验证仍不等于接受或修复。
+P8 已推进到 schema v37：v35 把完成的 Fan-out execution 投影为通用 `draft` Finding、不可变 `model_assertion` Evidence 和可重建的 Markdown/JSON Report；v36 增加同 Run 冻结 Artifact Evidence、一次性 operator `validated/rejected` 决定与完整复核；v37 以独立不可变事实完成 `validated -> accepted -> fixed`，并强制修复 Evidence 来自接受后新建且未用于验证的同 Run Artifact。验证、接受和修复始终分离。
 
 ## 二、已完成功能
 
@@ -47,6 +47,7 @@ P8 已推进到 schema v36：v35 把完成的 Fan-out execution 投影为通用 
 - schema v34 以独立 `readonly_fanout_executions/execution_shards/model_calls/findings/execution_operations` 执行已冻结的 v33 计划；调用前重建并核对完整 snapshot，正文只在内存中脱敏后进入 tool-free JSON Provider，首错取消 siblings，lease takeover 只重试未完成 shard，未知调用按预留额度计费。
 - schema v35 以 `finding_reports/findings/finding_evidence` 将完成的 v34 execution 确定性投影为通用报告；只合并事实字段完全相同的声明，严重度不同绝不合并，重复声明保留全部 Evidence 并采用最低置信度，Markdown/JSON 重放字节稳定且不调用 Provider。
 - schema v36 以独立覆盖层挂接同 Run Artifact Evidence；Store 重读完整 blob 并复核 SHA-256/大小/MIME/stream/tool/source/redacted，SQLite 冻结 Artifact 和验证事实。`validated` 至少需要一份 Artifact，`rejected` 可为零 Evidence；同键并发收敛，第二决定和决定后追加稳定冲突，v35 投影摘要不变。
+- schema v37 增加独立 acceptance/remediation/fix 覆盖层；接受冻结 validation 快照，修复 Evidence 通过 Run event sequence 证明 Artifact 晚于接受且不可复用验证 Artifact，fix 冻结有序修复 Evidence 数量与摘要。SARIF 只输出 `validated/accepted` 未解决项，CI 默认门禁同样阻断二者，fixed/rejected 永不阻断。
 - `RunAgentUsage` 每轮前后从 SQLite 重建总账：root token/执行时间来自 Supervisor checkpoint，child token 必须在 Agent 投影与 Attempt ledger 间一致，所有 child model-call elapsed 求和；投影漂移返回 `CONFLICT`，剩余 token/毫秒按排序后的 active child 确定性分片。
 - root inbox 进入模型前执行持久化协议关联、sender 路由、严格 JSON、脱敏、字段截断和 8192-token 全批次适配；prompt 不含消息 ID、sequence/cursor，模型不能选择 sender 或提交消费位置。
 - Supervisor 与 `tool invoke` 从 Go-owned Run/Agent 状态注入所有者，模型 schema 不包含 `owner_agent_id`；CLI/TUI/HTTP/OpenAPI 可显示和过滤 Agent owner。root/Specialist 的 owner-only Notes 按真实 Agent 身份隔离。
@@ -451,10 +452,14 @@ Trust-aware SARIF and CI Gate 切片不增加数据库迁移，只在 `internal/
 
 本轮审计发现并修复一项中风险兼容性问题：初稿按 OASIS 语义把 draft/rejected 映射为 `result.kind=review/pass`，但 [GitHub Code Scanning 支持列表](https://docs.github.com/en/code-security/reference/code-scanning/sarif-files/sarif-support) 不消费 `kind`，这些结果仍可能显示为告警。最终实现因此收紧为 validated-only `results`，完整状态仍保留在 SQLite、Markdown/JSON 与 SARIF Run 汇总中。后续健壮性复核又修复三项低风险边界：公共 Go `GatePolicy` 现在拒绝可能 fail-open 的非规范化状态值；文本门禁传播输出写入错误；公开 SARIF 移除由完整 Evidence 元数据计算的集合摘要，只保留证据数量。定向测试覆盖确定性、空结果数组、URI/fingerprint、私密叙述隔离、默认/active/none 门禁和 CLI 退出码；真实二进制走完 report->Artifact->validate->SARIF/check，并通过 [OASIS 官方 schema](https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json) 校验。最终全仓普通测试、全仓 race、`go vet`、零告警 `staticcheck`、`go mod verify/tidy -diff`、凭据/运行产物扫描与 `govulncheck` 全部通过，可达漏洞为 0。
 
+Finding Acceptance and Remediation 切片新增 schema v37、`finding_acceptance_decisions`、`finding_remediation_evidence`、`finding_fix_decisions` 及三份 digest-only operation ledger，并提供 `report finding accept/remediation attach/fix`。接受要求已有 `validated` 决定，并冻结其 ID、Artifact Evidence 数量和摘要；它不会把 validation 自动升级为 authorization。修复 Evidence 只能绑定同 Run 且 `artifact.created` 事件序严格晚于 `finding.accepted` 的新 Artifact，验证 Artifact 和接受前输出都被拒绝。fix 至少需要一份修复 Evidence，并冻结有序数量与独立域摘要。所有决定、Evidence、operation 和 Run Artifact 都不可更新或删除，叙述和原始 operation key 不进入事件。
+
+Markdown/JSON 现在重建完整五态生命周期；SARIF 仅输出 `validated/accepted` confirmed-unresolved 结果，使用独立 validation/lifecycle property，fixed 从结果中消失。默认 validated/high CI 门禁同时阻断 accepted，`active` 额外纳入 draft，fixed/rejected 永不匹配。功能复核覆盖 v36 原地升级、两个 SQLite 连接的八路 acceptance/Evidence/fix 收敛、改意图冲突、无证据 fix、验证 Artifact 复用、接受前 Artifact、fix 后追加、投影摘要稳定、事件正文隔离、SQL 不可变和完整 CLI 生命周期；并发收敛连续 10 轮通过。代码审计未发现未解决的高/中风险问题，并修复三项低风险一致性问题：v37 触发器补齐 decision/Evidence 时间顺序，生命周期错误不再误称 validation，SARIF 把 validation 状态与 Finding 当前状态拆为两个字段。最终 uncached 全仓测试、全仓 race、`go vet`、零告警 `staticcheck`、`go mod verify/tidy -diff`、凭据/运行产物扫描与 `govulncheck` 全部通过，可达漏洞为 0。隔离真实二进制创建 schema v37 runtime，完成 report->validation->acceptance->fresh remediation->fix，确认 fixed、SARIF 零结果、CI gate 通过和三类新事件各一条后清理全部临时数据。
+
 ## 七、下一开发切片
 
-1. 为 P8 增加独立的 `accepted/fixed` remediation Evidence 状态机；接受不能复用 validation 决定，修复必须引用新的可复核 Artifact Evidence，并保持历史不可变。
-2. schema v32 的显式 operator child schedule/continue 仍单独推进，只允许选择该 application 已 instructed 的 ready child，并复用 durable schedule、总预算、取消与恢复。
+1. schema v32 的显式 operator child schedule/continue 仍单独推进，只允许选择该 application 已 instructed 的 ready child，并复用 durable schedule、总预算、取消与恢复。
+2. 为 P8 增加从同一只读 `GateResult` 派生的平台专用 CI annotations，不增加第二套 Finding 状态。
 3. React/Vite 后续从 `docs/openapi.json` 生成 client/DTO，并通过带 Authorization header 的 fetch 消费 SSE，不把 token 放入 URL、不重复实现 Go Policy。
 4. Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
 

@@ -21,6 +21,7 @@ const (
 	MaxFindingReportEvidence                   = MaxFindingReportFindings
 	MaxFindingReportTitleRunes                 = 256
 	MaxFindingArtifactEvidence                 = 64
+	MaxFindingRemediationEvidence              = 64
 	MaxFindingValidationTextRunes              = 2048
 )
 
@@ -205,6 +206,72 @@ type FindingValidation struct {
 	CreatedAt              time.Time     `json:"created_at"`
 }
 
+type FindingAcceptance struct {
+	ID                               string        `json:"id"`
+	ReportID                         string        `json:"report_id"`
+	FindingID                        string        `json:"finding_id"`
+	RunID                            string        `json:"run_id"`
+	FromStatus                       FindingStatus `json:"from_status"`
+	Status                           FindingStatus `json:"status"`
+	ValidationID                     string        `json:"validation_id"`
+	ValidationArtifactEvidenceCount  int           `json:"validation_artifact_evidence_count"`
+	ValidationArtifactEvidenceDigest string        `json:"validation_artifact_evidence_digest"`
+	DecidedBy                        string        `json:"decided_by"`
+	Reason                           string        `json:"reason"`
+	Version                          int64         `json:"version"`
+	CreatedAt                        time.Time     `json:"created_at"`
+}
+
+func (a FindingAcceptance) Validate() error {
+	for _, value := range []string{a.ID, a.ReportID, a.FindingID, a.RunID,
+		a.ValidationID, a.DecidedBy} {
+		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {
+			return errors.New("finding acceptance identities are invalid")
+		}
+	}
+	if a.FromStatus != FindingStatusValidated || a.Status != FindingStatusAccepted ||
+		a.ValidationArtifactEvidenceCount <= 0 ||
+		a.ValidationArtifactEvidenceCount > MaxFindingArtifactEvidence ||
+		!validLowerHexDigest(a.ValidationArtifactEvidenceDigest) ||
+		!validFindingValidationText(a.Reason) || a.Version != 1 || a.CreatedAt.IsZero() {
+		return errors.New("finding acceptance is invalid")
+	}
+	return nil
+}
+
+type FindingFix struct {
+	ID                        string        `json:"id"`
+	ReportID                  string        `json:"report_id"`
+	FindingID                 string        `json:"finding_id"`
+	RunID                     string        `json:"run_id"`
+	AcceptanceID              string        `json:"acceptance_id"`
+	FromStatus                FindingStatus `json:"from_status"`
+	Status                    FindingStatus `json:"status"`
+	RemediationEvidenceCount  int           `json:"remediation_evidence_count"`
+	RemediationEvidenceDigest string        `json:"remediation_evidence_digest"`
+	DecidedBy                 string        `json:"decided_by"`
+	Reason                    string        `json:"reason"`
+	Version                   int64         `json:"version"`
+	CreatedAt                 time.Time     `json:"created_at"`
+}
+
+func (f FindingFix) Validate() error {
+	for _, value := range []string{f.ID, f.ReportID, f.FindingID, f.RunID,
+		f.AcceptanceID, f.DecidedBy} {
+		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {
+			return errors.New("finding fix identities are invalid")
+		}
+	}
+	if f.FromStatus != FindingStatusAccepted || f.Status != FindingStatusFixed ||
+		f.RemediationEvidenceCount <= 0 ||
+		f.RemediationEvidenceCount > MaxFindingRemediationEvidence ||
+		!validLowerHexDigest(f.RemediationEvidenceDigest) ||
+		!validFindingValidationText(f.Reason) || f.Version != 1 || f.CreatedAt.IsZero() {
+		return errors.New("finding fix is invalid")
+	}
+	return nil
+}
+
 func (v FindingValidation) Validate() error {
 	for _, value := range []string{v.ID, v.ReportID, v.FindingID, v.RunID, v.DecidedBy} {
 		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {
@@ -274,26 +341,105 @@ func (o FindingValidationOperation) Validate() error {
 	return nil
 }
 
+type FindingAcceptanceOperation struct {
+	KeyDigest          string
+	RequestFingerprint string
+	AcceptanceID       string
+	ValidationID       string
+	FindingID          string
+	RunID              string
+	DecidedBy          string
+	CreatedAt          time.Time
+}
+
+func (o FindingAcceptanceOperation) Validate() error {
+	for _, value := range []string{o.AcceptanceID, o.ValidationID, o.FindingID,
+		o.RunID, o.DecidedBy} {
+		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {
+			return errors.New("finding acceptance operation identities are invalid")
+		}
+	}
+	if !validLowerHexDigest(o.KeyDigest) ||
+		!validLowerHexDigest(o.RequestFingerprint) || o.CreatedAt.IsZero() {
+		return errors.New("finding acceptance operation is invalid")
+	}
+	return nil
+}
+
+type FindingRemediationEvidenceOperation struct {
+	KeyDigest          string
+	RequestFingerprint string
+	EvidenceID         string
+	AcceptanceID       string
+	FindingID          string
+	ArtifactID         string
+	RunID              string
+	AttachedBy         string
+	CreatedAt          time.Time
+}
+
+func (o FindingRemediationEvidenceOperation) Validate() error {
+	for _, value := range []string{o.EvidenceID, o.AcceptanceID, o.FindingID,
+		o.ArtifactID, o.RunID, o.AttachedBy} {
+		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {
+			return errors.New("finding remediation Evidence operation identities are invalid")
+		}
+	}
+	if !validLowerHexDigest(o.KeyDigest) ||
+		!validLowerHexDigest(o.RequestFingerprint) || o.CreatedAt.IsZero() {
+		return errors.New("finding remediation Evidence operation is invalid")
+	}
+	return nil
+}
+
+type FindingFixOperation struct {
+	KeyDigest          string
+	RequestFingerprint string
+	FixID              string
+	AcceptanceID       string
+	FindingID          string
+	RunID              string
+	DecidedBy          string
+	CreatedAt          time.Time
+}
+
+func (o FindingFixOperation) Validate() error {
+	for _, value := range []string{o.FixID, o.AcceptanceID, o.FindingID,
+		o.RunID, o.DecidedBy} {
+		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {
+			return errors.New("finding fix operation identities are invalid")
+		}
+	}
+	if !validLowerHexDigest(o.KeyDigest) ||
+		!validLowerHexDigest(o.RequestFingerprint) || o.CreatedAt.IsZero() {
+		return errors.New("finding fix operation is invalid")
+	}
+	return nil
+}
+
 type Finding struct {
-	ID               string                    `json:"id"`
-	ReportID         string                    `json:"report_id"`
-	RunID            string                    `json:"run_id"`
-	Ordinal          int                       `json:"ordinal"`
-	Fingerprint      string                    `json:"fingerprint"`
-	Status           FindingStatus             `json:"status"`
-	Severity         FindingSeverity           `json:"severity"`
-	Category         string                    `json:"category"`
-	Title            string                    `json:"title"`
-	Detail           string                    `json:"detail"`
-	RelativePath     string                    `json:"relative_path"`
-	LineStart        int                       `json:"line_start"`
-	LineEnd          int                       `json:"line_end"`
-	Confidence       int                       `json:"confidence"`
-	Version          int64                     `json:"version"`
-	CreatedAt        time.Time                 `json:"created_at"`
-	Evidence         []FindingEvidence         `json:"evidence"`
-	ArtifactEvidence []FindingArtifactEvidence `json:"artifact_evidence,omitempty"`
-	Validation       *FindingValidation        `json:"validation,omitempty"`
+	ID                  string                    `json:"id"`
+	ReportID            string                    `json:"report_id"`
+	RunID               string                    `json:"run_id"`
+	Ordinal             int                       `json:"ordinal"`
+	Fingerprint         string                    `json:"fingerprint"`
+	Status              FindingStatus             `json:"status"`
+	Severity            FindingSeverity           `json:"severity"`
+	Category            string                    `json:"category"`
+	Title               string                    `json:"title"`
+	Detail              string                    `json:"detail"`
+	RelativePath        string                    `json:"relative_path"`
+	LineStart           int                       `json:"line_start"`
+	LineEnd             int                       `json:"line_end"`
+	Confidence          int                       `json:"confidence"`
+	Version             int64                     `json:"version"`
+	CreatedAt           time.Time                 `json:"created_at"`
+	Evidence            []FindingEvidence         `json:"evidence"`
+	ArtifactEvidence    []FindingArtifactEvidence `json:"artifact_evidence,omitempty"`
+	Validation          *FindingValidation        `json:"validation,omitempty"`
+	Acceptance          *FindingAcceptance        `json:"acceptance,omitempty"`
+	RemediationEvidence []FindingArtifactEvidence `json:"remediation_evidence,omitempty"`
+	Fix                 *FindingFix               `json:"fix,omitempty"`
 }
 
 func (f Finding) Validate() error {
@@ -369,7 +515,80 @@ func (f Finding) Validate() error {
 			return errors.New("finding validation Evidence digest is inconsistent")
 		}
 	}
+	if f.Acceptance != nil {
+		if err := f.Acceptance.Validate(); err != nil {
+			return err
+		}
+		if f.Validation == nil || f.Validation.Status != FindingStatusValidated ||
+			f.Acceptance.ReportID != f.ReportID || f.Acceptance.FindingID != f.ID ||
+			f.Acceptance.RunID != f.RunID ||
+			f.Acceptance.ValidationID != f.Validation.ID ||
+			f.Acceptance.ValidationArtifactEvidenceCount !=
+				f.Validation.ArtifactEvidenceCount ||
+			f.Acceptance.ValidationArtifactEvidenceDigest !=
+				f.Validation.ArtifactEvidenceDigest ||
+			f.Acceptance.CreatedAt.Before(f.Validation.CreatedAt) {
+			return errors.New("finding acceptance projection is inconsistent")
+		}
+	}
+	if len(f.RemediationEvidence) > MaxFindingRemediationEvidence {
+		return errors.New("finding has too much remediation Evidence")
+	}
+	if len(f.RemediationEvidence) > 0 && f.Acceptance == nil {
+		return errors.New("finding remediation Evidence requires acceptance")
+	}
+	seenRemediationArtifacts := make(map[string]struct{}, len(f.RemediationEvidence))
+	for index, evidence := range f.RemediationEvidence {
+		if err := evidence.Validate(); err != nil {
+			return err
+		}
+		if evidence.ReportID != f.ReportID || evidence.FindingID != f.ID ||
+			evidence.RunID != f.RunID || evidence.Ordinal != index+1 ||
+			f.Acceptance == nil || evidence.CreatedAt.Before(f.Acceptance.CreatedAt) {
+			return errors.New("finding remediation Evidence projection is inconsistent")
+		}
+		if _, found := seenArtifacts[evidence.ArtifactID]; found {
+			return errors.New("finding remediation Evidence reused validation Artifact")
+		}
+		if _, found := seenRemediationArtifacts[evidence.ArtifactID]; found {
+			return errors.New("finding remediation Evidence is duplicated")
+		}
+		seenRemediationArtifacts[evidence.ArtifactID] = struct{}{}
+	}
+	if f.Fix != nil {
+		if err := f.Fix.Validate(); err != nil {
+			return err
+		}
+		if f.Acceptance == nil || f.Fix.ReportID != f.ReportID ||
+			f.Fix.FindingID != f.ID || f.Fix.RunID != f.RunID ||
+			f.Fix.AcceptanceID != f.Acceptance.ID ||
+			f.Fix.RemediationEvidenceCount != len(f.RemediationEvidence) ||
+			f.Fix.CreatedAt.Before(f.Acceptance.CreatedAt) {
+			return errors.New("finding fix projection is inconsistent")
+		}
+		digest, err := FindingRemediationEvidenceDigest(f.RemediationEvidence)
+		if err != nil || digest != f.Fix.RemediationEvidenceDigest {
+			return errors.New("finding fix Evidence digest is inconsistent")
+		}
+		if len(f.RemediationEvidence) == 0 ||
+			f.Fix.CreatedAt.Before(f.RemediationEvidence[len(f.RemediationEvidence)-1].CreatedAt) {
+			return errors.New("finding fix predates its remediation Evidence")
+		}
+	}
 	return nil
+}
+
+func (f Finding) EffectiveStatus() FindingStatus {
+	if f.Fix != nil {
+		return FindingStatusFixed
+	}
+	if f.Acceptance != nil {
+		return FindingStatusAccepted
+	}
+	if f.Validation != nil {
+		return f.Validation.Status
+	}
+	return f.Status
 }
 
 type FindingReport struct {
@@ -443,6 +662,9 @@ func FindingReportProjectionDigest(report FindingReport) (string, error) {
 	for index := range copy.Findings {
 		copy.Findings[index].ArtifactEvidence = nil
 		copy.Findings[index].Validation = nil
+		copy.Findings[index].Acceptance = nil
+		copy.Findings[index].RemediationEvidence = nil
+		copy.Findings[index].Fix = nil
 	}
 	encoded, err := json.Marshal(copy)
 	if err != nil {
@@ -457,6 +679,14 @@ func FindingArtifactEvidenceDigest(evidence []FindingArtifactEvidence) (string, 
 		return "", err
 	}
 	return findingReportDigest("finding_artifact_evidence.v1", string(encoded)), nil
+}
+
+func FindingRemediationEvidenceDigest(evidence []FindingArtifactEvidence) (string, error) {
+	encoded, err := json.Marshal(evidence)
+	if err != nil {
+		return "", err
+	}
+	return findingReportDigest("finding_remediation_evidence.v1", string(encoded)), nil
 }
 
 func validFindingValidationText(value string) bool {

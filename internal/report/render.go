@@ -55,16 +55,16 @@ func renderMarkdown(value domain.FindingReport) string {
 	validationCounts := map[domain.FindingStatus]int{
 		domain.FindingStatusDraft:     0,
 		domain.FindingStatusValidated: 0,
+		domain.FindingStatusAccepted:  0,
+		domain.FindingStatusFixed:     0,
 		domain.FindingStatusRejected:  0,
 	}
 	artifactEvidenceCount := 0
+	remediationEvidenceCount := 0
 	for _, finding := range value.Findings {
-		status := finding.Status
-		if finding.Validation != nil {
-			status = finding.Validation.Status
-		}
-		validationCounts[status]++
+		validationCounts[finding.EffectiveStatus()]++
 		artifactEvidenceCount += len(finding.ArtifactEvidence)
+		remediationEvidenceCount += len(finding.RemediationEvidence)
 	}
 	fmt.Fprintf(&output, "# %s\n\n", markdownInline(value.Title))
 	fmt.Fprintf(&output, "- Report: `%s`\n", value.ID)
@@ -82,24 +82,25 @@ func renderMarkdown(value domain.FindingReport) string {
 	fmt.Fprintf(&output, "| Medium | %d |\n", value.Severity.Medium)
 	fmt.Fprintf(&output, "| Low | %d |\n", value.Severity.Low)
 	fmt.Fprintf(&output, "| Info | %d |\n\n", value.Severity.Info)
-	output.WriteString("## Validation Summary\n\n")
+	output.WriteString("## Finding Lifecycle Summary\n\n")
 	fmt.Fprintf(&output, "- Draft: %d\n", validationCounts[domain.FindingStatusDraft])
 	fmt.Fprintf(&output, "- Validated: %d\n", validationCounts[domain.FindingStatusValidated])
+	fmt.Fprintf(&output, "- Accepted: %d\n", validationCounts[domain.FindingStatusAccepted])
+	fmt.Fprintf(&output, "- Fixed: %d\n", validationCounts[domain.FindingStatusFixed])
 	fmt.Fprintf(&output, "- Rejected: %d\n", validationCounts[domain.FindingStatusRejected])
-	fmt.Fprintf(&output, "- Artifact Evidence records: %d\n\n", artifactEvidenceCount)
+	fmt.Fprintf(&output, "- Validation Artifact Evidence records: %d\n",
+		artifactEvidenceCount)
+	fmt.Fprintf(&output, "- Remediation Artifact Evidence records: %d\n\n",
+		remediationEvidenceCount)
 	output.WriteString("## Findings\n\n")
 	if len(value.Findings) == 0 {
 		output.WriteString("No draft findings were projected from this execution.\n")
 		return output.String()
 	}
 	for _, finding := range value.Findings {
-		status := finding.Status
-		if finding.Validation != nil {
-			status = finding.Validation.Status
-		}
 		fmt.Fprintf(&output, "### F-%03d: %s\n\n", finding.Ordinal,
 			markdownInline(finding.Title))
-		fmt.Fprintf(&output, "- Status: `%s`\n", status)
+		fmt.Fprintf(&output, "- Status: `%s`\n", finding.EffectiveStatus())
 		fmt.Fprintf(&output, "- Severity: `%s`\n", finding.Severity)
 		fmt.Fprintf(&output, "- Category: %s\n", markdownInline(finding.Category))
 		fmt.Fprintf(&output, "- Location: %s\n", markdownCodeSpan(fmt.Sprintf("%s:%d-%d",
@@ -114,7 +115,7 @@ func renderMarkdown(value domain.FindingReport) string {
 				evidence.Ordinal, evidence.Kind, evidence.SourceShard,
 				evidence.SourceOrdinal, evidence.Confidence, evidence.SourceDigest)
 		}
-		output.WriteString("\nArtifact Evidence:\n\n")
+		output.WriteString("\nValidation Artifact Evidence:\n\n")
 		if len(finding.ArtifactEvidence) == 0 {
 			output.WriteString("- None attached.\n")
 		}
@@ -138,6 +139,44 @@ func renderMarkdown(value domain.FindingReport) string {
 				finding.Validation.ArtifactEvidenceDigest)
 			output.WriteString("- Reason:\n\n")
 			output.WriteString(markdownQuote(finding.Validation.Reason))
+		}
+		if finding.Acceptance != nil {
+			output.WriteString("\nAcceptance decision:\n\n")
+			fmt.Fprintf(&output, "- Decision: `%s` from `%s`\n",
+				finding.Acceptance.Status, finding.Acceptance.FromStatus)
+			fmt.Fprintf(&output, "- Decided by: %s\n",
+				markdownInline(finding.Acceptance.DecidedBy))
+			fmt.Fprintf(&output, "- Validation snapshot: `%s`, %d records, digest `%s`\n",
+				finding.Acceptance.ValidationID,
+				finding.Acceptance.ValidationArtifactEvidenceCount,
+				finding.Acceptance.ValidationArtifactEvidenceDigest)
+			output.WriteString("- Reason:\n\n")
+			output.WriteString(markdownQuote(finding.Acceptance.Reason))
+		}
+		output.WriteString("\nRemediation Artifact Evidence:\n\n")
+		if len(finding.RemediationEvidence) == 0 {
+			output.WriteString("- None attached.\n")
+		}
+		for _, evidence := range finding.RemediationEvidence {
+			fmt.Fprintf(&output,
+				"- RE-%03d: Artifact `%s`, `%s`, %d bytes, `%s`, tool `%s`, redacted `%t`, SHA-256 `%s`\n",
+				evidence.Ordinal, evidence.ArtifactID, evidence.ArtifactStream,
+				evidence.ArtifactSize, evidence.ArtifactMIME, evidence.ArtifactTool,
+				evidence.ArtifactRedacted, evidence.ArtifactSHA256)
+			fmt.Fprintf(&output, "  Attached by %s: %s\n",
+				markdownInline(evidence.AttachedBy), markdownInline(evidence.Note))
+		}
+		if finding.Fix != nil {
+			output.WriteString("\nFix decision:\n\n")
+			fmt.Fprintf(&output, "- Decision: `%s` from `%s`\n",
+				finding.Fix.Status, finding.Fix.FromStatus)
+			fmt.Fprintf(&output, "- Decided by: %s\n",
+				markdownInline(finding.Fix.DecidedBy))
+			fmt.Fprintf(&output, "- Remediation Evidence snapshot: %d records, digest `%s`\n",
+				finding.Fix.RemediationEvidenceCount,
+				finding.Fix.RemediationEvidenceDigest)
+			output.WriteString("- Reason:\n\n")
+			output.WriteString(markdownQuote(finding.Fix.Reason))
 		}
 		output.WriteString("\n")
 	}

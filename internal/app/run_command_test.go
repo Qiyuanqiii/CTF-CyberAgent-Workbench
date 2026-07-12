@@ -39,6 +39,9 @@ var fanoutExecutionIDPattern = regexp.MustCompile(`fanout-execution-[0-9]{14}-[a
 var findingReportIDPattern = regexp.MustCompile(`report-[a-f0-9]{64}`)
 var findingArtifactEvidenceIDPattern = regexp.MustCompile(`finding-artifact-evidence-[0-9]{14}-[a-f0-9]{12}`)
 var findingValidationIDPattern = regexp.MustCompile(`finding-validation-[0-9]{14}-[a-f0-9]{12}`)
+var findingAcceptanceIDPattern = regexp.MustCompile(`finding-acceptance-[0-9]{14}-[a-f0-9]{12}`)
+var findingRemediationEvidenceIDPattern = regexp.MustCompile(`finding-remediation-evidence-[0-9]{14}-[a-f0-9]{12}`)
+var findingFixIDPattern = regexp.MustCompile(`finding-fix-[0-9]{14}-[a-f0-9]{12}`)
 
 func executeTestCommand(t *testing.T, args ...string) (string, string, int) {
 	t.Helper()
@@ -232,7 +235,8 @@ func TestRunReadOnlyFanoutCLIPlansThenExecutesThroughReadOnlyGate(t *testing.T) 
 	}
 	verified, stderr, code := executeTestCommand(t, "report", "finding", "verify", findingID)
 	if code != 0 || stderr != "" || !strings.Contains(verified, "status: validated") ||
-		!strings.Contains(verified, "artifact_evidence_count: 1") {
+		!strings.Contains(verified, "validation_artifact_evidence_count: 1") ||
+		!strings.Contains(verified, "remediation_evidence_count: 0") {
 		t.Fatalf("finding verification failed output=%s stderr=%s code=%d",
 			verified, stderr, code)
 	}
@@ -318,10 +322,166 @@ func TestRunReadOnlyFanoutCLIPlansThenExecutesThroughReadOnlyGate(t *testing.T) 
 		!strings.Contains(reportMarkdown, "# Read-only Fan-out Audit Report") ||
 		!strings.Contains(reportMarkdown, findingReport.ID) ||
 		!strings.Contains(reportMarkdown, "- Validated: 1") ||
-		!strings.Contains(reportMarkdown, "Artifact Evidence:") ||
+		!strings.Contains(reportMarkdown, "Validation Artifact Evidence:") ||
 		!strings.Contains(reportMarkdown, "Mock review observation") {
 		t.Fatalf("stored Markdown report failed output=%s stderr=%s code=%d",
 			reportMarkdown, stderr, code)
+	}
+	accepted, stderr, code := executeTestCommand(t, "report", "finding", "accept",
+		findingID, "--operation-key", "report-cli-acceptance-0001",
+		"--reason", "operator accepts the validated finding")
+	acceptanceID := findingAcceptanceIDPattern.FindString(accepted)
+	if code != 0 || stderr != "" || acceptanceID == "" ||
+		!strings.Contains(accepted, "status: accepted") ||
+		!strings.Contains(accepted, "validation: "+validationID) ||
+		!strings.Contains(accepted, "validation_artifact_evidence_count: 1") {
+		t.Fatalf("finding acceptance failed output=%s stderr=%s code=%d",
+			accepted, stderr, code)
+	}
+	acceptedReplay, stderr, code := executeTestCommand(t, "report", "finding", "accept",
+		findingID, "--operation-key", "report-cli-acceptance-0001",
+		"--reason", "operator accepts the validated finding")
+	if code != 0 || stderr != "" ||
+		findingAcceptanceIDPattern.FindString(acceptedReplay) != acceptanceID ||
+		!strings.Contains(acceptedReplay, "reused") {
+		t.Fatalf("finding acceptance replay drifted output=%s stderr=%s code=%d",
+			acceptedReplay, stderr, code)
+	}
+	verified, stderr, code = executeTestCommand(t, "report", "finding", "verify", findingID)
+	if code != 0 || stderr != "" || !strings.Contains(verified, "status: accepted") ||
+		!strings.Contains(verified, "acceptance: "+acceptanceID) ||
+		!strings.Contains(verified, "remediation_evidence_count: 0") {
+		t.Fatalf("accepted finding verification failed output=%s stderr=%s code=%d",
+			verified, stderr, code)
+	}
+	acceptedSARIF, stderr, code := executeTestCommand(t, "report", "show",
+		findingReport.ID, "--format", "sarif")
+	if code != 0 || stderr != "" ||
+		json.Unmarshal([]byte(acceptedSARIF), &sarifReport) != nil ||
+		len(sarifReport.Runs) != 1 || len(sarifReport.Runs[0].Results) != 1 ||
+		sarifReport.Runs[0].Results[0].Properties["cyberagentFindingStatus"] != "accepted" ||
+		sarifReport.Runs[0].Results[0].Properties["cyberagentValidationStatus"] != "validated" {
+		t.Fatalf("accepted SARIF projection failed output=%s stderr=%s code=%d",
+			acceptedSARIF, stderr, code)
+	}
+	_, stderr, code = executeTestCommand(t, "report", "finding", "fix", findingID,
+		"--operation-key", "report-cli-fix-without-remediation-0001",
+		"--reason", "must not fix without fresh evidence")
+	if code != apperror.ExitCode(apperror.New(apperror.CodeFailedPrecondition, "failed")) ||
+		!strings.Contains(stderr, "requires fresh remediation") {
+		t.Fatalf("evidence-free fix was not rejected stderr=%s code=%d", stderr, code)
+	}
+	_, stderr, code = executeTestCommand(t, "report", "finding", "remediation", "attach",
+		findingID, artifactID, "--operation-key", "report-cli-remediation-reuse-0001",
+		"--note", "must not reuse validation Artifact")
+	if code != apperror.ExitCode(apperror.New(apperror.CodeFailedPrecondition, "failed")) ||
+		!strings.Contains(stderr, "fresh Artifact") {
+		t.Fatalf("validation Artifact reuse was not rejected stderr=%s code=%d", stderr, code)
+	}
+	remediationProposal, stderr, code := executeTestCommand(t, "session", "send", sessionID,
+		"/run echo report-remediation-evidence")
+	remediationToolID := toolIDPattern.FindString(remediationProposal)
+	if code != 0 || stderr != "" || remediationToolID == "" {
+		t.Fatalf("remediation Artifact proposal failed output=%s stderr=%s code=%d",
+			remediationProposal, stderr, code)
+	}
+	remediationApproved, stderr, code := executeTestCommand(t, "tool", "approve",
+		remediationToolID)
+	remediationArtifactID := artifactIDPattern.FindString(remediationApproved)
+	if code != 0 || stderr != "" || remediationArtifactID == "" {
+		t.Fatalf("remediation Artifact approval failed output=%s stderr=%s code=%d",
+			remediationApproved, stderr, code)
+	}
+	remediationAttached, stderr, code := executeTestCommand(t, "report", "finding",
+		"remediation", "attach", findingID, remediationArtifactID,
+		"--operation-key", "report-cli-remediation-evidence-0001",
+		"--note", "fresh Artifact confirms remediation")
+	remediationEvidenceID := findingRemediationEvidenceIDPattern.FindString(remediationAttached)
+	if code != 0 || stderr != "" || remediationEvidenceID == "" ||
+		!strings.Contains(remediationAttached, "attached") {
+		t.Fatalf("remediation Evidence attach failed output=%s stderr=%s code=%d",
+			remediationAttached, stderr, code)
+	}
+	remediationReplay, stderr, code := executeTestCommand(t, "report", "finding",
+		"remediation", "attach", findingID, remediationArtifactID,
+		"--operation-key", "report-cli-remediation-evidence-0001",
+		"--note", "fresh Artifact confirms remediation")
+	if code != 0 || stderr != "" ||
+		findingRemediationEvidenceIDPattern.FindString(remediationReplay) != remediationEvidenceID ||
+		!strings.Contains(remediationReplay, "reused") {
+		t.Fatalf("remediation Evidence replay drifted output=%s stderr=%s code=%d",
+			remediationReplay, stderr, code)
+	}
+	fixed, stderr, code := executeTestCommand(t, "report", "finding", "fix", findingID,
+		"--operation-key", "report-cli-fix-0001",
+		"--reason", "fresh remediation evidence confirms the correction")
+	fixID := findingFixIDPattern.FindString(fixed)
+	if code != 0 || stderr != "" || fixID == "" ||
+		!strings.Contains(fixed, "status: fixed") ||
+		!strings.Contains(fixed, "acceptance: "+acceptanceID) ||
+		!strings.Contains(fixed, "remediation_evidence_count: 1") {
+		t.Fatalf("finding fix failed output=%s stderr=%s code=%d", fixed, stderr, code)
+	}
+	fixedReplay, stderr, code := executeTestCommand(t, "report", "finding", "fix", findingID,
+		"--operation-key", "report-cli-fix-0001",
+		"--reason", "fresh remediation evidence confirms the correction")
+	if code != 0 || stderr != "" || findingFixIDPattern.FindString(fixedReplay) != fixID ||
+		!strings.Contains(fixedReplay, "reused") {
+		t.Fatalf("finding fix replay drifted output=%s stderr=%s code=%d",
+			fixedReplay, stderr, code)
+	}
+	verified, stderr, code = executeTestCommand(t, "report", "finding", "verify", findingID)
+	if code != 0 || stderr != "" || !strings.Contains(verified, "status: fixed") ||
+		!strings.Contains(verified, "fix: "+fixID) ||
+		!strings.Contains(verified, "remediation_evidence_count: 1") {
+		t.Fatalf("fixed finding verification failed output=%s stderr=%s code=%d",
+			verified, stderr, code)
+	}
+	fixedJSON, stderr, code := executeTestCommand(t, "report", "show",
+		findingReport.ID, "--format", "json")
+	var fixedReport domain.FindingReport
+	if code != 0 || stderr != "" || json.Unmarshal([]byte(fixedJSON), &fixedReport) != nil ||
+		fixedReport.ProjectionDigest != findingReport.ProjectionDigest ||
+		fixedReport.Findings[0].EffectiveStatus() != domain.FindingStatusFixed ||
+		fixedReport.Findings[0].Acceptance == nil || fixedReport.Findings[0].Fix == nil ||
+		len(fixedReport.Findings[0].RemediationEvidence) != 1 {
+		t.Fatalf("fixed JSON report drifted output=%s stderr=%s code=%d",
+			fixedJSON, stderr, code)
+	}
+	fixedSARIF, stderr, code := executeTestCommand(t, "report", "show",
+		findingReport.ID, "--format", "sarif")
+	if code != 0 || stderr != "" || json.Unmarshal([]byte(fixedSARIF), &sarifReport) != nil ||
+		len(sarifReport.Runs) != 1 || len(sarifReport.Runs[0].Results) != 0 {
+		t.Fatalf("fixed finding remained in SARIF output=%s stderr=%s code=%d",
+			fixedSARIF, stderr, code)
+	}
+	fixedGateText, stderr, code := executeTestCommand(t, "report", "check",
+		findingReport.ID, "--min-severity", "info")
+	if code != 0 || stderr != "" || !strings.Contains(fixedGateText, "fixed: 1") ||
+		!strings.Contains(fixedGateText, "matched: 0") ||
+		!strings.Contains(fixedGateText, "passed: true") {
+		t.Fatalf("fixed finding still blocked validated gate output=%s stderr=%s code=%d",
+			fixedGateText, stderr, code)
+	}
+	fixedActiveJSON, stderr, code := executeTestCommand(t, "report", "check",
+		findingReport.ID, "--fail-status", "active", "--min-severity", "info",
+		"--format", "json")
+	var fixedActiveGate reporting.GateResult
+	if code != apperror.ExitCode(apperror.New(apperror.CodeFailedPrecondition, "failed")) ||
+		json.Unmarshal([]byte(fixedActiveJSON), &fixedActiveGate) != nil ||
+		fixedActiveGate.MatchedCount != 5 || fixedActiveGate.FixedCount != 1 ||
+		fixedActiveGate.Passed {
+		t.Fatalf("fixed active gate drifted output=%s stderr=%s code=%d",
+			fixedActiveJSON, stderr, code)
+	}
+	fixedMarkdown, stderr, code := executeTestCommand(t, "report", "show",
+		findingReport.ID, "--format", "markdown")
+	if code != 0 || stderr != "" || !strings.Contains(fixedMarkdown, "- Fixed: 1") ||
+		!strings.Contains(fixedMarkdown, "Acceptance decision:") ||
+		!strings.Contains(fixedMarkdown, "Remediation Artifact Evidence:") ||
+		!strings.Contains(fixedMarkdown, "Fix decision:") {
+		t.Fatalf("fixed Markdown lifecycle failed output=%s stderr=%s code=%d",
+			fixedMarkdown, stderr, code)
 	}
 	usage, stderr, code := executeTestCommand(t, "run", "usage", runID)
 	if code != 0 || stderr != "" ||
@@ -341,7 +501,10 @@ func TestRunReadOnlyFanoutCLIPlansThenExecutesThroughReadOnlyGate(t *testing.T) 
 		strings.Count(timeline, events.ReadOnlyFanoutExecutionCompletedEvent) != 1 ||
 		strings.Count(timeline, events.FindingReportGeneratedEvent) != 1 ||
 		strings.Count(timeline, events.FindingArtifactEvidenceAttachedEvent) != 1 ||
-		strings.Count(timeline, events.FindingValidationDecidedEvent) != 1 {
+		strings.Count(timeline, events.FindingValidationDecidedEvent) != 1 ||
+		strings.Count(timeline, events.FindingAcceptedEvent) != 1 ||
+		strings.Count(timeline, events.FindingRemediationEvidenceAttachedEvent) != 1 ||
+		strings.Count(timeline, events.FindingFixedEvent) != 1 {
 		t.Fatalf("fan-out timeline drifted output=%s stderr=%s code=%d", timeline, stderr, code)
 	}
 }
