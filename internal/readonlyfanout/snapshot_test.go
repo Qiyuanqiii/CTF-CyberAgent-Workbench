@@ -82,6 +82,56 @@ func TestBuildPlanRejectsScopeEscapeAndDetectsSnapshotDrift(t *testing.T) {
 	}
 }
 
+func TestLoadVerifiedSnapshotReturnsRedactedManifestBytes(t *testing.T) {
+	root := t.TempDir()
+	writeSnapshotTestFile(t, root, "src/main.go",
+		"package main\n// API_KEY=super-secret-value\n")
+	plan, err := BuildPlan(context.Background(), BuildPlanRequest{
+		PlanID: "fanout-plan-verified", RunID: "run-verified",
+		WorkspaceID: "ws-verified", WorkspaceRoot: root, ScopePath: ".",
+		Goal: "review source", Tier: domain.ReadOnlyFanoutOne,
+		RequestedBy: "operator",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := LoadVerifiedSnapshot(context.Background(), root, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.SnapshotDigest != plan.SnapshotDigest || len(snapshot.Shards) != 1 ||
+		len(snapshot.Shards[0].Files) != 1 ||
+		strings.Contains(snapshot.Shards[0].Files[0].Content, "super-secret-value") ||
+		snapshot.Shards[0].Files[0].Redactions != 1 {
+		t.Fatalf("unexpected verified snapshot: %#v", snapshot)
+	}
+}
+
+func TestLoadVerifiedSnapshotRejectsAnyManifestDrift(t *testing.T) {
+	root := t.TempDir()
+	writeSnapshotTestFile(t, root, "src/main.go", "package main\n")
+	plan, err := BuildPlan(context.Background(), BuildPlanRequest{
+		PlanID: "fanout-plan-drift", RunID: "run-drift", WorkspaceID: "ws-drift",
+		WorkspaceRoot: root, ScopePath: ".", Goal: "review source",
+		Tier: domain.ReadOnlyFanoutOne, RequestedBy: "operator",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeSnapshotTestFile(t, root, "src/new.go", "package src\n")
+	if _, err := LoadVerifiedSnapshot(context.Background(), root, plan); err == nil ||
+		!strings.Contains(err.Error(), "changed after planning") {
+		t.Fatalf("new file drift was accepted: %v", err)
+	}
+	if err := os.Remove(filepath.Join(root, "src", "new.go")); err != nil {
+		t.Fatal(err)
+	}
+	writeSnapshotTestFile(t, root, "src/main.go", "package main\n// changed\n")
+	if _, err := LoadVerifiedSnapshot(context.Background(), root, plan); err == nil {
+		t.Fatal("content drift was accepted")
+	}
+}
+
 func writeSnapshotTestFile(t *testing.T, root, name, content string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(name))

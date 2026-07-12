@@ -8,12 +8,12 @@
 
 当前完成度：
 
-- 整体产品愿景：约 94%。
+- 整体产品愿景：约 95%。
 - v0.1 通用 Agent MVP：约 99%。
 - V2 Run-centric Runtime：约 99%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程 root 活动模型取消。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P4 已完成 schema v19 单 root Coordinator、schema v20 可恢复 inbox、schema v21 internal-only Specialist admission、schema v22 Agent-owned memory、schema v23 CompletionReport、schema v24 Specialist Attempt Runtime、schema v25 root inbox context、schema v26 internal-only no-tool Specialist turn、schema v27 recoverable child context、schema v28 child lifecycle repair、schema v29 durable schedule/cross-process child cancellation、schema v30 review-gated delegation proposal、schema v31 non-authorizing operator review、schema v32 recoverable operator application、schema v33 planning-only read-only Fan-out，以及最多两个 child 的 Go-internal 有界并发调度：稳定 Agent 身份、有界幂等 inbox、严格 wake/dependency、最多两个 depth-1 child、独立 Session、Skill/预算预留、同 Run memory ownership、lease-fenced Attempt、累计 usage 计费、崩溃通知、接管恢复、attempt-bound `agent.finish`、root/child 两阶段 exactly-once context、严格 child lifecycle、一次隔离修复、持久化调度摘要、精确 child-call 取消、root 提案/审阅/application/admission 权限分离、Agent/Message 中断恢复、取消扇出及 root+children SQLite 总预算复核均已落地；核心委派仍为两个 child，独立只读规划可选择最多六个 shard，但 Provider 执行尚未开放。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具、schema v16 可恢复 Provider 工具批次，以及 schema v30 `agent_proposal` class。P9 已新增 loopback-only `api.v1` 读取面、独立授权的 root/Specialist 精确取消 POST、由 Go DTO 生成且受 golden/live-route 测试保护的 OpenAPI 3.1 契约、有界可恢复 Run-event SSE，以及 Run-aware TUI 的 Work/Notes/ToolRounds/Tools 视图和批准一次/本会话操作；真实命令执行、通用 API 写入和执行类模型工具继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程 root 活动模型取消。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P4 已完成 schema v19 单 root Coordinator、schema v20 可恢复 inbox、schema v21 internal-only Specialist admission、schema v22 Agent-owned memory、schema v23 CompletionReport、schema v24 Specialist Attempt Runtime、schema v25 root inbox context、schema v26 internal-only no-tool Specialist turn、schema v27 recoverable child context、schema v28 child lifecycle repair、schema v29 durable schedule/cross-process child cancellation、schema v30 review-gated delegation proposal、schema v31 non-authorizing operator review、schema v32 recoverable operator application、schema v33 immutable read-only Fan-out plan 与 schema v34 bounded read-only execution，以及最多两个 child 的 Go-internal 核心调度：稳定 Agent 身份、有界幂等 inbox、严格 wake/dependency、最多两个 depth-1 child、独立 Session、Skill/预算预留、同 Run memory ownership、lease-fenced Attempt、累计 usage 计费、崩溃通知、接管恢复、attempt-bound `agent.finish`、root/child 两阶段 exactly-once context、严格 child lifecycle、一次隔离修复、持久化调度摘要、精确 child-call 取消、root 提案/审阅/application/admission 权限分离、Agent/Message 中断恢复、取消扇出及 root+children+Fan-out SQLite 总预算复核均已落地。核心委派仍为两个 child；独立只读池可按 1/2/4/6 档调用无工具 JSON Provider，但不创建 Agent、Attempt、schedule，不提供写入、Shell、进程或网络能力。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具、schema v16 可恢复 Provider 工具批次，以及 schema v30 `agent_proposal` class。P9 已新增 loopback-only `api.v1` 读取面、独立授权的 root/Specialist 精确取消 POST、由 Go DTO 生成且受 golden/live-route 测试保护的 OpenAPI 3.1 契约、有界可恢复 Run-event SSE，以及 Run-aware TUI 的 Work/Notes/ToolRounds/Tools 视图和批准一次/本会话操作；真实命令执行、通用 API 写入和执行类模型工具继续关闭。
 
 ## 二、已完成功能
 
@@ -41,7 +41,8 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - schema v30 以严格 `specialist_delegation.v1`、`specialist_delegation_proposals/assignments/operations` 和 `agent.delegation_proposed` 支持 root 最多提出两个待审 child 目标；active root/lease/scope/Skill/capacity/budget 全部由 Go/SQLite 复核，proposal 不创建 Agent、Session、预算预留或 schedule。
 - schema v31 以不可变 `specialist_delegation_reviews/review_operations` 和 `agent.delegation_reviewed` 记录一次 operator approved/rejected；拒绝理由脱敏且不进事件，结果不创建 child 且不授权 admission。
 - schema v32 以 `specialist_delegation_applications/application_assignments/application_operations` 将 approved proposal 可恢复地接入现有 admission 与严格父指令；applying 阻止 root/无关 mutation/child scheduler，成功保持 child ready，终态 Run 原子 abort。
-- schema v33 以独立 `readonly_fanout_plans/files/shards/operations` 支持 `auto/1/2/4/6` 只读分片规划；Go/SQLite 锁定 workspace-list/read 能力指纹，核心 Agent/v32 上限仍为 2，当前不调用 Provider 或启动执行。
+- schema v33 以独立 `readonly_fanout_plans/files/shards/operations` 支持 `auto/1/2/4/6` 只读分片规划；Go/SQLite 锁定 workspace-list/read 能力指纹，核心 Agent/v32 上限仍为 2；v33 当时不调用 Provider，执行能力现由 schema v34 提供。
+- schema v34 以独立 `readonly_fanout_executions/execution_shards/model_calls/findings/execution_operations` 执行已冻结的 v33 计划；调用前重建并核对完整 snapshot，正文只在内存中脱敏后进入 tool-free JSON Provider，首错取消 siblings，lease takeover 只重试未完成 shard，未知调用按预留额度计费。
 - `RunAgentUsage` 每轮前后从 SQLite 重建总账：root token/执行时间来自 Supervisor checkpoint，child token 必须在 Agent 投影与 Attempt ledger 间一致，所有 child model-call elapsed 求和；投影漂移返回 `CONFLICT`，剩余 token/毫秒按排序后的 active child 确定性分片。
 - root inbox 进入模型前执行持久化协议关联、sender 路由、严格 JSON、脱敏、字段截断和 8192-token 全批次适配；prompt 不含消息 ID、sequence/cursor，模型不能选择 sender 或提交消费位置。
 - Supervisor 与 `tool invoke` 从 Go-owned Run/Agent 状态注入所有者，模型 schema 不包含 `owner_agent_id`；CLI/TUI/HTTP/OpenAPI 可显示和过滤 Agent owner。root/Specialist 的 owner-only Notes 按真实 Agent 身份隔离。
@@ -426,12 +427,18 @@ Recoverable Specialist Delegation Application 切片新增 schema v32、`applyin
 
 Read-only Fan-out Planning 切片新增 schema v33、固定 `readonly_fanout.v1` 能力指纹、`auto/1/2/4/6` 档位解析、工作区 snapshot scanner、确定性 shard、摘要幂等 operation，以及 `run fanout plan/fanouts/fanout show`。扫描器拒绝路径逃逸并跳过 symlink、VCS、依赖/构建目录、二进制和 secret-like 文件，硬限制为 20,000 entries、256 files、128 KiB/file、768 KiB total。Go 与 SQLite 同时要求 running/network-disabled Run、相同 workspace 的 active Session、准确 capability fingerprint 和完整 file/shard 计数；所有 v33 行不可更新或删除。双 Store 八路同 key 收敛为一个 plan/event，连续十轮通过；改意图冲突、Policy 拒绝零状态、原始 key 不落库、v32 原地升级保留，CLI 明确 `execution_authorized=false`，Agent 图保持 root-only 且 Attempt/schedule 为零。独立审计未发现未解决的高/中风险问题，并修复两项低风险边界：规划 writer 原误用了要求 Tool Budget 初始化的 helper，现改为独立 Run 行锁且不伪造工具消费；scope 起点原会解析工作区内 symlink，现明确拒绝并通过 Go `os.Root` 约束读取。最终 `go test ./...`、全仓 `go test -race ./...`、`go vet ./...`、零告警 `staticcheck ./...`、`go mod verify`、`go mod tidy -diff`、`govulncheck ./...`、凭据/运行产物扫描和隔离真实 CLI smoke 全部通过，可达漏洞为 0。
 
+Bounded Read-only Fan-out Execution 切片新增 schema v34、`ReadOnlyFanoutExecutionService`、严格 `readonly_fanout_report.v1`、执行/分片/模型调用/发现项/摘要幂等账本，以及 `run fanout execute` 与 `run fanout execution`。执行器持有现有 Run execution lease，先重建 v33 manifest，再逐文件通过 Go `os.Root` 复核 regular-file identity、大小和 SHA-256；新增、删除、修改、symlink 漂移或超界 prompt 均在调用前 fail closed。通过复核的正文只在内存中存在，并在构建 JSON payload 前做凭据脱敏；请求没有 ToolSpec，强制 JSON mode，报告 unknown/trailing 字段被拒绝，finding 只能引用本 shard 的 manifest path。核心 delegation 的两个 child 上限、Agent 图、AgentAttempt 和 Specialist schedule 均不变。
+
+Go 按计划档位并发 1/2/4/6 个 worker，首错会取消共享 context 并等待所有 shard 写入 durable terminal state。schema v34 的 private lease generation 会 fence 旧 worker；新 generation 将未决调用标记 `abandoned`、running shard 恢复为 pending，并只重试未完成 shard，单 shard 最多三次恢复尝试。root、Specialist 和 Fan-out 用量由 `RunAgentUsage` 一次性从 SQLite 重建；正常调用使用实际 token/elapsed，结果未知的 failed/cancelled/abandoned 调用使用保守预留量，且有 timeout 时把剩余模型毫秒在待执行 shards 间确定性均分。Specialist schedule 持久化也增加 Fan-out 前后预算分量，防止两种并发模式交替运行时丢失基线。
+
+功能复核覆盖 mock 六路成功、终态同 key 零重复、4096-output 预算拒绝零 Provider 调用、六路 barrier 首错后 1 failed + 5 cancelled、无 started/running 残留、旧 lease fencing、未知调用 612 token/1000ms 预留保留、same-key 不同临时 execution ID 收敛、v33->v34 plan 保留、CLI plan/execute/replay/show/usage/event 和 Agent 图仍 root-only。安全审计确认原始 operation key、工作区绝对根目录和原始源码不落库，Run 事件不包含 goal、manifest 路径、finding 详情或报告正文；v33 manifest 的相对路径以及 v34 严格报告/finding 则按设计留在本地 SQLite，供恢复、展示与审计。模型不能改档位、调用工具、递归 spawn 或写文件。审计阶段修复三项低风险代码问题：执行创建重放原把随机 execution ID 误当意图字段，现按摘要意图收敛；Specialist schedule 原没有 Fan-out 预算列，现保留兼容 subtotal 并单独持久化 Fan-out 分量；终态失败原可在所有 shard 已完成时伪造，现由 Domain 与 Store 双重拒绝。提交前复核另修正了一处关于持久化边界的文档表述。最终 `go test ./...`、全仓 `go test -race ./...`、`go vet ./...`、零告警 `staticcheck ./...`、`go mod verify`、`go mod tidy -diff`、`govulncheck ./...` 与凭据扫描全部通过，可达漏洞为 0。隔离的真实二进制 CLI smoke 也完成 tier 6 规划与执行、六个终态 shard、零重复重放、统一用量查询及 root-only Agent 图验证。
+
 ## 七、下一开发切片
 
-1. 为 schema v33 增加执行门：每个 shard 调用前重新读取并核对 manifest hash，只允许无工具 JSON-mode Provider，纳入 Run 总 token/时间预算、取消扇出与结构化结果汇总；模型不能改档位、请求工具或写文件。
+1. 为 v34 增加 execution-level 确定性汇总与去重，把 shard findings 投影到通用 Finding/Evidence/Report 边界；先支持 Markdown/JSON，只读且不让模型自行合并或改变严重度事实。
 2. schema v32 的显式 operator child schedule/continue 仍单独推进，只允许选择该 application 已 instructed 的 ready child，并复用 durable schedule、总预算、取消与恢复。
-2. React/Vite 后续从 `docs/openapi.json` 生成 client/DTO，并通过带 Authorization header 的 fetch 消费 SSE，不把 token 放入 URL、不重复实现 Go Policy。
-3. Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
+3. React/Vite 后续从 `docs/openapi.json` 生成 client/DTO，并通过带 Authorization header 的 fetch 消费 SSE，不把 token 放入 URL、不重复实现 Go Policy。
+4. Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
 
 ## 八、仓库同步与恢复约定
 

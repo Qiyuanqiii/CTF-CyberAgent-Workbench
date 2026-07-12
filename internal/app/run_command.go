@@ -98,15 +98,98 @@ func (a *App) runFanouts(ctx context.Context, args []string) error {
 
 func (a *App) runFanout(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run fanout plan <run-id> <goal> | show <plan-id>")
+		return errors.New("usage: cyberagent run fanout plan|execute|show|execution")
 	}
 	switch args[0] {
 	case "plan":
 		return a.runFanoutPlan(ctx, args[1:])
+	case "execute":
+		return a.runFanoutExecute(ctx, args[1:])
 	case "show":
 		return a.runFanoutShow(ctx, args[1:])
+	case "execution":
+		return a.runFanoutExecutionShow(ctx, args[1:])
 	default:
 		return a.runFanoutShow(ctx, args)
+	}
+}
+
+func (a *App) runFanoutExecute(ctx context.Context, args []string) error {
+	fs := newFlagSet("run fanout execute", a.errOut)
+	operationKey := fs.String("operation-key", "", "stable execution operation key")
+	operator := fs.String("operator", "cli_operator", "operator identity")
+	maxOutputTokens := fs.Int("max-output-tokens", 1024,
+		"maximum output tokens reserved for each shard")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"operation-key": true, "operator": true, "max-output-tokens": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 || strings.TrimSpace(*operationKey) == "" {
+		return errors.New("usage: cyberagent run fanout execute <plan-id> --operation-key <key> [--operator <id>] [--max-output-tokens <128..4096>]")
+	}
+	result, err := application.NewReadOnlyFanoutExecutionService(a.store, a.router,
+		a.checker).Execute(ctx, application.ExecuteReadOnlyFanoutRequest{
+		PlanID: fs.Arg(0), OperationKey: *operationKey, RequestedBy: *operator,
+		MaxOutputTokensPerShard: *maxOutputTokens,
+	})
+	if result.Execution.ID != "" {
+		a.printReadOnlyFanoutExecution(result.Execution, result.Replayed,
+			result.Recovered, &result.UsageAfter)
+	}
+	return err
+}
+
+func (a *App) runFanoutExecutionShow(ctx context.Context, args []string) error {
+	fs := newFlagSet("run fanout execution", a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run fanout execution <execution-id>")
+	}
+	execution, err := a.store.GetReadOnlyFanoutExecution(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	a.printReadOnlyFanoutExecution(execution, false, false, nil)
+	return nil
+}
+
+func (a *App) printReadOnlyFanoutExecution(execution domain.ReadOnlyFanoutExecution,
+	replayed bool, recovered bool, usage *domain.RunAgentUsage,
+) {
+	fmt.Fprintf(a.out, "fanout_execution: %s\nplan: %s\nrun: %s\nstatus: %s\nparallelism: %d\nmax_output_tokens_per_shard: %d\nsnapshot_digest: %s\ncapability: workspace_readonly\nshell: false\nfile_write: false\nprocess: false\nnetwork: false\nexternal_tools: false\nchild_spawn: false\nreplayed: %t\nrecovered: %t\n",
+		execution.ID, execution.PlanID, execution.RunID, execution.Status,
+		execution.Parallelism, execution.MaxOutputTokensPerShard,
+		execution.SnapshotDigest, replayed, recovered)
+	if execution.StopCode != "" {
+		fmt.Fprintf(a.out, "stop_code: %s\n", execution.StopCode)
+	}
+	for _, shard := range execution.Shards {
+		fmt.Fprintf(a.out, "shard_%d: status=%s attempts=%d provider=%s model=%s tokens=%d elapsed_millis=%d findings=%d",
+			shard.Ordinal, shard.Status, shard.AttemptCount, shard.Provider, shard.Model,
+			shard.TotalTokens, shard.ElapsedMillis, shard.FindingCount)
+		if shard.ErrorCode != "" {
+			fmt.Fprintf(a.out, " error_code=%s", shard.ErrorCode)
+		}
+		fmt.Fprintln(a.out)
+		if shard.ReportJSON != "" {
+			var report domain.ReadOnlyFanoutReport
+			if json.Unmarshal([]byte(shard.ReportJSON), &report) == nil {
+				fmt.Fprintf(a.out, "  summary: %s\n", report.Summary)
+				for _, finding := range report.Findings {
+					fmt.Fprintf(a.out, "  finding: severity=%s path=%s line=%d-%d title=%s\n",
+						finding.Severity, finding.Path, finding.LineStart,
+						finding.LineEnd, finding.Title)
+				}
+			}
+		}
+	}
+	if usage != nil && usage.RunID != "" {
+		fmt.Fprintf(a.out, "run_total_tokens: %d\nrun_readonly_fanout_tokens: %d\nrun_total_execution_millis: %d\nrun_readonly_fanout_millis: %d\n",
+			usage.TotalTokens, usage.ReadOnlyFanoutTokens,
+			usage.TotalExecutionMillis, usage.ReadOnlyFanoutMillis)
 	}
 }
 
@@ -391,6 +474,15 @@ func (a *App) runUsage(ctx context.Context, service *application.RunService, arg
 	if toolUsage.ExhaustedAt != nil {
 		fmt.Fprintf(a.out, "tool_budget_exhausted_at: %s\n", toolUsage.ExhaustedAt.Format(time.RFC3339))
 	}
+	agentUsage, err := a.store.GetRunAgentUsage(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "agent_root_tokens: %d\nagent_specialist_tokens: %d\nagent_readonly_fanout_tokens: %d\nagent_total_tokens: %d\nagent_root_execution_millis: %d\nagent_specialist_execution_millis: %d\nagent_readonly_fanout_millis: %d\nagent_total_execution_millis: %d\n",
+		agentUsage.RootTokens, agentUsage.SpecialistTokens,
+		agentUsage.ReadOnlyFanoutTokens, agentUsage.TotalTokens,
+		agentUsage.RootExecutionMillis, agentUsage.SpecialistExecutionMillis,
+		agentUsage.ReadOnlyFanoutMillis, agentUsage.TotalExecutionMillis)
 	if checkpoint, ok, err := a.newRunSupervisor().Checkpoint(ctx, run.ID); err != nil {
 		return err
 	} else if ok {

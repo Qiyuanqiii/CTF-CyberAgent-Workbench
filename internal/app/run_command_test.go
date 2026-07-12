@@ -34,6 +34,7 @@ var approvalIDPattern = regexp.MustCompile(`approval-[0-9]{14}-[a-f0-9]{12}`)
 var artifactIDPattern = regexp.MustCompile(`artifact-[0-9]{14}-[a-f0-9]{12}`)
 var delegationReviewIDPattern = regexp.MustCompile(`delegation-review-[0-9]{14}-[a-f0-9]{12}`)
 var fanoutPlanIDPattern = regexp.MustCompile(`fanout-plan-[0-9]{14}-[a-f0-9]{12}`)
+var fanoutExecutionIDPattern = regexp.MustCompile(`fanout-execution-[0-9]{14}-[a-f0-9]{12}`)
 
 func executeTestCommand(t *testing.T, args ...string) (string, string, int) {
 	t.Helper()
@@ -50,7 +51,7 @@ func TestCLIHelpListsRunGraphAndLease(t *testing.T) {
 	}
 }
 
-func TestRunReadOnlyFanoutPlanCLIIsExplicitAndNonExecuting(t *testing.T) {
+func TestRunReadOnlyFanoutCLIPlansThenExecutesThroughReadOnlyGate(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CYBERAGENT_HOME", home)
 	if _, stderr, code := executeTestCommand(t, "workspace", "init", "fanout-demo"); code != 0 {
@@ -113,13 +114,52 @@ func TestRunReadOnlyFanoutPlanCLIIsExplicitAndNonExecuting(t *testing.T) {
 		!strings.Contains(listed, "execution_authorized=false") {
 		t.Fatalf("fan-out list drifted output=%s stderr=%s code=%d", listed, stderr, code)
 	}
+	executed, stderr, code := executeTestCommand(t, "run", "fanout", "execute", planID,
+		"--operation-key", "fanout-cli-execution-0001", "--max-output-tokens", "512")
+	if code != 0 || stderr != "" || !strings.Contains(executed, "status: completed") ||
+		strings.Count(executed, "summary: Mock read-only audit completed") != 6 ||
+		!strings.Contains(executed, "external_tools: false") ||
+		!strings.Contains(executed, "child_spawn: false") ||
+		!strings.Contains(executed, "replayed: false") {
+		t.Fatalf("fan-out execution failed output=%s stderr=%s code=%d",
+			executed, stderr, code)
+	}
+	executionID := fanoutExecutionIDPattern.FindString(executed)
+	if executionID == "" {
+		t.Fatalf("fan-out execution id missing: %s", executed)
+	}
+	executionReplay, stderr, code := executeTestCommand(t, "run", "fanout", "execute",
+		planID, "--operation-key", "fanout-cli-execution-0001",
+		"--max-output-tokens", "512")
+	if code != 0 || stderr != "" ||
+		fanoutExecutionIDPattern.FindString(executionReplay) != executionID ||
+		!strings.Contains(executionReplay, "replayed: true") {
+		t.Fatalf("fan-out execution replay drifted output=%s stderr=%s code=%d",
+			executionReplay, stderr, code)
+	}
+	executionShown, stderr, code := executeTestCommand(t, "run", "fanout", "execution",
+		executionID)
+	if code != 0 || stderr != "" || !strings.Contains(executionShown, "status: completed") ||
+		strings.Count(executionShown, "shard_") != 6 {
+		t.Fatalf("fan-out execution show drifted output=%s stderr=%s code=%d",
+			executionShown, stderr, code)
+	}
+	usage, stderr, code := executeTestCommand(t, "run", "usage", runID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(usage, "agent_readonly_fanout_tokens:") {
+		t.Fatalf("fan-out usage is missing output=%s stderr=%s code=%d",
+			usage, stderr, code)
+	}
 	graph, stderr, code := executeTestCommand(t, "run", "graph", runID)
 	if code != 0 || stderr != "" || !strings.Contains(graph, "nodes: 1") {
 		t.Fatalf("fan-out plan changed Agent graph output=%s stderr=%s code=%d", graph, stderr, code)
 	}
 	timeline, stderr, code := executeTestCommand(t, "run", "events", runID)
 	if code != 0 || stderr != "" ||
-		strings.Count(timeline, events.ReadOnlyFanoutPlannedEvent) != 1 {
+		strings.Count(timeline, events.ReadOnlyFanoutPlannedEvent) != 1 ||
+		strings.Count(timeline, events.ReadOnlyFanoutExecutionStartedEvent) != 1 ||
+		strings.Count(timeline, events.ReadOnlyFanoutShardCompletedEvent) != 6 ||
+		strings.Count(timeline, events.ReadOnlyFanoutExecutionCompletedEvent) != 1 {
 		t.Fatalf("fan-out timeline drifted output=%s stderr=%s code=%d", timeline, stderr, code)
 	}
 }

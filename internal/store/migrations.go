@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 33
+const LatestSchemaVersion = 34
 
 type migration struct {
 	Version    int
@@ -3009,6 +3009,414 @@ var readOnlyFanoutPlanStatements = []string{
 		BEFORE DELETE ON readonly_fanout_operations
 		BEGIN
 			SELECT RAISE(ABORT, 'read-only fan-out operation cannot be deleted');
+		END;`,
+}
+
+var readOnlyFanoutExecutionStatements = []string{
+	`ALTER TABLE specialist_schedules ADD COLUMN before_readonly_tokens
+		INTEGER NOT NULL DEFAULT 0 CHECK(before_readonly_tokens >= 0);`,
+	`ALTER TABLE specialist_schedules ADD COLUMN before_readonly_execution_millis
+		INTEGER NOT NULL DEFAULT 0 CHECK(before_readonly_execution_millis >= 0);`,
+	`ALTER TABLE specialist_schedules ADD COLUMN after_readonly_tokens
+		INTEGER NOT NULL DEFAULT 0 CHECK(after_readonly_tokens >= 0);`,
+	`ALTER TABLE specialist_schedules ADD COLUMN after_readonly_execution_millis
+		INTEGER NOT NULL DEFAULT 0 CHECK(after_readonly_execution_millis >= 0);`,
+	`CREATE TRIGGER trg_specialist_schedule_readonly_usage_insert
+		BEFORE INSERT ON specialist_schedules
+		WHEN NEW.status = 'running' AND
+			(NEW.before_readonly_tokens != NEW.after_readonly_tokens
+			 OR NEW.before_readonly_execution_millis != NEW.after_readonly_execution_millis)
+		BEGIN
+			SELECT RAISE(ABORT, 'running Specialist schedule read-only usage must start equal');
+		END;`,
+	`CREATE TABLE readonly_fanout_executions (
+		id TEXT PRIMARY KEY,
+		plan_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		status TEXT NOT NULL,
+		parallelism INTEGER NOT NULL,
+		max_output_tokens_per_shard INTEGER NOT NULL,
+		snapshot_digest TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		stop_code TEXT NOT NULL DEFAULT '',
+		lease_id TEXT NOT NULL,
+		lease_generation INTEGER NOT NULL,
+		version INTEGER NOT NULL,
+		started_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		finished_at TEXT,
+		FOREIGN KEY(plan_id) REFERENCES readonly_fanout_plans(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+		CHECK(status IN ('running', 'completed', 'failed', 'cancelled')),
+		CHECK(parallelism BETWEEN 1 AND 6),
+		CHECK(max_output_tokens_per_shard BETWEEN 128 AND 4096),
+		CHECK(length(snapshot_digest) = 64 AND snapshot_digest = lower(snapshot_digest)
+			AND snapshot_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0),
+		CHECK(length(stop_code) <= 256 AND instr(stop_code, char(0)) = 0),
+		CHECK(lease_id = trim(lease_id) AND length(lease_id) BETWEEN 1 AND 256
+			AND instr(lease_id, char(0)) = 0 AND lease_generation > 0),
+		CHECK(version > 0 AND julianday(updated_at) >= julianday(started_at)),
+		CHECK((status = 'running' AND finished_at IS NULL AND stop_code = '') OR
+			(status = 'completed' AND finished_at IS NOT NULL AND stop_code = ''
+				AND updated_at = finished_at) OR
+			(status IN ('failed', 'cancelled') AND finished_at IS NOT NULL
+				AND length(stop_code) > 0 AND updated_at = finished_at))
+	);`,
+	`CREATE INDEX idx_readonly_fanout_executions_run_started
+		ON readonly_fanout_executions(run_id, started_at, id);`,
+	`CREATE TABLE readonly_fanout_execution_shards (
+		execution_id TEXT NOT NULL,
+		plan_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		input_digest TEXT NOT NULL,
+		attempt_count INTEGER NOT NULL,
+		current_attempt INTEGER NOT NULL,
+		provider TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		input_tokens INTEGER NOT NULL DEFAULT 0,
+		output_tokens INTEGER NOT NULL DEFAULT 0,
+		total_tokens INTEGER NOT NULL DEFAULT 0,
+		elapsed_millis INTEGER NOT NULL DEFAULT 0,
+		report_json TEXT NOT NULL DEFAULT '',
+		report_digest TEXT NOT NULL DEFAULT '',
+		finding_count INTEGER NOT NULL DEFAULT 0,
+		error_code TEXT NOT NULL DEFAULT '',
+		error_reason TEXT NOT NULL DEFAULT '',
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		started_at TEXT,
+		finished_at TEXT,
+		PRIMARY KEY(execution_id, ordinal),
+		FOREIGN KEY(execution_id) REFERENCES readonly_fanout_executions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(plan_id) REFERENCES readonly_fanout_plans(id) ON DELETE RESTRICT,
+		CHECK(ordinal BETWEEN 1 AND 6),
+		CHECK(status IN ('pending', 'running', 'completed', 'failed', 'cancelled')),
+		CHECK(length(input_digest) = 64 AND input_digest = lower(input_digest)
+			AND input_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(attempt_count BETWEEN 0 AND 3 AND current_attempt BETWEEN 0 AND attempt_count),
+		CHECK(length(provider) <= 256 AND length(model) <= 256
+			AND instr(provider, char(0)) = 0 AND instr(model, char(0)) = 0),
+		CHECK(input_tokens >= 0 AND output_tokens >= 0 AND total_tokens >= 0
+			AND total_tokens >= input_tokens + output_tokens AND elapsed_millis >= 0),
+		CHECK(length(CAST(report_json AS BLOB)) <= 131072),
+		CHECK((report_digest = '') OR (length(report_digest) = 64
+			AND report_digest = lower(report_digest)
+			AND report_digest NOT GLOB '*[^0-9a-f]*')),
+		CHECK(finding_count BETWEEN 0 AND 32),
+		CHECK(length(error_code) <= 256 AND instr(error_code, char(0)) = 0
+			AND length(CAST(error_reason AS BLOB)) <= 8192
+			AND instr(error_reason, char(0)) = 0),
+		CHECK(version > 0 AND julianday(updated_at) >= julianday(created_at)),
+		CHECK((status = 'pending' AND current_attempt = 0 AND provider = '' AND model = ''
+			AND input_tokens = 0 AND output_tokens = 0 AND total_tokens = 0
+			AND elapsed_millis = 0 AND report_json = '' AND report_digest = ''
+			AND finding_count = 0 AND error_code = '' AND error_reason = ''
+			AND started_at IS NULL AND finished_at IS NULL) OR
+			(status = 'running' AND attempt_count > 0 AND current_attempt = attempt_count
+				AND provider = '' AND model = '' AND input_tokens = 0 AND output_tokens = 0
+				AND total_tokens = 0 AND elapsed_millis = 0 AND report_json = ''
+				AND report_digest = '' AND finding_count = 0 AND error_code = ''
+				AND error_reason = '' AND started_at IS NOT NULL AND finished_at IS NULL) OR
+			(status = 'completed' AND attempt_count > 0 AND current_attempt = attempt_count
+				AND length(provider) > 0 AND length(model) > 0 AND json_valid(report_json)
+				AND length(report_digest) = 64 AND finding_count >= 0
+				AND error_code = '' AND error_reason = '' AND started_at IS NOT NULL
+				AND finished_at IS NOT NULL AND updated_at = finished_at) OR
+			(status = 'failed' AND attempt_count > 0 AND current_attempt = attempt_count
+				AND length(provider) > 0 AND length(model) > 0 AND report_json = ''
+				AND report_digest = '' AND finding_count = 0 AND length(error_code) > 0
+				AND length(error_reason) > 0 AND started_at IS NOT NULL
+				AND finished_at IS NOT NULL AND updated_at = finished_at) OR
+			(status = 'cancelled' AND report_json = '' AND report_digest = ''
+				AND finding_count = 0 AND length(error_code) > 0 AND length(error_reason) > 0
+				AND finished_at IS NOT NULL AND updated_at = finished_at AND
+				((attempt_count > 0 AND current_attempt = attempt_count
+					AND length(provider) > 0 AND length(model) > 0 AND started_at IS NOT NULL) OR
+				 (current_attempt = 0 AND provider = '' AND model = '' AND input_tokens = 0
+					AND output_tokens = 0 AND total_tokens = 0 AND elapsed_millis = 0
+					AND started_at IS NULL))))
+	);`,
+	`CREATE INDEX idx_readonly_fanout_execution_shards_status
+		ON readonly_fanout_execution_shards(execution_id, status, ordinal);`,
+	`CREATE TABLE readonly_fanout_model_calls (
+		execution_id TEXT NOT NULL,
+		plan_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		shard_ordinal INTEGER NOT NULL,
+		attempt_number INTEGER NOT NULL,
+		lease_id TEXT NOT NULL,
+		lease_generation INTEGER NOT NULL,
+		provider TEXT NOT NULL,
+		model TEXT NOT NULL,
+		status TEXT NOT NULL,
+		outcome TEXT NOT NULL DEFAULT '',
+		input_fingerprint TEXT NOT NULL,
+		response_digest TEXT NOT NULL DEFAULT '',
+		reserved_input_tokens INTEGER NOT NULL,
+		reserved_output_tokens INTEGER NOT NULL,
+		reserved_total_tokens INTEGER NOT NULL,
+		reserved_millis INTEGER NOT NULL,
+		usage_recorded INTEGER NOT NULL DEFAULT 0,
+		input_tokens INTEGER NOT NULL DEFAULT 0,
+		output_tokens INTEGER NOT NULL DEFAULT 0,
+		total_tokens INTEGER NOT NULL DEFAULT 0,
+		elapsed_recorded INTEGER NOT NULL DEFAULT 0,
+		elapsed_millis INTEGER NOT NULL DEFAULT 0,
+		error_code TEXT NOT NULL DEFAULT '',
+		error_reason TEXT NOT NULL DEFAULT '',
+		version INTEGER NOT NULL,
+		started_at TEXT NOT NULL,
+		finished_at TEXT,
+		PRIMARY KEY(execution_id, shard_ordinal, attempt_number),
+		FOREIGN KEY(execution_id, shard_ordinal)
+			REFERENCES readonly_fanout_execution_shards(execution_id, ordinal) ON DELETE RESTRICT,
+		FOREIGN KEY(plan_id) REFERENCES readonly_fanout_plans(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(shard_ordinal BETWEEN 1 AND 6 AND attempt_number > 0),
+		CHECK(lease_id = trim(lease_id) AND length(lease_id) BETWEEN 1 AND 256
+			AND instr(lease_id, char(0)) = 0 AND lease_generation > 0),
+		CHECK(provider = trim(provider) AND model = trim(model)
+			AND length(provider) BETWEEN 1 AND 256 AND length(model) BETWEEN 1 AND 256
+			AND instr(provider, char(0)) = 0 AND instr(model, char(0)) = 0),
+		CHECK(status IN ('started', 'completed', 'failed', 'cancelled', 'abandoned')),
+		CHECK(length(input_fingerprint) = 64 AND input_fingerprint = lower(input_fingerprint)
+			AND input_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK((response_digest = '') OR (length(response_digest) = 64
+			AND response_digest = lower(response_digest)
+			AND response_digest NOT GLOB '*[^0-9a-f]*')),
+		CHECK(reserved_input_tokens >= 0 AND reserved_output_tokens BETWEEN 128 AND 4096
+			AND reserved_total_tokens = reserved_input_tokens + reserved_output_tokens
+			AND reserved_millis >= 0),
+		CHECK(usage_recorded IN (0, 1) AND input_tokens >= 0 AND output_tokens >= 0
+			AND total_tokens >= 0 AND total_tokens >= input_tokens + output_tokens),
+		CHECK(elapsed_recorded IN (0, 1) AND elapsed_millis >= 0),
+		CHECK(length(error_code) <= 256 AND instr(error_code, char(0)) = 0
+			AND length(CAST(error_reason AS BLOB)) <= 8192
+			AND instr(error_reason, char(0)) = 0),
+		CHECK(version > 0),
+		CHECK((status = 'started' AND outcome = '' AND response_digest = ''
+			AND usage_recorded = 0 AND input_tokens = 0 AND output_tokens = 0
+			AND total_tokens = 0 AND elapsed_recorded = 0 AND elapsed_millis = 0
+			AND error_code = '' AND error_reason = '' AND finished_at IS NULL) OR
+			(status = 'completed' AND outcome = 'success' AND length(response_digest) = 64
+				AND usage_recorded = 1 AND elapsed_recorded = 1 AND error_code = ''
+				AND error_reason = '' AND finished_at IS NOT NULL) OR
+			(status IN ('failed', 'cancelled', 'abandoned') AND length(outcome) > 0
+				AND response_digest = '' AND length(error_code) > 0
+				AND length(error_reason) > 0 AND finished_at IS NOT NULL))
+	);`,
+	`CREATE INDEX idx_readonly_fanout_model_calls_run_status
+		ON readonly_fanout_model_calls(run_id, status, execution_id, shard_ordinal);`,
+	`CREATE TABLE readonly_fanout_findings (
+		execution_id TEXT NOT NULL,
+		shard_ordinal INTEGER NOT NULL,
+		ordinal INTEGER NOT NULL,
+		fingerprint TEXT NOT NULL,
+		severity TEXT NOT NULL,
+		category TEXT NOT NULL,
+		title TEXT NOT NULL,
+		detail TEXT NOT NULL,
+		relative_path TEXT NOT NULL,
+		line_start INTEGER NOT NULL,
+		line_end INTEGER NOT NULL,
+		confidence INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		PRIMARY KEY(execution_id, shard_ordinal, ordinal),
+		UNIQUE(execution_id, fingerprint),
+		FOREIGN KEY(execution_id, shard_ordinal)
+			REFERENCES readonly_fanout_execution_shards(execution_id, ordinal) ON DELETE RESTRICT,
+		CHECK(shard_ordinal BETWEEN 1 AND 6 AND ordinal BETWEEN 1 AND 32),
+		CHECK(length(fingerprint) = 64 AND fingerprint = lower(fingerprint)
+			AND fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(severity IN ('info', 'low', 'medium', 'high', 'critical')),
+		CHECK(category = trim(category) AND length(category) BETWEEN 1 AND 64),
+		CHECK(title = trim(title) AND length(title) BETWEEN 1 AND 256),
+		CHECK(detail = trim(detail) AND length(detail) BETWEEN 1 AND 2048),
+		CHECK(relative_path = trim(relative_path) AND length(relative_path) BETWEEN 1 AND 2048
+			AND instr(relative_path, char(0)) = 0 AND instr(relative_path, char(92)) = 0
+			AND substr(relative_path, 1, 1) <> '/' AND relative_path NOT IN ('.', '..')
+			AND relative_path NOT LIKE '../%'
+			AND instr('/' || relative_path || '/', '/../') = 0),
+		CHECK(line_start >= 0 AND line_end >= line_start AND confidence BETWEEN 0 AND 100)
+	);`,
+	`CREATE INDEX idx_readonly_fanout_findings_severity
+		ON readonly_fanout_findings(execution_id, severity, shard_ordinal, ordinal);`,
+	`CREATE TABLE readonly_fanout_execution_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		execution_id TEXT NOT NULL UNIQUE,
+		plan_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(execution_id) REFERENCES readonly_fanout_executions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(plan_id) REFERENCES readonly_fanout_plans(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64
+			AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64
+			AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE TRIGGER trg_readonly_fanout_execution_insert
+		BEFORE INSERT ON readonly_fanout_executions
+		WHEN NOT EXISTS (
+			SELECT 1 FROM readonly_fanout_plans plan
+			JOIN runs run ON run.id = plan.run_id
+			JOIN run_execution_leases lease ON lease.run_id = run.id
+			WHERE plan.id = NEW.plan_id AND plan.run_id = NEW.run_id
+				AND plan.workspace_id = NEW.workspace_id AND plan.status = 'planned'
+				AND plan.effective_parallelism = NEW.parallelism
+				AND plan.snapshot_digest = NEW.snapshot_digest
+				AND plan.requested_by = NEW.requested_by AND run.status = 'running'
+				AND lease.lease_id = NEW.lease_id
+				AND lease.generation = NEW.lease_generation AND lease.status = 'active'
+				AND julianday(lease.expires_at) > julianday(NEW.started_at)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out execution binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_execution_shard_insert
+		BEFORE INSERT ON readonly_fanout_execution_shards
+		WHEN NOT EXISTS (
+			SELECT 1 FROM readonly_fanout_executions execution
+			JOIN readonly_fanout_shards plan_shard
+				ON plan_shard.plan_id = execution.plan_id AND plan_shard.ordinal = NEW.ordinal
+			WHERE execution.id = NEW.execution_id AND execution.plan_id = NEW.plan_id
+				AND execution.status = 'running' AND NEW.ordinal <= execution.parallelism
+				AND plan_shard.input_digest = NEW.input_digest
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out execution shard binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_execution_operation_insert
+		BEFORE INSERT ON readonly_fanout_execution_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM readonly_fanout_executions execution
+			WHERE execution.id = NEW.execution_id AND execution.plan_id = NEW.plan_id
+				AND execution.run_id = NEW.run_id AND execution.requested_by = NEW.requested_by
+				AND execution.started_at = NEW.created_at
+				AND (SELECT COUNT(*) FROM readonly_fanout_execution_shards shard
+					WHERE shard.execution_id = execution.id) = execution.parallelism
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out execution operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_execution_transition
+		BEFORE UPDATE ON readonly_fanout_executions
+		WHEN OLD.status != 'running'
+			OR NEW.id != OLD.id OR NEW.plan_id != OLD.plan_id OR NEW.run_id != OLD.run_id
+			OR NEW.workspace_id != OLD.workspace_id OR NEW.parallelism != OLD.parallelism
+			OR NEW.max_output_tokens_per_shard != OLD.max_output_tokens_per_shard
+			OR NEW.snapshot_digest != OLD.snapshot_digest OR NEW.requested_by != OLD.requested_by
+			OR NEW.started_at != OLD.started_at OR NEW.version != OLD.version + 1
+			OR julianday(NEW.updated_at) < julianday(OLD.updated_at)
+			OR (NEW.status = 'running' AND
+				(NEW.finished_at IS NOT NULL OR NEW.stop_code != ''
+				 OR NEW.lease_generation <= OLD.lease_generation
+				 OR NEW.lease_id = OLD.lease_id))
+			OR (NEW.status IN ('completed', 'failed', 'cancelled') AND
+				(NEW.lease_id != OLD.lease_id OR NEW.lease_generation != OLD.lease_generation
+				 OR NEW.finished_at IS NULL OR NEW.updated_at != NEW.finished_at))
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out execution transition is invalid');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_execution_shard_transition
+		BEFORE UPDATE ON readonly_fanout_execution_shards
+		WHEN OLD.status IN ('completed', 'failed', 'cancelled')
+			OR NEW.execution_id != OLD.execution_id OR NEW.plan_id != OLD.plan_id
+			OR NEW.ordinal != OLD.ordinal OR NEW.input_digest != OLD.input_digest
+			OR NEW.created_at != OLD.created_at OR NEW.version != OLD.version + 1
+			OR julianday(NEW.updated_at) < julianday(OLD.updated_at)
+			OR (OLD.status = 'pending' AND NEW.status NOT IN ('running', 'cancelled'))
+			OR (OLD.status = 'running' AND NEW.status NOT IN
+				('pending', 'completed', 'failed', 'cancelled'))
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out execution shard transition is invalid');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_model_call_insert
+		BEFORE INSERT ON readonly_fanout_model_calls
+		WHEN NOT EXISTS (
+			SELECT 1 FROM readonly_fanout_executions execution
+			JOIN readonly_fanout_execution_shards shard
+				ON shard.execution_id = execution.id AND shard.ordinal = NEW.shard_ordinal
+			JOIN run_execution_leases lease ON lease.run_id = execution.run_id
+			WHERE execution.id = NEW.execution_id AND execution.plan_id = NEW.plan_id
+				AND execution.run_id = NEW.run_id AND execution.status = 'running'
+				AND execution.lease_id = NEW.lease_id
+				AND execution.lease_generation = NEW.lease_generation
+				AND shard.status = 'running' AND shard.current_attempt = NEW.attempt_number
+				AND lease.lease_id = NEW.lease_id
+				AND lease.generation = NEW.lease_generation AND lease.status = 'active'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out model call binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_model_call_transition
+		BEFORE UPDATE ON readonly_fanout_model_calls
+		WHEN OLD.status != 'started' OR NEW.status = 'started'
+			OR NEW.execution_id != OLD.execution_id OR NEW.plan_id != OLD.plan_id
+			OR NEW.run_id != OLD.run_id OR NEW.shard_ordinal != OLD.shard_ordinal
+			OR NEW.attempt_number != OLD.attempt_number OR NEW.lease_id != OLD.lease_id
+			OR NEW.lease_generation != OLD.lease_generation OR NEW.provider != OLD.provider
+			OR NEW.model != OLD.model OR NEW.input_fingerprint != OLD.input_fingerprint
+			OR NEW.reserved_input_tokens != OLD.reserved_input_tokens
+			OR NEW.reserved_output_tokens != OLD.reserved_output_tokens
+			OR NEW.reserved_total_tokens != OLD.reserved_total_tokens
+			OR NEW.reserved_millis != OLD.reserved_millis OR NEW.started_at != OLD.started_at
+			OR NEW.version != OLD.version + 1
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out model call transition is invalid');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_finding_insert
+		BEFORE INSERT ON readonly_fanout_findings
+		WHEN NOT EXISTS (
+			SELECT 1 FROM readonly_fanout_execution_shards shard
+			JOIN readonly_fanout_files file ON file.plan_id = shard.plan_id
+				AND file.shard_ordinal = shard.ordinal
+			WHERE shard.execution_id = NEW.execution_id
+				AND shard.ordinal = NEW.shard_ordinal AND shard.status = 'completed'
+				AND file.relative_path = NEW.relative_path
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out finding binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_execution_delete_immutable
+		BEFORE DELETE ON readonly_fanout_executions BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out execution cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_execution_shard_delete_immutable
+		BEFORE DELETE ON readonly_fanout_execution_shards BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out execution shard cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_model_call_delete_immutable
+		BEFORE DELETE ON readonly_fanout_model_calls BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out model call cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_finding_immutable
+		BEFORE UPDATE ON readonly_fanout_findings BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out finding is immutable');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_finding_delete_immutable
+		BEFORE DELETE ON readonly_fanout_findings BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out finding cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_execution_operation_immutable
+		BEFORE UPDATE ON readonly_fanout_execution_operations BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out execution operation is immutable');
+		END;`,
+	`CREATE TRIGGER trg_readonly_fanout_execution_operation_delete_immutable
+		BEFORE DELETE ON readonly_fanout_execution_operations BEGIN
+			SELECT RAISE(ABORT, 'read-only fan-out execution operation cannot be deleted');
 		END;`,
 }
 

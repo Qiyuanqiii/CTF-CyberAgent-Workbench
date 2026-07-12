@@ -20,6 +20,10 @@ func TestSpecialistScheduleSummaryFinishesAndReplaysExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	usage.ReadOnlyFanoutTokens = 17
+	usage.TotalTokens += usage.ReadOnlyFanoutTokens
+	usage.ReadOnlyFanoutMillis = 23
+	usage.TotalExecutionMillis += usage.ReadOnlyFanoutMillis
 	started, err := st.StartSpecialistSchedule(ctx, domain.SpecialistScheduleStart{
 		ID: "schedule-summary-0001", RunID: fixture.Run.ID,
 		AgentIDs: []string{fixture.Child.ID}, MaxRounds: 2,
@@ -38,7 +42,8 @@ func TestSpecialistScheduleSummaryFinishesAndReplaysExactlyOnce(t *testing.T) {
 	completed, err := st.FinishSpecialistSchedule(ctx, finish)
 	if err != nil || completed.Status != domain.SpecialistScheduleCompleted ||
 		completed.RoundsCompleted != 2 || completed.TurnsStarted != 1 ||
-		completed.FinishedAt == nil {
+		completed.FinishedAt == nil || completed.UsageBefore.ReadOnlyFanoutTokens != 17 ||
+		completed.UsageAfter.ReadOnlyFanoutMillis != 23 {
 		t.Fatalf("Specialist schedule did not finish: schedule=%#v err=%v", completed, err)
 	}
 	replayed, err := st.FinishSpecialistSchedule(ctx, finish)

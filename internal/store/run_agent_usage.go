@@ -90,18 +90,34 @@ func (s *SQLiteStore) GetRunAgentUsage(ctx context.Context,
 		Scan(&specialistExecutionMillis); err != nil {
 		return domain.RunAgentUsage{}, err
 	}
+	var readOnlyTokens, readOnlyExecutionMillis int64
+	if err := tx.QueryRowContext(ctx, `SELECT
+		COALESCE(SUM(CASE WHEN usage_recorded = 1 THEN total_tokens
+			ELSE reserved_total_tokens END), 0),
+		COALESCE(SUM(CASE WHEN elapsed_recorded = 1 THEN elapsed_millis
+			ELSE reserved_millis END), 0)
+		FROM readonly_fanout_model_calls WHERE run_id = ?`, runID).
+		Scan(&readOnlyTokens, &readOnlyExecutionMillis); err != nil {
+		return domain.RunAgentUsage{}, err
+	}
 	if rootTokens > math.MaxInt64-specialistTokens ||
-		rootExecutionMillis > math.MaxInt64-specialistExecutionMillis {
+		rootTokens+specialistTokens > math.MaxInt64-readOnlyTokens ||
+		rootExecutionMillis > math.MaxInt64-specialistExecutionMillis ||
+		rootExecutionMillis+specialistExecutionMillis >
+			math.MaxInt64-readOnlyExecutionMillis {
 		return domain.RunAgentUsage{}, apperror.New(apperror.CodeResourceExhausted,
 			"Run Agent usage total exceeds the supported range")
 	}
 	usage := domain.RunAgentUsage{
 		RunID:      runID,
 		RootTokens: rootTokens, SpecialistTokens: specialistTokens,
-		TotalTokens:               rootTokens + specialistTokens,
+		ReadOnlyFanoutTokens:      readOnlyTokens,
+		TotalTokens:               rootTokens + specialistTokens + readOnlyTokens,
 		RootExecutionMillis:       rootExecutionMillis,
 		SpecialistExecutionMillis: specialistExecutionMillis,
-		TotalExecutionMillis:      rootExecutionMillis + specialistExecutionMillis,
+		ReadOnlyFanoutMillis:      readOnlyExecutionMillis,
+		TotalExecutionMillis: rootExecutionMillis + specialistExecutionMillis +
+			readOnlyExecutionMillis,
 	}
 	if err := usage.Validate(); err != nil {
 		return domain.RunAgentUsage{}, apperror.Wrap(apperror.CodeConflict,

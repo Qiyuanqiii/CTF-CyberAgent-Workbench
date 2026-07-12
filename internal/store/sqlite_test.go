@@ -232,6 +232,18 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 			t.Fatalf("schema v33 read-only fan-out table is missing: %q", table)
 		}
 	}
+	for _, name := range []string{"readonly_fanout_executions",
+		"readonly_fanout_execution_shards", "readonly_fanout_model_calls",
+		"readonly_fanout_findings", "readonly_fanout_execution_operations"} {
+		var table string
+		if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master
+			WHERE type = 'table' AND name = ?`, name).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		if table != name {
+			t.Fatalf("schema v34 read-only fan-out execution table is missing: %q", table)
+		}
+	}
 	for _, column := range []string{"lease_id", "lease_generation"} {
 		var count int
 		if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('run_supervisor_checkpoints')
@@ -732,7 +744,7 @@ func removeSchemaV32ForTestStatements() []string {
 }
 
 func removeSchemaV33ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV34ForTestStatements(), []string{
 		`DROP TRIGGER trg_readonly_fanout_operation_delete_immutable`,
 		`DROP TRIGGER trg_readonly_fanout_operation_immutable`,
 		`DROP TRIGGER trg_readonly_fanout_shard_delete_immutable`,
@@ -750,6 +762,37 @@ func removeSchemaV33ForTestStatements() []string {
 		`DROP TABLE readonly_fanout_files`,
 		`DROP TABLE readonly_fanout_plans`,
 		`DELETE FROM schema_migrations WHERE version = 33`,
+	}...)
+}
+
+func removeSchemaV34ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_specialist_schedule_readonly_usage_insert`,
+		`DROP TRIGGER trg_readonly_fanout_execution_operation_delete_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_execution_operation_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_finding_delete_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_finding_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_model_call_delete_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_execution_shard_delete_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_execution_delete_immutable`,
+		`DROP TRIGGER trg_readonly_fanout_finding_insert`,
+		`DROP TRIGGER trg_readonly_fanout_model_call_transition`,
+		`DROP TRIGGER trg_readonly_fanout_model_call_insert`,
+		`DROP TRIGGER trg_readonly_fanout_execution_shard_transition`,
+		`DROP TRIGGER trg_readonly_fanout_execution_transition`,
+		`DROP TRIGGER trg_readonly_fanout_execution_operation_insert`,
+		`DROP TRIGGER trg_readonly_fanout_execution_shard_insert`,
+		`DROP TRIGGER trg_readonly_fanout_execution_insert`,
+		`DROP TABLE readonly_fanout_execution_operations`,
+		`DROP TABLE readonly_fanout_findings`,
+		`DROP TABLE readonly_fanout_model_calls`,
+		`DROP TABLE readonly_fanout_execution_shards`,
+		`DROP TABLE readonly_fanout_executions`,
+		`ALTER TABLE specialist_schedules DROP COLUMN after_readonly_execution_millis`,
+		`ALTER TABLE specialist_schedules DROP COLUMN after_readonly_tokens`,
+		`ALTER TABLE specialist_schedules DROP COLUMN before_readonly_execution_millis`,
+		`ALTER TABLE specialist_schedules DROP COLUMN before_readonly_tokens`,
+		`DELETE FROM schema_migrations WHERE version = 34`,
 	}
 }
 

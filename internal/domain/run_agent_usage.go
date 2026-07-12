@@ -12,9 +12,11 @@ type RunAgentUsage struct {
 	RunID                     string `json:"run_id"`
 	RootTokens                int64  `json:"root_tokens"`
 	SpecialistTokens          int64  `json:"specialist_tokens"`
+	ReadOnlyFanoutTokens      int64  `json:"read_only_fanout_tokens"`
 	TotalTokens               int64  `json:"total_tokens"`
 	RootExecutionMillis       int64  `json:"root_execution_millis"`
 	SpecialistExecutionMillis int64  `json:"specialist_execution_millis"`
+	ReadOnlyFanoutMillis      int64  `json:"read_only_fanout_millis"`
 	TotalExecutionMillis      int64  `json:"total_execution_millis"`
 }
 
@@ -23,8 +25,9 @@ func (u RunAgentUsage) Validate() error {
 		return errors.New("run Agent usage requires a Run id")
 	}
 	values := []int64{
-		u.RootTokens, u.SpecialistTokens, u.TotalTokens,
-		u.RootExecutionMillis, u.SpecialistExecutionMillis, u.TotalExecutionMillis,
+		u.RootTokens, u.SpecialistTokens, u.ReadOnlyFanoutTokens, u.TotalTokens,
+		u.RootExecutionMillis, u.SpecialistExecutionMillis, u.ReadOnlyFanoutMillis,
+		u.TotalExecutionMillis,
 	}
 	for _, value := range values {
 		if value < 0 {
@@ -32,11 +35,15 @@ func (u RunAgentUsage) Validate() error {
 		}
 	}
 	if u.RootTokens > math.MaxInt64-u.SpecialistTokens ||
-		u.TotalTokens != u.RootTokens+u.SpecialistTokens {
+		u.RootTokens+u.SpecialistTokens > math.MaxInt64-u.ReadOnlyFanoutTokens ||
+		u.TotalTokens != u.RootTokens+u.SpecialistTokens+u.ReadOnlyFanoutTokens {
 		return errors.New("run Agent token total is inconsistent")
 	}
 	if u.RootExecutionMillis > math.MaxInt64-u.SpecialistExecutionMillis ||
-		u.TotalExecutionMillis != u.RootExecutionMillis+u.SpecialistExecutionMillis {
+		u.RootExecutionMillis+u.SpecialistExecutionMillis >
+			math.MaxInt64-u.ReadOnlyFanoutMillis ||
+		u.TotalExecutionMillis != u.RootExecutionMillis+u.SpecialistExecutionMillis+
+			u.ReadOnlyFanoutMillis {
 		return errors.New("run Agent execution total is inconsistent")
 	}
 	return nil

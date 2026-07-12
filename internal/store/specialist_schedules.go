@@ -14,11 +14,13 @@ import (
 
 const specialistScheduleSelect = `SELECT id, run_id, lease_id, lease_generation,
 	max_rounds, status, stop_reason, rounds_completed, turns_started, recovered_attempts,
-	before_root_tokens, before_specialist_tokens, before_total_tokens,
+	before_root_tokens, before_specialist_tokens, before_readonly_tokens, before_total_tokens,
 	before_root_execution_millis, before_specialist_execution_millis,
-	before_total_execution_millis, after_root_tokens, after_specialist_tokens,
+	before_readonly_execution_millis, before_total_execution_millis,
+	after_root_tokens, after_specialist_tokens, after_readonly_tokens,
 	after_total_tokens, after_root_execution_millis, after_specialist_execution_millis,
-	after_total_execution_millis, error_code, started_at, finished_at
+	after_readonly_execution_millis, after_total_execution_millis,
+	error_code, started_at, finished_at
 	FROM specialist_schedules`
 
 type specialistScheduleRecord struct {
@@ -90,14 +92,17 @@ func (s *SQLiteStore) StartSpecialistSchedule(ctx context.Context,
 		updateResult, err := tx.ExecContext(ctx, `UPDATE specialist_schedules SET status = ?,
 			stop_reason = 'worker_lost', turns_started = ?, recovered_attempts = ?,
 			after_root_tokens = ?, after_specialist_tokens = ?,
-			after_total_tokens = ?, after_root_execution_millis = ?,
+			after_readonly_tokens = ?, after_total_tokens = ?, after_root_execution_millis = ?,
 			after_specialist_execution_millis = ?, after_total_execution_millis = ?,
+			after_readonly_execution_millis = ?,
 			error_code = 'UNAVAILABLE', finished_at = ? WHERE id = ? AND status = ?`,
 			domain.SpecialistScheduleAbandoned, priorTurns, recoverableAttempts,
 			start.UsageBefore.RootTokens,
-			start.UsageBefore.SpecialistTokens, start.UsageBefore.TotalTokens,
+			start.UsageBefore.SpecialistTokens, start.UsageBefore.ReadOnlyFanoutTokens,
+			start.UsageBefore.RootTokens+start.UsageBefore.SpecialistTokens,
 			start.UsageBefore.RootExecutionMillis, start.UsageBefore.SpecialistExecutionMillis,
-			start.UsageBefore.TotalExecutionMillis, ts(finishedAt), previous.Schedule.ID,
+			start.UsageBefore.RootExecutionMillis+start.UsageBefore.SpecialistExecutionMillis,
+			start.UsageBefore.ReadOnlyFanoutMillis, ts(finishedAt), previous.Schedule.ID,
 			domain.SpecialistScheduleRunning)
 		if err != nil {
 			return domain.SpecialistScheduleStartResult{}, err
@@ -125,18 +130,26 @@ func (s *SQLiteStore) StartSpecialistSchedule(ctx context.Context,
 	usage := start.UsageBefore
 	if _, err := tx.ExecContext(ctx, `INSERT INTO specialist_schedules
 		(id, run_id, lease_id, lease_generation, max_rounds, status,
-		 before_root_tokens, before_specialist_tokens, before_total_tokens,
+		 before_root_tokens, before_specialist_tokens, before_readonly_tokens,
+		 before_total_tokens,
 		 before_root_execution_millis, before_specialist_execution_millis,
-		 before_total_execution_millis, after_root_tokens, after_specialist_tokens,
+		 before_readonly_execution_millis, before_total_execution_millis,
+		 after_root_tokens, after_specialist_tokens, after_readonly_tokens,
 		 after_total_tokens, after_root_execution_millis, after_specialist_execution_millis,
+		 after_readonly_execution_millis,
 		 after_total_execution_millis, started_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		start.ID, run.ID, start.Lease.LeaseID, start.Lease.Generation, start.MaxRounds,
 		domain.SpecialistScheduleRunning, usage.RootTokens, usage.SpecialistTokens,
-		usage.TotalTokens, usage.RootExecutionMillis, usage.SpecialistExecutionMillis,
-		usage.TotalExecutionMillis, usage.RootTokens, usage.SpecialistTokens,
-		usage.TotalTokens, usage.RootExecutionMillis, usage.SpecialistExecutionMillis,
-		usage.TotalExecutionMillis, ts(start.StartedAt)); err != nil {
+		usage.ReadOnlyFanoutTokens, usage.RootTokens+usage.SpecialistTokens,
+		usage.RootExecutionMillis, usage.SpecialistExecutionMillis,
+		usage.ReadOnlyFanoutMillis,
+		usage.RootExecutionMillis+usage.SpecialistExecutionMillis,
+		usage.RootTokens, usage.SpecialistTokens, usage.ReadOnlyFanoutTokens,
+		usage.RootTokens+usage.SpecialistTokens, usage.RootExecutionMillis,
+		usage.SpecialistExecutionMillis, usage.ReadOnlyFanoutMillis,
+		usage.RootExecutionMillis+usage.SpecialistExecutionMillis,
+		ts(start.StartedAt)); err != nil {
 		return domain.SpecialistScheduleStartResult{}, err
 	}
 	for index, agentID := range start.AgentIDs {
@@ -218,13 +231,17 @@ func (s *SQLiteStore) FinishSpecialistSchedule(ctx context.Context,
 	result, err := tx.ExecContext(ctx, `UPDATE specialist_schedules SET status = ?,
 		stop_reason = ?, rounds_completed = ?, turns_started = ?, recovered_attempts = ?,
 		after_root_tokens = ?, after_specialist_tokens = ?, after_total_tokens = ?,
+		after_readonly_tokens = ?,
 		after_root_execution_millis = ?, after_specialist_execution_millis = ?,
-		after_total_execution_millis = ?, error_code = ?, finished_at = ?
+		after_readonly_execution_millis = ?, after_total_execution_millis = ?,
+		error_code = ?, finished_at = ?
 		WHERE id = ? AND status = ?`, finish.Status, finish.StopReason,
 		finish.RoundsCompleted, finish.TurnsStarted, finish.RecoveredAttempts,
 		finish.UsageAfter.RootTokens, finish.UsageAfter.SpecialistTokens,
-		finish.UsageAfter.TotalTokens, finish.UsageAfter.RootExecutionMillis,
-		finish.UsageAfter.SpecialistExecutionMillis, finish.UsageAfter.TotalExecutionMillis,
+		finish.UsageAfter.RootTokens+finish.UsageAfter.SpecialistTokens,
+		finish.UsageAfter.ReadOnlyFanoutTokens, finish.UsageAfter.RootExecutionMillis,
+		finish.UsageAfter.SpecialistExecutionMillis, finish.UsageAfter.ReadOnlyFanoutMillis,
+		finish.UsageAfter.RootExecutionMillis+finish.UsageAfter.SpecialistExecutionMillis,
 		finish.ErrorCode, ts(finishedAt), finish.ID, domain.SpecialistScheduleRunning)
 	if err != nil {
 		return domain.SpecialistSchedule{}, err
@@ -328,6 +345,8 @@ func getSpecialistScheduleTx(ctx context.Context, tx *sql.Tx,
 
 func scanSpecialistSchedule(row scanner) (specialistScheduleRecord, error) {
 	var record specialistScheduleRecord
+	var beforeTokenSubtotal, beforeExecutionSubtotal int64
+	var afterTokenSubtotal, afterExecutionSubtotal int64
 	var startedAt string
 	var finishedAt sql.NullString
 	schedule := &record.Schedule
@@ -335,19 +354,41 @@ func scanSpecialistSchedule(row scanner) (specialistScheduleRecord, error) {
 		&record.LeaseGeneration, &schedule.MaxRounds, &schedule.Status,
 		&schedule.StopReason, &schedule.RoundsCompleted, &schedule.TurnsStarted,
 		&schedule.RecoveredAttempts, &schedule.UsageBefore.RootTokens,
-		&schedule.UsageBefore.SpecialistTokens, &schedule.UsageBefore.TotalTokens,
+		&schedule.UsageBefore.SpecialistTokens, &schedule.UsageBefore.ReadOnlyFanoutTokens,
+		&beforeTokenSubtotal,
 		&schedule.UsageBefore.RootExecutionMillis,
 		&schedule.UsageBefore.SpecialistExecutionMillis,
-		&schedule.UsageBefore.TotalExecutionMillis, &schedule.UsageAfter.RootTokens,
-		&schedule.UsageAfter.SpecialistTokens, &schedule.UsageAfter.TotalTokens,
+		&schedule.UsageBefore.ReadOnlyFanoutMillis, &beforeExecutionSubtotal,
+		&schedule.UsageAfter.RootTokens, &schedule.UsageAfter.SpecialistTokens,
+		&schedule.UsageAfter.ReadOnlyFanoutTokens, &afterTokenSubtotal,
 		&schedule.UsageAfter.RootExecutionMillis,
 		&schedule.UsageAfter.SpecialistExecutionMillis,
-		&schedule.UsageAfter.TotalExecutionMillis, &schedule.ErrorCode, &startedAt,
+		&schedule.UsageAfter.ReadOnlyFanoutMillis, &afterExecutionSubtotal,
+		&schedule.ErrorCode, &startedAt,
 		&finishedAt); err != nil {
 		return specialistScheduleRecord{}, err
 	}
 	schedule.UsageBefore.RunID = schedule.RunID
 	schedule.UsageAfter.RunID = schedule.RunID
+	if beforeTokenSubtotal != schedule.UsageBefore.RootTokens+
+		schedule.UsageBefore.SpecialistTokens ||
+		beforeExecutionSubtotal != schedule.UsageBefore.RootExecutionMillis+
+			schedule.UsageBefore.SpecialistExecutionMillis ||
+		afterTokenSubtotal != schedule.UsageAfter.RootTokens+
+			schedule.UsageAfter.SpecialistTokens ||
+		afterExecutionSubtotal != schedule.UsageAfter.RootExecutionMillis+
+			schedule.UsageAfter.SpecialistExecutionMillis {
+		return specialistScheduleRecord{}, apperror.New(apperror.CodeConflict,
+			"Specialist schedule legacy usage subtotal is inconsistent")
+	}
+	schedule.UsageBefore.TotalTokens = beforeTokenSubtotal +
+		schedule.UsageBefore.ReadOnlyFanoutTokens
+	schedule.UsageBefore.TotalExecutionMillis = beforeExecutionSubtotal +
+		schedule.UsageBefore.ReadOnlyFanoutMillis
+	schedule.UsageAfter.TotalTokens = afterTokenSubtotal +
+		schedule.UsageAfter.ReadOnlyFanoutTokens
+	schedule.UsageAfter.TotalExecutionMillis = afterExecutionSubtotal +
+		schedule.UsageAfter.ReadOnlyFanoutMillis
 	schedule.StartedAt = parseTS(startedAt)
 	schedule.FinishedAt = parseNullableTS(finishedAt)
 	return record, nil
@@ -431,8 +472,10 @@ func sameSpecialistScheduleFinish(schedule domain.SpecialistSchedule,
 func usageNotBefore(after domain.RunAgentUsage, before domain.RunAgentUsage) bool {
 	return after.RunID == before.RunID && after.RootTokens >= before.RootTokens &&
 		after.SpecialistTokens >= before.SpecialistTokens &&
+		after.ReadOnlyFanoutTokens >= before.ReadOnlyFanoutTokens &&
 		after.TotalTokens >= before.TotalTokens &&
 		after.RootExecutionMillis >= before.RootExecutionMillis &&
 		after.SpecialistExecutionMillis >= before.SpecialistExecutionMillis &&
+		after.ReadOnlyFanoutMillis >= before.ReadOnlyFanoutMillis &&
 		after.TotalExecutionMillis >= before.TotalExecutionMillis
 }

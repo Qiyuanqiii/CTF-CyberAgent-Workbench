@@ -74,6 +74,11 @@ func (r *Router) Resolve(route string) ModelRef {
 	return r.defaultRef
 }
 
+func (r *Router) SupportsJSONMode(ref ModelRef) bool {
+	provider, ok := r.providers[strings.TrimSpace(ref.Provider)]
+	return ok && provider.SupportsJSONMode(strings.TrimSpace(ref.Model))
+}
+
 func (r *Router) Chat(ctx context.Context, route string, req ChatRequest) (*ChatResponse, error) {
 	ref := r.Resolve(route)
 	return r.ChatModelRef(ctx, ref, req)

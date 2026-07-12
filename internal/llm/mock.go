@@ -51,6 +51,13 @@ func (MockProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, e
 				"message": text,
 			})
 			text = string(encoded)
+		case "readonly_fanout_report.v1":
+			encoded, _ := json.Marshal(map[string]any{
+				"version":  "readonly_fanout_report.v1",
+				"summary":  "Mock read-only audit completed for the assigned shard.",
+				"findings": []any{},
+			})
+			text = string(encoded)
 		}
 	}
 	raw, _ := json.Marshal(map[string]string{"provider": "mock", "model": model, "last_user": last})

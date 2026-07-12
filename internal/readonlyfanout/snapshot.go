@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/redact"
 )
 
 type BuildPlanRequest struct {
@@ -33,6 +35,27 @@ type snapshotCandidate struct {
 	relativePath string
 	sizeBytes    int64
 	digest       string
+}
+
+// SourceFile is an execution-only, redacted copy of one manifest file. Its
+// content is deliberately never part of the durable fan-out projection.
+type SourceFile struct {
+	RelativePath  string
+	Content       string
+	ContentSHA256 string
+	Redactions    int
+}
+
+type VerifiedShard struct {
+	Ordinal     int
+	InputDigest string
+	Files       []SourceFile
+}
+
+type VerifiedSnapshot struct {
+	PlanID         string
+	SnapshotDigest string
+	Shards         []VerifiedShard
 }
 
 var skippedDirectories = map[string]struct{}{
@@ -141,6 +164,135 @@ func BuildPlan(ctx context.Context, request BuildPlanRequest) (domain.ReadOnlyFa
 		return domain.ReadOnlyFanoutPlan{}, err
 	}
 	return plan, nil
+}
+
+// LoadVerifiedSnapshot rebuilds the manifest and then opens every admitted
+// file through os.Root. No model input is returned unless the complete
+// workspace snapshot still matches the immutable plan.
+func LoadVerifiedSnapshot(ctx context.Context, workspaceRoot string,
+	plan domain.ReadOnlyFanoutPlan,
+) (VerifiedSnapshot, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := plan.Validate(); err != nil {
+		return VerifiedSnapshot{}, fmt.Errorf("invalid read-only fan-out plan: %w", err)
+	}
+	fresh, err := BuildPlan(ctx, BuildPlanRequest{
+		PlanID: plan.ID, RunID: plan.RunID, WorkspaceID: plan.WorkspaceID,
+		WorkspaceRoot: workspaceRoot, ScopePath: plan.ScopePath, Goal: plan.Goal,
+		Tier: plan.RequestedTier, RequestedBy: plan.RequestedBy,
+		CreatedAt: plan.CreatedAt,
+	})
+	if err != nil {
+		return VerifiedSnapshot{}, err
+	}
+	if !samePlannedSnapshot(plan, fresh) {
+		return VerifiedSnapshot{}, errors.New(
+			"read-only fan-out workspace changed after planning")
+	}
+
+	root, _, err := resolveSnapshotScope(workspaceRoot, plan.ScopePath)
+	if err != nil {
+		return VerifiedSnapshot{}, err
+	}
+	rootHandle, err := os.OpenRoot(root)
+	if err != nil {
+		return VerifiedSnapshot{}, err
+	}
+	defer rootHandle.Close()
+
+	verified := VerifiedSnapshot{
+		PlanID: plan.ID, SnapshotDigest: plan.SnapshotDigest,
+		Shards: make([]VerifiedShard, plan.ShardCount),
+	}
+	for index, shard := range plan.Shards {
+		verified.Shards[index] = VerifiedShard{
+			Ordinal: shard.Ordinal, InputDigest: shard.InputDigest,
+			Files: make([]SourceFile, 0, shard.FileCount),
+		}
+	}
+	for _, manifest := range plan.Files {
+		if err := ctx.Err(); err != nil {
+			return VerifiedSnapshot{}, err
+		}
+		file, err := readVerifiedFile(rootHandle, manifest)
+		if err != nil {
+			return VerifiedSnapshot{}, fmt.Errorf("verify %s: %w", manifest.RelativePath, err)
+		}
+		verified.Shards[manifest.ShardOrdinal-1].Files = append(
+			verified.Shards[manifest.ShardOrdinal-1].Files, file)
+	}
+	return verified, nil
+}
+
+func samePlannedSnapshot(expected, current domain.ReadOnlyFanoutPlan) bool {
+	return expected.ID == current.ID && expected.RunID == current.RunID &&
+		expected.WorkspaceID == current.WorkspaceID &&
+		expected.ScopePath == current.ScopePath && expected.Goal == current.Goal &&
+		expected.ProtocolVersion == current.ProtocolVersion &&
+		expected.RequestedTier == current.RequestedTier &&
+		expected.EffectiveParallelism == current.EffectiveParallelism &&
+		expected.Status == current.Status &&
+		expected.CapabilityFingerprint == current.CapabilityFingerprint &&
+		expected.SnapshotDigest == current.SnapshotDigest &&
+		expected.FileCount == current.FileCount &&
+		expected.TotalBytes == current.TotalBytes &&
+		expected.ExcludedCount == current.ExcludedCount &&
+		expected.ShardCount == current.ShardCount &&
+		expected.RequestedBy == current.RequestedBy &&
+		slices.Equal(expected.Files, current.Files) &&
+		slices.Equal(expected.Shards, current.Shards)
+}
+
+func readVerifiedFile(root *os.Root, manifest domain.ReadOnlyFanoutFile) (SourceFile, error) {
+	rootRelative := filepath.FromSlash(manifest.RelativePath)
+	before, err := root.Lstat(rootRelative)
+	if err != nil {
+		return SourceFile{}, err
+	}
+	if !before.Mode().IsRegular() || before.Mode()&os.ModeSymlink != 0 {
+		return SourceFile{}, errors.New("manifest path is no longer a regular file")
+	}
+	handle, err := root.Open(rootRelative)
+	if err != nil {
+		return SourceFile{}, err
+	}
+	defer handle.Close()
+	opened, err := handle.Stat()
+	if err != nil {
+		return SourceFile{}, err
+	}
+	if !opened.Mode().IsRegular() || !os.SameFile(before, opened) {
+		return SourceFile{}, errors.New("manifest path changed while opening")
+	}
+	content, err := io.ReadAll(io.LimitReader(handle,
+		int64(domain.MaxReadOnlyFanoutFileBytes)+1))
+	if err != nil {
+		return SourceFile{}, err
+	}
+	after, err := root.Lstat(rootRelative)
+	if err != nil {
+		return SourceFile{}, err
+	}
+	if !os.SameFile(opened, after) || int64(len(content)) != manifest.SizeBytes ||
+		!utf8.Valid(content) || containsNUL(content) {
+		return SourceFile{}, errors.New("manifest file changed while reading")
+	}
+	digest := sha256.Sum256(content)
+	digestText := hex.EncodeToString(digest[:])
+	if digestText != manifest.ContentSHA256 {
+		return SourceFile{}, errors.New("manifest content digest changed")
+	}
+	redacted := redact.Text(string(content))
+	redactionCount := 0
+	for _, finding := range redacted.Findings {
+		redactionCount += finding.Count
+	}
+	return SourceFile{
+		RelativePath: manifest.RelativePath, Content: redacted.Text,
+		ContentSHA256: digestText, Redactions: redactionCount,
+	}, nil
 }
 
 func resolveSnapshotScope(workspaceRoot, scopePath string) (string, string, error) {
