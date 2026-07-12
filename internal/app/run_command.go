@@ -85,14 +85,35 @@ func (a *App) runDelegations(ctx context.Context, args []string) error {
 		return nil
 	}
 	for _, proposal := range proposals {
-		fmt.Fprintf(a.out, "%s\tstatus=%s\tassignments=%d\troot=%s\tcreated_at=%s\n",
-			proposal.ID, proposal.Status, len(proposal.Spec.Assignments), proposal.RootAgentID,
+		reviewStatus := "pending"
+		if review, found, err := a.store.GetSpecialistDelegationReviewByProposal(ctx,
+			proposal.ID); err != nil {
+			return err
+		} else if found {
+			reviewStatus = string(review.Decision)
+		}
+		fmt.Fprintf(a.out, "%s\tstatus=%s\treview=%s\tassignments=%d\troot=%s\tcreated_at=%s\n",
+			proposal.ID, proposal.Status, reviewStatus, len(proposal.Spec.Assignments), proposal.RootAgentID,
 			proposal.CreatedAt.Format(time.RFC3339Nano))
 	}
 	return nil
 }
 
 func (a *App) runDelegation(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: cyberagent run delegation [show] <proposal-id> | approve|reject <proposal-id> --operation-key <key>")
+	}
+	switch args[0] {
+	case "approve", "reject":
+		return a.runDelegationReview(ctx, args[0], args[1:])
+	case "show":
+		return a.runDelegationShow(ctx, args[1:])
+	default:
+		return a.runDelegationShow(ctx, args)
+	}
+}
+
+func (a *App) runDelegationShow(ctx context.Context, args []string) error {
 	fs := newFlagSet("run delegation", a.errOut)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -114,6 +135,47 @@ func (a *App) runDelegation(ctx context.Context, args []string) error {
 			strings.Join(assignment.Skills, ","), assignment.TurnLimit,
 			assignment.TokenLimit)
 	}
+	if review, found, err := a.store.GetSpecialistDelegationReviewByProposal(ctx,
+		proposal.ID); err != nil {
+		return err
+	} else if !found {
+		fmt.Fprintln(a.out, "review: pending")
+	} else {
+		fmt.Fprintf(a.out, "review: %s\nreview_id: %s\nreviewed_by: %s\nreview_reason: %s\nreviewed_at: %s\napplication_required: true\n",
+			review.Decision, review.ID, review.ReviewedBy, review.Reason,
+			review.CreatedAt.Format(time.RFC3339Nano))
+	}
+	return nil
+}
+
+func (a *App) runDelegationReview(ctx context.Context, action string, args []string) error {
+	fs := newFlagSet("run delegation "+action, a.errOut)
+	operationKey := fs.String("operation-key", "", "stable review operation key")
+	reviewer := fs.String("reviewer", "cli_operator", "reviewer identity")
+	reason := fs.String("reason", "", "redacted review reason")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"operation-key": true, "reviewer": true, "reason": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 || strings.TrimSpace(*operationKey) == "" {
+		return fmt.Errorf("usage: cyberagent run delegation %s <proposal-id> --operation-key <key> [--reviewer <id>] [--reason <text>]", action)
+	}
+	decision := domain.SpecialistDelegationApproved
+	if action == "reject" {
+		decision = domain.SpecialistDelegationRejected
+	}
+	result, err := application.NewSpecialistDelegationReviewService(a.store).Review(ctx,
+		application.ReviewSpecialistDelegationRequest{
+			ProposalID: fs.Arg(0), OperationKey: *operationKey, Decision: decision,
+			Reason: *reason, ReviewedBy: *reviewer,
+		})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "review: %s\nproposal: %s\ndecision: %s\nreviewed_by: %s\nadmission_authorized: false\napplication_required: true\nreplayed: %t\n",
+		result.Review.ID, result.Review.ProposalID, result.Review.Decision,
+		result.Review.ReviewedBy, result.Replayed)
 	return nil
 }
 

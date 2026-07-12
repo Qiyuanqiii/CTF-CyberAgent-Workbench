@@ -252,6 +252,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 28, Name: "specialist protocol repair", Statements: specialistProtocolRepairStatements},
 		{Version: 29, Name: "specialist schedule and cancellation control", Statements: specialistScheduleControlStatements},
 		{Version: 30, Name: "review-gated specialist delegation proposals", Statements: specialistDelegationProposalStatements},
+		{Version: 31, Name: "immutable specialist delegation reviews", Statements: specialistDelegationReviewStatements},
 	})
 }
 

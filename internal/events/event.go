@@ -58,6 +58,7 @@ const (
 	AgentScheduleStartedEvent         = "agent.schedule_started"
 	AgentScheduleStoppedEvent         = "agent.schedule_stopped"
 	AgentDelegationProposedEvent      = "agent.delegation_proposed"
+	AgentDelegationReviewedEvent      = "agent.delegation_reviewed"
 	AgentProtocolRepairRequestedEvent = "agent.protocol_repair_requested"
 	AgentProtocolRepairStartedEvent   = "agent.protocol_repair_started"
 	AgentProtocolRepairCompletedEvent = "agent.protocol_repair_completed"

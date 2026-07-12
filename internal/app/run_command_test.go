@@ -3,12 +3,21 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"cyberagent-workbench/internal/apperror"
+	"cyberagent-workbench/internal/application"
+	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/policy"
+	"cyberagent-workbench/internal/store"
+	"cyberagent-workbench/internal/toolgateway"
 )
 
 var runIDPattern = regexp.MustCompile(`run-[0-9]{14}-[a-f0-9]{12}`)
@@ -19,6 +28,7 @@ var processIDPattern = regexp.MustCompile(`process-[0-9]{14}-[a-f0-9]{12}`)
 var editIDPattern = regexp.MustCompile(`edit-[0-9]{14}-[a-f0-9]{12}`)
 var approvalIDPattern = regexp.MustCompile(`approval-[0-9]{14}-[a-f0-9]{12}`)
 var artifactIDPattern = regexp.MustCompile(`artifact-[0-9]{14}-[a-f0-9]{12}`)
+var delegationReviewIDPattern = regexp.MustCompile(`delegation-review-[0-9]{14}-[a-f0-9]{12}`)
 
 func executeTestCommand(t *testing.T, args ...string) (string, string, int) {
 	t.Helper()
@@ -50,6 +60,97 @@ func TestRunGraphShowsDurableRootProjection(t *testing.T) {
 		!strings.Contains(stdout, "role=root") || !strings.Contains(stdout, "status=ready") ||
 		!strings.Contains(stdout, "snapshot_protocol: agent_graph.v1") {
 		t.Fatalf("unexpected run graph output: stdout=%s stderr=%s code=%d", stdout, stderr, code)
+	}
+}
+
+func TestRunDelegationReviewCLIIsExplicitAndIdempotent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CYBERAGENT_HOME", home)
+	stdout, stderr, code := executeTestCommand(t, "run", "create", "review delegation",
+		"--profile", "code", "--max-turns", "8", "--max-tokens", "2000")
+	if code != 0 {
+		t.Fatalf("run create failed: %s", stderr)
+	}
+	runID := runIDPattern.FindString(stdout)
+	if runID == "" {
+		t.Fatalf("run id missing: %s", stdout)
+	}
+	if _, stderr, code = executeTestCommand(t, "run", "start", runID); code != 0 {
+		t.Fatalf("run start failed: %s", stderr)
+	}
+	st, err := store.Open(filepath.Join(home, "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	root, _, err := st.RegisterRootAgent(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquisition, err := st.AcquireRunExecutionLease(ctx,
+		domain.AcquireRunExecutionLeaseRequest{
+			RunID: runID, OwnerID: "delegation-cli-test", TTL: time.Minute,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := st.BeginSupervisorTurn(ctx, acquisition.Lease, "review delegation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(domain.SpecialistDelegationSpec{
+		Version: domain.SpecialistDelegationVersion,
+		Assignments: []domain.SpecialistDelegationAssignment{{
+			Title: "Inspect parser", Goal: "Review parser input boundaries",
+			Skills: []string{"model.chat"}, TurnLimit: 1, TokenLimit: 64,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := toolgateway.New(st, policy.NewDefaultChecker()).
+		WithSpecialistDelegationExecutor(application.NewSpecialistDelegationToolExecutor(st)).
+		Invoke(ctx, toolgateway.ToolCall{
+			Name: toolgateway.SpecialistDelegationProposeTool, Payload: payload,
+			OperationKey: "delegation-cli-proposal", RunID: runID, AgentID: root.ID,
+			SessionID: turn.Agent.SessionID, RequestedBy: "run_supervisor",
+			LeaseID: acquisition.Lease.LeaseID, LeaseGeneration: acquisition.Lease.Generation,
+		})
+	if err != nil || outcome.Result == nil {
+		t.Fatalf("proposal creation failed: outcome=%#v err=%v", outcome, err)
+	}
+	proposalID := outcome.Result.Metadata["proposal_id"]
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	operationKey := "delegation-cli-review-0001"
+	stdout, stderr, code = executeTestCommand(t, "run", "delegation", "approve", proposalID,
+		"--operation-key", operationKey, "--reason", "bounded review")
+	if code != 0 || stderr != "" || !delegationReviewIDPattern.MatchString(stdout) ||
+		!strings.Contains(stdout, "decision: approved") ||
+		!strings.Contains(stdout, "admission_authorized: false") ||
+		!strings.Contains(stdout, "replayed: false") {
+		t.Fatalf("unexpected approval output: stdout=%s stderr=%s code=%d", stdout, stderr, code)
+	}
+	stdout, stderr, code = executeTestCommand(t, "run", "delegation", "approve", proposalID,
+		"--operation-key", operationKey, "--reason", "bounded review")
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "replayed: true") {
+		t.Fatalf("review replay failed: stdout=%s stderr=%s code=%d", stdout, stderr, code)
+	}
+	stdout, stderr, code = executeTestCommand(t, "run", "delegation", proposalID)
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "review: approved") ||
+		!strings.Contains(stdout, "application_required: true") {
+		t.Fatalf("review detail is incomplete: stdout=%s stderr=%s code=%d", stdout, stderr, code)
+	}
+	stdout, stderr, code = executeTestCommand(t, "run", "delegations", runID)
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "review=approved") {
+		t.Fatalf("review list is incomplete: stdout=%s stderr=%s code=%d", stdout, stderr, code)
+	}
+	_, stderr, code = executeTestCommand(t, "run", "delegation", "reject", proposalID,
+		"--operation-key", "delegation-cli-review-0002", "--reason", "changed decision")
+	if code != apperror.ExitCode(apperror.New(apperror.CodeConflict, "conflict")) ||
+		!strings.Contains(stderr, "already approved") {
+		t.Fatalf("second decision did not conflict: stderr=%s code=%d", stderr, code)
 	}
 }
 

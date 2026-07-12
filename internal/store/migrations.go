@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 30
+const LatestSchemaVersion = 31
 
 type migration struct {
 	Version    int
@@ -2398,6 +2398,96 @@ var specialistDelegationProposalStatements = []string{
 		BEFORE UPDATE ON specialist_delegation_operations
 		BEGIN
 			SELECT RAISE(ABORT, 'Specialist delegation operation is immutable');
+		END;`,
+}
+
+var specialistDelegationReviewStatements = []string{
+	`CREATE TABLE specialist_delegation_reviews (
+		id TEXT PRIMARY KEY,
+		proposal_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		root_agent_id TEXT NOT NULL,
+		decision TEXT NOT NULL,
+		reason TEXT NOT NULL DEFAULT '',
+		reviewed_by TEXT NOT NULL,
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(proposal_id) REFERENCES specialist_delegation_proposals(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id, root_agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE RESTRICT,
+		CHECK(decision IN ('approved', 'rejected')),
+		CHECK(reason = trim(reason) AND instr(reason, char(0)) = 0
+			AND length(reason) <= 2048 AND length(CAST(reason AS BLOB)) <= 8192),
+		CHECK(decision = 'approved' OR length(reason) > 0),
+		CHECK(reviewed_by = trim(reviewed_by) AND length(reviewed_by) BETWEEN 1 AND 256
+			AND instr(reviewed_by, char(0)) = 0),
+		CHECK(version = 1)
+	);`,
+	`CREATE INDEX idx_specialist_delegation_reviews_run_created
+		ON specialist_delegation_reviews(run_id, created_at, id);`,
+	`CREATE TABLE specialist_delegation_review_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		review_id TEXT NOT NULL UNIQUE,
+		proposal_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		reviewed_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(review_id) REFERENCES specialist_delegation_reviews(id) ON DELETE RESTRICT,
+		FOREIGN KEY(proposal_id) REFERENCES specialist_delegation_proposals(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64 AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64 AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(reviewed_by = trim(reviewed_by) AND length(reviewed_by) BETWEEN 1 AND 256
+			AND instr(reviewed_by, char(0)) = 0)
+	);`,
+	`CREATE TRIGGER trg_specialist_delegation_review_insert
+		BEFORE INSERT ON specialist_delegation_reviews
+		WHEN NOT EXISTS (
+			SELECT 1 FROM specialist_delegation_proposals proposal
+			JOIN runs run ON run.id = proposal.run_id
+			JOIN agent_nodes root ON root.run_id = proposal.run_id
+				AND root.id = proposal.root_agent_id
+			WHERE proposal.id = NEW.proposal_id AND proposal.run_id = NEW.run_id
+				AND proposal.root_agent_id = NEW.root_agent_id
+				AND proposal.status = 'proposed'
+				AND julianday(NEW.created_at) >= julianday(proposal.created_at)
+				AND root.role = 'root' AND root.parent_id IS NULL
+				AND (NEW.decision = 'rejected' OR run.status = 'running')
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist delegation review binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_specialist_delegation_review_operation_insert
+		BEFORE INSERT ON specialist_delegation_review_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM specialist_delegation_reviews review
+			WHERE review.id = NEW.review_id AND review.proposal_id = NEW.proposal_id
+				AND review.run_id = NEW.run_id AND review.reviewed_by = NEW.reviewed_by
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist delegation review operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_specialist_delegation_review_immutable
+		BEFORE UPDATE ON specialist_delegation_reviews
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist delegation review is immutable');
+		END;`,
+	`CREATE TRIGGER trg_specialist_delegation_review_delete_immutable
+		BEFORE DELETE ON specialist_delegation_reviews
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist delegation review cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_specialist_delegation_review_operation_immutable
+		BEFORE UPDATE ON specialist_delegation_review_operations
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist delegation review operation is immutable');
+		END;`,
+	`CREATE TRIGGER trg_specialist_delegation_review_operation_delete_immutable
+		BEFORE DELETE ON specialist_delegation_review_operations
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist delegation review operation cannot be deleted');
 		END;`,
 }
 
