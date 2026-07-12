@@ -237,6 +237,205 @@ func TestSpecialistRunnerRetriesTransportFailureAndChargesOnce(t *testing.T) {
 	})
 }
 
+func TestSpecialistRunnerRepairsLifecycleOnceWithoutPersistingInvalidOutput(t *testing.T) {
+	secret := "raw-invalid-output-marker-" + strings.Repeat("q", 24)
+	valid := domain.SpecialistAction{
+		Version: domain.SpecialistLifecycleVersion, Kind: domain.SpecialistActionContinue,
+		Message: "continue after the bounded protocol repair",
+	}
+	provider := &specialistTestProvider{responses: []llm.ChatResponse{
+		{Text: "not-json " + secret,
+			Usage: llm.Usage{InputTokens: 2, OutputTokens: 2, TotalTokens: 4}},
+		{Text: specialistResponse(t, valid),
+			Usage: llm.Usage{InputTokens: 3, OutputTokens: 2, TotalTokens: 5}},
+	}}
+	st, run, child, runner := newSpecialistRunnerFixture(t, provider,
+		domain.Budget{MaxTurns: 10}, 2, 32)
+	result, err := runner.Step(context.Background(), run.ID, child.ID)
+	if err != nil || result.AttemptStatus != domain.AgentAttemptContinued ||
+		result.ProtocolRepairs != 1 || result.ModelAttempts != 2 ||
+		result.ModelOutcome != llm.OutcomeSuccess || result.Usage.TotalTokens != 9 {
+		t.Fatalf("Specialist repair did not complete exactly once: result=%#v err=%v",
+			result, err)
+	}
+	if len(provider.requests) != 2 ||
+		provider.requests[1].Metadata["protocol_repair"] != "1" ||
+		len(provider.requests[1].Tools) != 0 ||
+		provider.requests[1].MaxTokens >= provider.requests[0].MaxTokens {
+		t.Fatalf("repair request did not preserve its bounded no-tool shape: %#v",
+			provider.requests)
+	}
+	for _, message := range provider.requests[1].Messages {
+		if strings.Contains(message.Content, secret) {
+			t.Fatalf("repair request retained raw invalid output: %#v", message)
+		}
+	}
+	messages, err := st.ListSessionMessages(context.Background(), child.SessionID, true)
+	if err != nil || len(messages) != 2 || messages[1].Content != valid.Message {
+		t.Fatalf("repair did not commit only the valid exchange: messages=%#v err=%v",
+			messages, err)
+	}
+	for _, message := range messages {
+		if strings.Contains(message.Content, secret) {
+			t.Fatalf("raw invalid output entered Session history: %#v", messages)
+		}
+	}
+	repair, found, err := st.GetSpecialistProtocolRepair(context.Background(), result.AttemptID)
+	if err != nil || !found || repair.Status != domain.SpecialistRepairCompleted ||
+		repair.RequestedModelAttempt != 1 || repair.ResolvedModelAttempt != 2 {
+		t.Fatalf("repair ledger is incomplete: repair=%#v found=%t err=%v",
+			repair, found, err)
+	}
+	timeline, err := st.ListRunEvents(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range timeline {
+		if strings.Contains(event.PayloadJSON, secret) {
+			t.Fatalf("raw invalid output entered the audit stream: %#v", event)
+		}
+	}
+	assertSpecialistEventCounts(t, st, run.ID, map[string]int{
+		events.AgentProtocolRepairRequestedEvent: 1,
+		events.AgentProtocolRepairStartedEvent:   1,
+		events.AgentProtocolRepairCompletedEvent: 1,
+	})
+}
+
+func TestSpecialistRunnerKeepsTransportRetriesIndependentAcrossRepair(t *testing.T) {
+	valid := domain.SpecialistAction{
+		Version: domain.SpecialistLifecycleVersion, Kind: domain.SpecialistActionContinue,
+		Message: "continue after independent transport retries",
+	}
+	provider := &specialistTestProvider{
+		failures: []error{
+			llm.NewProviderError(llm.OutcomeRetryable, "specialist-test", "primary reset", nil),
+			nil,
+			llm.NewProviderError(llm.OutcomeRetryable, "specialist-test", "repair reset", nil),
+			nil,
+		},
+		responses: []llm.ChatResponse{
+			{},
+			{Text: `{"action":"continue"}`,
+				Usage: llm.Usage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}},
+			{},
+			{Text: specialistResponse(t, valid),
+				Usage: llm.Usage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3}},
+		},
+	}
+	st, run, child, runner := newSpecialistRunnerFixture(t, provider,
+		domain.Budget{MaxTurns: 10}, 2, 32)
+	runner.WithModelRetryPolicy(application.ModelRetryPolicy{MaxAttempts: 2})
+	result, err := runner.Step(context.Background(), run.ID, child.ID)
+	if err != nil || result.AttemptStatus != domain.AgentAttemptContinued ||
+		result.ModelAttempts != 4 || result.ProtocolRepairs != 1 ||
+		result.Usage.TotalTokens != 5 {
+		t.Fatalf("independent Specialist retries failed: result=%#v err=%v", result, err)
+	}
+	timeline, err := st.ListRunEvents(context.Background(), run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var phases [][2]int
+	for _, event := range timeline {
+		if event.Type != events.ModelStartedEvent ||
+			event.Source != "specialist_model_gateway" {
+			continue
+		}
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(event.PayloadJSON), &payload); err != nil {
+			t.Fatal(err)
+		}
+		phases = append(phases, [2]int{
+			int(payload["protocol_repair"].(float64)),
+			int(payload["transport_attempt"].(float64)),
+		})
+	}
+	want := [][2]int{{0, 1}, {0, 2}, {1, 1}, {1, 2}}
+	if len(phases) != len(want) {
+		t.Fatalf("unexpected model phase ledger: %#v", phases)
+	}
+	for index := range want {
+		if phases[index] != want[index] {
+			t.Fatalf("model phase %d=%v want=%v", index, phases[index], want[index])
+		}
+	}
+}
+
+func TestSpecialistRunnerAbortsRepairWhenTotalTokenBudgetIsExhausted(t *testing.T) {
+	provider := &specialistTestProvider{responses: []llm.ChatResponse{{
+		Text:  `{"action":"continue"}`,
+		Usage: llm.Usage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3},
+	}}}
+	st, run, child, runner := newSpecialistRunnerFixture(t, provider,
+		domain.Budget{MaxTurns: 10, MaxTokens: 3}, 2, 2)
+	result, err := runner.Step(context.Background(), run.ID, child.ID)
+	if apperror.CodeOf(err) != apperror.CodeResourceExhausted ||
+		result.AttemptStatus != domain.AgentAttemptCrashed ||
+		result.ModelAttempts != 1 || result.ProtocolRepairs != 1 ||
+		result.Usage.TotalTokens != 3 || len(provider.requests) != 1 {
+		t.Fatalf("exhausted repair budget was not contained: result=%#v code=%s err=%v",
+			result, apperror.CodeOf(err), err)
+	}
+	repair, found, loadErr := st.GetSpecialistProtocolRepair(context.Background(), result.AttemptID)
+	if loadErr != nil || !found || repair.Status != domain.SpecialistRepairAborted {
+		t.Fatalf("budget-aborted repair is not durable: repair=%#v found=%t err=%v",
+			repair, found, loadErr)
+	}
+	assertSpecialistEventCounts(t, st, run.ID, map[string]int{
+		events.AgentProtocolRepairRequestedEvent: 1,
+		events.AgentProtocolRepairStartedEvent:   0,
+		events.AgentProtocolRepairFailedEvent:    1,
+	})
+}
+
+func TestSpecialistRunnerCancellationAbortsPendingRepair(t *testing.T) {
+	provider := &specialistTestProvider{
+		responses: []llm.ChatResponse{{
+			Text:  `{"action":"continue"}`,
+			Usage: llm.Usage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2},
+		}, {}},
+		block: true, blockAt: 1, started: make(chan struct{}),
+	}
+	st, run, child, runner := newSpecialistRunnerFixture(t, provider,
+		domain.Budget{MaxTurns: 10}, 2, 32)
+	ctx, cancel := context.WithCancel(context.Background())
+	type outcome struct {
+		result application.SpecialistTurnResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := runner.Step(ctx, run.ID, child.ID)
+		done <- outcome{result: result, err: err}
+	}()
+	select {
+	case <-provider.started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Specialist repair provider did not start")
+	}
+	cancel()
+	select {
+	case got := <-done:
+		if apperror.CodeOf(got.err) != apperror.CodeCancelled ||
+			got.result.AttemptStatus != domain.AgentAttemptCrashed ||
+			got.result.ProtocolRepairs != 1 || got.result.ModelAttempts != 2 ||
+			got.result.ModelOutcome != llm.OutcomeCancelled ||
+			got.result.Usage.TotalTokens != 2 {
+			t.Fatalf("cancelled repair was not contained: result=%#v code=%s err=%v",
+				got.result, apperror.CodeOf(got.err), got.err)
+		}
+		repair, found, loadErr := st.GetSpecialistProtocolRepair(context.Background(),
+			got.result.AttemptID)
+		if loadErr != nil || !found || repair.Status != domain.SpecialistRepairAborted {
+			t.Fatalf("cancelled repair is not durable: repair=%#v found=%t err=%v",
+				repair, found, loadErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled Specialist repair did not return")
+	}
+}
+
 func TestSpecialistRunnerRefusesContinueAfterChildBudgetExhaustion(t *testing.T) {
 	provider := &specialistTestProvider{responses: []llm.ChatResponse{{
 		Text: specialistResponse(t, domain.SpecialistAction{
@@ -302,7 +501,11 @@ func TestSpecialistRunnerRejectsMalformedToolAndDangerousResponses(t *testing.T)
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			provider := &specialistTestProvider{responses: []llm.ChatResponse{test.response}}
+			responses := []llm.ChatResponse{test.response}
+			if test.wantModel == llm.OutcomeInvalidResponse {
+				responses = append(responses, test.response)
+			}
+			provider := &specialistTestProvider{responses: responses}
 			st, run, child, runner := newSpecialistRunnerFixture(t, provider,
 				domain.Budget{MaxTurns: 10}, 2, 32)
 			result, err := runner.Step(context.Background(), run.ID, child.ID)
@@ -311,6 +514,10 @@ func TestSpecialistRunnerRejectsMalformedToolAndDangerousResponses(t *testing.T)
 				result.ModelOutcome != test.wantModel || result.Usage.TotalTokens <= 0 {
 				t.Fatalf("unsafe response was not contained: result=%#v code=%s err=%v",
 					result, apperror.CodeOf(err), err)
+			}
+			if test.wantModel == llm.OutcomeInvalidResponse &&
+				(result.ProtocolRepairs != 1 || result.ModelAttempts != 2) {
+				t.Fatalf("invalid response did not use exactly one repair: %#v", result)
 			}
 			messages, err := st.ListSessionMessages(context.Background(), child.SessionID, true)
 			if err != nil {
@@ -497,6 +704,7 @@ type specialistTestProvider struct {
 	requests  []llm.ChatRequest
 	calls     int
 	block     bool
+	blockAt   int
 	started   chan struct{}
 	startOnce sync.Once
 }
@@ -514,7 +722,7 @@ func (p *specialistTestProvider) Chat(ctx context.Context,
 	index := p.calls
 	p.calls++
 	p.requests = append(p.requests, request)
-	block := p.block
+	block := p.block && index == p.blockAt
 	p.mu.Unlock()
 	if block {
 		p.startOnce.Do(func() { close(p.started) })

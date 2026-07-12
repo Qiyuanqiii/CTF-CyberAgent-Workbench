@@ -135,6 +135,9 @@ func (s *SQLiteStore) FinishSpecialist(ctx context.Context, completion domain.Ag
 		return domain.AgentCompletion{}, false, apperror.New(apperror.CodeFailedPrecondition,
 			"Agent completion requires recorded model usage")
 	}
+	if err := requireSpecialistProtocolRepairResolvedTx(ctx, tx, attempt.ID); err != nil {
+		return domain.AgentCompletion{}, false, err
+	}
 	if completion.CreatedAt.Before(*attempt.UsageRecordedAt) {
 		return domain.AgentCompletion{}, false, apperror.New(apperror.CodeInvalidArgument,
 			"Agent completion cannot predate recorded model usage")

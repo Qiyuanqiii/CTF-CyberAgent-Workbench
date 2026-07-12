@@ -13,7 +13,7 @@
 - V2 Run-centric Runtime：约 99%。
 - 项目骨架和模块边界：约 99%。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程活动模型取消。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P4 已完成 schema v19 单 root Coordinator、schema v20 可恢复 inbox、schema v21 internal-only Specialist admission、schema v22 Agent-owned memory、schema v23 CompletionReport、schema v24 Specialist Attempt Runtime、schema v25 root inbox context、schema v26 internal-only no-tool Specialist turn、schema v27 recoverable child context，以及最多两个 child 的 Go-internal 有界并发调度：稳定 Agent 身份、有界幂等 inbox、严格 wake/dependency、最多两个 depth-1 child、独立 Session、Skill/预算预留、同 Run memory ownership、lease-fenced Attempt、usage 计费、崩溃通知、接管恢复、attempt-bound `agent.finish`、root/child 两阶段 exactly-once context、严格 child lifecycle、取消扇出与 root+children SQLite 总预算复核均已落地；公开/model spawn 和自主 child scheduling 继续关闭。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次。P9 已新增 loopback-only `api.v1` 读取面、独立授权的唯一取消 POST、由 Go DTO 生成且受 golden/live-route 测试保护的 OpenAPI 3.1 契约、有界可恢复 Run-event SSE，以及 Run-aware TUI 的 Work/Notes/ToolRounds/Tools 视图和批准一次/本会话操作；真实命令执行、通用 API 写入和非结构化记忆类模型工具继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程活动模型取消。P3 主体已落地：WorkItem/schema v9、Note/schema v10、事务化关系与事件、完整 `todo`/`note` CLI、可见性、8192-token Context Builder，以及不含正文的持久化上下文来源审计。P4 已完成 schema v19 单 root Coordinator、schema v20 可恢复 inbox、schema v21 internal-only Specialist admission、schema v22 Agent-owned memory、schema v23 CompletionReport、schema v24 Specialist Attempt Runtime、schema v25 root inbox context、schema v26 internal-only no-tool Specialist turn、schema v27 recoverable child context、schema v28 child lifecycle repair，以及最多两个 child 的 Go-internal 有界并发调度：稳定 Agent 身份、有界幂等 inbox、严格 wake/dependency、最多两个 depth-1 child、独立 Session、Skill/预算预留、同 Run memory ownership、lease-fenced Attempt、累计 usage 计费、崩溃通知、接管恢复、attempt-bound `agent.finish`、root/child 两阶段 exactly-once context、严格 child lifecycle、一次隔离修复、取消扇出与 root+children SQLite 总预算复核均已落地；公开/model spawn 和自主 child scheduling 继续关闭。P5 已落地统一 Tool Gateway、schema v11 持久化幂等逐次审批、schema v12 可撤销 Session Grant 与 Run 工具预算、schema v13 first-class ScriptProcess、schema v14 来源绑定的脱敏输出 Artifact、schema v15 create-only WorkItem/Note 结构化工具，以及 schema v16 可恢复 Provider 工具批次。P9 已新增 loopback-only `api.v1` 读取面、独立授权的唯一取消 POST、由 Go DTO 生成且受 golden/live-route 测试保护的 OpenAPI 3.1 契约、有界可恢复 Run-event SSE，以及 Run-aware TUI 的 Work/Notes/ToolRounds/Tools 视图和批准一次/本会话操作；真实命令执行、通用 API 写入和非结构化记忆类模型工具继续关闭。
 
 ## 二、已完成功能
 
@@ -191,7 +191,7 @@ V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider stream
 - 通用 HTTP 写入接口、TypeScript Web UI 和 Rust analyzer 进程；本地读取 API、metadata SSE 与精确取消控制已完成。
 - MCP Server、插件系统和远程任务能力。
 - 通用 Agent 稳定后的 CTF 自动分析与求解流程。
-- 子 Agent admission、Attempt scheduling、独立 Session/预算计费、崩溃恢复、消息唤醒、root/child context projection、WorkItem/Note Owner 外键和内部双 child 并发编排已完成；尚缺 child lifecycle repair、结构化 dependency waiting 与公开/自主调度产品面。
+- 子 Agent admission、Attempt scheduling、独立 Session/累计预算计费、崩溃恢复、消息唤醒、root/child context projection、WorkItem/Note Owner 外键、一次 lifecycle repair 和内部双 child 并发编排已完成；尚缺结构化 dependency waiting、持久化 schedule 摘要、跨进程 child-call cancellation 与公开/自主调度产品面。
 
 ## 五、审计结论
 
@@ -394,16 +394,21 @@ Recoverable Specialist Child Context 切片新增 schema v27、严格 `specialis
 
 Bounded Specialist Scheduler 切片新增 Go-internal `SpecialistScheduler` 与持久化聚合 `RunAgentUsage` 复核，不增加 schema 版本。调度器在整个 bounded schedule 中复用一份 Run lease，每轮按稳定 Agent ID 最多并发两个 direct ready child，最多 32 轮；all-terminal、no-ready、round-limit、首错、父取消、token 和 execution budget 均为显式停止条件。父 context、heartbeat cancellation 或首个不可继续 child error 会 fan out 到同轮其他 child；所有 goroutine 完成 Attempt crash/continue/finish 写入后才返回并释放 lease。旧 generation 遗留 Attempt 在新调度开始时恰好一次恢复。scheduler goroutine 边界会把自定义 Provider/runtime panic 收敛为不含 panic payload 的 `INTERNAL`，已开始的 Attempt 先持久化 crash，再取消 sibling，避免进程崩溃或留下当前 lease 的 running child。
 
-总预算不采用进程内猜测：每轮前后以只读 SQLite 事务核对 root checkpoint 与 root Agent token、Specialist Agent token 与全部 Attempt token，并累加所有 `specialist_model_calls.elapsed_millis`；任一投影不一致立即 `CONFLICT`。剩余 output token 和模型毫秒按实际参与 child 数确定性均分，调度后再次复核。审计确认一个已知低风险硬边界：Provider `MaxTokens` 只限制输出，最终 usage 还包含输入，因此单 round 可能被 Provider 上报推过总 token 线；实现会完整持久化实际 usage 并立即停止后续 round，不通过截断账本掩盖超支。
+总预算不采用进程内猜测：每轮前后以只读 SQLite 事务核对 root checkpoint 与 root Agent token、Specialist Agent token 与全部 Attempt token，并累加所有 `specialist_model_calls.elapsed_millis`；任一投影不一致立即 `CONFLICT`。剩余 total token 和模型毫秒按实际参与 child 数确定性均分，调度后再次复核。审计确认一个已知低风险硬边界：Provider `MaxTokens` 只限制输出，最终 usage 还包含输入，因此单 round 可能被 Provider 上报推过总 token 线；实现会完整持久化实际 usage 并立即停止后续 round，不通过截断账本掩盖超支。
 
 测试覆盖真实双 Provider 屏障并发、最多两个 child、共享 lease generation、父取消双向扇出、首个 child 失败取消 sibling、panic containment、all-terminal 与 round-limit、root+children aggregate token、执行 deadline 确定性分片、模型耗时求和、预算耗尽零 Provider 调用、过期 lease takeover 恢复和投影篡改拒绝。全仓 `go test ./...`、全仓 `go test -race ./...`、`go vet ./...`、零告警 `staticcheck ./...` 与 `govulncheck ./...` 全部通过，可达漏洞为 0。`rg` 复核确认 `NewSpecialistScheduler` 仅存在于内部实现与测试，没有 CLI/HTTP/OpenAPI/model spawn、工具、Shell 或网络入口。
 
+Specialist Lifecycle Repair 切片新增 schema v28、`SpecialistProtocolRepair` 领域状态、`specialist_protocol_repairs` 持久化账本，以及 `agent.protocol_repair_requested/started/completed/failed` 事件。每个 AgentAttempt 最多请求一次 repair；`specialist_model_calls.model_attempt_number` 是全局连续序列，`transport_attempt` 在 primary/repair 两个 phase 内分别从 1 开始。无效 primary 的真实 usage 与 pending repair 原子提交，repair usage 继续累加到同一 Attempt 和 child token 总账；transport failure 不重复扣 token，但执行毫秒仍进入累计账本。
+
+Runner 只把固定诊断附加到原可信请求，绝不把原始坏输出放进 repair prompt、Session 或事件。第二次无效响应原子标记 exhausted；预算不足、context cancellation、Attempt crash/interruption 和 stale-worker takeover 会在 Attempt 终态前把 pending repair 标记 aborted。`continue`/`finish` 同时由 Go 事务和 SQLite trigger 要求 repair 已 completed。每次 child turn 还会从 `RunAgentUsage` 复核 Run 剩余 total token 与执行时间，repair 只能使用 primary 后的余额；Provider input-inclusive usage 若单次越线仍会完整记账并立即终止，不伪造或截断账本。
+
+测试覆盖 repair success、第二次 invalid、primary/repair 各自 transport retry、全局与 phase-local 编号、累计 token/执行时间、终态 start/terminal 幂等重放、预算中止、repair 调用中取消、crash abort、Session exact-once、原始坏输出隔离、SQLite 跳号/错 phase/未完成 repair 直接写入拒绝，以及 v27 model ledger 到 v28 的数据保留升级。审计发现并修复四项低风险健壮性问题：终态后 `model.started` 重放的判断顺序、超长 repair reason 截断后的 rune 缓冲、系统时钟回拨时的 resolution 时间，以及 Anthropic-compatible repair 请求可能产生连续 user message。全仓普通测试、全仓 race、`go vet`、零告警 `staticcheck`、`go mod verify/tidy -diff`、生产凭据/运行产物扫描与 `govulncheck` 均通过，当前可达漏洞为 0。隔离真实 CLI smoke 创建 schema v28 runtime、workspace 和 review Run 后已删除全部临时数据。没有新增 CLI/HTTP/OpenAPI/model spawn、child tool、Shell 或网络权限。
+
 ## 七、下一开发切片
 
-1. 为 child 无效 lifecycle 增加与 root 分离计数的一次有界协议修复，原始无效输出仍不得进入 Session、事件或修复 prompt。
-2. 为内部 scheduler 增加持久化 schedule-level start/stop 摘要与跨进程主动 child-call cancellation；保持 fencing token 和模型正文不进入公开事件。
-3. React/Vite 后续从 `docs/openapi.json` 生成 client/DTO，并通过带 Authorization header 的 fetch 消费 SSE，不把 token 放入 URL、不重复实现 Go Policy。
-4. Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
+1. 为内部 scheduler 增加持久化 schedule-level start/stop 摘要与跨进程主动 child-call cancellation；保持 fencing token 和模型正文不进入公开事件。
+2. React/Vite 后续从 `docs/openapi.json` 生成 client/DTO，并通过带 Authorization header 的 fetch 消费 SSE，不把 token 放入 URL、不重复实现 Go Policy。
+3. Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
 
 ## 八、仓库同步与恢复约定
 

@@ -368,7 +368,7 @@ func specialistRoundLimits(budget domain.Budget, usage domain.RunAgentUsage,
 		share := (budget.MaxTokens - usage.TotalTokens) / int64(len(scheduled))
 		for _, child := range scheduled {
 			limit := limits[child.ID]
-			limit.MaxOutputTokens = max(share, 1)
+			limit.MaxTotalTokens = max(share, 1)
 			limits[child.ID] = limit
 		}
 	}

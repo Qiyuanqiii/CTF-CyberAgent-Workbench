@@ -235,6 +235,9 @@ func (s *SQLiteStore) ContinueSpecialistAttempt(ctx context.Context, ref domain.
 	if err != nil {
 		return domain.AgentAttempt{}, false, err
 	}
+	if err := requireSpecialistProtocolRepairResolvedTx(ctx, tx, attempt.ID); err != nil {
+		return domain.AgentAttempt{}, false, err
+	}
 	if attempt.UsageRecordedAt == nil {
 		return domain.AgentAttempt{}, false, apperror.New(apperror.CodeFailedPrecondition,
 			"Specialist continuation requires recorded model usage")
@@ -678,6 +681,10 @@ func crashAgentAttemptTx(ctx context.Context, tx *sql.Tx, run domain.Run,
 	if err := insertBoundedAgentMessageTx(ctx, tx, &message); err != nil {
 		return domain.AgentAttempt{}, domain.AgentNode{}, err
 	}
+	if err := abortSpecialistProtocolRepairTx(ctx, tx, run, attempt,
+		failure.Reason, at); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, err
+	}
 	updatedAttempt := attempt
 	updatedAttempt.Status = domain.AgentAttemptCrashed
 	updatedAttempt.Failure = failure
@@ -776,6 +783,10 @@ func interruptAgentAttemptTx(ctx context.Context, tx *sql.Tx, run domain.Run,
 	}
 	failure, err := domain.NormalizeAgentAttemptFailure(domain.AgentAttemptFailure{Code: code, Reason: reason})
 	if err != nil {
+		return domain.AgentAttempt{}, err
+	}
+	if err := abortSpecialistProtocolRepairTx(ctx, tx, run, attempt,
+		failure.Reason, at); err != nil {
 		return domain.AgentAttempt{}, err
 	}
 	updated := attempt

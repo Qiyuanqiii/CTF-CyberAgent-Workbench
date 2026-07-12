@@ -22,12 +22,12 @@ import (
 )
 
 const (
-	maxSpecialistModelAttempts   = 5
-	maxSpecialistModelInputBytes = 32 * 1024
+	maxSpecialistModelTransportAttempts = 5
+	maxSpecialistModelInputBytes        = 32 * 1024
 )
 
 const specialistModelCallSelect = `SELECT agent_attempt_id, run_id, agent_id,
-	model_attempt_number, transport_attempt, max_attempts, provider, model, status, outcome,
+	model_attempt_number, transport_attempt, max_attempts, protocol_repair, provider, model, status, outcome,
 	input_fingerprint, action_fingerprint,
 	error_text, retry_after_millis, retry_planned, elapsed_millis, stream_events, stream_bytes,
 	input_tokens, output_tokens, total_tokens, usage_recorded, action_kind, report_outcome,
@@ -42,6 +42,7 @@ type specialistModelCallRecord struct {
 	ModelAttempt        int
 	TransportAttempt    int
 	MaxAttempts         int
+	ProtocolRepair      int
 	Provider            string
 	Model               string
 	InputFingerprint    string
@@ -78,52 +79,68 @@ type specialistModelTerminal struct {
 	assistantMessageID *int64
 	inputFingerprint   string
 	actionFingerprint  string
+	repairStatus       domain.SpecialistProtocolRepairStatus
+	repairReason       string
 }
 
-// NextSpecialistModelAttempt returns the next transport attempt within the
-// active child turn and the child's durable cumulative model execution time.
+// NextSpecialistModelAttempt returns the next global model sequence, the next
+// phase-local transport sequence, and the child's cumulative model time.
 func (s *SQLiteStore) NextSpecialistModelAttempt(ctx context.Context,
-	ref domain.AgentAttemptRef,
-) (int, int64, error) {
+	ref domain.AgentAttemptRef, protocolRepair int,
+) (int, int, int64, error) {
 	ref = normalizeAgentAttemptRef(ref)
 	if err := ref.Validate(); err != nil {
-		return 0, 0, apperror.Wrap(apperror.CodeInvalidArgument,
+		return 0, 0, 0, apperror.Wrap(apperror.CodeInvalidArgument,
 			"Specialist model attempt reference is invalid", err)
+	}
+	if protocolRepair < 0 || protocolRepair > 1 {
+		return 0, 0, 0, apperror.New(apperror.CodeInvalidArgument,
+			"Specialist protocol repair number must be zero or one")
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	attempt, _, _, err := loadActiveAgentAttemptTx(ctx, tx, ref)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
-	if attempt.UsageRecordedAt != nil {
-		return 0, 0, apperror.New(apperror.CodeFailedPrecondition,
-			"Specialist model usage was already committed")
+	repair, repairFound, err := getSpecialistProtocolRepairTx(ctx, tx, attempt.ID)
+	if err != nil {
+		return 0, 0, 0, err
 	}
-	var count, started int
+	if protocolRepair == 0 && (attempt.UsageRecordedAt != nil || repairFound) {
+		return 0, 0, 0, apperror.New(apperror.CodeFailedPrecondition,
+			"Specialist primary model phase was already committed")
+	}
+	if protocolRepair == 1 && (!repairFound || repair.Status != domain.SpecialistRepairPending ||
+		attempt.UsageRecordedAt == nil) {
+		return 0, 0, 0, apperror.New(apperror.CodeFailedPrecondition,
+			"Specialist protocol repair is not pending")
+	}
+	var count, phaseCount, started int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),
+		COALESCE(SUM(CASE WHEN protocol_repair = ? THEN 1 ELSE 0 END), 0),
 		COALESCE(SUM(CASE WHEN status = 'started' THEN 1 ELSE 0 END), 0)
-		FROM specialist_model_calls WHERE agent_attempt_id = ?`, attempt.ID).
-		Scan(&count, &started); err != nil {
-		return 0, 0, err
+		FROM specialist_model_calls WHERE agent_attempt_id = ?`, protocolRepair, attempt.ID).
+		Scan(&count, &phaseCount, &started); err != nil {
+		return 0, 0, 0, err
 	}
 	if started != 0 {
-		return 0, 0, apperror.New(apperror.CodeConflict,
+		return 0, 0, 0, apperror.New(apperror.CodeConflict,
 			"Specialist already has an active model call")
 	}
 	var executionMillis int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(elapsed_millis), 0)
 		FROM specialist_model_calls WHERE agent_id = ?`, attempt.AgentID).
 		Scan(&executionMillis); err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
-	return count + 1, executionMillis, nil
+	return count + 1, phaseCount + 1, executionMillis, nil
 }
 
 func (s *SQLiteStore) RecordSpecialistModelStarted(ctx context.Context,
@@ -153,10 +170,6 @@ func (s *SQLiteStore) RecordSpecialistModelStarted(ctx context.Context,
 	if err != nil {
 		return false, err
 	}
-	if attempt.UsageRecordedAt != nil {
-		return false, apperror.New(apperror.CodeFailedPrecondition,
-			"Specialist model usage was already committed")
-	}
 	existing, found, err := getSpecialistModelCallTx(ctx, tx, attempt.ID, modelAttempt.Number)
 	if err != nil {
 		return false, err
@@ -170,24 +183,39 @@ func (s *SQLiteStore) RecordSpecialistModelStarted(ctx context.Context,
 		}
 		return false, nil
 	}
-	var count, active int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),
-		COALESCE(SUM(CASE WHEN status = 'started' THEN 1 ELSE 0 END), 0)
-		FROM specialist_model_calls WHERE agent_attempt_id = ?`, attempt.ID).
-		Scan(&count, &active); err != nil {
+	repair, repairFound, err := getSpecialistProtocolRepairTx(ctx, tx, attempt.ID)
+	if err != nil {
 		return false, err
 	}
-	if active != 0 || modelAttempt.Number != count+1 {
+	if modelAttempt.ProtocolRepair == 0 && (attempt.UsageRecordedAt != nil || repairFound) {
+		return false, apperror.New(apperror.CodeFailedPrecondition,
+			"Specialist primary model phase was already committed")
+	}
+	if modelAttempt.ProtocolRepair == 1 && (!repairFound ||
+		repair.Status != domain.SpecialistRepairPending || attempt.UsageRecordedAt == nil) {
+		return false, apperror.New(apperror.CodeFailedPrecondition,
+			"Specialist protocol repair is not pending")
+	}
+	var count, phaseCount, active int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),
+		COALESCE(SUM(CASE WHEN protocol_repair = ? THEN 1 ELSE 0 END), 0),
+		COALESCE(SUM(CASE WHEN status = 'started' THEN 1 ELSE 0 END), 0)
+		FROM specialist_model_calls WHERE agent_attempt_id = ?`, modelAttempt.ProtocolRepair, attempt.ID).
+		Scan(&count, &phaseCount, &active); err != nil {
+		return false, err
+	}
+	if active != 0 || modelAttempt.Number != count+1 ||
+		modelAttempt.TransportNumber() != phaseCount+1 {
 		return false, apperror.New(apperror.CodeConflict,
-			"Specialist model attempt is not the next durable call")
+			"Specialist model attempt is not the next durable phase call")
 	}
 	now := time.Now().UTC()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO specialist_model_calls
 		(agent_attempt_id, run_id, agent_id, model_attempt_number, transport_attempt,
-		max_attempts, provider, model, status, started_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'started', ?)`, attempt.ID, attempt.RunID,
+		max_attempts, protocol_repair, provider, model, status, started_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'started', ?)`, attempt.ID, attempt.RunID,
 		attempt.AgentID, modelAttempt.Number, modelAttempt.TransportNumber(), modelAttempt.MaxAttempts,
-		modelAttempt.Provider, modelAttempt.Model, ts(now)); err != nil {
+		modelAttempt.ProtocolRepair, modelAttempt.Provider, modelAttempt.Model, ts(now)); err != nil {
 		return false, err
 	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.ModelStartedEvent,
@@ -195,9 +223,20 @@ func (s *SQLiteStore) RecordSpecialistModelStarted(ctx context.Context,
 			"agent_id": child.ID, "parent_agent_id": child.ParentID, "agent_attempt_id": attempt.ID,
 			"turn": attempt.Turn, "model_attempt": modelAttempt.Number,
 			"transport_attempt": modelAttempt.TransportNumber(), "max_attempts": modelAttempt.MaxAttempts,
-			"provider": modelAttempt.Provider, "model": modelAttempt.Model, "context": modelAttempt.Context,
+			"protocol_repair": modelAttempt.ProtocolRepair,
+			"provider":        modelAttempt.Provider, "model": modelAttempt.Model, "context": modelAttempt.Context,
 		}); err != nil {
 		return false, err
+	}
+	if modelAttempt.ProtocolRepair == 1 && modelAttempt.TransportNumber() == 1 {
+		if err := appendSupervisorEventTx(ctx, tx, run, events.AgentProtocolRepairStartedEvent,
+			"specialist_runner", attempt.ID, map[string]any{
+				"agent_id": attempt.AgentID, "agent_attempt_id": attempt.ID,
+				"turn": attempt.Turn, "protocol_repair": 1,
+				"model_attempt": modelAttempt.Number,
+			}); err != nil {
+			return false, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return false, err
@@ -256,12 +295,54 @@ func (s *SQLiteStore) RecordSpecialistModelCompleted(ctx context.Context,
 	if err != nil {
 		return domain.AgentAttempt{}, err
 	}
+	repairStatus := domain.SpecialistProtocolRepairStatus("")
+	if modelAttempt.ProtocolRepair == 1 {
+		repairStatus = domain.SpecialistRepairCompleted
+	}
 	return s.recordSpecialistModelTerminal(ctx, ref, modelAttempt, specialistModelTerminal{
 		status: "completed", usage: &response.Usage, action: &safeAction,
 		decision:          &decision,
 		input:             input,
 		inputFingerprint:  runmutation.Fingerprint("specialist_model_input.v1", input),
 		actionFingerprint: runmutation.Fingerprint("specialist_model_action.v1", string(actionJSON)),
+		repairStatus:      repairStatus,
+	})
+}
+
+func (s *SQLiteStore) RecordSpecialistProtocolFailure(ctx context.Context,
+	ref domain.AgentAttemptRef, modelAttempt llm.ModelAttempt, usage llm.Usage,
+	reason string, requestRepair bool,
+) (domain.AgentAttempt, error) {
+	modelAttempt = sanitizeModelAttempt(modelAttempt)
+	modelAttempt.Outcome = llm.OutcomeInvalidResponse
+	modelAttempt.ErrorText = normalizeSpecialistRepairReason(reason)
+	modelAttempt.RetryAfter = 0
+	modelAttempt.RetryPlanned = false
+	if err := validateSpecialistModelIdentity(modelAttempt); err != nil {
+		return domain.AgentAttempt{}, err
+	}
+	if err := modelAttempt.ValidateFailed(); err != nil {
+		return domain.AgentAttempt{}, apperror.Wrap(apperror.CodeInvalidArgument,
+			"Specialist protocol failure model call is invalid", err)
+	}
+	if err := usage.Validate(); err != nil {
+		return domain.AgentAttempt{}, apperror.Wrap(apperror.CodeFailedPrecondition,
+			"Specialist protocol failure usage is invalid", err)
+	}
+	repairStatus := domain.SpecialistRepairExhausted
+	if requestRepair {
+		if modelAttempt.ProtocolRepair != 0 {
+			return domain.AgentAttempt{}, apperror.New(apperror.CodeInvalidArgument,
+				"only a primary Specialist response can request protocol repair")
+		}
+		repairStatus = domain.SpecialistRepairPending
+	} else if modelAttempt.ProtocolRepair != 1 {
+		return domain.AgentAttempt{}, apperror.New(apperror.CodeInvalidArgument,
+			"only a Specialist repair response can exhaust protocol repair")
+	}
+	return s.recordSpecialistModelTerminal(ctx, ref, modelAttempt, specialistModelTerminal{
+		status: "failed", usage: &usage, repairStatus: repairStatus,
+		repairReason: modelAttempt.ErrorText,
 	})
 }
 
@@ -277,7 +358,7 @@ func (s *SQLiteStore) RecordSpecialistModelFailed(ctx context.Context,
 			"failed Specialist model call is invalid", err)
 	}
 	if modelAttempt.RetryPlanned && (!modelAttempt.Outcome.Retryable() ||
-		modelAttempt.Number >= modelAttempt.MaxAttempts || usage != nil) {
+		modelAttempt.TransportNumber() >= modelAttempt.MaxAttempts || usage != nil) {
 		return domain.AgentAttempt{}, apperror.New(apperror.CodeInvalidArgument,
 			"Specialist retry plan conflicts with its terminal outcome")
 	}
@@ -288,6 +369,10 @@ func (s *SQLiteStore) RecordSpecialistModelFailed(ctx context.Context,
 				"Specialist provider returned invalid usage", err)
 		}
 		usage = &copy
+	}
+	if usage != nil && modelAttempt.Outcome == llm.OutcomeInvalidResponse {
+		return domain.AgentAttempt{}, apperror.New(apperror.CodeFailedPrecondition,
+			"usage-bearing Specialist protocol failures require the repair ledger")
 	}
 	return s.recordSpecialistModelTerminal(ctx, ref, modelAttempt, specialistModelTerminal{
 		status: "failed", usage: usage,
@@ -332,6 +417,10 @@ func (s *SQLiteStore) recordSpecialistModelTerminal(ctx context.Context,
 		if err := requireSpecialistTerminalReplay(call, modelAttempt, terminal); err != nil {
 			return domain.AgentAttempt{}, err
 		}
+		if err := requireSpecialistRepairTerminalReplayTx(ctx, tx, currentAttempt.ID,
+			modelAttempt.Number, terminal); err != nil {
+			return domain.AgentAttempt{}, err
+		}
 		if err := tx.Commit(); err != nil {
 			return domain.AgentAttempt{}, err
 		}
@@ -341,55 +430,27 @@ func (s *SQLiteStore) recordSpecialistModelTerminal(ctx context.Context,
 	if err != nil {
 		return domain.AgentAttempt{}, err
 	}
-	if attempt.UsageRecordedAt != nil {
-		return domain.AgentAttempt{}, apperror.New(apperror.CodeConflict,
-			"Specialist model usage was already recorded")
-	}
 	elapsedMillis, err := supervisorElapsedMillis(modelAttempt.Elapsed)
 	if err != nil {
 		return domain.AgentAttempt{}, err
 	}
-	var usage domain.AgentAttemptUsage
+	var callUsage domain.AgentAttemptUsage
 	if terminal.usage != nil {
 		inputTokens, outputTokens, totalTokens, err := supervisorUsage(*terminal.usage)
 		if err != nil {
 			return domain.AgentAttempt{}, err
 		}
-		var priorMillis int64
-		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(elapsed_millis), 0)
-			FROM specialist_model_calls WHERE agent_attempt_id = ? AND model_attempt_number <> ?`,
-			attempt.ID, modelAttempt.Number).Scan(&priorMillis); err != nil {
-			return domain.AgentAttempt{}, err
-		}
-		executionMillis, err := supervisorAddCounter(priorMillis, elapsedMillis,
-			"Specialist model execution time")
-		if err != nil {
-			return domain.AgentAttempt{}, err
-		}
-		usage = domain.AgentAttemptUsage{
+		callUsage = domain.AgentAttemptUsage{
 			InputTokens: inputTokens, OutputTokens: outputTokens,
-			TotalTokens: totalTokens, ExecutionMillis: executionMillis,
-		}
-		operationKey := "specialist-usage-" + runmutation.Fingerprint(
-			"specialist_model_usage.v1", attempt.RunID, attempt.ID)
-		keyDigest := runmutation.Fingerprint("agent_attempt_operation.v1", attempt.RunID,
-			operationKey)
-		requestFingerprint := runmutation.Fingerprint("agent_attempt_usage.v1", attempt.RunID,
-			attempt.AgentID, attempt.ID, fmt.Sprint(usage.InputTokens), fmt.Sprint(usage.OutputTokens),
-			fmt.Sprint(usage.TotalTokens), fmt.Sprint(usage.ExecutionMillis))
-		if _, _, _, found, err := getAgentAttemptMutationTx(ctx, tx, keyDigest); err != nil {
-			return domain.AgentAttempt{}, err
-		} else if found {
-			return domain.AgentAttempt{}, apperror.New(apperror.CodeConflict,
-				"Specialist model usage mutation already exists before terminal commit")
-		}
-		attempt, child, err = applySpecialistUsageTx(ctx, tx, attempt, child, run, usage,
-			keyDigest, requestFingerprint, time.Now().UTC())
-		if err != nil {
-			return domain.AgentAttempt{}, err
+			TotalTokens: totalTokens, ExecutionMillis: elapsedMillis,
 		}
 	}
 	now := time.Now().UTC()
+	attempt, child, usageChanged, err := applySpecialistModelUsageTx(ctx, tx, attempt,
+		child, run, modelAttempt.Number, terminal.usage, elapsedMillis, now)
+	if err != nil {
+		return domain.AgentAttempt{}, err
+	}
 	var actionKind, reportOutcome string
 	policyAllowed := -1
 	policyNeedsApproval := false
@@ -449,8 +510,8 @@ func (s *SQLiteStore) recordSpecialistModelTerminal(ctx context.Context,
 		terminal.status, modelAttempt.Outcome, terminal.inputFingerprint,
 		terminal.actionFingerprint, modelAttempt.ErrorText,
 		modelAttempt.RetryAfter.Milliseconds(), boolInt(modelAttempt.RetryPlanned), elapsedMillis,
-		modelAttempt.StreamEvents, modelAttempt.StreamBytes, usage.InputTokens, usage.OutputTokens,
-		usage.TotalTokens, boolInt(usageRecorded), actionKind, reportOutcome, policyAllowed,
+		modelAttempt.StreamEvents, modelAttempt.StreamBytes, callUsage.InputTokens, callUsage.OutputTokens,
+		callUsage.TotalTokens, boolInt(usageRecorded), actionKind, reportOutcome, policyAllowed,
 		boolInt(policyNeedsApproval), policyRisk, policyReason, nullableInt64(terminal.userMessageID),
 		nullableInt64(terminal.assistantMessageID), ts(now), attempt.ID, modelAttempt.Number)
 	if err != nil {
@@ -465,14 +526,15 @@ func (s *SQLiteStore) recordSpecialistModelTerminal(ctx context.Context,
 		"agent_attempt_id": attempt.ID, "turn": attempt.Turn,
 		"model_attempt": modelAttempt.Number, "transport_attempt": modelAttempt.TransportNumber(),
 		"max_attempts": modelAttempt.MaxAttempts, "provider": modelAttempt.Provider,
-		"model": modelAttempt.Model, "outcome": modelAttempt.Outcome,
+		"protocol_repair": modelAttempt.ProtocolRepair,
+		"model":           modelAttempt.Model, "outcome": modelAttempt.Outcome,
 		"elapsed_millis": elapsedMillis, "stream_events": modelAttempt.StreamEvents,
 		"stream_bytes": modelAttempt.StreamBytes,
 	}
 	eventType := events.ModelFailedEvent
 	if terminal.status == "completed" {
 		eventType = events.ModelCompletedEvent
-		payload["usage"] = usage
+		payload["usage"] = callUsage
 		payload["action"] = actionKind
 		payload["report_outcome"] = reportOutcome
 		payload["policy_allowed"] = policyAllowed == 1
@@ -484,12 +546,16 @@ func (s *SQLiteStore) recordSpecialistModelTerminal(ctx context.Context,
 		payload["retry_after_millis"] = modelAttempt.RetryAfter.Milliseconds()
 		payload["retry_planned"] = modelAttempt.RetryPlanned
 		if usageRecorded {
-			payload["usage"] = usage
+			payload["usage"] = callUsage
 		}
 	}
 	subject := specialistModelSubject(attempt.ID, modelAttempt.Number)
 	if err := appendSupervisorEventTx(ctx, tx, run, eventType,
 		"specialist_model_gateway", subject, payload); err != nil {
+		return domain.AgentAttempt{}, err
+	}
+	if err := commitSpecialistRepairTransitionTx(ctx, tx, run, attempt,
+		modelAttempt.Number, terminal, now); err != nil {
 		return domain.AgentAttempt{}, err
 	}
 	if terminal.decision != nil {
@@ -503,7 +569,7 @@ func (s *SQLiteStore) recordSpecialistModelTerminal(ctx context.Context,
 			return domain.AgentAttempt{}, err
 		}
 	}
-	if usageRecorded {
+	if usageChanged {
 		if _, err := createAgentGraphSnapshotTx(ctx, tx, run); err != nil {
 			return domain.AgentAttempt{}, err
 		}
@@ -514,13 +580,180 @@ func (s *SQLiteStore) recordSpecialistModelTerminal(ctx context.Context,
 	return attempt, nil
 }
 
+func applySpecialistModelUsageTx(ctx context.Context, tx *sql.Tx,
+	attempt domain.AgentAttempt, child domain.AgentNode, run domain.Run,
+	modelAttempt int, delta *llm.Usage, elapsedMillis int64, now time.Time,
+) (domain.AgentAttempt, domain.AgentNode, bool, error) {
+	var priorInput, priorOutput, priorTotal, priorElapsed int64
+	if err := tx.QueryRowContext(ctx, `SELECT
+		COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
+		COALESCE(SUM(total_tokens), 0), COALESCE(SUM(elapsed_millis), 0)
+		FROM specialist_model_calls WHERE agent_attempt_id = ?
+			AND model_attempt_number <> ? AND status <> 'started'`,
+		attempt.ID, modelAttempt).Scan(&priorInput, &priorOutput, &priorTotal,
+		&priorElapsed); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+	}
+	executionMillis, err := supervisorAddCounter(priorElapsed, elapsedMillis,
+		"Specialist model execution time")
+	if err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+	}
+	if delta == nil && attempt.UsageRecordedAt == nil {
+		return attempt, child, false, nil
+	}
+	aggregate := domain.AgentAttemptUsage{
+		InputTokens: priorInput, OutputTokens: priorOutput,
+		TotalTokens: priorTotal, ExecutionMillis: executionMillis,
+	}
+	var deltaTotal int64
+	if delta != nil {
+		inputTokens, outputTokens, totalTokens, err := supervisorUsage(*delta)
+		if err != nil {
+			return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+		}
+		aggregate.InputTokens, err = supervisorAddCounter(aggregate.InputTokens,
+			inputTokens, "Specialist model input token")
+		if err != nil {
+			return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+		}
+		aggregate.OutputTokens, err = supervisorAddCounter(aggregate.OutputTokens,
+			outputTokens, "Specialist model output token")
+		if err != nil {
+			return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+		}
+		aggregate.TotalTokens, err = supervisorAddCounter(aggregate.TotalTokens,
+			totalTokens, "Specialist model total token")
+		if err != nil {
+			return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+		}
+		deltaTotal = totalTokens
+	}
+	if err := aggregate.Validate(); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+	}
+	if attempt.UsageRecordedAt != nil && (attempt.Usage.InputTokens != priorInput ||
+		attempt.Usage.OutputTokens != priorOutput || attempt.Usage.TotalTokens != priorTotal ||
+		attempt.Usage.ExecutionMillis != priorElapsed) {
+		return domain.AgentAttempt{}, domain.AgentNode{}, false,
+			apperror.New(apperror.CodeConflict,
+				"Specialist Attempt usage disagrees with its durable model ledger")
+	}
+	updatedAttempt := attempt
+	updatedAttempt.Usage = aggregate
+	if updatedAttempt.UsageRecordedAt == nil {
+		recordedAt := now.UTC()
+		updatedAttempt.UsageRecordedAt = &recordedAt
+	}
+	updatedAttempt.UpdatedAt = now.UTC()
+	if err := updatedAttempt.Validate(); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE agent_attempts SET input_tokens = ?,
+		output_tokens = ?, total_tokens = ?, execution_millis = ?, usage_recorded_at = ?,
+		updated_at = ? WHERE id = ? AND status = ?`, aggregate.InputTokens,
+		aggregate.OutputTokens, aggregate.TotalTokens, aggregate.ExecutionMillis,
+		ts(*updatedAttempt.UsageRecordedAt), ts(updatedAttempt.UpdatedAt), attempt.ID,
+		domain.AgentAttemptRunning)
+	if err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+	}
+	if err := requireSingleAgentAttemptUpdate(result,
+		"Specialist Attempt changed during model usage commit"); err != nil {
+		return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+	}
+	updatedChild := child
+	if delta != nil {
+		updatedChild.TokensUsed, err = supervisorAddCounter(child.TokensUsed, deltaTotal,
+			"Specialist token")
+		if err != nil {
+			return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+		}
+		updatedChild.Version++
+		updatedChild.UpdatedAt = now.UTC()
+		if err := updatedChild.Validate(); err != nil {
+			return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+		}
+		result, err = tx.ExecContext(ctx, `UPDATE agent_nodes SET tokens_used = ?, version = ?,
+			updated_at = ? WHERE id = ? AND version = ? AND status = ? AND active_attempt_id = ?`,
+			updatedChild.TokensUsed, updatedChild.Version, ts(updatedChild.UpdatedAt), child.ID,
+			child.Version, domain.AgentRunning, attempt.ID)
+		if err != nil {
+			return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+		}
+		if err := requireSingleAgentAttemptUpdate(result,
+			"Specialist changed during model usage commit"); err != nil {
+			return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+		}
+		if err := appendSupervisorEventTx(ctx, tx, run,
+			events.AgentAttemptUsageRecordedEvent, "agent_coordinator", attempt.ID,
+			agentAttemptEventPayload(updatedAttempt, false)); err != nil {
+			return domain.AgentAttempt{}, domain.AgentNode{}, false, err
+		}
+	}
+	return updatedAttempt, updatedChild, true, nil
+}
+
+func commitSpecialistRepairTransitionTx(ctx context.Context, tx *sql.Tx, run domain.Run,
+	attempt domain.AgentAttempt, modelAttempt int, terminal specialistModelTerminal,
+	now time.Time,
+) error {
+	switch terminal.repairStatus {
+	case "":
+		return nil
+	case domain.SpecialistRepairPending:
+		_, err := insertSpecialistProtocolRepairTx(ctx, tx, run, attempt, modelAttempt,
+			terminal.repairReason, now)
+		return err
+	case domain.SpecialistRepairCompleted, domain.SpecialistRepairExhausted:
+		_, err := resolveSpecialistProtocolRepairTx(ctx, tx, run, attempt,
+			terminal.repairStatus, modelAttempt, now)
+		return err
+	default:
+		return apperror.New(apperror.CodeInvalidArgument,
+			"Specialist model terminal has an invalid repair transition")
+	}
+}
+
+func requireSpecialistRepairTerminalReplayTx(ctx context.Context, tx *sql.Tx,
+	attemptID string, modelAttempt int, terminal specialistModelTerminal,
+) error {
+	if terminal.repairStatus == "" {
+		return nil
+	}
+	repair, found, err := getSpecialistProtocolRepairTx(ctx, tx, attemptID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return apperror.New(apperror.CodeConflict,
+			"Specialist model terminal replay is missing its repair state")
+	}
+	switch terminal.repairStatus {
+	case domain.SpecialistRepairPending:
+		if repair.RequestedModelAttempt != modelAttempt ||
+			repair.Reason != normalizeSpecialistRepairReason(terminal.repairReason) {
+			return apperror.New(apperror.CodeConflict,
+				"Specialist repair request replay differs from its durable state")
+		}
+	case domain.SpecialistRepairCompleted, domain.SpecialistRepairExhausted:
+		if repair.Status != terminal.repairStatus || repair.ResolvedModelAttempt != modelAttempt {
+			return apperror.New(apperror.CodeConflict,
+				"Specialist repair resolution replay differs from its durable state")
+		}
+	default:
+		return apperror.New(apperror.CodeInvalidArgument,
+			"Specialist repair replay status is invalid")
+	}
+	return nil
+}
+
 func validateSpecialistModelIdentity(attempt llm.ModelAttempt) error {
 	if err := attempt.ValidateStarted(); err != nil {
 		return apperror.Wrap(apperror.CodeInvalidArgument,
 			"Specialist model call identity is invalid", err)
 	}
-	if attempt.ProtocolRepair != 0 || attempt.ToolRound != 0 ||
-		attempt.Number != attempt.TransportNumber() || attempt.MaxAttempts > maxSpecialistModelAttempts {
+	if attempt.ToolRound != 0 || attempt.MaxAttempts > maxSpecialistModelTransportAttempts {
 		return apperror.New(apperror.CodeInvalidArgument,
 			"Specialist no-tool model call has an unsupported attempt shape")
 	}
@@ -546,7 +779,7 @@ func scanSpecialistModelCall(row scanner) (specialistModelCallRecord, error) {
 	var userMessageID, assistantMessageID sql.NullInt64
 	var finishedAt sql.NullString
 	if err := row.Scan(&record.AgentAttemptID, &record.RunID, &record.AgentID,
-		&record.ModelAttempt, &record.TransportAttempt, &record.MaxAttempts,
+		&record.ModelAttempt, &record.TransportAttempt, &record.MaxAttempts, &record.ProtocolRepair,
 		&record.Provider, &record.Model, &record.Status, &outcome,
 		&record.InputFingerprint, &record.ActionFingerprint, &record.ErrorText,
 		&record.RetryAfterMillis, &retryPlanned, &record.ElapsedMillis,
@@ -578,7 +811,8 @@ func requireSpecialistModelIdentity(record specialistModelCallRecord,
 	attempt llm.ModelAttempt,
 ) error {
 	if record.ModelAttempt != attempt.Number || record.TransportAttempt != attempt.TransportNumber() ||
-		record.MaxAttempts != attempt.MaxAttempts || record.Provider != attempt.Provider ||
+		record.MaxAttempts != attempt.MaxAttempts || record.ProtocolRepair != attempt.ProtocolRepair ||
+		record.Provider != attempt.Provider ||
 		record.Model != attempt.Model {
 		return apperror.New(apperror.CodeConflict,
 			"Specialist model call identity differs from its durable record")

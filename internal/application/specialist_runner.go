@@ -45,7 +45,7 @@ type SpecialistRunnerStore interface {
 	PrepareSpecialistContext(ctx context.Context,
 		ref domain.AgentAttemptRef) (domain.SpecialistContextBatch, error)
 	NextSpecialistModelAttempt(ctx context.Context,
-		ref domain.AgentAttemptRef) (int, int64, error)
+		ref domain.AgentAttemptRef, protocolRepair int) (int, int, int64, error)
 	RecordSpecialistModelStarted(ctx context.Context, ref domain.AgentAttemptRef,
 		attempt llm.ModelAttempt) (bool, error)
 	RecordSpecialistModelCompleted(ctx context.Context, ref domain.AgentAttemptRef,
@@ -53,6 +53,9 @@ type SpecialistRunnerStore interface {
 		action domain.SpecialistAction, decision policy.Decision) (domain.AgentAttempt, error)
 	RecordSpecialistModelFailed(ctx context.Context, ref domain.AgentAttemptRef,
 		attempt llm.ModelAttempt, usage *llm.Usage) (domain.AgentAttempt, error)
+	RecordSpecialistProtocolFailure(ctx context.Context, ref domain.AgentAttemptRef,
+		attempt llm.ModelAttempt, usage llm.Usage, reason string,
+		requestRepair bool) (domain.AgentAttempt, error)
 	ContinueSpecialistAttempt(ctx context.Context, ref domain.AgentAttemptRef,
 		operationKey string) (domain.AgentAttempt, bool, error)
 	CrashSpecialistAttempt(ctx context.Context, request domain.AgentAttemptFailureRequest,
@@ -75,6 +78,7 @@ type SpecialistTurnResult struct {
 	Model              string
 	Usage              domain.AgentAttemptUsage
 	ModelAttempts      int
+	ProtocolRepairs    int
 	ModelOutcome       llm.Outcome
 	StreamEvents       int
 	StreamBytes        int
@@ -90,7 +94,7 @@ type SpecialistTurnResult struct {
 }
 
 type specialistTurnLimits struct {
-	MaxOutputTokens    int64
+	MaxTotalTokens     int64
 	MaxExecutionMillis int64
 }
 
@@ -291,52 +295,101 @@ func (r *SpecialistRunner) stepReadyWithLease(ctx context.Context,
 	if err != nil {
 		return r.failAttempt(ctx, result, ref, err)
 	}
-	request.MaxTokens, err = specialistOutputLimit(child, limits.MaxOutputTokens)
+	runUsage, err := r.store.GetRunAgentUsage(ctx, run.ID)
+	if err != nil {
+		return r.failAttempt(ctx, result, ref, err)
+	}
+	turnTokenLimit, err := specialistTurnTokenLimit(run.Budget, runUsage,
+		limits.MaxTotalTokens)
+	if err != nil {
+		return r.failAttempt(ctx, result, ref, err)
+	}
+	turnExecutionLimit, err := specialistTurnExecutionLimit(run.Budget, runUsage,
+		limits.MaxExecutionMillis)
+	if err != nil {
+		return r.failAttempt(ctx, result, ref, err)
+	}
+	request.MaxTokens, err = specialistOutputLimit(child, turnTokenLimit)
 	if err != nil {
 		return r.failAttempt(ctx, result, ref, err)
 	}
 	contextAudit := supervisorModelContextAudit(contextSelection)
-	modelCall, err := r.callModelWithRetry(ctx, run, ref, refModel, request, contextAudit,
-		limits.MaxExecutionMillis)
-	result.ModelAttempts = modelCall.Attempt.Number
-	result.ModelOutcome = modelCall.Attempt.Outcome
-	result.StreamEvents = modelCall.StreamEvents
-	result.StreamBytes = modelCall.StreamBytes
-	result.Provider = modelCall.Attempt.Provider
-	result.Model = modelCall.Attempt.Model
-	if err != nil {
-		return r.failAttempt(ctx, result, ref, err)
+	budgetState := specialistModelBudgetState{}
+	protocolRepair := 0
+	var safeAction domain.SpecialistAction
+	var decision policy.Decision
+	for {
+		modelCall, callErr := r.callModelWithRetry(ctx, run, ref, refModel, request,
+			contextAudit, turnExecutionLimit, protocolRepair, &budgetState)
+		mergeSpecialistModelCallResult(result, modelCall)
+		if callErr != nil {
+			return r.failAttempt(ctx, result, ref, callErr)
+		}
+		response := modelCall.Response
+		if response == nil {
+			return r.recordUnusableModelResponse(ctx, result, ref, modelCall.Attempt)
+		}
+		action, normalized, repairReason := validateSpecialistLifecycleResponse(response)
+		if repairReason != "" {
+			requestRepair := protocolRepair == 0
+			eventCtx, cancelEvent := specialistEventContext(ctx)
+			charged, storeErr := r.store.RecordSpecialistProtocolFailure(eventCtx, ref,
+				modelCall.Attempt, response.Usage, repairReason, requestRepair)
+			cancelEvent()
+			if charged.ID != "" {
+				result.Usage = charged.Usage
+			}
+			result.ModelOutcome = llm.OutcomeInvalidResponse
+			if storeErr != nil {
+				return r.failAttempt(ctx, result, ref, storeErr)
+			}
+			if !requestRepair {
+				return r.failAttemptWithCode(ctx, result, ref, "invalid_response",
+					apperror.New(apperror.CodeFailedPrecondition,
+						"Specialist lifecycle repair response was invalid"))
+			}
+			result.ProtocolRepairs = 1
+			if err := ctx.Err(); err != nil {
+				return r.failAttempt(ctx, result, ref, err)
+			}
+			remainingTokens, err := remainingSpecialistTurnTokens(turnTokenLimit,
+				charged.Usage.TotalTokens)
+			if err != nil {
+				return r.failAttempt(ctx, result, ref, err)
+			}
+			child, err = r.store.GetAgentNode(ctx, child.ID)
+			if err != nil {
+				return r.failAttempt(ctx, result, ref, err)
+			}
+			request = specialistProtocolRepairRequest(request)
+			request.MaxTokens, err = specialistOutputLimit(child, remainingTokens)
+			if err != nil {
+				return r.failAttempt(ctx, result, ref, err)
+			}
+			protocolRepair = 1
+			continue
+		}
+		decision = r.checker.CheckText("specialist_assistant_response",
+			specialistActionPolicyText(normalized))
+		modelCall.Attempt.Outcome = llm.OutcomeSuccess
+		eventCtx, cancelEvent := specialistEventContext(ctx)
+		charged, storeErr := r.store.RecordSpecialistModelCompleted(eventCtx, ref,
+			modelCall.Attempt, *response, input, action, decision)
+		cancelEvent()
+		if storeErr != nil {
+			return r.failAttempt(ctx, result, ref, storeErr)
+		}
+		result.Usage = charged.Usage
+		result.ModelOutcome = llm.OutcomeSuccess
+		result.Action = normalized
+		safeAction = normalized
+		if turnTokenLimit > 0 && charged.Usage.TotalTokens > turnTokenLimit {
+			return r.failAttempt(ctx, result, ref,
+				apperror.New(apperror.CodeResourceExhausted,
+					"Specialist turn exceeded its total token allocation"))
+		}
+		break
 	}
-	response := modelCall.Response
-	if response == nil {
-		return r.recordInvalidAndFail(ctx, result, ref, modelCall.Attempt, nil,
-			errors.New("provider returned an empty Specialist response"))
-	}
-	if len(response.ToolCalls) != 0 {
-		return r.recordInvalidAndFail(ctx, result, ref, modelCall.Attempt, &response.Usage,
-			errors.New("specialist no-tool turn returned tool calls"))
-	}
-	action, err := domain.DecodeSpecialistAction(response.Text)
-	if err != nil {
-		return r.recordInvalidAndFail(ctx, result, ref, modelCall.Attempt, &response.Usage, err)
-	}
-	safeAction, err := safeSpecialistAction(action)
-	if err != nil {
-		return r.recordInvalidAndFail(ctx, result, ref, modelCall.Attempt, &response.Usage, err)
-	}
-	decision := r.checker.CheckText("specialist_assistant_response",
-		specialistActionPolicyText(safeAction))
-	modelCall.Attempt.Outcome = llm.OutcomeSuccess
-	eventCtx, cancelEvent := specialistEventContext(ctx)
-	charged, storeErr := r.store.RecordSpecialistModelCompleted(eventCtx, ref,
-		modelCall.Attempt, *response, input, action, decision)
-	cancelEvent()
-	if storeErr != nil {
-		return r.failAttempt(ctx, result, ref, storeErr)
-	}
-	result.Usage = charged.Usage
-	result.ModelOutcome = llm.OutcomeSuccess
-	result.Action = safeAction
 	if err := ctx.Err(); err != nil {
 		return r.failAttempt(ctx, result, ref, err)
 	}
@@ -382,35 +435,47 @@ type specialistModelCallResult struct {
 	StreamBytes  int
 }
 
+type specialistModelBudgetState struct {
+	turnBaseMillis int64
+	initialized    bool
+}
+
 func (r *SpecialistRunner) callModelWithRetry(ctx context.Context, run domain.Run,
 	ref domain.AgentAttemptRef, modelRef llm.ModelRef, request llm.ChatRequest,
 	contextAudit *llm.ModelContextAudit, maxTurnExecutionMillis int64,
+	protocolRepair int, budgetState *specialistModelBudgetState,
 ) (specialistModelCallResult, error) {
 	result := specialistModelCallResult{}
 	retryPolicy := normalizeModelRetryPolicy(r.retryPolicy)
-	var turnBaseMillis int64 = -1
+	if budgetState == nil {
+		budgetState = &specialistModelBudgetState{}
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return result, apperror.Normalize(err)
 		}
-		number, consumedMillis, err := r.store.NextSpecialistModelAttempt(ctx, ref)
+		number, transportAttempt, consumedMillis, err :=
+			r.store.NextSpecialistModelAttempt(ctx, ref, protocolRepair)
 		if err != nil {
 			return result, apperror.Normalize(err)
 		}
-		if turnBaseMillis < 0 {
-			turnBaseMillis = consumedMillis
+		if !budgetState.initialized {
+			budgetState.turnBaseMillis = consumedMillis
+			budgetState.initialized = true
 		}
-		if number > retryPolicy.MaxAttempts {
+		if transportAttempt > retryPolicy.MaxAttempts {
 			return result, apperror.New(apperror.CodeUnavailable,
 				"Specialist model retry limit was exhausted")
 		}
-		if specialistModelBudgetExhausted(run.Budget, consumedMillis, turnBaseMillis,
+		if specialistModelBudgetExhausted(run.Budget, consumedMillis,
+			budgetState.turnBaseMillis,
 			maxTurnExecutionMillis, 0) {
 			return result, apperror.New(apperror.CodeDeadlineExceeded,
 				"Specialist model execution timeout was exhausted")
 		}
 		attempt := llm.ModelAttempt{
-			Number: number, TransportAttempt: number, MaxAttempts: retryPolicy.MaxAttempts,
+			Number: number, TransportAttempt: transportAttempt,
+			MaxAttempts: retryPolicy.MaxAttempts, ProtocolRepair: protocolRepair,
 			Provider: modelRef.Provider, Model: modelRef.Model, Context: contextAudit,
 		}
 		inserted, err := r.store.RecordSpecialistModelStarted(ctx, ref, attempt)
@@ -422,7 +487,7 @@ func (r *SpecialistRunner) callModelWithRetry(ctx context.Context, run domain.Ru
 				"Specialist model attempt is already active")
 		}
 		callCtx, cancelCall := specialistModelContext(ctx, run.Budget, consumedMillis,
-			turnBaseMillis, maxTurnExecutionMillis)
+			budgetState.turnBaseMillis, maxTurnExecutionMillis)
 		startedAt := time.Now()
 		streamed, callErr := streamSpecialistModel(callCtx, r.router, modelRef, request)
 		attempt.Elapsed = time.Since(startedAt)
@@ -440,9 +505,11 @@ func (r *SpecialistRunner) callModelWithRetry(ctx context.Context, run domain.Ru
 		attempt.Outcome = providerErr.Kind
 		attempt.ErrorText = providerErr.Error()
 		attempt.RetryAfter = providerErr.RetryAfter
-		attempt.RetryPlanned = providerErr.Kind.Retryable() && number < retryPolicy.MaxAttempts &&
+		attempt.RetryPlanned = providerErr.Kind.Retryable() &&
+			transportAttempt < retryPolicy.MaxAttempts &&
 			ctx.Err() == nil &&
-			!specialistModelBudgetExhausted(run.Budget, consumedMillis, turnBaseMillis,
+			!specialistModelBudgetExhausted(run.Budget, consumedMillis,
+				budgetState.turnBaseMillis,
 				maxTurnExecutionMillis, attempt.Elapsed) &&
 			retryPolicy.allowsRetryAfter(providerErr)
 		result.Attempt = attempt
@@ -455,7 +522,8 @@ func (r *SpecialistRunner) callModelWithRetry(ctx context.Context, run domain.Ru
 		if !attempt.RetryPlanned {
 			return result, providerApplicationError(providerErr)
 		}
-		if err := waitForModelRetry(ctx, retryPolicy.delay(number, providerErr)); err != nil {
+		if err := waitForModelRetry(ctx,
+			retryPolicy.delay(transportAttempt, providerErr)); err != nil {
 			return result, apperror.Normalize(err)
 		}
 	}
@@ -582,6 +650,109 @@ func specialistRequest(history []session.Message, input string,
 	}, nil
 }
 
+func specialistProtocolRepairRequest(primary llm.ChatRequest) llm.ChatRequest {
+	repair := primary
+	repair.Messages = append([]llm.Message(nil), primary.Messages...)
+	diagnostic := "The previous response failed strict specialist_lifecycle.v1 validation. " +
+		"This is the single protocol repair attempt. Return exactly one valid " +
+		"specialist_lifecycle.v1 JSON object, with no tools or surrounding text."
+	if len(repair.Messages) == 0 ||
+		!strings.EqualFold(strings.TrimSpace(repair.Messages[len(repair.Messages)-1].Role), "user") {
+		repair.Messages = append(repair.Messages, llm.Message{Role: "user", Content: diagnostic})
+	} else {
+		last := len(repair.Messages) - 1
+		repair.Messages[last].Content = strings.TrimSpace(repair.Messages[last].Content) +
+			"\n\n" + diagnostic
+	}
+	repair.Tools = nil
+	repair.JSONMode = true
+	repair.Metadata = make(map[string]string, len(primary.Metadata)+1)
+	for key, value := range primary.Metadata {
+		repair.Metadata[key] = value
+	}
+	repair.Metadata["protocol_repair"] = "1"
+	return repair
+}
+
+func validateSpecialistLifecycleResponse(response *llm.ChatResponse) (
+	domain.SpecialistAction, domain.SpecialistAction, string,
+) {
+	if len(response.ToolCalls) != 0 {
+		return domain.SpecialistAction{}, domain.SpecialistAction{},
+			"response included forbidden tool calls"
+	}
+	action, err := domain.DecodeSpecialistAction(response.Text)
+	if err != nil {
+		return domain.SpecialistAction{}, domain.SpecialistAction{},
+			"response failed strict specialist_lifecycle.v1 validation"
+	}
+	safeAction, err := safeSpecialistAction(action)
+	if err != nil {
+		return domain.SpecialistAction{}, domain.SpecialistAction{},
+			"response failed strict specialist_lifecycle.v1 validation"
+	}
+	return action, safeAction, ""
+}
+
+func mergeSpecialistModelCallResult(result *SpecialistTurnResult,
+	call specialistModelCallResult,
+) {
+	if call.Attempt.Number > 0 {
+		result.ModelAttempts = call.Attempt.Number
+		result.ModelOutcome = call.Attempt.Outcome
+		result.Provider = call.Attempt.Provider
+		result.Model = call.Attempt.Model
+	}
+	result.StreamEvents += call.StreamEvents
+	result.StreamBytes += call.StreamBytes
+}
+
+func specialistTurnTokenLimit(budget domain.Budget, usage domain.RunAgentUsage,
+	schedulerLimit int64,
+) (int64, error) {
+	limit := schedulerLimit
+	if budget.MaxTokens > 0 {
+		remaining := budget.MaxTokens - usage.TotalTokens
+		if remaining <= 0 {
+			return 0, apperror.New(apperror.CodeResourceExhausted,
+				"Run Agent token budget is exhausted")
+		}
+		if limit == 0 || remaining < limit {
+			limit = remaining
+		}
+	}
+	return limit, nil
+}
+
+func specialistTurnExecutionLimit(budget domain.Budget, usage domain.RunAgentUsage,
+	schedulerLimit int64,
+) (int64, error) {
+	limit := schedulerLimit
+	if budget.TimeoutSeconds > 0 {
+		remaining := budget.TimeoutSeconds*1000 - usage.TotalExecutionMillis
+		if remaining <= 0 {
+			return 0, apperror.New(apperror.CodeDeadlineExceeded,
+				"Run Agent execution budget is exhausted")
+		}
+		if limit == 0 || remaining < limit {
+			limit = remaining
+		}
+	}
+	return limit, nil
+}
+
+func remainingSpecialistTurnTokens(limit int64, consumed int64) (int64, error) {
+	if limit == 0 {
+		return 0, nil
+	}
+	remaining := limit - consumed
+	if remaining <= 0 {
+		return 0, apperror.New(apperror.CodeResourceExhausted,
+			"Specialist protocol repair has no remaining total token budget")
+	}
+	return remaining, nil
+}
+
 func specialistOutputLimit(child domain.AgentNode, aggregateLimit int64) (int, error) {
 	remaining := child.TokenLimit - child.TokensUsed
 	if remaining <= 0 {
@@ -620,23 +791,22 @@ func specialistActionPolicyText(action domain.SpecialistAction) string {
 	return strings.Join(parts, "\n")
 }
 
-func (r *SpecialistRunner) recordInvalidAndFail(ctx context.Context,
+func (r *SpecialistRunner) recordUnusableModelResponse(ctx context.Context,
 	result *SpecialistTurnResult, ref domain.AgentAttemptRef, attempt llm.ModelAttempt,
-	usage *llm.Usage, cause error,
 ) error {
 	attempt.Outcome = llm.OutcomeInvalidResponse
-	attempt.ErrorText = boundedSpecialistFailure(cause)
+	attempt.ErrorText = "provider returned an empty Specialist response"
 	attempt.RetryAfter = 0
 	attempt.RetryPlanned = false
 	eventCtx, cancelEvent := specialistEventContext(ctx)
-	charged, storeErr := r.store.RecordSpecialistModelFailed(eventCtx, ref, attempt, usage)
+	charged, storeErr := r.store.RecordSpecialistModelFailed(eventCtx, ref, attempt, nil)
 	cancelEvent()
 	if charged.ID != "" {
 		result.Usage = charged.Usage
 	}
 	result.ModelOutcome = llm.OutcomeInvalidResponse
-	invalid := apperror.Wrap(apperror.CodeFailedPrecondition,
-		"Specialist lifecycle response was invalid", cause)
+	invalid := apperror.New(apperror.CodeFailedPrecondition,
+		"Specialist provider returned an unusable response")
 	if storeErr != nil {
 		invalid = errors.Join(invalid, storeErr)
 	}

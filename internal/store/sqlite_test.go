@@ -509,7 +509,7 @@ func removeSchemaV26ForTestStatements() []string {
 }
 
 func removeSchemaV27ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV28ForTestStatements(), []string{
 		`DROP TRIGGER trg_specialist_context_delivery_insert`,
 		`DROP TRIGGER trg_specialist_context_delivery_commit`,
 		`DROP TRIGGER trg_specialist_context_delivery_active_supersede`,
@@ -519,7 +519,71 @@ func removeSchemaV27ForTestStatements() []string {
 		`DROP TRIGGER trg_agent_message_prepared_specialist_delivery`,
 		`DROP TABLE specialist_context_deliveries`,
 		`DELETE FROM schema_migrations WHERE version = 27`,
+	}...)
+}
+
+func removeSchemaV28ForTestStatements() []string {
+	statements := []string{
+		`DROP TRIGGER trg_agent_attempt_repair_resolution`,
+		`DROP TRIGGER trg_agent_attempt_usage_monotonic`,
+		`DROP TRIGGER trg_agent_attempt_usage_requires_lease`,
+		`DROP TRIGGER trg_specialist_repair_insert`,
+		`DROP TRIGGER trg_specialist_repair_resolve`,
+		`DROP TRIGGER trg_specialist_repair_identity_immutable`,
+		`DROP TRIGGER trg_specialist_repair_terminal_immutable`,
+		`DROP TRIGGER trg_specialist_model_call_sequence`,
+		`DROP TRIGGER trg_specialist_model_call_phase_sequence`,
+		`DROP TRIGGER trg_specialist_model_call_insert`,
+		`DROP TRIGGER trg_specialist_model_call_terminal_requires_lease`,
+		`DROP TRIGGER trg_specialist_model_call_identity_immutable`,
+		`DROP TRIGGER trg_specialist_model_call_terminal_immutable`,
+		`DROP INDEX idx_specialist_model_one_started`,
+		`DROP INDEX idx_specialist_model_agent_started`,
+		`DROP INDEX idx_specialist_repair_run_status`,
+		`DROP TABLE specialist_protocol_repairs`,
+		`ALTER TABLE specialist_model_calls RENAME TO specialist_model_calls_v28`,
+		specialistModelCallStatements[0],
+		`INSERT INTO specialist_model_calls
+			(agent_attempt_id, run_id, agent_id, model_attempt_number, transport_attempt,
+			max_attempts, provider, model, input_fingerprint, action_fingerprint,
+			status, outcome, error_text, retry_after_millis, retry_planned, elapsed_millis,
+			stream_events, stream_bytes, input_tokens, output_tokens, total_tokens,
+			usage_recorded, action_kind, report_outcome, policy_allowed, policy_needs_approval,
+			policy_risk, policy_reason, user_message_id, assistant_message_id, started_at, finished_at)
+		SELECT agent_attempt_id, run_id, agent_id, model_attempt_number, transport_attempt,
+			max_attempts, provider, model, input_fingerprint, action_fingerprint,
+			status, outcome, error_text, retry_after_millis, retry_planned, elapsed_millis,
+			stream_events, stream_bytes, input_tokens, output_tokens, total_tokens,
+			usage_recorded, action_kind, report_outcome, policy_allowed, policy_needs_approval,
+			policy_risk, policy_reason, user_message_id, assistant_message_id, started_at, finished_at
+		FROM specialist_model_calls_v28 WHERE protocol_repair = 0`,
+		`DROP TABLE specialist_model_calls_v28`,
 	}
+	statements = append(statements, specialistModelCallStatements[1:]...)
+	statements = append(statements,
+		`CREATE TRIGGER trg_agent_attempt_usage_immutable
+			BEFORE UPDATE OF input_tokens, output_tokens, total_tokens, execution_millis,
+				usage_recorded_at ON agent_attempts
+			WHEN OLD.usage_recorded_at IS NOT NULL
+			BEGIN
+				SELECT RAISE(ABORT, 'Agent attempt usage is immutable');
+			END`,
+		`CREATE TRIGGER trg_agent_attempt_usage_requires_lease
+			BEFORE UPDATE OF input_tokens, output_tokens, total_tokens, execution_millis,
+				usage_recorded_at ON agent_attempts
+			WHEN OLD.usage_recorded_at IS NULL AND NEW.usage_recorded_at IS NOT NULL
+				AND NOT EXISTS (
+					SELECT 1 FROM run_execution_leases lease
+					WHERE lease.run_id = OLD.run_id AND lease.lease_id = OLD.lease_id
+						AND lease.generation = OLD.lease_generation AND lease.status = 'active'
+						AND julianday(lease.expires_at) > julianday('now')
+				)
+			BEGIN
+				SELECT RAISE(ABORT, 'Agent attempt usage requires its active Run lease');
+			END`,
+		`DELETE FROM schema_migrations WHERE version = 28`,
+	)
+	return statements
 }
 
 func TestSQLiteUpgradesV21MemoryRowsToOptionalAgentOwnership(t *testing.T) {
