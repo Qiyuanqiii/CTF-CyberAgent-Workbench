@@ -1,0 +1,43 @@
+package domain
+
+import (
+	"errors"
+	"math"
+	"strings"
+)
+
+// RunAgentUsage is the durable aggregate used to enforce Run-wide model
+// budgets across the root Agent and every admitted Specialist.
+type RunAgentUsage struct {
+	RunID                     string `json:"run_id"`
+	RootTokens                int64  `json:"root_tokens"`
+	SpecialistTokens          int64  `json:"specialist_tokens"`
+	TotalTokens               int64  `json:"total_tokens"`
+	RootExecutionMillis       int64  `json:"root_execution_millis"`
+	SpecialistExecutionMillis int64  `json:"specialist_execution_millis"`
+	TotalExecutionMillis      int64  `json:"total_execution_millis"`
+}
+
+func (u RunAgentUsage) Validate() error {
+	if strings.TrimSpace(u.RunID) == "" {
+		return errors.New("run Agent usage requires a Run id")
+	}
+	values := []int64{
+		u.RootTokens, u.SpecialistTokens, u.TotalTokens,
+		u.RootExecutionMillis, u.SpecialistExecutionMillis, u.TotalExecutionMillis,
+	}
+	for _, value := range values {
+		if value < 0 {
+			return errors.New("run Agent usage counters cannot be negative")
+		}
+	}
+	if u.RootTokens > math.MaxInt64-u.SpecialistTokens ||
+		u.TotalTokens != u.RootTokens+u.SpecialistTokens {
+		return errors.New("run Agent token total is inconsistent")
+	}
+	if u.RootExecutionMillis > math.MaxInt64-u.SpecialistExecutionMillis ||
+		u.TotalExecutionMillis != u.RootExecutionMillis+u.SpecialistExecutionMillis {
+		return errors.New("run Agent execution total is inconsistent")
+	}
+	return nil
+}

@@ -31,6 +31,8 @@ type SpecialistRunnerStore interface {
 	GetRun(ctx context.Context, id string) (domain.Run, error)
 	GetMission(ctx context.Context, id string) (domain.Mission, error)
 	GetAgentNode(ctx context.Context, id string) (domain.AgentNode, error)
+	ListAgentNodes(ctx context.Context, runID string) ([]domain.AgentNode, error)
+	GetRunAgentUsage(ctx context.Context, runID string) (domain.RunAgentUsage, error)
 	GetSession(ctx context.Context, id string) (session.Session, error)
 	ListRecentSessionMessages(ctx context.Context, sessionID string,
 		includeCompacted bool, limit int) ([]session.Message, error)
@@ -85,6 +87,11 @@ type SpecialistTurnResult struct {
 	ContextOmitted     int
 	ContextTokens      int
 	ContextTokenBudget int
+}
+
+type specialistTurnLimits struct {
+	MaxOutputTokens    int64
+	MaxExecutionMillis int64
 }
 
 // SpecialistRunner is an opt-in, internal-only no-tool child runtime. No CLI,
@@ -179,6 +186,15 @@ func (r *SpecialistRunner) stepWithLease(ctx context.Context,
 		return apperror.Normalize(err)
 	}
 	result.RecoveredAttempts = len(recovered)
+	return r.stepReadyWithLease(ctx, lease, result, specialistTurnLimits{})
+}
+
+func (r *SpecialistRunner) stepReadyWithLease(ctx context.Context,
+	lease domain.RunExecutionLease, result *SpecialistTurnResult, limits specialistTurnLimits,
+) error {
+	if err := ctx.Err(); err != nil {
+		return apperror.Normalize(err)
+	}
 	child, err := r.store.GetAgentNode(ctx, result.AgentID)
 	if err != nil {
 		return apperror.Normalize(err)
@@ -275,12 +291,13 @@ func (r *SpecialistRunner) stepWithLease(ctx context.Context,
 	if err != nil {
 		return r.failAttempt(ctx, result, ref, err)
 	}
-	request.MaxTokens, err = specialistOutputLimit(child)
+	request.MaxTokens, err = specialistOutputLimit(child, limits.MaxOutputTokens)
 	if err != nil {
 		return r.failAttempt(ctx, result, ref, err)
 	}
 	contextAudit := supervisorModelContextAudit(contextSelection)
-	modelCall, err := r.callModelWithRetry(ctx, run, ref, refModel, request, contextAudit)
+	modelCall, err := r.callModelWithRetry(ctx, run, ref, refModel, request, contextAudit,
+		limits.MaxExecutionMillis)
 	result.ModelAttempts = modelCall.Attempt.Number
 	result.ModelOutcome = modelCall.Attempt.Outcome
 	result.StreamEvents = modelCall.StreamEvents
@@ -367,10 +384,11 @@ type specialistModelCallResult struct {
 
 func (r *SpecialistRunner) callModelWithRetry(ctx context.Context, run domain.Run,
 	ref domain.AgentAttemptRef, modelRef llm.ModelRef, request llm.ChatRequest,
-	contextAudit *llm.ModelContextAudit,
+	contextAudit *llm.ModelContextAudit, maxTurnExecutionMillis int64,
 ) (specialistModelCallResult, error) {
 	result := specialistModelCallResult{}
 	retryPolicy := normalizeModelRetryPolicy(r.retryPolicy)
+	var turnBaseMillis int64 = -1
 	for {
 		if err := ctx.Err(); err != nil {
 			return result, apperror.Normalize(err)
@@ -379,11 +397,15 @@ func (r *SpecialistRunner) callModelWithRetry(ctx context.Context, run domain.Ru
 		if err != nil {
 			return result, apperror.Normalize(err)
 		}
+		if turnBaseMillis < 0 {
+			turnBaseMillis = consumedMillis
+		}
 		if number > retryPolicy.MaxAttempts {
 			return result, apperror.New(apperror.CodeUnavailable,
 				"Specialist model retry limit was exhausted")
 		}
-		if specialistModelBudgetExhausted(run.Budget, consumedMillis, 0) {
+		if specialistModelBudgetExhausted(run.Budget, consumedMillis, turnBaseMillis,
+			maxTurnExecutionMillis, 0) {
 			return result, apperror.New(apperror.CodeDeadlineExceeded,
 				"Specialist model execution timeout was exhausted")
 		}
@@ -399,7 +421,8 @@ func (r *SpecialistRunner) callModelWithRetry(ctx context.Context, run domain.Ru
 			return result, apperror.New(apperror.CodeConflict,
 				"Specialist model attempt is already active")
 		}
-		callCtx, cancelCall := specialistModelContext(ctx, run.Budget, consumedMillis)
+		callCtx, cancelCall := specialistModelContext(ctx, run.Budget, consumedMillis,
+			turnBaseMillis, maxTurnExecutionMillis)
 		startedAt := time.Now()
 		streamed, callErr := streamSpecialistModel(callCtx, r.router, modelRef, request)
 		attempt.Elapsed = time.Since(startedAt)
@@ -419,7 +442,8 @@ func (r *SpecialistRunner) callModelWithRetry(ctx context.Context, run domain.Ru
 		attempt.RetryAfter = providerErr.RetryAfter
 		attempt.RetryPlanned = providerErr.Kind.Retryable() && number < retryPolicy.MaxAttempts &&
 			ctx.Err() == nil &&
-			!specialistModelBudgetExhausted(run.Budget, consumedMillis, attempt.Elapsed) &&
+			!specialistModelBudgetExhausted(run.Budget, consumedMillis, turnBaseMillis,
+				maxTurnExecutionMillis, attempt.Elapsed) &&
 			retryPolicy.allowsRetryAfter(providerErr)
 		result.Attempt = attempt
 		eventCtx, cancelEvent := specialistEventContext(ctx)
@@ -558,7 +582,7 @@ func specialistRequest(history []session.Message, input string,
 	}, nil
 }
 
-func specialistOutputLimit(child domain.AgentNode) (int, error) {
+func specialistOutputLimit(child domain.AgentNode, aggregateLimit int64) (int, error) {
 	remaining := child.TokenLimit - child.TokensUsed
 	if remaining <= 0 {
 		return 0, apperror.New(apperror.CodeResourceExhausted,
@@ -567,6 +591,9 @@ func specialistOutputLimit(child domain.AgentNode) (int, error) {
 	limit := int64(defaultSpecialistOutputLimit)
 	if remaining < limit {
 		limit = remaining
+	}
+	if aggregateLimit > 0 && aggregateLimit < limit {
+		limit = aggregateLimit
 	}
 	maxInt := int64(^uint(0) >> 1)
 	if limit > maxInt {
@@ -691,19 +718,33 @@ func specialistEventContext(ctx context.Context) (context.Context, context.Cance
 }
 
 func specialistModelBudgetExhausted(budget domain.Budget, consumedMillis int64,
-	additional time.Duration,
+	turnBaseMillis int64, maxTurnExecutionMillis int64, additional time.Duration,
 ) bool {
-	return budget.TimeoutSeconds > 0 &&
-		consumedMillis+additional.Milliseconds() >= budget.TimeoutSeconds*1000
+	additionalMillis := additional.Milliseconds()
+	if budget.TimeoutSeconds > 0 &&
+		consumedMillis+additionalMillis >= budget.TimeoutSeconds*1000 {
+		return true
+	}
+	return maxTurnExecutionMillis > 0 &&
+		consumedMillis-turnBaseMillis+additionalMillis >= maxTurnExecutionMillis
 }
 
 func specialistModelContext(ctx context.Context, budget domain.Budget,
-	consumedMillis int64,
+	consumedMillis int64, turnBaseMillis int64, maxTurnExecutionMillis int64,
 ) (context.Context, context.CancelFunc) {
-	if budget.TimeoutSeconds <= 0 {
+	remainingMillis := int64(0)
+	if budget.TimeoutSeconds > 0 {
+		remainingMillis = budget.TimeoutSeconds*1000 - consumedMillis
+	}
+	if maxTurnExecutionMillis > 0 {
+		turnRemaining := maxTurnExecutionMillis - (consumedMillis - turnBaseMillis)
+		if remainingMillis == 0 || turnRemaining < remainingMillis {
+			remainingMillis = turnRemaining
+		}
+	}
+	if remainingMillis == 0 {
 		return context.WithCancel(ctx)
 	}
-	remainingMillis := budget.TimeoutSeconds*1000 - consumedMillis
 	if remainingMillis <= 0 {
 		remainingMillis = 1
 	}
