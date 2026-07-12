@@ -63,7 +63,7 @@ func TestReportCheckRejectsOutputFormatBeforeLookup(t *testing.T) {
 	t.Setenv("CYBERAGENT_HOME", t.TempDir())
 	_, stderr, code := executeTestCommand(t, "report", "check",
 		"report-"+strings.Repeat("a", 64), "--format", "yaml")
-	if code == 0 || !strings.Contains(stderr, "format must be text or json") ||
+	if code == 0 || !strings.Contains(stderr, "format must be text, json, or github") ||
 		strings.Contains(stderr, "not found") {
 		t.Fatalf("report format validation was not fail-fast: stderr=%s code=%d",
 			stderr, code)
@@ -300,6 +300,18 @@ func TestRunReadOnlyFanoutCLIPlansThenExecutesThroughReadOnlyGate(t *testing.T) 
 		t.Fatalf("validated report gate drifted output=%s stderr=%s code=%d",
 			checkJSON, stderr, code)
 	}
+	githubAnnotations, stderr, code := executeTestCommand(t, "report", "check",
+		findingReport.ID, "--min-severity", "info", "--format", "github")
+	if code != apperror.ExitCode(apperror.New(apperror.CodeFailedPrecondition, "failed")) ||
+		!strings.Contains(stderr, "report check matched 1 validated finding") ||
+		strings.Count(githubAnnotations, "\n") != 1 ||
+		!strings.HasPrefix(githubAnnotations, "::notice file=") ||
+		!strings.Contains(githubAnnotations, "status=validated;") ||
+		strings.Contains(githubAnnotations, "Artifact confirms the finding") ||
+		strings.Contains(githubAnnotations, "reproduction output") {
+		t.Fatalf("GitHub annotation gate drifted output=%s stderr=%s code=%d",
+			githubAnnotations, stderr, code)
+	}
 	activeJSON, stderr, code := executeTestCommand(t, "report", "check", findingReport.ID,
 		"--fail-status", "active", "--min-severity", "info", "--format", "json")
 	var activeGate reporting.GateResult
@@ -462,6 +474,12 @@ func TestRunReadOnlyFanoutCLIPlansThenExecutesThroughReadOnlyGate(t *testing.T) 
 		!strings.Contains(fixedGateText, "passed: true") {
 		t.Fatalf("fixed finding still blocked validated gate output=%s stderr=%s code=%d",
 			fixedGateText, stderr, code)
+	}
+	fixedGitHub, stderr, code := executeTestCommand(t, "report", "check",
+		findingReport.ID, "--min-severity", "info", "--format", "github")
+	if code != 0 || stderr != "" || fixedGitHub != "" {
+		t.Fatalf("fixed finding emitted GitHub annotation output=%s stderr=%s code=%d",
+			fixedGitHub, stderr, code)
 	}
 	fixedActiveJSON, stderr, code := executeTestCommand(t, "report", "check",
 		findingReport.ID, "--fail-status", "active", "--min-severity", "info",

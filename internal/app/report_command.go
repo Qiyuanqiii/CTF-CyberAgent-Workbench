@@ -285,18 +285,18 @@ func (a *App) reportCheck(ctx context.Context, args []string) error {
 		"finding status gate: validated, active, or none")
 	minSeverity := fs.String("min-severity", "high",
 		"minimum source severity: info, low, medium, high, or critical")
-	format := fs.String("format", "text", "check output format: text or json")
+	format := fs.String("format", "text", "check output format: text, json, or github")
 	if err := fs.Parse(reorderFlags(args, map[string]bool{
 		"fail-status": true, "min-severity": true, "format": true,
 	})); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return errors.New("usage: cyberagent report check <report-id> [--fail-status validated|active|none] [--min-severity info|low|medium|high|critical] [--format text|json]")
+		return errors.New("usage: cyberagent report check <report-id> [--fail-status validated|active|none] [--min-severity info|low|medium|high|critical] [--format text|json|github]")
 	}
 	outputFormat := strings.ToLower(strings.TrimSpace(*format))
-	if outputFormat != "text" && outputFormat != "json" {
-		return errors.New("report check format must be text or json")
+	if outputFormat != "text" && outputFormat != "json" && outputFormat != "github" {
+		return errors.New("report check format must be text, json, or github")
 	}
 	status, err := reporting.ParseGateStatus(*failStatus)
 	if err != nil {
@@ -340,6 +340,14 @@ func (a *App) reportCheck(ctx context.Context, args []string) error {
 			return err
 		}
 		if _, err := a.out.Write(append(encoded, '\n')); err != nil {
+			return err
+		}
+	case "github":
+		encoded, err := reporting.RenderGitHubAnnotations(result)
+		if err != nil {
+			return err
+		}
+		if _, err := a.out.Write(encoded); err != nil {
 			return err
 		}
 	}
