@@ -256,6 +256,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 32, Name: "recoverable specialist delegation application", Statements: specialistDelegationApplicationStatements},
 		{Version: 33, Name: "immutable read-only fan-out plans", Statements: readOnlyFanoutPlanStatements},
 		{Version: 34, Name: "bounded read-only fan-out execution", Statements: readOnlyFanoutExecutionStatements},
+		{Version: 35, Name: "deterministic finding report projection", Statements: findingReportStatements},
 	})
 }
 

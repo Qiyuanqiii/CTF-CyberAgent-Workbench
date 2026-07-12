@@ -35,6 +35,7 @@ var artifactIDPattern = regexp.MustCompile(`artifact-[0-9]{14}-[a-f0-9]{12}`)
 var delegationReviewIDPattern = regexp.MustCompile(`delegation-review-[0-9]{14}-[a-f0-9]{12}`)
 var fanoutPlanIDPattern = regexp.MustCompile(`fanout-plan-[0-9]{14}-[a-f0-9]{12}`)
 var fanoutExecutionIDPattern = regexp.MustCompile(`fanout-execution-[0-9]{14}-[a-f0-9]{12}`)
+var findingReportIDPattern = regexp.MustCompile(`report-[a-f0-9]{64}`)
 
 func executeTestCommand(t *testing.T, args ...string) (string, string, int) {
 	t.Helper()
@@ -46,7 +47,8 @@ func executeTestCommand(t *testing.T, args ...string) (string, string, int) {
 
 func TestCLIHelpListsRunGraphAndLease(t *testing.T) {
 	stdout, stderr, code := executeTestCommand(t, "help")
-	if code != 0 || stderr != "" || !strings.Contains(stdout, "checkpoint|graph|lease|finish") {
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "checkpoint|graph|lease|finish") ||
+		!strings.Contains(stdout, "cyberagent report show") {
 		t.Fatalf("run graph or lease is missing from help: stdout=%s stderr=%s code=%d", stdout, stderr, code)
 	}
 }
@@ -144,6 +146,31 @@ func TestRunReadOnlyFanoutCLIPlansThenExecutesThroughReadOnlyGate(t *testing.T) 
 		t.Fatalf("fan-out execution show drifted output=%s stderr=%s code=%d",
 			executionShown, stderr, code)
 	}
+	reportJSON, stderr, code := executeTestCommand(t, "run", "fanout", "report",
+		executionID, "--format", "json")
+	var findingReport domain.FindingReport
+	if code != 0 || stderr != "" || json.Unmarshal([]byte(reportJSON), &findingReport) != nil ||
+		findingReport.Status != domain.FindingReportGenerated ||
+		findingReport.SourceID != executionID || findingReport.FindingCount != 0 ||
+		findingReport.EvidenceCount != 0 || findingReportIDPattern.FindString(reportJSON) == "" {
+		t.Fatalf("fan-out JSON report failed output=%s stderr=%s code=%d",
+			reportJSON, stderr, code)
+	}
+	reportReplay, stderr, code := executeTestCommand(t, "run", "fanout", "report",
+		executionID, "--format", "json")
+	if code != 0 || stderr != "" || reportReplay != reportJSON {
+		t.Fatalf("fan-out report replay drifted output=%s stderr=%s code=%d",
+			reportReplay, stderr, code)
+	}
+	reportMarkdown, stderr, code := executeTestCommand(t, "report", "show",
+		findingReport.ID, "--format", "markdown")
+	if code != 0 || stderr != "" ||
+		!strings.Contains(reportMarkdown, "# Read-only Fan-out Audit Report") ||
+		!strings.Contains(reportMarkdown, findingReport.ID) ||
+		!strings.Contains(reportMarkdown, "No draft findings were projected") {
+		t.Fatalf("stored Markdown report failed output=%s stderr=%s code=%d",
+			reportMarkdown, stderr, code)
+	}
 	usage, stderr, code := executeTestCommand(t, "run", "usage", runID)
 	if code != 0 || stderr != "" ||
 		!strings.Contains(usage, "agent_readonly_fanout_tokens:") {
@@ -159,7 +186,8 @@ func TestRunReadOnlyFanoutCLIPlansThenExecutesThroughReadOnlyGate(t *testing.T) 
 		strings.Count(timeline, events.ReadOnlyFanoutPlannedEvent) != 1 ||
 		strings.Count(timeline, events.ReadOnlyFanoutExecutionStartedEvent) != 1 ||
 		strings.Count(timeline, events.ReadOnlyFanoutShardCompletedEvent) != 6 ||
-		strings.Count(timeline, events.ReadOnlyFanoutExecutionCompletedEvent) != 1 {
+		strings.Count(timeline, events.ReadOnlyFanoutExecutionCompletedEvent) != 1 ||
+		strings.Count(timeline, events.FindingReportGeneratedEvent) != 1 {
 		t.Fatalf("fan-out timeline drifted output=%s stderr=%s code=%d", timeline, stderr, code)
 	}
 }

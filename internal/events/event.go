@@ -74,6 +74,7 @@ const (
 	ReadOnlyFanoutExecutionCompletedEvent    = "readonly_fanout.execution_completed"
 	ReadOnlyFanoutExecutionFailedEvent       = "readonly_fanout.execution_failed"
 	ReadOnlyFanoutExecutionCancelledEvent    = "readonly_fanout.execution_cancelled"
+	FindingReportGeneratedEvent              = "report.generated"
 	AgentProtocolRepairRequestedEvent        = "agent.protocol_repair_requested"
 	AgentProtocolRepairStartedEvent          = "agent.protocol_repair_started"
 	AgentProtocolRepairCompletedEvent        = "agent.protocol_repair_completed"

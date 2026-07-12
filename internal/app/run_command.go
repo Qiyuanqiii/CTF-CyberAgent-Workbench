@@ -98,7 +98,7 @@ func (a *App) runFanouts(ctx context.Context, args []string) error {
 
 func (a *App) runFanout(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run fanout plan|execute|show|execution")
+		return errors.New("usage: cyberagent run fanout plan|execute|show|execution|report")
 	}
 	switch args[0] {
 	case "plan":
@@ -109,9 +109,28 @@ func (a *App) runFanout(ctx context.Context, args []string) error {
 		return a.runFanoutShow(ctx, args[1:])
 	case "execution":
 		return a.runFanoutExecutionShow(ctx, args[1:])
+	case "report":
+		return a.runFanoutReport(ctx, args[1:])
 	default:
 		return a.runFanoutShow(ctx, args)
 	}
+}
+
+func (a *App) runFanoutReport(ctx context.Context, args []string) error {
+	fs := newFlagSet("run fanout report", a.errOut)
+	format := fs.String("format", "markdown", "report format: markdown or json")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{"format": true})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run fanout report <execution-id> [--format markdown|json]")
+	}
+	value, _, err := application.NewFindingReportService(a.store).
+		GenerateReadOnlyFanout(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	return a.renderFindingReport(value, *format)
 }
 
 func (a *App) runFanoutExecute(ctx context.Context, args []string) error {

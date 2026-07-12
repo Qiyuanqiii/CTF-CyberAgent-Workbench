@@ -244,6 +244,16 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 			t.Fatalf("schema v34 read-only fan-out execution table is missing: %q", table)
 		}
 	}
+	for _, name := range []string{"finding_reports", "findings", "finding_evidence"} {
+		var table string
+		if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master
+			WHERE type = 'table' AND name = ?`, name).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		if table != name {
+			t.Fatalf("schema v35 finding report table is missing: %q", table)
+		}
+	}
 	for _, column := range []string{"lease_id", "lease_generation"} {
 		var count int
 		if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('run_supervisor_checkpoints')
@@ -766,7 +776,7 @@ func removeSchemaV33ForTestStatements() []string {
 }
 
 func removeSchemaV34ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV35ForTestStatements(), []string{
 		`DROP TRIGGER trg_specialist_schedule_readonly_usage_insert`,
 		`DROP TRIGGER trg_readonly_fanout_execution_operation_delete_immutable`,
 		`DROP TRIGGER trg_readonly_fanout_execution_operation_immutable`,
@@ -793,6 +803,24 @@ func removeSchemaV34ForTestStatements() []string {
 		`ALTER TABLE specialist_schedules DROP COLUMN before_readonly_execution_millis`,
 		`ALTER TABLE specialist_schedules DROP COLUMN before_readonly_tokens`,
 		`DELETE FROM schema_migrations WHERE version = 34`,
+	}...)
+}
+
+func removeSchemaV35ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_finding_evidence_delete_immutable`,
+		`DROP TRIGGER trg_finding_evidence_update_immutable`,
+		`DROP TRIGGER trg_finding_delete_immutable`,
+		`DROP TRIGGER trg_finding_update_immutable`,
+		`DROP TRIGGER trg_finding_report_delete_immutable`,
+		`DROP TRIGGER trg_finding_report_generate`,
+		`DROP TRIGGER trg_finding_evidence_insert`,
+		`DROP TRIGGER trg_finding_insert`,
+		`DROP TRIGGER trg_finding_report_insert`,
+		`DROP TABLE finding_evidence`,
+		`DROP TABLE findings`,
+		`DROP TABLE finding_reports`,
+		`DELETE FROM schema_migrations WHERE version = 35`,
 	}
 }
 

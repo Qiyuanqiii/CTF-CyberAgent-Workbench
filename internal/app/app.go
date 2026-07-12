@@ -192,6 +192,8 @@ func (a *App) dispatch(ctx context.Context, args []string) error {
 		return a.approvalCommand(ctx, args[1:])
 	case "artifact":
 		return a.artifactCommand(ctx, args[1:])
+	case "report":
+		return a.reportCommand(ctx, args[1:])
 	case "api":
 		return a.apiCommand(ctx, args[1:])
 	case "run":
@@ -224,9 +226,10 @@ func (a *App) printHelp() {
 	fmt.Fprintln(a.out, "  cyberagent edit propose|list|show|approve|deny")
 	fmt.Fprintln(a.out, "  cyberagent approval list|show|grant")
 	fmt.Fprintln(a.out, "  cyberagent artifact list|show|read|verify")
+	fmt.Fprintln(a.out, "  cyberagent report show")
 	fmt.Fprintln(a.out, "  cyberagent api serve|openapi")
 	fmt.Fprintln(a.out, "  cyberagent run create|adapt-task|list|show|events|usage|start|step|execute|checkpoint|graph|lease|finish|fail|pause|resume|cancel|delegations|delegation|fanouts|fanout")
-	fmt.Fprintln(a.out, "  cyberagent run fanout plan|execute|show|execution")
+	fmt.Fprintln(a.out, "  cyberagent run fanout plan|execute|show|execution|report")
 	fmt.Fprintln(a.out, "  cyberagent todo create|list|show|update|start|block|reopen|complete|cancel")
 	fmt.Fprintln(a.out, "  cyberagent note create|list|show|update|archive|restore")
 	fmt.Fprintln(a.out, "  cyberagent tui")

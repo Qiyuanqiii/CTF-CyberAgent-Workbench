@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 34
+const LatestSchemaVersion = 35
 
 type migration struct {
 	Version    int
@@ -3417,6 +3417,273 @@ var readOnlyFanoutExecutionStatements = []string{
 	`CREATE TRIGGER trg_readonly_fanout_execution_operation_delete_immutable
 		BEFORE DELETE ON readonly_fanout_execution_operations BEGIN
 			SELECT RAISE(ABORT, 'read-only fan-out execution operation cannot be deleted');
+		END;`,
+}
+
+var findingReportStatements = []string{
+	`CREATE TABLE finding_reports (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		source_kind TEXT NOT NULL,
+		source_id TEXT NOT NULL UNIQUE,
+		protocol_version TEXT NOT NULL,
+		status TEXT NOT NULL,
+		title TEXT NOT NULL,
+		projection_digest TEXT NOT NULL DEFAULT '',
+		finding_count INTEGER NOT NULL DEFAULT 0,
+		evidence_count INTEGER NOT NULL DEFAULT 0,
+		info_count INTEGER NOT NULL DEFAULT 0,
+		low_count INTEGER NOT NULL DEFAULT 0,
+		medium_count INTEGER NOT NULL DEFAULT 0,
+		high_count INTEGER NOT NULL DEFAULT 0,
+		critical_count INTEGER NOT NULL DEFAULT 0,
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(source_id) REFERENCES readonly_fanout_executions(id) ON DELETE RESTRICT,
+		CHECK(source_kind = 'readonly_fanout_execution'),
+		CHECK(protocol_version = 'finding_report.v1'),
+		CHECK(status IN ('building', 'generated')),
+		CHECK(title = trim(title) AND length(title) BETWEEN 1 AND 256
+			AND length(CAST(title AS BLOB)) <= 1024 AND instr(title, char(0)) = 0),
+		CHECK((projection_digest = '') OR (length(projection_digest) = 64
+			AND projection_digest = lower(projection_digest)
+			AND projection_digest NOT GLOB '*[^0-9a-f]*')),
+		CHECK(finding_count BETWEEN 0 AND 192 AND evidence_count BETWEEN 0 AND 192),
+		CHECK(info_count >= 0 AND low_count >= 0 AND medium_count >= 0
+			AND high_count >= 0 AND critical_count >= 0
+			AND info_count + low_count + medium_count + high_count + critical_count
+				= finding_count),
+		CHECK((status = 'building' AND projection_digest = '' AND finding_count = 0
+			AND evidence_count = 0 AND version = 1) OR
+			(status = 'generated' AND length(projection_digest) = 64 AND version = 2))
+	);`,
+	`CREATE INDEX idx_finding_reports_run_created
+		ON finding_reports(run_id, created_at, id);`,
+	`CREATE TABLE findings (
+		id TEXT PRIMARY KEY,
+		report_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		fingerprint TEXT NOT NULL,
+		status TEXT NOT NULL,
+		severity TEXT NOT NULL,
+		category TEXT NOT NULL,
+		title TEXT NOT NULL,
+		detail TEXT NOT NULL,
+		relative_path TEXT NOT NULL,
+		line_start INTEGER NOT NULL,
+		line_end INTEGER NOT NULL,
+		confidence INTEGER NOT NULL,
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(report_id) REFERENCES finding_reports(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		UNIQUE(report_id, ordinal),
+		UNIQUE(report_id, fingerprint),
+		CHECK(ordinal BETWEEN 1 AND 192),
+		CHECK(length(fingerprint) = 64 AND fingerprint = lower(fingerprint)
+			AND fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(status = 'draft'),
+		CHECK(severity IN ('info', 'low', 'medium', 'high', 'critical')),
+		CHECK(category = trim(category) AND length(category) BETWEEN 1 AND 64
+			AND length(CAST(category AS BLOB)) <= 256 AND instr(category, char(0)) = 0),
+		CHECK(title = trim(title) AND length(title) BETWEEN 1 AND 256
+			AND length(CAST(title AS BLOB)) <= 1024 AND instr(title, char(0)) = 0),
+		CHECK(detail = trim(detail) AND length(detail) BETWEEN 1 AND 2048
+			AND length(CAST(detail AS BLOB)) <= 8192 AND instr(detail, char(0)) = 0),
+		CHECK(relative_path = trim(relative_path)
+			AND length(relative_path) BETWEEN 1 AND 2048
+			AND instr(relative_path, char(0)) = 0 AND instr(relative_path, char(92)) = 0
+			AND substr(relative_path, 1, 1) <> '/' AND relative_path NOT IN ('.', '..')
+			AND relative_path NOT LIKE '../%'
+			AND instr('/' || relative_path || '/', '/../') = 0),
+		CHECK(line_start >= 0 AND line_end >= line_start AND confidence BETWEEN 0 AND 100),
+		CHECK(version = 1)
+	);`,
+	`CREATE INDEX idx_findings_report_severity
+		ON findings(report_id, severity, ordinal);`,
+	`CREATE TABLE finding_evidence (
+		id TEXT PRIMARY KEY,
+		report_id TEXT NOT NULL,
+		finding_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		kind TEXT NOT NULL,
+		source_kind TEXT NOT NULL,
+		source_id TEXT NOT NULL,
+		source_shard INTEGER NOT NULL,
+		source_ordinal INTEGER NOT NULL,
+		source_fingerprint TEXT NOT NULL,
+		source_digest TEXT NOT NULL,
+		relative_path TEXT NOT NULL,
+		line_start INTEGER NOT NULL,
+		line_end INTEGER NOT NULL,
+		confidence INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(report_id) REFERENCES finding_reports(id) ON DELETE RESTRICT,
+		FOREIGN KEY(finding_id) REFERENCES findings(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(source_id, source_shard, source_ordinal)
+			REFERENCES readonly_fanout_findings(execution_id, shard_ordinal, ordinal)
+			ON DELETE RESTRICT,
+		UNIQUE(finding_id, ordinal),
+		UNIQUE(source_kind, source_id, source_shard, source_ordinal),
+		CHECK(ordinal BETWEEN 1 AND 192),
+		CHECK(kind = 'model_assertion'),
+		CHECK(source_kind = 'readonly_fanout_finding'),
+		CHECK(source_shard BETWEEN 1 AND 6 AND source_ordinal BETWEEN 1 AND 32),
+		CHECK(length(source_fingerprint) = 64
+			AND source_fingerprint = lower(source_fingerprint)
+			AND source_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(source_digest) = 64 AND source_digest = lower(source_digest)
+			AND source_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(relative_path = trim(relative_path)
+			AND length(relative_path) BETWEEN 1 AND 2048
+			AND instr(relative_path, char(0)) = 0 AND instr(relative_path, char(92)) = 0
+			AND substr(relative_path, 1, 1) <> '/' AND relative_path NOT IN ('.', '..')
+			AND relative_path NOT LIKE '../%'
+			AND instr('/' || relative_path || '/', '/../') = 0),
+		CHECK(line_start >= 0 AND line_end >= line_start AND confidence BETWEEN 0 AND 100)
+	);`,
+	`CREATE INDEX idx_finding_evidence_report_finding
+		ON finding_evidence(report_id, finding_id, ordinal);`,
+	`CREATE TRIGGER trg_finding_report_insert
+		BEFORE INSERT ON finding_reports
+		WHEN NOT EXISTS (
+			SELECT 1 FROM readonly_fanout_executions execution
+			WHERE execution.id = NEW.source_id AND execution.run_id = NEW.run_id
+				AND execution.status = 'completed' AND execution.finished_at = NEW.created_at
+				AND NEW.status = 'building' AND NEW.version = 1
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'finding report source binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_finding_insert
+		BEFORE INSERT ON findings
+		WHEN NOT EXISTS (
+			SELECT 1 FROM finding_reports report
+			JOIN readonly_fanout_findings source ON source.execution_id = report.source_id
+			WHERE report.id = NEW.report_id AND report.run_id = NEW.run_id
+				AND report.status = 'building' AND source.severity = NEW.severity
+				AND source.category = NEW.category AND source.title = NEW.title
+				AND source.detail = NEW.detail AND source.relative_path = NEW.relative_path
+				AND source.line_start = NEW.line_start AND source.line_end = NEW.line_end
+				AND NEW.confidence = (
+					SELECT MIN(candidate.confidence)
+					FROM readonly_fanout_findings candidate
+					WHERE candidate.execution_id = report.source_id
+						AND candidate.severity = NEW.severity
+						AND candidate.category = NEW.category
+						AND candidate.title = NEW.title
+						AND candidate.detail = NEW.detail
+						AND candidate.relative_path = NEW.relative_path
+						AND candidate.line_start = NEW.line_start
+						AND candidate.line_end = NEW.line_end
+				)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'finding source projection is invalid');
+		END;`,
+	`CREATE TRIGGER trg_finding_evidence_insert
+		BEFORE INSERT ON finding_evidence
+		WHEN NOT EXISTS (
+			SELECT 1 FROM finding_reports report
+			JOIN findings finding ON finding.report_id = report.id
+			JOIN readonly_fanout_findings source
+				ON source.execution_id = report.source_id
+				AND source.shard_ordinal = NEW.source_shard
+				AND source.ordinal = NEW.source_ordinal
+			JOIN readonly_fanout_execution_shards shard
+				ON shard.execution_id = source.execution_id
+				AND shard.ordinal = source.shard_ordinal
+			WHERE report.id = NEW.report_id AND report.run_id = NEW.run_id
+				AND report.status = 'building' AND finding.id = NEW.finding_id
+				AND finding.run_id = NEW.run_id AND NEW.source_id = report.source_id
+				AND NEW.source_fingerprint = source.fingerprint
+				AND NEW.source_digest = shard.report_digest
+				AND NEW.relative_path = source.relative_path
+				AND NEW.line_start = source.line_start AND NEW.line_end = source.line_end
+				AND NEW.confidence = source.confidence
+				AND finding.severity = source.severity
+				AND finding.category = source.category AND finding.title = source.title
+				AND finding.detail = source.detail
+				AND finding.relative_path = source.relative_path
+				AND finding.line_start = source.line_start
+				AND finding.line_end = source.line_end
+				AND finding.confidence <= source.confidence
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'finding evidence source binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_finding_report_generate
+		BEFORE UPDATE ON finding_reports
+		WHEN OLD.status != 'building' OR NEW.status != 'generated'
+			OR NEW.id != OLD.id OR NEW.run_id != OLD.run_id
+			OR NEW.source_kind != OLD.source_kind OR NEW.source_id != OLD.source_id
+			OR NEW.protocol_version != OLD.protocol_version OR NEW.title != OLD.title
+			OR NEW.created_at != OLD.created_at OR NEW.version != 2
+			OR NEW.evidence_count != (SELECT COUNT(*)
+				FROM readonly_fanout_findings source
+				WHERE source.execution_id = OLD.source_id)
+			OR NEW.finding_count != (SELECT COUNT(*) FROM (
+				SELECT 1 FROM readonly_fanout_findings source
+				WHERE source.execution_id = OLD.source_id
+				GROUP BY source.severity, source.category, source.title, source.detail,
+					source.relative_path, source.line_start, source.line_end
+			))
+			OR NEW.finding_count != (SELECT COUNT(*) FROM findings
+				WHERE report_id = OLD.id)
+			OR NEW.evidence_count != (SELECT COUNT(*) FROM finding_evidence
+				WHERE report_id = OLD.id)
+			OR NEW.info_count != (SELECT COUNT(*) FROM findings
+				WHERE report_id = OLD.id AND severity = 'info')
+			OR NEW.low_count != (SELECT COUNT(*) FROM findings
+				WHERE report_id = OLD.id AND severity = 'low')
+			OR NEW.medium_count != (SELECT COUNT(*) FROM findings
+				WHERE report_id = OLD.id AND severity = 'medium')
+			OR NEW.high_count != (SELECT COUNT(*) FROM findings
+				WHERE report_id = OLD.id AND severity = 'high')
+			OR NEW.critical_count != (SELECT COUNT(*) FROM findings
+				WHERE report_id = OLD.id AND severity = 'critical')
+			OR EXISTS (SELECT 1 FROM findings finding
+				WHERE finding.report_id = OLD.id AND NOT EXISTS (
+					SELECT 1 FROM finding_evidence evidence
+					WHERE evidence.finding_id = finding.id))
+			OR EXISTS (SELECT 1 FROM findings finding
+				WHERE finding.report_id = OLD.id AND (
+					(SELECT MIN(evidence.ordinal) FROM finding_evidence evidence
+						WHERE evidence.finding_id = finding.id) != 1
+					OR (SELECT MAX(evidence.ordinal) FROM finding_evidence evidence
+						WHERE evidence.finding_id = finding.id) !=
+						(SELECT COUNT(*) FROM finding_evidence evidence
+							WHERE evidence.finding_id = finding.id)))
+			OR (NEW.finding_count > 0 AND (SELECT MIN(ordinal) FROM findings
+				WHERE report_id = OLD.id) != 1)
+			OR (NEW.finding_count > 0 AND (SELECT MAX(ordinal) FROM findings
+				WHERE report_id = OLD.id) != NEW.finding_count)
+		BEGIN
+			SELECT RAISE(ABORT, 'finding report generation is invalid');
+		END;`,
+	`CREATE TRIGGER trg_finding_report_delete_immutable
+		BEFORE DELETE ON finding_reports BEGIN
+			SELECT RAISE(ABORT, 'finding report cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_finding_update_immutable
+		BEFORE UPDATE ON findings BEGIN
+			SELECT RAISE(ABORT, 'finding cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_finding_delete_immutable
+		BEFORE DELETE ON findings BEGIN
+			SELECT RAISE(ABORT, 'finding cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_finding_evidence_update_immutable
+		BEFORE UPDATE ON finding_evidence BEGIN
+			SELECT RAISE(ABORT, 'finding evidence cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_finding_evidence_delete_immutable
+		BEFORE DELETE ON finding_evidence BEGIN
+			SELECT RAISE(ABORT, 'finding evidence cannot be deleted');
 		END;`,
 }
 
