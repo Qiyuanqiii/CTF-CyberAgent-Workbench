@@ -376,6 +376,10 @@ Root Inbox Context 切片新增 schema v25、严格的 completion/failure inbox 
 
 本轮代码与安全审计未发现未解决的高/中风险问题。模型收到的是有界、脱敏、截断的 `root_inbox_context.v1` 类型化 JSON，且系统提示明确把 payload 当作不可信任务状态；消息 ID、sequence、cursor 和消费控制不进入 prompt，sender 由 Store 路由关系确定。手工 consume 不能抢占 running root，SQLite trigger 拒绝未由 CompletionReport/crashed Attempt 支撑的 result/failure delivery，图快照包含 prepared delivery 元数据并保持 v24 兼容。测试覆盖三种协议、顺序与 4 条上限、伪造字段、并发双 Store prepare、事件失败回滚、原子 completion 回滚、失败 supersede、取消后进程重启重放、lease takeover/stale fencing、exactly-once commit、v24 原地升级和 prompt 凭据脱敏。发布门通过全仓 uncached tests、全仓 `-race`、`go vet`、零告警 `staticcheck` 与 `govulncheck`，当前代码可达漏洞为 0。隔离真实二进制只注册 mock Provider，初始化工作区，创建 schema v25 review Run，并由 `run graph` 恢复 ready root 后清理临时目录。公开 CLI/HTTP/model spawn、child Provider loop 和真实 Shell/网络权限仍关闭。
 
+schema v25 完成后的独立全项目审计覆盖依赖图、所有 Go 包、race、静态分析、SQLite、LLM 网络出口、HTTP loopback 入口、Shell/Sandbox、工作区与审批文件写入、凭据/运行产物，以及真实 CLI/TUI/OpenAPI 链路。审计发现并修复四类健壮性问题：Bubble Tea 间接引入的 `x/sys v0.38.0` 含不可达但已知的 Windows 包级漏洞，已定点升级到无告警的 `v0.44.0`；未接入生产路径的 LocalRunner 仍具备宿主机 `exec` 实现，现改为明确 fail-closed，Noop/Docker 同时补上取消处理且 Noop 显示会脱敏；Anthropic-compatible Provider 现只接受 HTTPS 或 exact-loopback HTTP，拒绝 URL credentials/query/fragment、异常 API key 与全部重定向，防止 `x-api-key` 被转发；新 Unix runtime 目录和 SQLite 文件权限分别收紧为 `0700`/`0600`。
+
+新增测试把 Sandbox statement coverage 从 13.2% 提升到 72.0%，`toolbudget` 从 0% 提升到 100%，并覆盖 Provider 非安全配置、跨域重定向零触达、预取消 Runner 和 Unix 私有权限。最终全仓 uncached tests、全仓 `-race`、`go vet`、零告警 `staticcheck`、`go mod verify/tidy -diff` 与 `govulncheck` 全部通过，漏洞为 0。完整隔离二进制 smoke 覆盖 version/provider/model、workspace read/tree、script `--local` disabled proposal、learn、CTF 骨架、WorkItem/Note、Run step/checkpoint/events/usage/graph/lease/pause/resume/cancel、Run-bound Session send、TUI snapshot 和 OpenAPI 导出，并清理临时 runtime。残余风险仍是：Policy/Prompt 注入防御为规则型骨架，文件审批无法消除拥有同一主机权限的外部进程在最终写入瞬间制造 TOCTOU，真实 Sandbox、child model loop、金额预算和 TypeScript/Rust 层尚未实现。
+
 ## 七、下一开发切片
 
 1. 把一个内部 Specialist no-tool model turn 接入现有 Provider、取消与 schema v24 Attempt usage，复用 schema v25 父 inbox 回传，仍保持公开/model spawn 关闭。

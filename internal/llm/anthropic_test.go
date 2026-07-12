@@ -351,3 +351,68 @@ func TestAnthropicCompatibleProviderListModelsFallback(t *testing.T) {
 		t.Fatalf("unexpected fallback models: %#v", models)
 	}
 }
+
+func TestAnthropicCompatibleProviderRejectsUnsafeConfiguration(t *testing.T) {
+	for _, baseURL := range []string{
+		"ftp://example.com/anthropic",
+		"http://example.com/anthropic",
+		"https://user:password@example.com/anthropic",
+		"https://example.com/anthropic?route=unsafe",
+		"https://example.com/anthropic#fragment",
+	} {
+		if _, err := NewAnthropicCompatibleProvider(AnthropicCompatibleConfig{
+			Name: "unsafe", BaseURL: baseURL, APIKey: "secret",
+		}); err == nil {
+			t.Fatalf("unsafe Provider base URL was accepted: %s", baseURL)
+		}
+	}
+	for _, apiKey := range []string{"", " secret", "secret\nvalue", strings.Repeat("x", maxProviderAPIKeyBytes+1)} {
+		if _, err := NewAnthropicCompatibleProvider(AnthropicCompatibleConfig{
+			Name: "unsafe", BaseURL: "https://example.com/anthropic", APIKey: apiKey,
+		}); err == nil {
+			t.Fatal("unsafe Provider API key was accepted")
+		}
+	}
+}
+
+func TestAnthropicCompatibleProviderAllowsLoopbackHTTP(t *testing.T) {
+	for _, baseURL := range []string{
+		"http://localhost:8080/anthropic",
+		"http://127.0.0.1:8080/anthropic",
+		"http://[::1]:8080/anthropic",
+	} {
+		if _, err := NewAnthropicCompatibleProvider(AnthropicCompatibleConfig{
+			Name: "local", BaseURL: baseURL, APIKey: "secret",
+		}); err != nil {
+			t.Fatalf("loopback Provider URL %s was rejected: %v", baseURL, err)
+		}
+	}
+}
+
+func TestAnthropicCompatibleProviderDoesNotForwardCredentialsAcrossRedirects(t *testing.T) {
+	received := false
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		received = true
+	}))
+	defer target.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		http.Redirect(writer, request, target.URL+"/v1/messages", http.StatusTemporaryRedirect)
+	}))
+	defer redirect.Close()
+	provider, err := NewAnthropicCompatibleProvider(AnthropicCompatibleConfig{
+		Name: "redirect-test", BaseURL: redirect.URL, APIKey: "secret", DefaultModel: "model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = provider.Chat(t.Context(), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "do not redirect credentials"}},
+	})
+	var providerErr *ProviderError
+	if !errors.As(err, &providerErr) || providerErr.StatusCode != http.StatusTemporaryRedirect {
+		t.Fatalf("Provider redirect did not fail as HTTP 307: %v", err)
+	}
+	if received {
+		t.Fatal("Provider followed a redirect and exposed credential headers")
+	}
+}

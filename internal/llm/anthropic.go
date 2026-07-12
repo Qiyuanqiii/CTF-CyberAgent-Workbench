@@ -8,16 +8,24 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"cyberagent-workbench/internal/redact"
 )
 
 const AnthropicVersion = "2023-06-01"
+
+const (
+	maxProviderBaseURLBytes = 2048
+	maxProviderAPIKeyBytes  = 16 * 1024
+)
 
 type AnthropicCompatibleConfig struct {
 	Name         string
@@ -40,20 +48,14 @@ func NewAnthropicCompatibleProvider(config AnthropicCompatibleConfig) (*Anthropi
 	if name == "" {
 		name = "anthropic_compatible"
 	}
-	baseURL := strings.TrimRight(strings.TrimSpace(config.BaseURL), "/")
-	if baseURL == "" {
-		return nil, fmt.Errorf("base url is required for provider %s", name)
+	baseURL, err := normalizeProviderBaseURL(config.BaseURL, name)
+	if err != nil {
+		return nil, err
 	}
-	if _, err := url.ParseRequestURI(baseURL); err != nil {
-		return nil, fmt.Errorf("invalid base url for provider %s: %w", name, err)
+	if err := validateProviderAPIKey(config.APIKey, name); err != nil {
+		return nil, err
 	}
-	if strings.TrimSpace(config.APIKey) == "" {
-		return nil, fmt.Errorf("api key is required for provider %s", name)
-	}
-	client := config.HTTPClient
-	if client == nil {
-		client = &http.Client{Timeout: 60 * time.Second}
-	}
+	client := providerHTTPClient(config.HTTPClient)
 	defaultModel := strings.TrimSpace(config.DefaultModel)
 	if defaultModel == "" {
 		defaultModel = "claude-3-5-sonnet-latest"
@@ -65,6 +67,66 @@ func NewAnthropicCompatibleProvider(config AnthropicCompatibleConfig) (*Anthropi
 		defaultModel: defaultModel,
 		client:       client,
 	}, nil
+}
+
+func providerHTTPClient(source *http.Client) *http.Client {
+	client := &http.Client{Timeout: 60 * time.Second}
+	if source != nil {
+		copy := *source
+		client = &copy
+		if client.Timeout <= 0 {
+			client.Timeout = 60 * time.Second
+		}
+	}
+	client.CheckRedirect = func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return client
+}
+
+func normalizeProviderBaseURL(value string, provider string) (string, error) {
+	value = strings.TrimRight(strings.TrimSpace(value), "/")
+	if value == "" {
+		return "", fmt.Errorf("base url is required for provider %s", provider)
+	}
+	if len([]byte(value)) > maxProviderBaseURLBytes {
+		return "", fmt.Errorf("base url for provider %s exceeds %d bytes", provider,
+			maxProviderBaseURLBytes)
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return "", fmt.Errorf("base url for provider %s must be an absolute HTTP(S) URL", provider)
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("base url for provider %s cannot contain credentials, query, or fragment", provider)
+	}
+	if parsed.Scheme == "http" && !providerLoopbackHost(parsed.Hostname()) {
+		return "", fmt.Errorf("base url for provider %s must use HTTPS outside loopback", provider)
+	}
+	return value, nil
+}
+
+func providerLoopbackHost(host string) bool {
+	if strings.EqualFold(strings.TrimSpace(host), "localhost") {
+		return true
+	}
+	ip := net.ParseIP(strings.TrimSpace(host))
+	return ip != nil && ip.IsLoopback()
+}
+
+func validateProviderAPIKey(value string, provider string) error {
+	if value == "" || value != strings.TrimSpace(value) || !utf8.ValidString(value) ||
+		len([]byte(value)) > maxProviderAPIKeyBytes {
+		return fmt.Errorf("api key for provider %s must be normalized UTF-8 within %d bytes",
+			provider, maxProviderAPIKeyBytes)
+	}
+	for _, current := range value {
+		if unicode.IsControl(current) || unicode.IsSpace(current) {
+			return fmt.Errorf("api key for provider %s cannot contain whitespace or control characters",
+				provider)
+		}
+	}
+	return nil
 }
 
 func (p *AnthropicCompatibleProvider) Name() string {

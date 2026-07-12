@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +22,31 @@ import (
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/toolrun"
 )
+
+func TestOpenCreatesPrivateSQLitePathOnUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows permissions are controlled by ACLs")
+	}
+	directory := filepath.Join(t.TempDir(), "private", "runtime")
+	path := filepath.Join(directory, "cyberagent.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	directoryInfo, err := os.Stat(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	databaseInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directoryInfo.Mode().Perm() != 0o700 || databaseInfo.Mode().Perm() != 0o600 {
+		t.Fatalf("runtime path permissions are not private: dir=%o db=%o",
+			directoryInfo.Mode().Perm(), databaseInfo.Mode().Perm())
+	}
+}
 
 func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "cyberagent.db"))

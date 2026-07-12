@@ -52,7 +52,7 @@ type ArtifactRecord struct {
 }
 
 func Open(path string) (*SQLiteStore, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
 	db, err := sql.Open("sqlite3", sqliteDSN(path))
@@ -62,6 +62,10 @@ func Open(path string) (*SQLiteStore, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	if _, err := db.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := restrictSQLiteFilePermissions(path); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -75,6 +79,20 @@ func Open(path string) (*SQLiteStore, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func restrictSQLiteFilePermissions(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("inspect sqlite database permissions: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("sqlite database path is not a regular file")
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("restrict sqlite database permissions: %w", err)
+	}
+	return nil
 }
 
 func sqliteDSN(path string) string {

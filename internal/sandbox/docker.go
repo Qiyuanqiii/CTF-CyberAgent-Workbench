@@ -28,6 +28,9 @@ func (r DockerRunner) Available(ctx context.Context) bool {
 }
 
 func (r DockerRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
+	if err := ctx.Err(); err != nil {
+		return RunResult{ExitCode: 130}, err
+	}
 	if !r.Available(ctx) {
 		return RunResult{ExitCode: 127}, fmt.Errorf("docker runner unavailable: %q was not found on PATH", r.binary)
 	}

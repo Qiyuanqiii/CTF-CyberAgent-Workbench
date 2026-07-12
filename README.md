@@ -212,6 +212,9 @@ go run ./cmd/cyberagent context show --task task-demo
 
 Use `CYBERAGENT_HOME` to point runtime data at another directory during tests or experiments.
 
+在 Unix 上，新建的运行目录与 SQLite 数据库分别限制为 `0700` 和 `0600`；Windows 继续使用系统 ACL。LocalRunner 当前显式 fail-closed，不会启动宿主机进程，Noop dry-run 输出也会先脱敏。<br>
+On Unix, newly created runtime directories and SQLite databases are restricted to `0700` and `0600`; Windows continues to use system ACLs. LocalRunner is explicitly fail-closed and cannot start a host process, while Noop dry-run output is redacted before display.
+
 `api serve` generates and prints a temporary read token when `CYBERAGENT_API_TOKEN` is absent. Cross-process cancellation remains disabled unless a distinct `CYBERAGENT_API_CONTROL_TOKEN` is supplied; environment-provided tokens are validated but never echoed. See [docs/http-api.md](docs/http-api.md) for endpoints, envelopes, pagination, and security boundaries.
 
 ## Project Memory
@@ -242,8 +245,8 @@ File changes, Shell proposals, typed script-process proposals, and create-only s
 
 ## 可选在线 Provider / Optional Online Providers
 
-CLI 只在对应 API key 存在于当前进程环境时注册 `mimo` 或 `deepseek` Anthropic-compatible Provider。密钥不会写入仓库文件、SQLite 或 Run 事件。<br>
-The CLI registers the `mimo` and `deepseek` Anthropic-compatible providers only when their API keys exist in the current process environment. Keys are never written to repository files, SQLite, or Run events.
+CLI 只在对应 API key 存在于当前进程环境时注册 `mimo` 或 `deepseek` Anthropic-compatible Provider。密钥不会写入仓库文件、SQLite 或 Run 事件。Provider 地址必须使用 HTTPS，只有 loopback 本地服务可使用 HTTP；客户端不会跟随重定向，API key 也不能包含空白或控制字符。<br>
+The CLI registers the `mimo` and `deepseek` Anthropic-compatible providers only when their API keys exist in the current process environment. Keys are never written to repository files, SQLite, or Run events. Provider endpoints must use HTTPS except for loopback-local HTTP services; redirects are not followed, and API keys cannot contain whitespace or control characters.
 
 ```powershell
 $env:MIMO_API_KEY = "<token-plan-key>"
