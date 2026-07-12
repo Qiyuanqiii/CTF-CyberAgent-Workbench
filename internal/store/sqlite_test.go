@@ -187,6 +187,17 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 			t.Fatalf("schema v29 Specialist control table is missing: %q", table)
 		}
 	}
+	for _, name := range []string{"specialist_delegation_proposals",
+		"specialist_delegation_assignments", "specialist_delegation_operations"} {
+		var table string
+		if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master
+			WHERE type = 'table' AND name = ?`, name).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		if table != name {
+			t.Fatalf("schema v30 Specialist delegation table is missing: %q", table)
+		}
+	}
 	for _, column := range []string{"lease_id", "lease_generation"} {
 		var count int
 		if err := st.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('run_supervisor_checkpoints')
@@ -598,7 +609,7 @@ func removeSchemaV28ForTestStatements() []string {
 }
 
 func removeSchemaV29ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV30ForTestStatements(), []string{
 		`DROP TRIGGER trg_specialist_model_cancellation_operation_immutable`,
 		`DROP TRIGGER trg_specialist_model_cancellation_terminal_immutable`,
 		`DROP TRIGGER trg_specialist_model_cancellation_identity_immutable`,
@@ -617,6 +628,37 @@ func removeSchemaV29ForTestStatements() []string {
 		`DROP TABLE specialist_schedule_agents`,
 		`DROP TABLE specialist_schedules`,
 		`DELETE FROM schema_migrations WHERE version = 29`,
+	}...)
+}
+
+func removeSchemaV30ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_specialist_delegation_operation_immutable`,
+		`DROP TRIGGER trg_specialist_delegation_assignment_immutable`,
+		`DROP TRIGGER trg_specialist_delegation_proposal_immutable`,
+		`DROP TRIGGER trg_specialist_delegation_operation_insert`,
+		`DROP TRIGGER trg_specialist_non_delegable_capability`,
+		`DROP TRIGGER trg_specialist_delegation_assignment_insert`,
+		`DROP TRIGGER trg_specialist_delegation_proposal_insert`,
+		`DROP TABLE specialist_delegation_operations`,
+		`DROP TABLE specialist_delegation_assignments`,
+		`DROP TABLE specialist_delegation_proposals`,
+		`DROP TRIGGER trg_supervisor_tool_call_model_attempt`,
+		`DROP TRIGGER trg_supervisor_tool_round_completion`,
+		`DROP INDEX idx_run_supervisor_tool_calls_pending`,
+		`ALTER TABLE run_supervisor_tool_calls RENAME TO run_supervisor_tool_calls_v30`,
+		supervisorToolLoopStatements[1],
+		`INSERT INTO run_supervisor_tool_calls
+			(run_id, turn, attempt_id, round, position, model_attempt, call_id, tool_name,
+			payload_json, status, result_json, error_code, created_at, completed_at)
+			SELECT run_id, turn, attempt_id, round, position, model_attempt, call_id, tool_name,
+			payload_json, status, result_json, error_code, created_at, completed_at
+			FROM run_supervisor_tool_calls_v30`,
+		`DROP TABLE run_supervisor_tool_calls_v30`,
+		supervisorToolLoopStatements[2],
+		supervisorToolLoopStatements[5],
+		supervisorToolLoopStatements[6],
+		`DELETE FROM schema_migrations WHERE version = 30`,
 	}
 }
 

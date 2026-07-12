@@ -42,6 +42,10 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runSupervisorCheckpoint(ctx, args[1:])
 	case "graph":
 		return a.runAgentGraph(ctx, args[1:])
+	case "delegations":
+		return a.runDelegations(ctx, args[1:])
+	case "delegation":
+		return a.runDelegation(ctx, args[1:])
 	case "lease":
 		return a.runExecutionLease(ctx, service, args[1:])
 	case "usage":
@@ -61,6 +65,56 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown run subcommand %q", args[0])
 	}
+}
+
+func (a *App) runDelegations(ctx context.Context, args []string) error {
+	fs := newFlagSet("run delegations", a.errOut)
+	limit := fs.Int("limit", 20, "maximum proposals")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{"limit": true})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run delegations <run-id> [--limit <n>]")
+	}
+	proposals, err := a.store.ListSpecialistDelegationProposals(ctx, fs.Arg(0), *limit)
+	if err != nil {
+		return err
+	}
+	if len(proposals) == 0 {
+		fmt.Fprintln(a.out, "no Specialist delegation proposals")
+		return nil
+	}
+	for _, proposal := range proposals {
+		fmt.Fprintf(a.out, "%s\tstatus=%s\tassignments=%d\troot=%s\tcreated_at=%s\n",
+			proposal.ID, proposal.Status, len(proposal.Spec.Assignments), proposal.RootAgentID,
+			proposal.CreatedAt.Format(time.RFC3339Nano))
+	}
+	return nil
+}
+
+func (a *App) runDelegation(ctx context.Context, args []string) error {
+	fs := newFlagSet("run delegation", a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run delegation <proposal-id>")
+	}
+	proposal, err := a.store.GetSpecialistDelegationProposal(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "proposal: %s\nrun: %s\nroot_agent: %s\nstatus: %s\nprotocol: %s\nassignments: %d\nadmission_authorized: false\noperator_review_required: true\ncreated_at: %s\n",
+		proposal.ID, proposal.RunID, proposal.RootAgentID, proposal.Status,
+		proposal.Spec.Version, len(proposal.Spec.Assignments),
+		proposal.CreatedAt.Format(time.RFC3339Nano))
+	for _, assignment := range proposal.Spec.Assignments {
+		fmt.Fprintf(a.out, "%d. %s\n   goal: %s\n   skills: %s\n   budget: turns=%d tokens=%d\n",
+			assignment.Ordinal, assignment.Title, assignment.Goal,
+			strings.Join(assignment.Skills, ","), assignment.TurnLimit,
+			assignment.TokenLimit)
+	}
+	return nil
 }
 
 func (a *App) runExecutionLease(ctx context.Context, service *application.RunService, args []string) error {

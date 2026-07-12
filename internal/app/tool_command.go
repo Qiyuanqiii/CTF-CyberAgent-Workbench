@@ -58,13 +58,13 @@ func (a *App) toolSchema(args []string) error {
 		return err
 	}
 	if fs.NArg() > 1 {
-		return errors.New("usage: cyberagent tool schema [work_item_create|note_create]")
+		return errors.New("usage: cyberagent tool schema [work_item_create|note_create|specialist_delegation_propose]")
 	}
-	var value any = toolgateway.StructuredMemoryToolDefinitions()
+	var value any = toolgateway.SupervisorToolDefinitions()
 	if fs.NArg() == 1 {
-		definition, found := toolgateway.StructuredMemoryToolDefinition(toolgateway.ToolName(fs.Arg(0)))
+		definition, found := toolgateway.SupervisorToolDefinition(toolgateway.ToolName(fs.Arg(0)))
 		if !found {
-			return fmt.Errorf("structured tool %q was not found", fs.Arg(0))
+			return fmt.Errorf("supervisor tool %q was not found", fs.Arg(0))
 		}
 		value = definition
 	}

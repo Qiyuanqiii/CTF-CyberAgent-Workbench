@@ -24,6 +24,7 @@ func TestStructuredToolCLIListsSchemasAndCreatesRunMemory(t *testing.T) {
 	schemas, stderr, code := executeTestCommand(t, "tool", "schema")
 	if code != 0 || !strings.Contains(schemas, `"name": "work_item_create"`) ||
 		!strings.Contains(schemas, `"name": "note_create"`) ||
+		!strings.Contains(schemas, `"name": "specialist_delegation_propose"`) ||
 		!strings.Contains(schemas, `"additionalProperties": false`) {
 		t.Fatalf("structured tool schemas are unavailable: code=%d stderr=%s output=%s", code, stderr, schemas)
 	}

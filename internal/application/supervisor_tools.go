@@ -29,7 +29,7 @@ type supervisorToolResultEnvelope struct {
 }
 
 func supervisorStructuredToolSpecs() []llm.ToolSpec {
-	definitions := toolgateway.StructuredMemoryToolDefinitions()
+	definitions := toolgateway.SupervisorToolDefinitions()
 	out := make([]llm.ToolSpec, 0, len(definitions))
 	for _, definition := range definitions {
 		out = append(out, llm.ToolSpec{
@@ -53,10 +53,11 @@ func prepareSupervisorToolCalls(calls []llm.ToolCall, runID string, turn int, ro
 	seen := make(map[string]struct{}, len(normalized))
 	for index, call := range normalized {
 		name := toolgateway.ToolName(call.Name)
-		if name != toolgateway.WorkItemCreateTool && name != toolgateway.NoteCreateTool {
+		if name != toolgateway.WorkItemCreateTool && name != toolgateway.NoteCreateTool &&
+			name != toolgateway.SpecialistDelegationProposeTool {
 			return nil, fmt.Errorf("provider requested unsupported supervisor tool %q", call.Name)
 		}
-		payload, err := toolgateway.NormalizeStructuredMemoryPayload(name, call.Arguments)
+		payload, err := toolgateway.NormalizeSupervisorToolPayload(name, call.Arguments)
 		if err != nil {
 			return nil, err
 		}
@@ -115,7 +116,7 @@ func (s *RunSupervisor) invokeSupervisorTool(ctx context.Context, turn domain.Su
 	completedAt := time.Now().UTC()
 	if err != nil {
 		code := apperror.CodeOf(apperror.Normalize(err))
-		if code != apperror.CodeResourceExhausted {
+		if !recoverableSupervisorToolError(code) {
 			return domain.SupervisorToolResult{}, apperror.Normalize(err)
 		}
 		encoded, encodeErr := json.Marshal(supervisorToolResultEnvelope{
@@ -163,6 +164,15 @@ func (s *RunSupervisor) invokeSupervisorTool(ctx context.Context, turn domain.Su
 		CallID: call.CallID, Status: status, ResultJSON: string(encoded), ErrorCode: code,
 		CompletedAt: completedAt,
 	}, nil
+}
+
+func recoverableSupervisorToolError(code apperror.Code) bool {
+	switch code {
+	case apperror.CodeInvalidArgument, apperror.CodeConflict, apperror.CodeResourceExhausted:
+		return true
+	default:
+		return false
+	}
 }
 
 func boundedSupervisorToolMessage(value string) string {

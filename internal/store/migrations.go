@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 29
+const LatestSchemaVersion = 30
 
 type migration struct {
 	Version    int
@@ -2161,6 +2161,243 @@ var specialistContextDeliveryStatements = []string{
 		)
 		BEGIN
 			SELECT RAISE(ABORT, 'prepared Specialist instruction must commit through its Agent attempt');
+		END;`,
+}
+
+var specialistDelegationProposalStatements = []string{
+	`DROP TRIGGER trg_supervisor_tool_call_model_attempt;`,
+	`DROP TRIGGER trg_supervisor_tool_round_completion;`,
+	`DROP INDEX idx_run_supervisor_tool_calls_pending;`,
+	`ALTER TABLE run_supervisor_tool_calls RENAME TO run_supervisor_tool_calls_v29;`,
+	`CREATE TABLE run_supervisor_tool_calls (
+		run_id TEXT NOT NULL,
+		turn INTEGER NOT NULL,
+		attempt_id TEXT NOT NULL,
+		round INTEGER NOT NULL,
+		position INTEGER NOT NULL,
+		model_attempt INTEGER NOT NULL,
+		call_id TEXT NOT NULL,
+		tool_name TEXT NOT NULL,
+		payload_json TEXT NOT NULL,
+		status TEXT NOT NULL,
+		result_json TEXT NOT NULL DEFAULT '',
+		error_code TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		completed_at TEXT,
+		PRIMARY KEY(run_id, turn, attempt_id, round, position),
+		UNIQUE(run_id, turn, attempt_id, call_id),
+		FOREIGN KEY(run_id, turn, attempt_id, round)
+			REFERENCES run_supervisor_tool_rounds(run_id, turn, attempt_id, round) ON DELETE CASCADE,
+		CHECK(position BETWEEN 1 AND 4),
+		CHECK(model_attempt > 0),
+		CHECK(tool_name IN ('work_item_create', 'note_create', 'specialist_delegation_propose')),
+		CHECK(status IN ('pending', 'completed', 'denied', 'failed')),
+		CHECK((status = 'pending' AND result_json = '' AND error_code = '' AND completed_at IS NULL)
+			OR (status = 'completed' AND length(result_json) > 0 AND error_code = '' AND completed_at IS NOT NULL)
+			OR (status IN ('denied', 'failed') AND length(result_json) > 0 AND length(error_code) > 0
+				AND completed_at IS NOT NULL))
+	);`,
+	`INSERT INTO run_supervisor_tool_calls
+		(run_id, turn, attempt_id, round, position, model_attempt, call_id, tool_name,
+		payload_json, status, result_json, error_code, created_at, completed_at)
+		SELECT run_id, turn, attempt_id, round, position, model_attempt, call_id, tool_name,
+		payload_json, status, result_json, error_code, created_at, completed_at
+		FROM run_supervisor_tool_calls_v29;`,
+	`DROP TABLE run_supervisor_tool_calls_v29;`,
+	`CREATE INDEX idx_run_supervisor_tool_calls_pending
+		ON run_supervisor_tool_calls(run_id, turn, attempt_id, status, round, position);`,
+	`CREATE TRIGGER trg_supervisor_tool_call_model_attempt
+		BEFORE INSERT ON run_supervisor_tool_calls
+		WHEN NOT EXISTS (
+			SELECT 1 FROM run_supervisor_tool_rounds
+			WHERE run_id = NEW.run_id AND turn = NEW.turn AND attempt_id = NEW.attempt_id
+				AND round = NEW.round AND model_attempt = NEW.model_attempt
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'supervisor tool call model attempt mismatch');
+		END;`,
+	`CREATE TRIGGER trg_supervisor_tool_round_completion
+		BEFORE UPDATE OF completed_at ON run_supervisor_tool_rounds
+		WHEN NEW.completed_at IS NOT NULL AND EXISTS (
+			SELECT 1 FROM run_supervisor_tool_calls
+			WHERE run_id = NEW.run_id AND turn = NEW.turn AND attempt_id = NEW.attempt_id
+				AND round = NEW.round AND status = 'pending'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'supervisor tool round still has pending calls');
+		END;`,
+	`CREATE TABLE specialist_delegation_proposals (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		root_agent_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL DEFAULT '',
+		protocol_version TEXT NOT NULL,
+		status TEXT NOT NULL,
+		assignment_count INTEGER NOT NULL,
+		requested_by TEXT NOT NULL,
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+		FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, root_agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		CHECK(protocol_version = 'specialist_delegation.v1'),
+		CHECK(status = 'proposed'),
+		CHECK(assignment_count BETWEEN 1 AND 2),
+		CHECK(length(trim(requested_by)) BETWEEN 1 AND 256),
+		CHECK(version = 1)
+	);`,
+	`CREATE INDEX idx_specialist_delegation_proposals_run_created
+		ON specialist_delegation_proposals(run_id, created_at, id);`,
+	`CREATE TABLE specialist_delegation_assignments (
+		proposal_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		title TEXT NOT NULL,
+		goal TEXT NOT NULL,
+		skills_json TEXT NOT NULL,
+		turn_limit INTEGER NOT NULL,
+		token_limit INTEGER NOT NULL,
+		PRIMARY KEY(proposal_id, ordinal),
+		FOREIGN KEY(proposal_id) REFERENCES specialist_delegation_proposals(id) ON DELETE CASCADE,
+		CHECK(ordinal BETWEEN 1 AND 2),
+		CHECK(title = trim(title) AND length(title) BETWEEN 1 AND 256),
+		CHECK(length(CAST(title AS BLOB)) <= 1024),
+		CHECK(goal = trim(goal) AND length(goal) BETWEEN 1 AND 1200),
+		CHECK(length(CAST(goal AS BLOB)) <= 4800),
+		CHECK(json_valid(skills_json) AND json_type(skills_json) = 'array'),
+		CHECK(json_array_length(skills_json) BETWEEN 1 AND 16),
+		CHECK(turn_limit > 0),
+		CHECK(token_limit > 0)
+	);`,
+	`CREATE TABLE specialist_delegation_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		invocation_id TEXT NOT NULL UNIQUE,
+		proposal_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL DEFAULT '',
+		root_agent_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(invocation_id) REFERENCES run_tool_calls(id) ON DELETE RESTRICT,
+		FOREIGN KEY(proposal_id) REFERENCES specialist_delegation_proposals(id) ON DELETE CASCADE,
+		FOREIGN KEY(run_id, root_agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE CASCADE,
+		CHECK(length(operation_key_digest) = 64 AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64 AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = 'run_supervisor')
+	);`,
+	`CREATE TRIGGER trg_specialist_delegation_proposal_insert
+		BEFORE INSERT ON specialist_delegation_proposals
+		WHEN NOT EXISTS (
+			SELECT 1 FROM runs run
+			JOIN missions mission ON mission.id = run.mission_id
+			JOIN agent_nodes root ON root.run_id = run.id AND root.id = NEW.root_agent_id
+			WHERE run.id = NEW.run_id AND run.status = 'running'
+				AND run.session_id = NEW.session_id
+				AND COALESCE(mission.workspace_id, '') = NEW.workspace_id
+				AND root.role = 'root' AND root.parent_id IS NULL AND root.depth = 0
+				AND root.status = 'running' AND root.active_attempt_id <> ''
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist delegation proposal requires the active root Agent');
+		END;`,
+	`CREATE TRIGGER trg_specialist_delegation_assignment_insert
+		BEFORE INSERT ON specialist_delegation_assignments
+		WHEN NOT EXISTS (
+			SELECT 1 FROM specialist_delegation_proposals proposal
+			JOIN agent_nodes root ON root.run_id = proposal.run_id AND root.id = proposal.root_agent_id
+			WHERE proposal.id = NEW.proposal_id AND NEW.ordinal <= proposal.assignment_count
+				AND NOT EXISTS (
+					SELECT 1 FROM json_each(NEW.skills_json) requested
+					WHERE requested.type <> 'text'
+						OR requested.value <> lower(trim(requested.value))
+						OR length(requested.value) NOT BETWEEN 1 AND 96
+						OR requested.value GLOB '*[^a-z0-9._-]*'
+						OR requested.value = 'specialist_delegation_propose'
+						OR NOT EXISTS (
+							SELECT 1 FROM json_each(root.skills_json) allowed
+							WHERE allowed.type = 'text' AND allowed.value = requested.value
+						)
+						OR EXISTS (
+							SELECT 1 FROM json_each(NEW.skills_json) later
+							WHERE CAST(later.key AS INTEGER) > CAST(requested.key AS INTEGER)
+								AND requested.value >= later.value
+						)
+				)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist delegation assignment exceeds root capability');
+		END;`,
+	`CREATE TRIGGER trg_specialist_non_delegable_capability
+		BEFORE INSERT ON agent_nodes
+		WHEN NEW.role = 'specialist' AND EXISTS (
+			SELECT 1 FROM json_each(NEW.skills_json) skill
+			WHERE skill.type = 'text' AND skill.value = 'specialist_delegation_propose'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist includes a non-delegable control capability');
+		END;`,
+	`CREATE TRIGGER trg_specialist_delegation_operation_insert
+		BEFORE INSERT ON specialist_delegation_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM specialist_delegation_proposals proposal
+			JOIN runs run ON run.id = proposal.run_id
+			JOIN agent_nodes root ON root.run_id = proposal.run_id AND root.id = proposal.root_agent_id
+			JOIN run_supervisor_checkpoints checkpoint ON checkpoint.run_id = proposal.run_id
+			JOIN run_execution_leases lease ON lease.run_id = proposal.run_id
+			JOIN run_tool_calls invocation ON invocation.id = NEW.invocation_id
+			WHERE proposal.id = NEW.proposal_id AND proposal.run_id = NEW.run_id
+				AND proposal.root_agent_id = NEW.root_agent_id
+				AND proposal.session_id = NEW.session_id
+				AND proposal.workspace_id = NEW.workspace_id
+				AND proposal.requested_by = NEW.requested_by
+				AND run.status = 'running' AND root.status = 'running'
+				AND EXISTS (SELECT 1 FROM json_each(root.skills_json) root_skill
+					WHERE root_skill.type = 'text'
+						AND root_skill.value = 'specialist_delegation_propose')
+				AND root.active_attempt_id = checkpoint.attempt_id
+				AND checkpoint.phase = 'turn_started'
+				AND checkpoint.lease_id = lease.lease_id
+				AND checkpoint.lease_generation = lease.generation
+				AND lease.status = 'active' AND julianday(lease.expires_at) > julianday('now')
+				AND invocation.run_id = NEW.run_id AND invocation.session_id = NEW.session_id
+				AND invocation.workspace_id = NEW.workspace_id
+				AND invocation.tool_name = 'specialist_delegation_propose'
+				AND invocation.action_class = 'agent_proposal'
+				AND (SELECT COUNT(*) FROM specialist_delegation_assignments assignment
+					WHERE assignment.proposal_id = proposal.id) = proposal.assignment_count
+				AND (SELECT COUNT(*) FROM agent_nodes child
+					WHERE child.run_id = proposal.run_id AND child.parent_id = root.id)
+					+ proposal.assignment_count <= 2
+				AND COALESCE((SELECT SUM(assignment.turn_limit)
+					FROM specialist_delegation_assignments assignment
+					WHERE assignment.proposal_id = proposal.id), 0)
+					<= root.turn_limit - root.turns_used - 2
+				AND (root.token_limit = 0 OR COALESCE((SELECT SUM(assignment.token_limit)
+					FROM specialist_delegation_assignments assignment
+					WHERE assignment.proposal_id = proposal.id), 0)
+					< root.token_limit - root.tokens_used)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist delegation operation is not authorized or exceeds capacity');
+		END;`,
+	`CREATE TRIGGER trg_specialist_delegation_proposal_immutable
+		BEFORE UPDATE ON specialist_delegation_proposals
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist delegation proposal is immutable');
+		END;`,
+	`CREATE TRIGGER trg_specialist_delegation_assignment_immutable
+		BEFORE UPDATE ON specialist_delegation_assignments
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist delegation assignment is immutable');
+		END;`,
+	`CREATE TRIGGER trg_specialist_delegation_operation_immutable
+		BEFORE UPDATE ON specialist_delegation_operations
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist delegation operation is immutable');
 		END;`,
 }
 

@@ -52,6 +52,7 @@ type Gateway struct {
 	scriptProcesses       *scriptprocess.Manager
 	artifacts             *artifact.Manager
 	structuredMemory      StructuredMemoryExecutor
+	delegationProposals   SpecialistDelegationExecutor
 }
 
 type WorkspaceRootResolver func(ctx context.Context, workspaceID string) (string, error)
@@ -104,6 +105,9 @@ func (g *Gateway) Invoke(ctx context.Context, call ToolCall) (Outcome, error) {
 	if (normalized.Name == WorkItemCreateTool || normalized.Name == NoteCreateTool) && g.structuredMemory == nil {
 		return Outcome{}, errors.New("structured memory executor is required")
 	}
+	if normalized.Name == SpecialistDelegationProposeTool && g.delegationProposals == nil {
+		return Outcome{}, errors.New("specialist delegation proposal executor is required")
+	}
 	class, ok := ClassForTool(normalized.Name)
 	if !ok {
 		return Outcome{}, fmt.Errorf("unsupported tool %q", normalized.Name)
@@ -127,6 +131,8 @@ func (g *Gateway) Invoke(ctx context.Context, call ToolCall) (Outcome, error) {
 		return g.invokeFileEditProposal(ctx, normalized)
 	case WorkItemCreateTool, NoteCreateTool:
 		return g.invokeStructuredMemory(ctx, normalized)
+	case SpecialistDelegationProposeTool:
+		return g.invokeSpecialistDelegation(ctx, normalized)
 	default:
 		return Outcome{}, fmt.Errorf("unsupported tool %q", normalized.Name)
 	}
@@ -655,7 +661,8 @@ func gatewayDecision(source policy.Decision, mode ApprovalMode, fallbackRisk str
 }
 
 func validateToolArguments(call ToolCall) error {
-	if call.Name == WorkItemCreateTool || call.Name == NoteCreateTool {
+	if call.Name == WorkItemCreateTool || call.Name == NoteCreateTool ||
+		call.Name == SpecialistDelegationProposeTool {
 		if len(call.Arguments) != 0 {
 			return fmt.Errorf("tool %s accepts a JSON payload instead of string arguments", call.Name)
 		}
@@ -671,6 +678,12 @@ func validateToolArguments(call ToolCall) error {
 			return err
 		case NoteCreateTool:
 			_, _, err := decodeNoteCreateInput(call.Payload)
+			return err
+		case SpecialistDelegationProposeTool:
+			if call.RequestedBy != "run_supervisor" || call.AgentID == "" || call.LeaseID == "" {
+				return errors.New("specialist delegation proposals require a fenced root Supervisor")
+			}
+			_, _, err := normalizeSpecialistDelegationPayload(call.Payload)
 			return err
 		}
 	}
@@ -767,7 +780,7 @@ func safeToolCall(call ToolCall) ToolCall {
 	call.LeaseID = ""
 	call.LeaseGeneration = 0
 	if len(call.Payload) > 0 {
-		call.Payload = redactStructuredMemoryPayload(call.Name, call.Payload)
+		call.Payload = redactRunMutationPayload(call.Name, call.Payload)
 	}
 	call.Arguments = cloneArguments(call.Arguments)
 	for name, value := range call.Arguments {

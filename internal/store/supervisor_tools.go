@@ -163,7 +163,7 @@ func normalizeSupervisorToolCallsForStore(calls []llm.ToolCall, runID string, tu
 	}
 	for index := range normalized {
 		name := toolgateway.ToolName(normalized[index].Name)
-		safe, err := toolgateway.NormalizeStructuredMemoryPayload(name, normalized[index].Arguments)
+		safe, err := toolgateway.NormalizeSupervisorToolPayload(name, normalized[index].Arguments)
 		if err != nil {
 			return nil, apperror.Wrap(apperror.CodeInvalidArgument,
 				"invalid supervisor structured tool payload", err)

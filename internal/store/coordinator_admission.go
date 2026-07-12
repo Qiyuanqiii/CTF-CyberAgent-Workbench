@@ -31,6 +31,12 @@ func (s *SQLiteStore) AdmitSpecialist(ctx context.Context, admission domain.Spec
 			apperror.Wrap(apperror.CodeInvalidArgument, "specialist admission skills are invalid", err)
 	}
 	admission.Skills = skills
+	for _, skill := range admission.Skills {
+		if !domain.DelegableAgentSkill(skill) {
+			return domain.AgentNode{}, false, apperror.New(apperror.CodeInvalidArgument,
+				"specialist admission includes a non-delegable control capability")
+		}
+	}
 	if admission.CreatedAt.IsZero() {
 		admission.CreatedAt = time.Now().UTC()
 	} else {

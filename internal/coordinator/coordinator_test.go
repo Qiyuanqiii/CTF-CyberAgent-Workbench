@@ -257,6 +257,13 @@ func TestSpecialistAdmissionIsOptInBoundedAndLifecycleSafe(t *testing.T) {
 		t.Fatalf("specialist skill escalation was not rejected: code=%s err=%v",
 			apperror.CodeOf(err), err)
 	}
+	nonDelegable := firstRequest
+	nonDelegable.Skills = []string{domain.AgentSkillSpecialistDelegation}
+	nonDelegable.IdempotencyKey = "specialist-admission-control-skill"
+	if _, err := service.AdmitSpecialist(ctx, nonDelegable); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("non-delegable control Skill was accepted: code=%s err=%v",
+			apperror.CodeOf(err), err)
+	}
 	first, err := service.AdmitSpecialist(ctx, firstRequest)
 	if err != nil || first.Replayed {
 		t.Fatalf("first specialist admission failed: result=%#v err=%v", first, err)

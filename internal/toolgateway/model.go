@@ -33,19 +33,20 @@ const (
 type ToolName string
 
 const (
-	ReadFileTool       ToolName = "read_file"
-	ListWorkspaceTool  ToolName = "list_workspace"
-	ShellTool          ToolName = "shell"
-	ReplaceFileTool    ToolName = "replace_file"
-	ScriptProcessTool  ToolName = "script_process"
-	WorkItemCreateTool ToolName = "work_item_create"
-	NoteCreateTool     ToolName = "note_create"
+	ReadFileTool                    ToolName = "read_file"
+	ListWorkspaceTool               ToolName = "list_workspace"
+	ShellTool                       ToolName = "shell"
+	ReplaceFileTool                 ToolName = "replace_file"
+	ScriptProcessTool               ToolName = "script_process"
+	WorkItemCreateTool              ToolName = "work_item_create"
+	NoteCreateTool                  ToolName = "note_create"
+	SpecialistDelegationProposeTool ToolName = "specialist_delegation_propose"
 )
 
 func (n ToolName) Valid() bool {
 	switch n {
 	case ReadFileTool, ListWorkspaceTool, ShellTool, ReplaceFileTool, ScriptProcessTool,
-		WorkItemCreateTool, NoteCreateTool:
+		WorkItemCreateTool, NoteCreateTool, SpecialistDelegationProposeTool:
 		return true
 	default:
 		return false
@@ -60,11 +61,13 @@ const (
 	ClassShell          ActionClass = "shell"
 	ClassProcess        ActionClass = "process"
 	ClassRunMemory      ActionClass = "run_memory"
+	ClassAgentProposal  ActionClass = "agent_proposal"
 )
 
 func (c ActionClass) Valid() bool {
 	switch c {
-	case ClassWorkspaceRead, ClassWorkspaceWrite, ClassShell, ClassProcess, ClassRunMemory:
+	case ClassWorkspaceRead, ClassWorkspaceWrite, ClassShell, ClassProcess, ClassRunMemory,
+		ClassAgentProposal:
 		return true
 	default:
 		return false
@@ -83,6 +86,8 @@ func ClassForTool(name ToolName) (ActionClass, bool) {
 		return ClassProcess, true
 	case WorkItemCreateTool, NoteCreateTool:
 		return ClassRunMemory, true
+	case SpecialistDelegationProposeTool:
+		return ClassAgentProposal, true
 	default:
 		return "", false
 	}

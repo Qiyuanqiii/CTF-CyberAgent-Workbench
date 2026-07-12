@@ -175,7 +175,7 @@ func NormalizeStructuredMemoryPayload(name ToolName, payload json.RawMessage) (j
 	if err != nil {
 		return nil, err
 	}
-	safe := redactStructuredMemoryPayload(name, canonical)
+	safe := redactRunMutationPayload(name, canonical)
 	switch name {
 	case WorkItemCreateTool:
 		_, canonical, err = decodeWorkItemCreateInput(safe)
@@ -405,7 +405,7 @@ func decodeStructuredPayload[T any](payload json.RawMessage) (T, error) {
 	return value, nil
 }
 
-func redactStructuredMemoryPayload(name ToolName, payload json.RawMessage) json.RawMessage {
+func redactRunMutationPayload(name ToolName, payload json.RawMessage) json.RawMessage {
 	switch name {
 	case WorkItemCreateTool:
 		input, _, err := decodeWorkItemCreateInput(payload)
@@ -436,6 +436,19 @@ func redactStructuredMemoryPayload(name ToolName, payload json.RawMessage) json.
 			}
 		}
 		encoded, err := json.Marshal(input)
+		if err == nil {
+			return encoded
+		}
+	case SpecialistDelegationProposeTool:
+		spec, err := domain.DecodeSpecialistDelegationSpec(payload)
+		if err != nil {
+			break
+		}
+		for index := range spec.Assignments {
+			spec.Assignments[index].Title = redact.String(spec.Assignments[index].Title)
+			spec.Assignments[index].Goal = redact.String(spec.Assignments[index].Goal)
+		}
+		encoded, err := json.Marshal(spec)
 		if err == nil {
 			return encoded
 		}

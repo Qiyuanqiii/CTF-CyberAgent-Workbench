@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -557,6 +558,13 @@ func syncRootAgentTx(ctx context.Context, tx *sql.Tx, run domain.Run, mission do
 		}
 	}
 	updated := current
+	if !slices.Contains(updated.Skills, domain.AgentSkillSpecialistDelegation) {
+		updated.Skills, err = domain.NormalizeAgentSkills(append(
+			append([]string(nil), updated.Skills...), domain.AgentSkillSpecialistDelegation))
+		if err != nil {
+			return domain.AgentNode{}, false, false, err
+		}
+	}
 	updated.Status = projection.Status
 	updated.ActiveAttemptID = projection.ActiveAttemptID
 	updated.StatusReason = projection.StatusReason
@@ -585,7 +593,8 @@ func syncRootAgentTx(ctx context.Context, tx *sql.Tx, run domain.Run, mission do
 	changed := updated.Status != current.Status || updated.ActiveAttemptID != current.ActiveAttemptID ||
 		updated.StatusReason != current.StatusReason || updated.TurnLimit != current.TurnLimit ||
 		updated.TokenLimit != current.TokenLimit || updated.TurnsUsed != current.TurnsUsed ||
-		updated.TokensUsed != current.TokensUsed || !sameTimePointer(updated.FinishedAt, current.FinishedAt)
+		updated.TokensUsed != current.TokensUsed || !slices.Equal(updated.Skills, current.Skills) ||
+		!sameTimePointer(updated.FinishedAt, current.FinishedAt)
 	if !changed {
 		specialistChanged, err := syncSpecialistLifecycleTx(ctx, tx, run, projection.Status, at)
 		return current, false, specialistChanged, err
@@ -633,7 +642,8 @@ func insertRootAgentTx(ctx context.Context, tx *sql.Tx, run domain.Run, mission 
 	projection rootAgentProjection, at time.Time,
 ) (domain.AgentNode, error) {
 	skills, err := domain.NormalizeAgentSkills([]string{
-		"model.chat", "note_create", "work_item_create", "profile." + string(mission.Profile),
+		"model.chat", "note_create", domain.AgentSkillSpecialistDelegation, "work_item_create",
+		"profile." + string(mission.Profile),
 	})
 	if err != nil {
 		return domain.AgentNode{}, err

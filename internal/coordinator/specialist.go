@@ -78,6 +78,12 @@ func (c *Coordinator) AdmitSpecialist(ctx context.Context,
 		return AdmitSpecialistResult{}, apperror.Wrap(apperror.CodeInvalidArgument,
 			"specialist admission skills are invalid", err)
 	}
+	for _, skill := range skills {
+		if !domain.DelegableAgentSkill(skill) {
+			return AdmitSpecialistResult{}, apperror.New(apperror.CodeInvalidArgument,
+				"specialist admission includes a non-delegable control capability")
+		}
+	}
 	if req.TurnLimit <= 0 || req.TurnLimit > c.specialistPolicy.MaxTurnsPerChild ||
 		req.TokenLimit <= 0 || req.TokenLimit > c.specialistPolicy.MaxTokensPerChild {
 		return AdmitSpecialistResult{}, apperror.New(apperror.CodeInvalidArgument,

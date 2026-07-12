@@ -50,7 +50,7 @@ func TestRunSupervisorExecutesAllowlistedStructuredToolAndContinuesModel(t *test
 			items[0], root, found, err)
 	}
 	requests := provider.Requests()
-	if len(requests) != 2 || len(requests[0].Tools) != 2 || hasToolResults(requests[0]) ||
+	if len(requests) != 2 || len(requests[0].Tools) != 3 || hasToolResults(requests[0]) ||
 		!hasToolResult(requests[1], "work_item") {
 		t.Fatalf("model did not receive the structured tool transcript: %#v", requests)
 	}
@@ -74,6 +74,96 @@ func TestRunSupervisorExecutesAllowlistedStructuredToolAndContinuesModel(t *test
 					event.Type == events.SupervisorToolCompleteEvent || strings.HasPrefix(event.Type, "model."))) {
 			t.Fatalf("provider id or tool payload leaked into event %s: %s", event.Type, event.PayloadJSON)
 		}
+	}
+}
+
+func TestRunSupervisorPersistsReviewGatedDelegationWithoutSpawningAgents(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "supervisor-delegation.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	run := newStartedRunForProvider(t, st, "tool-loop",
+		domain.Budget{MaxTurns: 8, MaxTokens: 1000, MaxToolCalls: 5})
+	token := "s" + "k-" + strings.Repeat("z", 28)
+	payload := `{"version":"specialist_delegation.v1","assignments":[` +
+		`{"title":"Parser review","goal":"Inspect parser without changing files; token=` + token +
+		`","skills":["model.chat","work_item_create"],"turn_limit":2,"token_limit":128},` +
+		`{"title":"Test review","goal":"Identify missing focused tests","skills":["note_create"],"turn_limit":1,"token_limit":64}]}`
+	provider := &scriptedToolProvider{responses: []*llm.ChatResponse{
+		toolResponse("provider-delegation-1", "specialist_delegation_propose", payload),
+		toolResponse("provider-delegation-2", "specialist_delegation_propose", payload),
+		textResponse(rootActionResponse(domain.RootActionContinue,
+			"delegation proposal awaits operator review", "", "")),
+	}}
+	result, err := newToolLoopSupervisor(st, provider).Step(ctx, run.ID)
+	if err != nil || result.ToolRounds != 2 || result.ToolCalls != 2 || result.ModelAttempts != 3 {
+		t.Fatalf("unexpected delegation tool lifecycle: %#v err=%v", result, err)
+	}
+	proposals, err := st.ListSpecialistDelegationProposals(ctx, run.ID, 10)
+	if err != nil || len(proposals) != 1 || len(proposals[0].Spec.Assignments) != 2 ||
+		proposals[0].Status != domain.SpecialistDelegationProposed ||
+		strings.Contains(proposals[0].Spec.Assignments[0].Goal, token) ||
+		!strings.Contains(proposals[0].Spec.Assignments[0].Goal, "[REDACTED:") {
+		t.Fatalf("delegation proposal was not safely persisted: %#v err=%v", proposals, err)
+	}
+	nodes, err := st.ListAgentNodes(ctx, run.ID)
+	if err != nil || len(nodes) != 1 || nodes[0].Role != domain.AgentRoleRoot {
+		t.Fatalf("proposal created or admitted a child Agent: %#v err=%v", nodes, err)
+	}
+	requests := provider.Requests()
+	proposalIDs := toolResultMetadataValues(requests[2], "proposal_id")
+	if len(proposalIDs) != 2 || proposalIDs[0] == "" || proposalIDs[0] != proposalIDs[1] ||
+		!hasToolResult(requests[2], `"admission_authorized":"false"`) {
+		t.Fatalf("delegation replay did not converge or claimed admission: %#v", requests[2])
+	}
+	usage, err := st.GetToolCallUsage(ctx, run.ID)
+	if err != nil || usage.Consumed != 2 {
+		t.Fatalf("delegation attempts were not budgeted: %#v err=%v", usage, err)
+	}
+	timeline, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countEventType(timeline, events.AgentDelegationProposedEvent) != 1 ||
+		countEventType(timeline, events.ToolCompletedEvent) != 1 ||
+		countEventType(timeline, events.AgentRegisteredEvent) != 1 {
+		t.Fatalf("delegation event stream is inconsistent: %#v", timeline)
+	}
+	for _, event := range timeline {
+		if strings.Contains(event.PayloadJSON, token) || strings.Contains(event.PayloadJSON, "Inspect parser") ||
+			strings.Contains(event.PayloadJSON, "provider-delegation") {
+			t.Fatalf("delegation text or provider identity leaked into %s: %s", event.Type, event.PayloadJSON)
+		}
+	}
+}
+
+func TestRunSupervisorReturnsRejectedDelegationAsToolResult(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "supervisor-delegation-rejected.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	run := newStartedRunForProvider(t, st, "tool-loop",
+		domain.Budget{MaxTurns: 5, MaxTokens: 500, MaxToolCalls: 3})
+	payload := `{"version":"specialist_delegation.v1","assignments":[` +
+		`{"title":"Escalation","goal":"Request unavailable capability","skills":["shell"],"turn_limit":1,"token_limit":32}]}`
+	provider := &scriptedToolProvider{responses: []*llm.ChatResponse{
+		toolResponse("provider-delegation-escalation", "specialist_delegation_propose", payload),
+		textResponse(rootActionResponse(domain.RootActionContinue,
+			"delegation rejected by Go capability checks", "", "")),
+	}}
+	result, err := newToolLoopSupervisor(st, provider).Step(ctx, run.ID)
+	if err != nil || result.ToolCalls != 1 ||
+		!hasErrorToolResult(provider.Requests()[1], "INVALID_ARGUMENT") {
+		t.Fatalf("invalid delegation was not returned as a bounded tool result: %#v err=%v requests=%#v",
+			result, err, provider.Requests())
+	}
+	proposals, err := st.ListSpecialistDelegationProposals(ctx, run.ID, 10)
+	if err != nil || len(proposals) != 0 {
+		t.Fatalf("invalid delegation persisted state: %#v err=%v", proposals, err)
 	}
 }
 
@@ -304,6 +394,23 @@ func toolResultEntityIDs(request llm.ChatRequest) []string {
 		}
 	}
 	return ids
+}
+
+func toolResultMetadataValues(request llm.ChatRequest, key string) []string {
+	values := make([]string, 0)
+	for _, message := range request.Messages {
+		for _, result := range message.ToolResults {
+			var envelope struct {
+				Metadata map[string]string `json:"metadata"`
+			}
+			if json.Unmarshal([]byte(result.Content), &envelope) == nil {
+				if value := envelope.Metadata[key]; value != "" {
+					values = append(values, value)
+				}
+			}
+		}
+	}
+	return values
 }
 
 type scriptedToolProvider struct {
