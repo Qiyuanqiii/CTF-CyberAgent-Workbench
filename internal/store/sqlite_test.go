@@ -221,6 +221,19 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 			t.Fatalf("schema v32 Specialist delegation application table is missing: %q", table)
 		}
 	}
+	for _, name := range []string{"specialist_operator_schedule_requests",
+		"specialist_operator_schedule_request_agents",
+		"specialist_operator_schedule_operations",
+		"specialist_operator_schedule_attempts"} {
+		var table string
+		if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master
+			WHERE type = 'table' AND name = ?`, name).Scan(&table); err != nil {
+			t.Fatal(err)
+		}
+		if table != name {
+			t.Fatalf("schema v38 Specialist operator schedule table is missing: %q", table)
+		}
+	}
 	for _, name := range []string{"readonly_fanout_plans", "readonly_fanout_files",
 		"readonly_fanout_shards", "readonly_fanout_operations"} {
 		var table string
@@ -897,7 +910,7 @@ func removeSchemaV36ForTestStatements() []string {
 }
 
 func removeSchemaV37ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV38ForTestStatements(), []string{
 		`DROP TRIGGER trg_finding_fix_operation_delete_immutable`,
 		`DROP TRIGGER trg_finding_fix_operation_update_immutable`,
 		`DROP TRIGGER trg_finding_fix_delete_immutable`,
@@ -923,6 +936,31 @@ func removeSchemaV37ForTestStatements() []string {
 		`DROP TABLE finding_acceptance_operations`,
 		`DROP TABLE finding_acceptance_decisions`,
 		`DELETE FROM schema_migrations WHERE version = 37`,
+	}...)
+}
+
+func removeSchemaV38ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_specialist_operator_schedule_attempt_delete_immutable`,
+		`DROP TRIGGER trg_specialist_operator_schedule_attempt_update_immutable`,
+		`DROP TRIGGER trg_specialist_operator_schedule_operation_delete_immutable`,
+		`DROP TRIGGER trg_specialist_operator_schedule_operation_update_immutable`,
+		`DROP TRIGGER trg_specialist_operator_schedule_request_agent_delete_immutable`,
+		`DROP TRIGGER trg_specialist_operator_schedule_request_agent_update_immutable`,
+		`DROP TRIGGER trg_specialist_operator_schedule_request_delete_immutable`,
+		`DROP TRIGGER trg_specialist_operator_schedule_request_update_immutable`,
+		`DROP TRIGGER trg_specialist_operator_schedule_attempt_insert`,
+		`DROP TRIGGER trg_specialist_operator_schedule_operation_insert`,
+		`DROP TRIGGER trg_specialist_operator_schedule_request_agent_insert`,
+		`DROP TRIGGER trg_specialist_operator_schedule_request_insert`,
+		`DROP INDEX idx_specialist_operator_schedule_request_agent`,
+		`DROP INDEX idx_specialist_operator_schedule_request_run`,
+		`DROP INDEX idx_specialist_operator_schedule_request_application`,
+		`DROP TABLE specialist_operator_schedule_attempts`,
+		`DROP TABLE specialist_operator_schedule_operations`,
+		`DROP TABLE specialist_operator_schedule_request_agents`,
+		`DROP TABLE specialist_operator_schedule_requests`,
+		`DELETE FROM schema_migrations WHERE version = 38`,
 	}
 }
 

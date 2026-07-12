@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"cyberagent-workbench/internal/apperror"
@@ -69,6 +70,23 @@ func (s *SQLiteStore) StartSpecialistSchedule(ctx context.Context,
 		return domain.SpecialistScheduleStartResult{}, err
 	}
 	if found {
+		previousRequestID, operatorControlled, err :=
+			getSpecialistOperatorScheduleRequestIDForScheduleTx(ctx, tx,
+				previous.Schedule.ID)
+		if err != nil {
+			return domain.SpecialistScheduleStartResult{}, err
+		}
+		if start.OperatorRequestID != "" {
+			if !operatorControlled || previousRequestID != start.OperatorRequestID {
+				return domain.SpecialistScheduleStartResult{}, apperror.New(
+					apperror.CodeConflict,
+					"active Specialist schedule belongs to another execution request")
+			}
+		} else if operatorControlled {
+			return domain.SpecialistScheduleStartResult{}, apperror.New(
+				apperror.CodeConflict,
+				"operator-controlled Specialist schedule requires operator recovery")
+		}
 		if previous.LeaseGeneration >= start.Lease.Generation {
 			return domain.SpecialistScheduleStartResult{}, apperror.New(apperror.CodeConflict,
 				"Run already has an active Specialist schedule")
@@ -124,7 +142,11 @@ func (s *SQLiteStore) StartSpecialistSchedule(ctx context.Context,
 		}
 		recovered = true
 	}
-	if err := requireSpecialistScheduleTargetsTx(ctx, tx, run.ID, start.AgentIDs); err != nil {
+	if err := requireSpecialistScheduleTargetsTx(ctx, tx, run.ID, start.AgentIDs,
+		start.OperatorRequestID); err != nil {
+		return domain.SpecialistScheduleStartResult{}, err
+	}
+	if err := requireSpecialistOperatorScheduleStartTx(ctx, tx, start); err != nil {
 		return domain.SpecialistScheduleStartResult{}, err
 	}
 	usage := start.UsageBefore
@@ -159,6 +181,21 @@ func (s *SQLiteStore) StartSpecialistSchedule(ctx context.Context,
 			return domain.SpecialistScheduleStartResult{}, err
 		}
 	}
+	if start.OperatorRequestID != "" {
+		var attemptOrdinal int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 + COUNT(*)
+			FROM specialist_operator_schedule_attempts WHERE request_id = ?`,
+			start.OperatorRequestID).Scan(&attemptOrdinal); err != nil {
+			return domain.SpecialistScheduleStartResult{}, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO specialist_operator_schedule_attempts
+			(request_id, schedule_id, ordinal, created_at) VALUES (?, ?, ?, ?)`,
+			start.OperatorRequestID, start.ID, attemptOrdinal,
+			ts(start.StartedAt)); err != nil {
+			return domain.SpecialistScheduleStartResult{},
+				normalizeSpecialistOperatorScheduleError(err)
+		}
+	}
 	schedule := domain.SpecialistSchedule{
 		ID: start.ID, RunID: run.ID, AgentIDs: append([]string(nil), start.AgentIDs...),
 		MaxRounds: start.MaxRounds, Status: domain.SpecialistScheduleRunning,
@@ -167,12 +204,17 @@ func (s *SQLiteStore) StartSpecialistSchedule(ctx context.Context,
 	if err := schedule.Validate(); err != nil {
 		return domain.SpecialistScheduleStartResult{}, err
 	}
+	payload := map[string]any{
+		"schedule_id": schedule.ID, "agent_ids": schedule.AgentIDs,
+		"child_count": len(schedule.AgentIDs), "max_rounds": schedule.MaxRounds,
+		"usage_before":        schedule.UsageBefore,
+		"operator_controlled": start.OperatorRequestID != "",
+	}
+	if start.OperatorRequestID != "" {
+		payload["operator_schedule_request_id"] = start.OperatorRequestID
+	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.AgentScheduleStartedEvent,
-		"specialist_scheduler", schedule.ID, map[string]any{
-			"schedule_id": schedule.ID, "agent_ids": schedule.AgentIDs,
-			"child_count": len(schedule.AgentIDs), "max_rounds": schedule.MaxRounds,
-			"usage_before": schedule.UsageBefore,
-		}); err != nil {
+		"specialist_scheduler", schedule.ID, payload); err != nil {
 		return domain.SpecialistScheduleStartResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -415,7 +457,7 @@ func listSpecialistScheduleAgentsTx(ctx context.Context, tx *sql.Tx,
 }
 
 func requireSpecialistScheduleTargetsTx(ctx context.Context, tx *sql.Tx,
-	runID string, agentIDs []string,
+	runID string, agentIDs []string, operatorRequestID string,
 ) error {
 	var rootID string
 	var rootCount int
@@ -439,8 +481,65 @@ func requireSpecialistScheduleTargetsTx(ctx context.Context, tx *sql.Tx,
 			return apperror.New(apperror.CodeFailedPrecondition,
 				fmt.Sprintf("Agent %s is not a direct Specialist child of this Run", agentID))
 		}
+		reserved, err := hasPendingSpecialistOperatorScheduleReservationTx(ctx, tx,
+			runID, agentID, operatorRequestID)
+		if err != nil {
+			return err
+		}
+		if reserved {
+			return apperror.New(apperror.CodeConflict,
+				fmt.Sprintf("Specialist %s is reserved by an operator schedule", agentID))
+		}
 	}
 	return nil
+}
+
+func requireSpecialistOperatorScheduleStartTx(ctx context.Context, tx *sql.Tx,
+	start domain.SpecialistScheduleStart,
+) error {
+	if start.OperatorRequestID == "" {
+		return nil
+	}
+	request, err := getSpecialistOperatorScheduleRequest(ctx, tx,
+		start.OperatorRequestID)
+	if err != nil {
+		return err
+	}
+	if request.RunID != start.RunID || request.MaxRounds != start.MaxRounds ||
+		!slices.Equal(request.AgentIDs, start.AgentIDs) {
+		return apperror.New(apperror.CodeFailedPrecondition,
+			"Specialist schedule does not match its operator request")
+	}
+	latest, found, err := getLatestSpecialistOperatorScheduleAttempt(ctx, tx,
+		request.ID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	previous, err := getSpecialistScheduleTx(ctx, tx, latest.ScheduleID)
+	if err != nil {
+		return err
+	}
+	if previous.Schedule.Status != domain.SpecialistScheduleAbandoned {
+		return apperror.New(apperror.CodeConflict,
+			"specialist operator schedule request already has a terminal or active attempt")
+	}
+	return nil
+}
+
+func getSpecialistOperatorScheduleRequestIDForScheduleTx(ctx context.Context,
+	tx *sql.Tx, scheduleID string,
+) (string, bool, error) {
+	var requestID string
+	err := tx.QueryRowContext(ctx, `SELECT request_id
+		FROM specialist_operator_schedule_attempts WHERE schedule_id = ?`,
+		scheduleID).Scan(&requestID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return requestID, err == nil, err
 }
 
 func appendSpecialistScheduleStoppedEventTx(ctx context.Context, tx *sql.Tx,

@@ -530,7 +530,7 @@ func createApprovedDelegationApplicationFixture(t *testing.T, ctx context.Contex
 		assignments[index] = domain.SpecialistDelegationAssignment{
 			Title:  "Bounded Specialist " + string(rune('A'+index)),
 			Goal:   "Inspect parser boundary " + string(rune('A'+index)),
-			Skills: []string{"model.chat"}, TurnLimit: 1, TokenLimit: 64,
+			Skills: []string{"model.chat"}, TurnLimit: 2, TokenLimit: 512,
 		}
 	}
 	outcome, err := newDelegationTestGateway(st).Invoke(ctx, toolgateway.ToolCall{

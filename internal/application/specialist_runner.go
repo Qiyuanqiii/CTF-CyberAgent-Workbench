@@ -100,8 +100,9 @@ type specialistTurnLimits struct {
 	MaxExecutionMillis int64
 }
 
-// SpecialistRunner is an opt-in, internal-only no-tool child runtime. No CLI,
-// HTTP, or model-controlled spawn path constructs it.
+// SpecialistRunner is an opt-in no-tool child runtime. The operator schedule
+// service may construct it after durable application-bound authorization; no
+// HTTP, model, ordinary-tool, or spawn path can construct it.
 type SpecialistRunner struct {
 	store                    SpecialistRunnerStore
 	router                   *llm.Router

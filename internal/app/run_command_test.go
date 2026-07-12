@@ -566,7 +566,7 @@ func TestRunDelegationReviewCLIIsExplicitAndIdempotent(t *testing.T) {
 		Version: domain.SpecialistDelegationVersion,
 		Assignments: []domain.SpecialistDelegationAssignment{{
 			Title: "Inspect parser", Goal: "Review parser input boundaries",
-			Skills: []string{"model.chat"}, TurnLimit: 1, TokenLimit: 64,
+			Skills: []string{"model.chat"}, TurnLimit: 3, TokenLimit: 512,
 		}},
 	})
 	if err != nil {
@@ -670,6 +670,52 @@ func TestRunDelegationReviewCLIIsExplicitAndIdempotent(t *testing.T) {
 	if code != 0 || stderr != "" || !strings.Contains(stdout, "application: applied") ||
 		!strings.Contains(stdout, "scheduling_started: false") {
 		t.Fatalf("application detail is incomplete: stdout=%s stderr=%s code=%d", stdout, stderr, code)
+	}
+	scheduleKey := "delegation-cli-schedule-0001"
+	stdout, stderr, code = executeTestCommand(t, "run", "delegation", "schedule", proposalID,
+		"--operation-key", scheduleKey)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(stdout, "schedule_request: operator-schedule-") ||
+		!strings.Contains(stdout, "operator_controlled: true") ||
+		!strings.Contains(stdout, "status: completed") ||
+		!strings.Contains(stdout, "turns_started: 1") ||
+		!strings.Contains(stdout, "replayed: false") {
+		t.Fatalf("unexpected operator schedule output: stdout=%s stderr=%s code=%d",
+			stdout, stderr, code)
+	}
+	stdout, stderr, code = executeTestCommand(t, "run", "delegation", "schedule", proposalID,
+		"--operation-key", scheduleKey)
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "replayed: true") {
+		t.Fatalf("operator schedule replay failed: stdout=%s stderr=%s code=%d",
+			stdout, stderr, code)
+	}
+	stdout, stderr, code = executeTestCommand(t, "run", "delegation", "continue", proposalID,
+		"--operation-key", "delegation-cli-continue-0002")
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "status: completed") ||
+		!strings.Contains(stdout, "turns_started: 1") ||
+		!strings.Contains(stdout, "replayed: false") {
+		t.Fatalf("operator continuation failed: stdout=%s stderr=%s code=%d",
+			stdout, stderr, code)
+	}
+	stdout, stderr, code = executeTestCommand(t, "run", "delegation", proposalID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(stdout, "scheduling_requested: true") ||
+		!strings.Contains(stdout, "scheduling_started: true") ||
+		!strings.Contains(stdout, "schedule_status: completed") {
+		t.Fatalf("operator schedule detail is incomplete: stdout=%s stderr=%s code=%d",
+			stdout, stderr, code)
+	}
+	_, stderr, code = executeTestCommand(t, "run", "delegation", "schedule", proposalID,
+		"--operation-key", "delegation-cli-wrong-operator", "--operator", "other_operator")
+	if code != apperror.ExitCode(apperror.New(apperror.CodeFailedPrecondition, "failed")) ||
+		!strings.Contains(stderr, "application operator") {
+		t.Fatalf("different schedule operator was accepted: stderr=%s code=%d", stderr, code)
+	}
+	_, stderr, code = executeTestCommand(t, "tool", "invoke", "specialist_operator_schedule",
+		"--run", runID, "--operation-key", "delegation-tool-bypass-0001", "--payload", `{}`)
+	if code == 0 || !strings.Contains(stderr, "not an invocable structured memory tool") {
+		t.Fatalf("ordinary tool bypass reached operator scheduling: stderr=%s code=%d",
+			stderr, code)
 	}
 	stdout, stderr, code = executeTestCommand(t, "run", "delegations", runID)
 	if code != 0 || stderr != "" || !strings.Contains(stdout, "application=applied") {

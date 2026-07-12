@@ -259,6 +259,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 35, Name: "deterministic finding report projection", Statements: findingReportStatements},
 		{Version: 36, Name: "Artifact-backed finding validation", Statements: findingValidationStatements},
 		{Version: 37, Name: "accepted and fixed finding remediation lifecycle", Statements: findingRemediationStatements},
+		{Version: 38, Name: "operator-controlled Specialist scheduling", Statements: specialistOperatorScheduleStatements},
 	})
 }
 

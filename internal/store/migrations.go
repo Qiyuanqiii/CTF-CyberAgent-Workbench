@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 37
+const LatestSchemaVersion = 38
 
 type migration struct {
 	Version    int
@@ -4277,6 +4277,237 @@ var findingRemediationStatements = []string{
 	`CREATE TRIGGER trg_finding_fix_operation_delete_immutable
 		BEFORE DELETE ON finding_fix_operations BEGIN
 			SELECT RAISE(ABORT, 'finding fix operation cannot be deleted');
+		END;`,
+}
+
+var specialistOperatorScheduleStatements = []string{
+	`CREATE TABLE specialist_operator_schedule_requests (
+		id TEXT PRIMARY KEY,
+		application_id TEXT NOT NULL,
+		proposal_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		root_agent_id TEXT NOT NULL,
+		max_rounds INTEGER NOT NULL,
+		agent_count INTEGER NOT NULL,
+		policy_fingerprint TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(application_id) REFERENCES specialist_delegation_applications(id) ON DELETE RESTRICT,
+		FOREIGN KEY(proposal_id) REFERENCES specialist_delegation_proposals(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(root_agent_id) REFERENCES agent_nodes(id) ON DELETE RESTRICT,
+		CHECK(max_rounds BETWEEN 1 AND 32),
+		CHECK(agent_count BETWEEN 1 AND 2),
+		CHECK(length(policy_fingerprint) = 64
+			AND policy_fingerprint = lower(policy_fingerprint)
+			AND policy_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = trim(requested_by)
+			AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE INDEX idx_specialist_operator_schedule_request_application
+		ON specialist_operator_schedule_requests(application_id, created_at, id);`,
+	`CREATE INDEX idx_specialist_operator_schedule_request_run
+		ON specialist_operator_schedule_requests(run_id, created_at, id);`,
+	`CREATE TABLE specialist_operator_schedule_request_agents (
+		request_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		agent_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		PRIMARY KEY(request_id, ordinal),
+		UNIQUE(request_id, agent_id),
+		FOREIGN KEY(request_id) REFERENCES specialist_operator_schedule_requests(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(agent_id) REFERENCES agent_nodes(id) ON DELETE RESTRICT,
+		CHECK(ordinal BETWEEN 1 AND 2)
+	);`,
+	`CREATE INDEX idx_specialist_operator_schedule_request_agent
+		ON specialist_operator_schedule_request_agents(run_id, agent_id, request_id);`,
+	`CREATE TABLE specialist_operator_schedule_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		request_id TEXT NOT NULL UNIQUE,
+		application_id TEXT NOT NULL,
+		proposal_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(request_id) REFERENCES specialist_operator_schedule_requests(id) ON DELETE RESTRICT,
+		FOREIGN KEY(application_id) REFERENCES specialist_delegation_applications(id) ON DELETE RESTRICT,
+		FOREIGN KEY(proposal_id) REFERENCES specialist_delegation_proposals(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64
+			AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64
+			AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = trim(requested_by)
+			AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE TABLE specialist_operator_schedule_attempts (
+		request_id TEXT NOT NULL,
+		schedule_id TEXT NOT NULL UNIQUE,
+		ordinal INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		PRIMARY KEY(request_id, ordinal),
+		FOREIGN KEY(request_id) REFERENCES specialist_operator_schedule_requests(id) ON DELETE RESTRICT,
+		FOREIGN KEY(schedule_id) REFERENCES specialist_schedules(id) ON DELETE RESTRICT,
+		CHECK(ordinal > 0)
+	);`,
+	`CREATE TRIGGER trg_specialist_operator_schedule_request_insert
+		BEFORE INSERT ON specialist_operator_schedule_requests
+		WHEN NOT EXISTS (
+			SELECT 1 FROM specialist_delegation_applications application
+			JOIN specialist_delegation_proposals proposal
+				ON proposal.id = application.proposal_id
+			JOIN runs run ON run.id = application.run_id
+			JOIN agent_nodes root ON root.id = application.root_agent_id
+			WHERE application.id = NEW.application_id
+				AND application.proposal_id = NEW.proposal_id
+				AND application.run_id = NEW.run_id
+				AND application.root_agent_id = NEW.root_agent_id
+				AND application.requested_by = NEW.requested_by
+				AND application.status = 'applied'
+				AND application.completed_at IS NOT NULL
+				AND julianday(NEW.created_at) >= julianday(application.completed_at)
+				AND proposal.run_id = NEW.run_id
+				AND proposal.root_agent_id = NEW.root_agent_id
+				AND run.status = 'running'
+				AND root.run_id = NEW.run_id AND root.role = 'root'
+				AND root.status = 'ready' AND root.active_attempt_id = ''
+				AND NOT EXISTS (SELECT 1 FROM specialist_schedules schedule
+					WHERE schedule.run_id = NEW.run_id AND schedule.status = 'running')
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'specialist operator schedule request binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_specialist_operator_schedule_request_agent_insert
+		BEFORE INSERT ON specialist_operator_schedule_request_agents
+		WHEN NOT EXISTS (
+			SELECT 1 FROM specialist_operator_schedule_requests request
+			JOIN specialist_delegation_application_assignments assignment
+				ON assignment.application_id = request.application_id
+			JOIN agent_nodes agent ON agent.id = assignment.agent_id
+			WHERE request.id = NEW.request_id AND request.run_id = NEW.run_id
+				AND assignment.status = 'instructed'
+				AND assignment.agent_id = NEW.agent_id
+				AND agent.run_id = NEW.run_id AND agent.role = 'specialist'
+				AND agent.parent_id = request.root_agent_id
+				AND agent.status = 'ready' AND agent.active_attempt_id = ''
+				AND NEW.ordinal = 1 + (SELECT COUNT(*)
+					FROM specialist_operator_schedule_request_agents existing
+					WHERE existing.request_id = NEW.request_id)
+				AND NOT EXISTS (
+					SELECT 1 FROM specialist_operator_schedule_request_agents reserved
+					WHERE reserved.run_id = NEW.run_id
+						AND reserved.agent_id = NEW.agent_id
+						AND reserved.request_id != NEW.request_id
+						AND (
+							NOT EXISTS (SELECT 1 FROM specialist_operator_schedule_attempts attempt
+								WHERE attempt.request_id = reserved.request_id)
+							OR COALESCE((SELECT schedule.status
+								FROM specialist_operator_schedule_attempts attempt
+								JOIN specialist_schedules schedule ON schedule.id = attempt.schedule_id
+								WHERE attempt.request_id = reserved.request_id
+								ORDER BY attempt.ordinal DESC LIMIT 1), '')
+								IN ('running', 'abandoned')
+						)
+				)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'specialist operator schedule Agent binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_specialist_operator_schedule_operation_insert
+		BEFORE INSERT ON specialist_operator_schedule_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM specialist_operator_schedule_requests request
+			WHERE request.id = NEW.request_id
+				AND request.application_id = NEW.application_id
+				AND request.proposal_id = NEW.proposal_id
+				AND request.run_id = NEW.run_id
+				AND request.requested_by = NEW.requested_by
+				AND request.created_at = NEW.created_at
+				AND request.agent_count = (SELECT COUNT(*)
+					FROM specialist_operator_schedule_request_agents agent
+					WHERE agent.request_id = request.id)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'specialist operator schedule operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_specialist_operator_schedule_attempt_insert
+		BEFORE INSERT ON specialist_operator_schedule_attempts
+		WHEN NOT EXISTS (
+			SELECT 1 FROM specialist_operator_schedule_requests request
+			JOIN specialist_operator_schedule_operations operation
+				ON operation.request_id = request.id
+			JOIN specialist_schedules schedule ON schedule.id = NEW.schedule_id
+			WHERE request.id = NEW.request_id
+				AND schedule.run_id = request.run_id
+				AND schedule.max_rounds = request.max_rounds
+				AND schedule.status = 'running'
+				AND schedule.started_at = NEW.created_at
+				AND NEW.ordinal = 1 + (SELECT COUNT(*)
+					FROM specialist_operator_schedule_attempts existing
+					WHERE existing.request_id = NEW.request_id)
+				AND (NEW.ordinal = 1 OR (SELECT previous.status
+					FROM specialist_operator_schedule_attempts prior
+					JOIN specialist_schedules previous ON previous.id = prior.schedule_id
+					WHERE prior.request_id = NEW.request_id
+					ORDER BY prior.ordinal DESC LIMIT 1) = 'abandoned')
+				AND request.agent_count = (SELECT COUNT(*)
+					FROM specialist_schedule_agents target
+					WHERE target.schedule_id = NEW.schedule_id)
+				AND NOT EXISTS (
+					SELECT 1 FROM specialist_operator_schedule_request_agents requested
+					LEFT JOIN specialist_schedule_agents target
+						ON target.schedule_id = NEW.schedule_id
+						AND target.agent_id = requested.agent_id
+					WHERE requested.request_id = NEW.request_id
+						AND target.agent_id IS NULL)
+				AND NOT EXISTS (
+					SELECT 1 FROM specialist_schedule_agents target
+					LEFT JOIN specialist_operator_schedule_request_agents requested
+						ON requested.request_id = NEW.request_id
+						AND requested.agent_id = target.agent_id
+					WHERE target.schedule_id = NEW.schedule_id
+						AND requested.agent_id IS NULL)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'specialist operator schedule attempt binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_specialist_operator_schedule_request_update_immutable
+		BEFORE UPDATE ON specialist_operator_schedule_requests BEGIN
+			SELECT RAISE(ABORT, 'specialist operator schedule request cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_specialist_operator_schedule_request_delete_immutable
+		BEFORE DELETE ON specialist_operator_schedule_requests BEGIN
+			SELECT RAISE(ABORT, 'specialist operator schedule request cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_specialist_operator_schedule_request_agent_update_immutable
+		BEFORE UPDATE ON specialist_operator_schedule_request_agents BEGIN
+			SELECT RAISE(ABORT, 'specialist operator schedule Agent cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_specialist_operator_schedule_request_agent_delete_immutable
+		BEFORE DELETE ON specialist_operator_schedule_request_agents BEGIN
+			SELECT RAISE(ABORT, 'specialist operator schedule Agent cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_specialist_operator_schedule_operation_update_immutable
+		BEFORE UPDATE ON specialist_operator_schedule_operations BEGIN
+			SELECT RAISE(ABORT, 'specialist operator schedule operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_specialist_operator_schedule_operation_delete_immutable
+		BEFORE DELETE ON specialist_operator_schedule_operations BEGIN
+			SELECT RAISE(ABORT, 'specialist operator schedule operation cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_specialist_operator_schedule_attempt_update_immutable
+		BEFORE UPDATE ON specialist_operator_schedule_attempts BEGIN
+			SELECT RAISE(ABORT, 'specialist operator schedule attempt cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_specialist_operator_schedule_attempt_delete_immutable
+		BEFORE DELETE ON specialist_operator_schedule_attempts BEGIN
+			SELECT RAISE(ABORT, 'specialist operator schedule attempt cannot be deleted');
 		END;`,
 }
 

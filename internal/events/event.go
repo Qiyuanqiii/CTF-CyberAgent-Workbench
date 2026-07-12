@@ -57,6 +57,7 @@ const (
 	AgentTurnFailedEvent                     = "agent.turn_failed"
 	AgentScheduleStartedEvent                = "agent.schedule_started"
 	AgentScheduleStoppedEvent                = "agent.schedule_stopped"
+	AgentOperatorScheduleRequestedEvent      = "agent.operator_schedule_requested"
 	AgentDelegationProposedEvent             = "agent.delegation_proposed"
 	AgentDelegationReviewedEvent             = "agent.delegation_reviewed"
 	AgentDelegationApplicationStartedEvent   = "agent.delegation_application_started"

@@ -316,13 +316,15 @@ func (a *App) runDelegations(ctx context.Context, args []string) error {
 
 func (a *App) runDelegation(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run delegation [show] <proposal-id> | approve|reject|apply <proposal-id> --operation-key <key>")
+		return errors.New("usage: cyberagent run delegation [show] <proposal-id> | approve|reject|apply|schedule|continue <proposal-id> --operation-key <key>")
 	}
 	switch args[0] {
 	case "approve", "reject":
 		return a.runDelegationReview(ctx, args[0], args[1:])
 	case "apply":
 		return a.runDelegationApply(ctx, args[1:])
+	case "schedule", "continue":
+		return a.runDelegationSchedule(ctx, args[0], args[1:])
 	case "show":
 		return a.runDelegationShow(ctx, args[1:])
 	default:
@@ -368,12 +370,36 @@ func (a *App) runDelegationShow(ctx context.Context, args []string) error {
 	} else if !found {
 		fmt.Fprintln(a.out, "application: none")
 	} else {
-		fmt.Fprintf(a.out, "application: %s\napplication_id: %s\napplication_version: %d\napplication_stop_code: %s\nscheduling_started: false\n",
+		fmt.Fprintf(a.out, "application: %s\napplication_id: %s\napplication_version: %d\napplication_stop_code: %s\n",
 			applied.Status, applied.ID, applied.Version, applied.StopCode)
 		for _, assignment := range applied.Assignments {
 			fmt.Fprintf(a.out, "application_assignment_%d: status=%s agent=%s message=%s\n",
 				assignment.Ordinal, assignment.Status, assignment.AgentID, assignment.MessageID)
 		}
+		request, requested, err := a.store.
+			GetLatestSpecialistOperatorScheduleRequestByApplication(ctx, applied.ID)
+		if err != nil {
+			return err
+		}
+		if !requested {
+			fmt.Fprintln(a.out, "scheduling_requested: false\nscheduling_started: false")
+			return nil
+		}
+		fmt.Fprintf(a.out, "scheduling_requested: true\nschedule_request_id: %s\nschedule_requested_by: %s\nschedule_agents: %s\nschedule_max_rounds: %d\n",
+			request.ID, request.RequestedBy, strings.Join(request.AgentIDs, ","),
+			request.MaxRounds)
+		schedule, attempt, started, err := a.store.
+			GetLatestSpecialistOperatorScheduleAttempt(ctx, request.ID)
+		if err != nil {
+			return err
+		}
+		if !started {
+			fmt.Fprintln(a.out, "scheduling_started: false\nschedule_status: pending")
+			return nil
+		}
+		fmt.Fprintf(a.out, "scheduling_started: true\nschedule_id: %s\nschedule_status: %s\nschedule_attempt_ordinal: %d\nschedule_rounds_completed: %d\nschedule_turns_started: %d\n",
+			schedule.ID, schedule.Status, attempt.Ordinal, schedule.RoundsCompleted,
+			schedule.TurnsStarted)
 	}
 	return nil
 }
@@ -439,6 +465,48 @@ func (a *App) runDelegationApply(ctx context.Context, args []string) error {
 			assignment.Status, assignment.AgentID, assignment.MessageID)
 	}
 	return nil
+}
+
+func (a *App) runDelegationSchedule(ctx context.Context, action string, args []string) error {
+	fs := newFlagSet("run delegation "+action, a.errOut)
+	operationKey := fs.String("operation-key", "", "stable schedule operation key")
+	operator := fs.String("operator", "cli_operator", "operator identity")
+	maxRounds := fs.Int("max-rounds", 1, "bounded schedule rounds")
+	var agentIDs stringListFlag
+	fs.Var(&agentIDs, "agent", "instructed child Agent id (repeatable)")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"operation-key": true, "operator": true, "max-rounds": true, "agent": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 || strings.TrimSpace(*operationKey) == "" {
+		return fmt.Errorf("usage: cyberagent run delegation %s <proposal-id> --operation-key <key> [--operator <id>] [--max-rounds <n>] [--agent <id>]", action)
+	}
+	result, err := application.NewSpecialistOperatorScheduleService(
+		a.store, a.router, a.checker).Execute(ctx,
+		application.ExecuteSpecialistOperatorScheduleRequest{
+			ProposalID: fs.Arg(0), AgentIDs: agentIDs.values, MaxRounds: *maxRounds,
+			OperationKey: *operationKey, RequestedBy: *operator,
+		})
+	if result.Request.ID != "" {
+		printSpecialistOperatorScheduleResult(a.out, result)
+	}
+	return err
+}
+
+func printSpecialistOperatorScheduleResult(out interface {
+	Write([]byte) (int, error)
+}, result application.ExecuteSpecialistOperatorScheduleResult) {
+	status := "pending"
+	if result.Schedule.ID != "" {
+		status = string(result.Schedule.Status)
+	}
+	fmt.Fprintf(out, "schedule_request: %s\nproposal: %s\nrequested_by: %s\nagents: %s\nmax_rounds: %d\noperator_controlled: true\nschedule: %s\nstatus: %s\nattempt_ordinal: %d\nrounds_completed: %d\nturns_started: %d\nreplayed: %t\nrecovered: %t\n",
+		result.Request.ID, result.Request.ProposalID, result.Request.RequestedBy,
+		strings.Join(result.Request.AgentIDs, ","), result.Request.MaxRounds,
+		result.Schedule.ID, status, result.Attempt.Ordinal,
+		result.Schedule.RoundsCompleted, result.Schedule.TurnsStarted,
+		result.Replayed, result.Recovered)
 }
 
 func (a *App) runExecutionLease(ctx context.Context, service *application.RunService, args []string) error {

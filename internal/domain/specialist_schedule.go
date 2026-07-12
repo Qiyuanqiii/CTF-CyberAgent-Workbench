@@ -35,13 +35,14 @@ func (s SpecialistScheduleStatus) Terminal() bool {
 }
 
 type SpecialistScheduleStart struct {
-	ID          string
-	RunID       string
-	AgentIDs    []string
-	MaxRounds   int
-	Lease       RunExecutionLease
-	UsageBefore RunAgentUsage
-	StartedAt   time.Time
+	ID                string
+	RunID             string
+	AgentIDs          []string
+	MaxRounds         int
+	OperatorRequestID string
+	Lease             RunExecutionLease
+	UsageBefore       RunAgentUsage
+	StartedAt         time.Time
 }
 
 func (s SpecialistScheduleStart) Normalize() (SpecialistScheduleStart, error) {
@@ -58,6 +59,13 @@ func (s SpecialistScheduleStart) Normalize() (SpecialistScheduleStart, error) {
 		return SpecialistScheduleStart{}, err
 	}
 	s.AgentIDs = agentIDs
+	s.OperatorRequestID = strings.TrimSpace(s.OperatorRequestID)
+	if s.OperatorRequestID != "" {
+		if err := validateSpecialistScheduleIdentity(s.OperatorRequestID,
+			"operator request id"); err != nil {
+			return SpecialistScheduleStart{}, err
+		}
+	}
 	if s.MaxRounds <= 0 || s.MaxRounds > MaxSpecialistScheduleRounds {
 		return SpecialistScheduleStart{}, fmt.Errorf("specialist schedule rounds must be between 1 and %d",
 			MaxSpecialistScheduleRounds)

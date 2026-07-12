@@ -28,9 +28,10 @@ const (
 )
 
 type SpecialistScheduleRequest struct {
-	RunID     string
-	AgentIDs  []string
-	MaxRounds int
+	RunID             string
+	AgentIDs          []string
+	MaxRounds         int
+	OperatorRequestID string
 }
 
 type SpecialistScheduleFailure struct {
@@ -41,6 +42,7 @@ type SpecialistScheduleFailure struct {
 
 type SpecialistScheduleResult struct {
 	ScheduleID        string
+	OperatorRequestID string
 	RunID             string
 	AgentIDs          []string
 	RoundsCompleted   int
@@ -61,8 +63,9 @@ type SpecialistScheduleStore interface {
 		finish domain.SpecialistScheduleFinish) (domain.SpecialistSchedule, error)
 }
 
-// SpecialistScheduler is an internal-only Run-level owner for child turns. It
-// deliberately has no CLI, HTTP, or model-controlled construction path.
+// SpecialistScheduler is the Run-level owner for child turns. Direct callers
+// remain internal; the operator CLI reaches it only through an immutable,
+// application-bound schedule request. Models and ordinary tools have no path.
 type SpecialistScheduler struct {
 	runner *SpecialistRunner
 }
@@ -126,7 +129,8 @@ func (s *SpecialistScheduler) executeWithLease(ctx context.Context,
 		domain.SpecialistScheduleStart{
 			ID: scheduleID, RunID: result.RunID,
 			AgentIDs: append([]string(nil), result.AgentIDs...), MaxRounds: maxRounds,
-			Lease: lease, UsageBefore: usage, StartedAt: time.Now().UTC(),
+			OperatorRequestID: result.OperatorRequestID,
+			Lease:             lease, UsageBefore: usage, StartedAt: time.Now().UTC(),
 		})
 	if err != nil {
 		return apperror.Normalize(err)
@@ -370,6 +374,7 @@ func normalizeSpecialistScheduleRequest(
 	request SpecialistScheduleRequest,
 ) (SpecialistScheduleResult, error) {
 	result := SpecialistScheduleResult{RunID: strings.TrimSpace(request.RunID)}
+	result.OperatorRequestID = strings.TrimSpace(request.OperatorRequestID)
 	if result.RunID == "" {
 		return result, apperror.New(apperror.CodeInvalidArgument,
 			"Specialist schedule Run id is required")
@@ -378,6 +383,12 @@ func normalizeSpecialistScheduleRequest(
 		return result, apperror.New(apperror.CodeInvalidArgument,
 			fmt.Sprintf("Specialist schedule rounds must be between 1 and %d",
 				MaxSpecialistScheduleRounds))
+	}
+	if result.OperatorRequestID != "" &&
+		(!domain.ValidAgentID(result.OperatorRequestID) ||
+			strings.ContainsRune(result.OperatorRequestID, 0)) {
+		return result, apperror.New(apperror.CodeInvalidArgument,
+			"Specialist operator schedule request id is invalid")
 	}
 	if len(request.AgentIDs) == 0 || len(request.AgentIDs) > domain.MaxAgentChildren {
 		return result, apperror.New(apperror.CodeInvalidArgument,
