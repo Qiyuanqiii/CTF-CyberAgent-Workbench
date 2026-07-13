@@ -46,6 +46,8 @@ Preparation is persisted before the model call and committed in the same SQLite 
 
 Skill guidance is subordinate to the root system policy and does not alter the offered tool list. Models, HTTP, the Tool Gateway, and child scheduling still cannot select Skills; Specialist contexts receive none. A missing or mismatched Registry fails before Provider invocation. Focused tests cover deterministic current and archived assembly, redaction, tampering and Registry drift, SQL immutability, atomic commit/rollback, cross-Store replay, v39 upgrade, prompt delivery, metadata-only persistence, no tool grant, and fail-closed Registry loss. Full repository gates and CI are recorded in `docs/PROGRESS_BOOK.md` for the slice.
 
+The first Linux CI run exposed one unrelated pre-existing test timing assumption: API-process startup metadata had a fixed four-second polling deadline and could remain empty on a busy two-core runner. The shared test helper now allows a bounded 15-second startup window, fails immediately if the process exits, and reports stdout/stderr distinctly. All three API startup tests passed ten repeated runs; the generated-token test passed three race-enabled repetitions. Production API behavior and shutdown deadlines are unchanged.
+
 ## Next Slice
 
 Implement the fourth P7 Skills vertical slice as a bounded Plan/Delivery workflow inspired by strong coding-agent product patterns without copying proprietary implementation:

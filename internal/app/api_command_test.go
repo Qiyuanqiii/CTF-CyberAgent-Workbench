@@ -73,6 +73,31 @@ func (b *synchronizedBuffer) String() string {
 	return b.Buffer.String()
 }
 
+func waitForAPIProcessOutput(t *testing.T, stdout *synchronizedBuffer,
+	stderr *synchronizedBuffer, done <-chan int, ready func(string) bool,
+) string {
+	t.Helper()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(15 * time.Second)
+	defer timer.Stop()
+	for {
+		output := stdout.String()
+		if ready(output) {
+			return output
+		}
+		select {
+		case code := <-done:
+			t.Fatalf("API process exited before startup metadata: code=%d stdout=%s stderr=%s",
+				code, output, stderr.String())
+		case <-timer.C:
+			t.Fatalf("API process startup metadata timed out: stdout=%s stderr=%s",
+				output, stderr.String())
+		case <-ticker.C:
+		}
+	}
+}
+
 func TestAPIServeCLIStartsAuthenticatedLoopbackServerWithoutPersistingToken(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CYBERAGENT_HOME", home)
@@ -93,26 +118,20 @@ func TestAPIServeCLIStartsAuthenticatedLoopbackServerWithoutPersistingToken(t *t
 		done <- ExecuteContext(ctx, []string{"api", "serve", "--listen", "127.0.0.1:0"}, &stdout, &stderr)
 	}()
 
-	var baseURL string
-	deadline := time.Now().Add(4 * time.Second)
-	for time.Now().Before(deadline) {
-		output := stdout.String()
-		baseURL = outputField(output, "api_url")
-		if baseURL != "" && strings.Contains(output,
-			"api_control_token_source: "+apiControlTokenEnvironment) {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	output := waitForAPIProcessOutput(t, &stdout, &stderr, done, func(output string) bool {
+		return outputField(output, "api_url") != "" && strings.Contains(output,
+			"api_control_token_source: "+apiControlTokenEnvironment)
+	})
+	baseURL := outputField(output, "api_url")
 	if baseURL == "" {
-		t.Fatalf("API did not report its URL: stdout=%s stderr=%s", stdout.String(), stderr.String())
+		t.Fatalf("API did not report its URL: stdout=%s stderr=%s", output, stderr.String())
 	}
-	if strings.Contains(stdout.String(), token) || strings.Contains(stdout.String(), controlToken) ||
-		!strings.Contains(stdout.String(), "api_token_source: "+apiTokenEnvironment) ||
-		!strings.Contains(stdout.String(), "api_token_generated: false") ||
-		!strings.Contains(stdout.String(), "api_control_enabled: true") ||
-		!strings.Contains(stdout.String(), "api_control_token_source: "+apiControlTokenEnvironment) {
-		t.Fatalf("environment token reporting is unsafe or incomplete: %s", stdout.String())
+	if strings.Contains(output, token) || strings.Contains(output, controlToken) ||
+		!strings.Contains(output, "api_token_source: "+apiTokenEnvironment) ||
+		!strings.Contains(output, "api_token_generated: false") ||
+		!strings.Contains(output, "api_control_enabled: true") ||
+		!strings.Contains(output, "api_control_token_source: "+apiControlTokenEnvironment) {
+		t.Fatalf("environment token reporting is unsafe or incomplete: %s", output)
 	}
 
 	request, err := http.NewRequest(http.MethodGet, baseURL+"/health", nil)
@@ -164,21 +183,15 @@ func TestAPIServeCLIGeneratesUsableProcessToken(t *testing.T) {
 		done <- ExecuteContext(ctx, []string{"api", "serve", "--listen", "127.0.0.1:0"}, &stdout, &stderr)
 	}()
 
-	var baseURL string
-	var token string
-	deadline := time.Now().Add(4 * time.Second)
-	for time.Now().Before(deadline) {
-		output := stdout.String()
-		baseURL = outputField(output, "api_url")
-		token = outputField(output, "api_token")
-		if baseURL != "" && token != "" {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if baseURL == "" || len(token) < 32 || !strings.Contains(stdout.String(), "api_token_generated: true") ||
-		!strings.Contains(stdout.String(), "api_control_enabled: false") {
-		t.Fatalf("generated API credentials are incomplete: %s", stdout.String())
+	output := waitForAPIProcessOutput(t, &stdout, &stderr, done, func(output string) bool {
+		return outputField(output, "api_url") != "" && len(outputField(output, "api_token")) >= 32 &&
+			strings.Contains(output, "api_token_generated: true") &&
+			strings.Contains(output, "api_control_enabled: false")
+	})
+	baseURL := outputField(output, "api_url")
+	token := outputField(output, "api_token")
+	if baseURL == "" || len(token) < 32 {
+		t.Fatalf("generated API credentials are incomplete: %s", output)
 	}
 	request, err := http.NewRequest(http.MethodGet, baseURL+"/health", nil)
 	if err != nil {
@@ -238,21 +251,14 @@ func TestAPIServeCLIHostsImmutableWebUIWithoutWeakeningAPI(t *testing.T) {
 			"--ui-dir", uiDirectory}, &stdout, &stderr)
 	}()
 
-	var apiURL string
-	var uiURL string
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		output := stdout.String()
-		apiURL = outputField(output, "api_url")
-		uiURL = outputField(output, "ui_url")
-		if apiURL != "" && uiURL != "" && len(outputField(output, "ui_digest")) == 64 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if apiURL == "" || uiURL == "" || !strings.Contains(stdout.String(), "ui_assets: 1") ||
-		strings.Contains(stdout.String(), token) {
-		t.Fatalf("Web UI startup metadata is incomplete or unsafe: %s", stdout.String())
+	output := waitForAPIProcessOutput(t, &stdout, &stderr, done, func(output string) bool {
+		return outputField(output, "api_url") != "" && outputField(output, "ui_url") != "" &&
+			len(outputField(output, "ui_digest")) == 64 && strings.Contains(output, "ui_assets: 1")
+	})
+	apiURL := outputField(output, "api_url")
+	uiURL := outputField(output, "ui_url")
+	if apiURL == "" || uiURL == "" || strings.Contains(output, token) {
+		t.Fatalf("Web UI startup metadata is incomplete or unsafe: %s", output)
 	}
 
 	client := &http.Client{Timeout: 2 * time.Second}
