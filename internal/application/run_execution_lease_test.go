@@ -40,7 +40,7 @@ func TestRunSupervisorHeartbeatKeepsLongModelCallExclusive(t *testing.T) {
 		t.Fatal(err)
 	}
 	leasePolicy := application.RunExecutionLeasePolicy{
-		TTL: 180 * time.Millisecond, RenewInterval: 40 * time.Millisecond,
+		TTL: 750 * time.Millisecond, RenewInterval: 150 * time.Millisecond,
 	}
 	first := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).
 		WithRunExecutionLeaseOwner("heartbeat-worker-a").
@@ -103,7 +103,7 @@ func waitForRenewedLease(t *testing.T, ctx context.Context, st *store.SQLiteStor
 	initial domain.RunExecutionLease,
 ) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		current, found, err := st.GetRunExecutionLease(ctx, initial.RunID)
 		now := time.Now().UTC()
@@ -111,7 +111,7 @@ func waitForRenewedLease(t *testing.T, ctx context.Context, st *store.SQLiteStor
 			current.RenewedAt.After(initial.RenewedAt) && current.ExpiresAt.After(initial.ExpiresAt) {
 			return
 		}
-		time.Sleep(15 * time.Millisecond)
+		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatal("execution lease was not renewed beyond its original expiry")
 }

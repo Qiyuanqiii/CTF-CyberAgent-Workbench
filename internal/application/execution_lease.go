@@ -74,7 +74,7 @@ func renewRunExecutionLease(ctx context.Context, store RunExecutionLeaseStore,
 		case <-stop:
 			return
 		case <-ticker.C:
-			timeout := minDuration(2*time.Second, policy.RenewInterval)
+			timeout := runExecutionLeaseRenewalTimeout(policy)
 			renewCtx, cancelRenew := context.WithTimeout(context.WithoutCancel(ctx), timeout)
 			_, err := store.RenewRunExecutionLease(renewCtx, lease, policy.TTL)
 			cancelRenew()
@@ -88,6 +88,10 @@ func renewRunExecutionLease(ctx context.Context, store RunExecutionLeaseStore,
 			}
 		}
 	}
+}
+
+func runExecutionLeaseRenewalTimeout(policy RunExecutionLeasePolicy) time.Duration {
+	return minDuration(2*time.Second, policy.TTL-policy.RenewInterval)
 }
 
 func minDuration(left time.Duration, right time.Duration) time.Duration {
