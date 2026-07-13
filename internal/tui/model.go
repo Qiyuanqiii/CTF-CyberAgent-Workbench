@@ -15,6 +15,7 @@ import (
 
 	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/store"
@@ -49,6 +50,13 @@ type Model struct {
 	noteScroll         int
 	selectedRound      int
 	roundScroll        int
+	selectedEvent      int
+	eventScroll        int
+	selectedAgent      int
+	agentScroll        int
+	selectedFinding    int
+	findingScroll      int
+	eventPollError     bool
 	live               activeCallView
 	liveGeneration     uint64
 	liveDiscoverCancel context.CancelFunc
@@ -90,11 +98,18 @@ type SessionToolManager interface {
 
 type RunStateStore interface {
 	GetRunBySession(ctx context.Context, sessionID string) (domain.Run, bool, error)
+	ListRunEventsAfterSequence(ctx context.Context, runID string,
+		afterSequence int64, limit int) ([]events.Event, error)
+	LatestRunEventSequence(ctx context.Context, runID string) (int64, error)
 	ListWorkItems(ctx context.Context, filter domain.WorkItemFilter) ([]domain.WorkItem, error)
 	ListNotes(ctx context.Context, filter domain.NoteFilter) ([]domain.Note, error)
 	ListRunSupervisorToolRoundsPage(ctx context.Context, runID string, offset int,
 		limit int) ([]domain.SupervisorToolRound, error)
 	ListSessionGrants(ctx context.Context, filter approval.GrantListFilter) ([]approval.SessionGrant, error)
+	ListAgentNodes(ctx context.Context, runID string) ([]domain.AgentNode, error)
+	GetAgentCompletion(ctx context.Context, agentID string) (domain.AgentCompletion, bool, error)
+	ListFindingReportSummariesPage(ctx context.Context, runID string,
+		offset int, limit int) ([]domain.FindingReportSummary, error)
 }
 
 type workspaceContext struct {
@@ -113,23 +128,36 @@ type workspaceItem struct {
 }
 
 type runContext struct {
-	Found      bool
-	Run        domain.Run
-	WorkItems  []domain.WorkItem
-	Notes      []domain.Note
-	ToolRounds []domain.SupervisorToolRound
-	Grants     []approval.SessionGrant
+	Found          bool
+	Run            domain.Run
+	WorkItems      []domain.WorkItem
+	Notes          []domain.Note
+	ToolRounds     []domain.SupervisorToolRound
+	Grants         []approval.SessionGrant
+	Events         []events.Event
+	EventSequence  int64
+	Agents         []agentContext
+	FindingReports []domain.FindingReportSummary
+}
+
+type agentContext struct {
+	Node       domain.AgentNode
+	Completion *domain.AgentCompletion
 }
 
 type activityView string
 
 const (
-	activityTools    activityView = "tools"
-	activityWork     activityView = "work"
-	activityNotes    activityView = "notes"
-	activityRounds   activityView = "rounds"
-	maxTUIRunItems                = 50
-	maxTUIToolRounds              = 20
+	activityTools        activityView = "tools"
+	activityWork         activityView = "work"
+	activityNotes        activityView = "notes"
+	activityRounds       activityView = "rounds"
+	activityEvents       activityView = "events"
+	activityAgents       activityView = "agents"
+	activityFindings     activityView = "findings"
+	maxTUIRunItems                    = 50
+	maxTUIToolRounds                  = 20
+	maxTUIFindingReports              = 10
 )
 
 type focusArea string
@@ -163,16 +191,26 @@ func NewModel(ctx context.Context, sess session.Session, sessionManager *session
 	if err := model.Refresh(ctx); err != nil {
 		return nil, err
 	}
+	if len(model.runContext.Events) > 0 {
+		model.selectedEvent = len(model.runContext.Events) - 1
+	}
 	return model, nil
 }
 
 func (m *Model) Init() tea.Cmd {
-	return textinput.Blink
+	if m.runStateStore == nil || !m.runContext.Found || m.runContext.Run.Terminal() {
+		return textinput.Blink
+	}
+	return tea.Batch(textinput.Blink, m.scheduleRunEventPoll(tuiEventPollInterval))
 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch msg := msg.(type) {
+	case runEventPollTickMsg:
+		return m, m.pollRunEventsCmd(msg)
+	case runEventPollResultMsg:
+		return m.handleRunEventPollResult(msg)
 	case activeCallSubscribedMsg:
 		return m, m.handleActiveCallSubscribed(msg)
 	case activeCallEventMsg:
@@ -436,7 +474,8 @@ func (m *Model) PreviousActivityView() {
 
 func (m *Model) setActivityView(view activityView) {
 	switch view {
-	case activityTools, activityWork, activityNotes, activityRounds:
+	case activityTools, activityWork, activityNotes, activityRounds,
+		activityEvents, activityAgents, activityFindings:
 		m.activityView = view
 	default:
 		m.activityView = activityTools
@@ -446,7 +485,7 @@ func (m *Model) setActivityView(view activityView) {
 }
 
 func activityViewAt(current activityView, delta int) activityView {
-	views := []activityView{activityTools, activityWork, activityNotes, activityRounds}
+	views := activityViews()
 	index := 0
 	for candidate, view := range views {
 		if view == current {
@@ -477,6 +516,18 @@ func (m *Model) SelectNextActivityItem() {
 		m.selectedRound++
 		m.normalizeActivitySelection()
 		m.status = m.selectedRoundStatus()
+	case activityEvents:
+		m.selectedEvent++
+		m.normalizeActivitySelection()
+		m.status = m.selectedEventStatus()
+	case activityAgents:
+		m.selectedAgent++
+		m.normalizeActivitySelection()
+		m.status = m.selectedAgentStatus()
+	case activityFindings:
+		m.selectedFinding++
+		m.normalizeActivitySelection()
+		m.status = m.selectedFindingStatus()
 	}
 }
 
@@ -496,6 +547,18 @@ func (m *Model) SelectPreviousActivityItem() {
 		m.selectedRound--
 		m.normalizeActivitySelection()
 		m.status = m.selectedRoundStatus()
+	case activityEvents:
+		m.selectedEvent--
+		m.normalizeActivitySelection()
+		m.status = m.selectedEventStatus()
+	case activityAgents:
+		m.selectedAgent--
+		m.normalizeActivitySelection()
+		m.status = m.selectedAgentStatus()
+	case activityFindings:
+		m.selectedFinding--
+		m.normalizeActivitySelection()
+		m.status = m.selectedFindingStatus()
 	}
 }
 
@@ -554,48 +617,89 @@ func (m *Model) DenySelectedTool(ctx context.Context, reason string) error {
 }
 
 func (m *Model) Refresh(ctx context.Context) error {
-	messages, err := m.sessionManager.History(ctx, m.session.ID, false)
+	result, err := loadActionResult(ctx, m.session, m.sessionManager, m.toolManager,
+		m.workspaceStore, m.runStateStore, m.status, "")
 	if err != nil {
 		return err
 	}
-	runs, err := m.toolManager.List(ctx, toolrun.ListFilter{SessionID: m.session.ID})
-	if err != nil {
-		return err
-	}
-	runView, err := m.loadRunContext(ctx, m.session)
-	if err != nil {
-		return err
-	}
-	m.messages = messages
-	m.toolRuns = runs
-	m.workspace = m.loadWorkspaceContext(ctx, m.session)
-	m.runContext = runView
-	m.normalizeActivitySelection()
+	m.applyActionResult(result)
 	return nil
 }
 
 func (m *Model) refreshAction(ctx context.Context, sess session.Session, status string, selectedToolID string) (actionResult, error) {
-	messages, err := m.sessionManager.History(ctx, sess.ID, false)
-	if err != nil {
-		return actionResult{}, err
+	return loadActionResult(ctx, sess, m.sessionManager, m.toolManager,
+		m.workspaceStore, m.runStateStore, status, selectedToolID)
+}
+
+func loadActionResult(ctx context.Context, sess session.Session, sessionManager *session.Manager,
+	toolManager ToolManager, workspaceStore WorkspaceStore, runStateStore RunStateStore,
+	status string, selectedToolID string,
+) (actionResult, error) {
+	for attempt := 0; attempt < maxTUISnapshotAttempts; attempt++ {
+		beforeRun, beforeFound, err := currentTUIRunBoundary(ctx, runStateStore, sess.ID)
+		if err != nil {
+			return actionResult{}, err
+		}
+		beforeSequence := int64(0)
+		if beforeFound {
+			beforeSequence, err = runStateStore.LatestRunEventSequence(ctx, beforeRun.ID)
+			if err != nil {
+				return actionResult{}, err
+			}
+		}
+		messages, err := sessionManager.History(ctx, sess.ID, false)
+		if err != nil {
+			return actionResult{}, err
+		}
+		runs, err := toolManager.List(ctx, toolrun.ListFilter{SessionID: sess.ID})
+		if err != nil {
+			return actionResult{}, err
+		}
+		runView, err := loadRunContext(ctx, runStateStore, sess)
+		if err != nil {
+			return actionResult{}, err
+		}
+		afterRun, afterFound, err := currentTUIRunBoundary(ctx, runStateStore, sess.ID)
+		if err != nil {
+			return actionResult{}, err
+		}
+		if beforeFound != afterFound {
+			continue
+		}
+		if beforeFound {
+			if beforeRun.ID != afterRun.ID || beforeRun.MissionID != afterRun.MissionID {
+				continue
+			}
+			afterSequence, err := runStateStore.LatestRunEventSequence(ctx, afterRun.ID)
+			if err != nil {
+				return actionResult{}, err
+			}
+			if beforeSequence != afterSequence || !runView.Found ||
+				runView.Run.ID != afterRun.ID || runView.Run.MissionID != afterRun.MissionID ||
+				runView.EventSequence != afterSequence {
+				continue
+			}
+		} else if runView.Found {
+			continue
+		}
+		return actionResult{
+			session: sess, messages: messages, toolRuns: runs,
+			workspace: loadWorkspaceContext(ctx, workspaceStore, sess), runContext: runView,
+			status: status, selectedToolID: selectedToolID,
+		}, nil
 	}
-	runs, err := m.toolManager.List(ctx, toolrun.ListFilter{SessionID: sess.ID})
-	if err != nil {
-		return actionResult{}, err
+	return actionResult{}, errors.New("TUI Run projection changed during bounded snapshot retries")
+}
+
+const maxTUISnapshotAttempts = 8
+
+func currentTUIRunBoundary(ctx context.Context, runStateStore RunStateStore,
+	sessionID string,
+) (domain.Run, bool, error) {
+	if runStateStore == nil {
+		return domain.Run{}, false, nil
 	}
-	runView, err := m.loadRunContext(ctx, sess)
-	if err != nil {
-		return actionResult{}, err
-	}
-	return actionResult{
-		session:        sess,
-		messages:       messages,
-		toolRuns:       runs,
-		workspace:      m.loadWorkspaceContext(ctx, sess),
-		runContext:     runView,
-		status:         status,
-		selectedToolID: selectedToolID,
-	}, nil
+	return runStateStore.GetRunBySession(ctx, sessionID)
 }
 
 func (m *Model) approveAction(ctx context.Context, sess session.Session, id string) (actionResult, error) {
@@ -724,9 +828,24 @@ func (m *Model) selectedToolAction(verb string, makeCmd func(string) tea.Cmd) (t
 }
 
 func (m *Model) applyActionResult(result actionResult) {
+	m.normalizeActivitySelection()
 	oldSelection := ""
 	if run, ok := m.selectedToolRun(); ok {
 		oldSelection = run.ID
+	}
+	oldEventSequence := int64(0)
+	followEventTail := len(m.runContext.Events) == 0 ||
+		m.selectedEvent == len(m.runContext.Events)-1
+	if len(m.runContext.Events) > 0 {
+		oldEventSequence = m.runContext.Events[m.selectedEvent].Sequence
+	}
+	oldAgentID := ""
+	if len(m.runContext.Agents) > 0 {
+		oldAgentID = m.runContext.Agents[m.selectedAgent].Node.ID
+	}
+	oldFindingID := ""
+	if len(m.runContext.FindingReports) > 0 {
+		oldFindingID = m.runContext.FindingReports[m.selectedFinding].ID
 	}
 	m.session = result.session
 	m.messages = result.messages
@@ -739,6 +858,9 @@ func (m *Model) applyActionResult(result actionResult) {
 		target = oldSelection
 	}
 	m.selectToolByID(target)
+	m.selectEvent(oldEventSequence, followEventTail)
+	m.selectAgentByID(oldAgentID)
+	m.selectFindingByID(oldFindingID)
 	m.normalizeActivitySelection()
 }
 
@@ -769,6 +891,12 @@ func (m *Model) renderActivity(width int, height int) string {
 		return m.renderNotes(width, height)
 	case activityRounds:
 		return m.renderToolRounds(width, height)
+	case activityEvents:
+		return m.renderEvents(width, height)
+	case activityAgents:
+		return m.renderAgents(width, height)
+	case activityFindings:
+		return m.renderFindings(width, height)
 	default:
 		return m.renderTools(width, height)
 	}
@@ -962,8 +1090,8 @@ func (m *Model) activityHeader(label string, selected activityView, width int) [
 	if m.focus == focusTools {
 		label += " (focused)"
 	}
-	tabs := make([]string, 0, 4)
-	for _, view := range []activityView{activityTools, activityWork, activityNotes, activityRounds} {
+	tabs := make([]string, 0, len(activityViews()))
+	for _, view := range activityViews() {
 		name := activityLabel(view)
 		if view == selected {
 			name = "[" + name + "]"
@@ -981,9 +1109,20 @@ func activityLabel(view activityView) string {
 		return "Notes"
 	case activityRounds:
 		return "Rounds"
+	case activityEvents:
+		return "Events"
+	case activityAgents:
+		return "Agents"
+	case activityFindings:
+		return "Findings"
 	default:
 		return "Tools"
 	}
+}
+
+func activityViews() []activityView {
+	return []activityView{activityTools, activityWork, activityNotes, activityRounds,
+		activityEvents, activityAgents, activityFindings}
 }
 
 func (m *Model) statusLine() string {
@@ -997,6 +1136,12 @@ func (m *Model) statusLine() string {
 	}
 	if live := m.live.summary(); live != "" {
 		parts = append(parts, live)
+	}
+	if m.runContext.Found {
+		parts = append(parts, fmt.Sprintf("events=#%d", m.runContext.EventSequence))
+	}
+	if m.eventPollError {
+		parts = append(parts, "event-stream=retrying")
 	}
 	return truncate(strings.Join(parts, " | "), max(20, m.width-2))
 }
@@ -1019,51 +1164,84 @@ func (m *Model) selectedToolRun() (toolrun.ToolRun, bool) {
 	return m.toolRuns[m.selectedTool], true
 }
 
-func (m *Model) loadRunContext(ctx context.Context, sess session.Session) (runContext, error) {
-	if m.runStateStore == nil {
+func loadRunContext(ctx context.Context, runStateStore RunStateStore,
+	sess session.Session,
+) (runContext, error) {
+	if runStateStore == nil {
 		return runContext{}, nil
 	}
-	run, found, err := m.runStateStore.GetRunBySession(ctx, sess.ID)
+	run, found, err := runStateStore.GetRunBySession(ctx, sess.ID)
 	if err != nil || !found {
 		return runContext{}, err
 	}
-	workItems, err := m.runStateStore.ListWorkItems(ctx, domain.WorkItemFilter{
+	workItems, err := runStateStore.ListWorkItems(ctx, domain.WorkItemFilter{
 		RunID: run.ID, Limit: maxTUIRunItems,
 	})
 	if err != nil {
 		return runContext{}, err
 	}
-	notes, err := m.runStateStore.ListNotes(ctx, domain.NoteFilter{
+	notes, err := runStateStore.ListNotes(ctx, domain.NoteFilter{
 		RunID: run.ID, Limit: maxTUIRunItems,
 	})
 	if err != nil {
 		return runContext{}, err
 	}
-	rounds, err := m.runStateStore.ListRunSupervisorToolRoundsPage(ctx, run.ID, 0, maxTUIToolRounds)
+	rounds, err := runStateStore.ListRunSupervisorToolRoundsPage(ctx, run.ID, 0, maxTUIToolRounds)
 	if err != nil {
 		return runContext{}, err
 	}
-	grants, err := m.runStateStore.ListSessionGrants(ctx, approval.GrantListFilter{
+	grants, err := runStateStore.ListSessionGrants(ctx, approval.GrantListFilter{
 		RunID: run.ID, SessionID: sess.ID, Status: approval.GrantActive, Limit: maxTUIRunItems,
 	})
 	if err != nil {
 		return runContext{}, err
 	}
+	eventTail, err := runStateStore.LatestRunEventSequence(ctx, run.ID)
+	if err != nil {
+		return runContext{}, err
+	}
+	afterSequence := maxInt64(0, eventTail-maxTUIRunItems)
+	eventList, err := runStateStore.ListRunEventsAfterSequence(ctx, run.ID,
+		afterSequence, maxTUIRunItems)
+	if err != nil {
+		return runContext{}, err
+	}
+	if err := validateTUIEventBatch(run, afterSequence, eventList); err != nil {
+		return runContext{}, err
+	}
+	eventSequence := afterSequence
+	if len(eventList) > 0 {
+		eventSequence = eventList[len(eventList)-1].Sequence
+	}
+	if eventSequence < eventTail {
+		return runContext{}, errors.New("TUI event snapshot did not reach the durable Run tail")
+	}
+	agents, err := loadAgentContext(ctx, runStateStore, run)
+	if err != nil {
+		return runContext{}, err
+	}
+	reports, err := loadFindingContext(ctx, runStateStore, run)
+	if err != nil {
+		return runContext{}, err
+	}
 	return runContext{Found: true, Run: run, WorkItems: workItems, Notes: notes,
-		ToolRounds: rounds, Grants: grants}, nil
+		ToolRounds: rounds, Grants: grants, Events: eventList, EventSequence: eventSequence,
+		Agents: agents, FindingReports: reports}, nil
 }
 
-func (m *Model) loadWorkspaceContext(ctx context.Context, sess session.Session) workspaceContext {
+func loadWorkspaceContext(ctx context.Context, workspaceStore WorkspaceStore,
+	sess session.Session,
+) workspaceContext {
 	id := strings.TrimSpace(sess.WorkspaceID)
 	if id == "" {
 		return workspaceContext{}
 	}
 	ctxView := workspaceContext{ID: id}
-	if m.workspaceStore == nil {
+	if workspaceStore == nil {
 		ctxView.Error = "workspace lookup unavailable"
 		return ctxView
 	}
-	rec, err := m.workspaceStore.GetWorkspaceByID(ctx, id)
+	rec, err := workspaceStore.GetWorkspaceByID(ctx, id)
 	if err != nil {
 		ctxView.Error = err.Error()
 		return ctxView
@@ -1106,6 +1284,9 @@ func (m *Model) normalizeActivitySelection() {
 	normalizeListSelection(len(m.runContext.WorkItems), &m.selectedWorkItem, &m.workItemScroll)
 	normalizeListSelection(len(m.runContext.Notes), &m.selectedNote, &m.noteScroll)
 	normalizeListSelection(len(m.runContext.ToolRounds), &m.selectedRound, &m.roundScroll)
+	normalizeListSelection(len(m.runContext.Events), &m.selectedEvent, &m.eventScroll)
+	normalizeListSelection(len(m.runContext.Agents), &m.selectedAgent, &m.agentScroll)
+	normalizeListSelection(len(m.runContext.FindingReports), &m.selectedFinding, &m.findingScroll)
 }
 
 func normalizeListSelection(length int, selected *int, scroll *int) {
@@ -1140,6 +1321,52 @@ func (m *Model) selectToolByID(id string) {
 	}
 }
 
+func (m *Model) selectEvent(sequence int64, followTail bool) {
+	if len(m.runContext.Events) == 0 {
+		m.selectedEvent = 0
+		return
+	}
+	if followTail || sequence <= 0 {
+		m.selectedEvent = len(m.runContext.Events) - 1
+		return
+	}
+	for index, event := range m.runContext.Events {
+		if event.Sequence == sequence {
+			m.selectedEvent = index
+			return
+		}
+	}
+	if sequence < m.runContext.Events[0].Sequence {
+		m.selectedEvent = 0
+		return
+	}
+	m.selectedEvent = len(m.runContext.Events) - 1
+}
+
+func (m *Model) selectAgentByID(id string) {
+	if id == "" {
+		return
+	}
+	for index, agent := range m.runContext.Agents {
+		if agent.Node.ID == id {
+			m.selectedAgent = index
+			return
+		}
+	}
+}
+
+func (m *Model) selectFindingByID(id string) {
+	if id == "" {
+		return
+	}
+	for index, finding := range m.runContext.FindingReports {
+		if finding.ID == id {
+			m.selectedFinding = index
+			return
+		}
+	}
+}
+
 func (m *Model) ensureSelectedVisible(visible int) {
 	m.normalizeSelection()
 	if visible <= 0 || len(m.toolRuns) == 0 {
@@ -1167,6 +1394,21 @@ func (m *Model) ensureNoteVisible(visible int) {
 func (m *Model) ensureRoundVisible(visible int) {
 	m.normalizeActivitySelection()
 	ensureListSelectionVisible(len(m.runContext.ToolRounds), m.selectedRound, visible, &m.roundScroll)
+}
+
+func (m *Model) ensureEventVisible(visible int) {
+	m.normalizeActivitySelection()
+	ensureListSelectionVisible(len(m.runContext.Events), m.selectedEvent, visible, &m.eventScroll)
+}
+
+func (m *Model) ensureAgentVisible(visible int) {
+	m.normalizeActivitySelection()
+	ensureListSelectionVisible(len(m.runContext.Agents), m.selectedAgent, visible, &m.agentScroll)
+}
+
+func (m *Model) ensureFindingVisible(visible int) {
+	m.normalizeActivitySelection()
+	ensureListSelectionVisible(len(m.runContext.FindingReports), m.selectedFinding, visible, &m.findingScroll)
 }
 
 func ensureListSelectionVisible(length int, selected int, visible int, scroll *int) {
@@ -1218,6 +1460,28 @@ func (m *Model) selectedRoundStatus() string {
 	return fmt.Sprintf("selected turn %d round %d", round.Turn, round.Round)
 }
 
+func (m *Model) selectedEventStatus() string {
+	if len(m.runContext.Events) == 0 {
+		return "no Run events"
+	}
+	event := m.runContext.Events[m.selectedEvent]
+	return fmt.Sprintf("selected event #%d %s", event.Sequence, event.Type)
+}
+
+func (m *Model) selectedAgentStatus() string {
+	if len(m.runContext.Agents) == 0 {
+		return "no Agents"
+	}
+	return "selected " + m.runContext.Agents[m.selectedAgent].Node.ID
+}
+
+func (m *Model) selectedFindingStatus() string {
+	if len(m.runContext.FindingReports) == 0 {
+		return "no Findings"
+	}
+	return "selected " + m.runContext.FindingReports[m.selectedFinding].ID
+}
+
 func wrap(value string, width int) []string {
 	value = strings.TrimSpace(value)
 	if width <= 0 || ansi.StringWidth(value) <= width {
@@ -1258,6 +1522,7 @@ func windowTop(lines []string, maxLines int) []string {
 }
 
 func truncate(value string, width int) string {
+	value = terminalSafeText(value)
 	if width <= 0 || ansi.StringWidth(value) <= width {
 		return value
 	}
@@ -1268,7 +1533,22 @@ func truncate(value string, width int) string {
 }
 
 func singleLine(value string) string {
-	return strings.Join(strings.Fields(value), " ")
+	return strings.Join(strings.Fields(terminalSafeText(value)), " ")
+}
+
+func terminalSafeText(value string) string {
+	var out strings.Builder
+	for _, char := range value {
+		switch {
+		case char == '\n' || char == '\r' || char == '\t':
+			out.WriteByte(' ')
+		case char < 0x20 || char == 0x7f:
+			fmt.Fprintf(&out, "\\u%04X", char)
+		default:
+			out.WriteRune(char)
+		}
+	}
+	return out.String()
 }
 
 func defaultText(value string, fallback string) string {

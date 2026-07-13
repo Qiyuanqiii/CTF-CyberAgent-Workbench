@@ -316,9 +316,12 @@ func TestModelRendersRunWorkNotesAndSupervisorRounds(t *testing.T) {
 		t.Fatalf("Run header or activity focus is missing:\n%s", snapshot)
 	}
 	for view, wants := range map[activityView][]string{
-		activityWork:   {"Work Board 1", "检查中文工作项", "owner=root"},
-		activityNotes:  {"Notes 1", "持久化观察", "这是一条可恢复的中文记录"},
-		activityRounds: {"Tool Rounds 1", "pending", "note_create"},
+		activityWork:     {"Work Board 1", "检查中文工作项", "owner=root"},
+		activityNotes:    {"Notes 1", "持久化观察", "这是一条可恢复的中文记录"},
+		activityRounds:   {"Tool Rounds 1", "pending", "note_create"},
+		activityEvents:   {"Events", "work_item.created", "note.created"},
+		activityAgents:   {"Agents 1", "root/", "turns="},
+		activityFindings: {"Findings 0 reports=0", "none"},
 	} {
 		model.setActivityView(view)
 		snapshot := model.Snapshot()
@@ -330,6 +333,12 @@ func TestModelRendersRunWorkNotesAndSupervisorRounds(t *testing.T) {
 				t.Fatalf("%s snapshot missing %q:\n%s", view, want, snapshot)
 			}
 		}
+	}
+	projection, found := model.CurrentRunProjection()
+	if !found || projection.RunID != run.ID || projection.MissionID != run.MissionID ||
+		projection.Status != domain.RunRunning || projection.EventSequence <= 0 ||
+		projection.AgentCount != 1 || projection.FindingCount != 0 {
+		t.Fatalf("TUI Run projection drifted: %#v found=%t", projection, found)
 	}
 	if got := truncate("你好世界", 3); ansi.StringWidth(got) > 3 || !utf8.ValidString(got) {
 		t.Fatalf("Unicode truncation is unsafe: %q", got)
