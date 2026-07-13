@@ -180,6 +180,8 @@ func (a *App) dispatch(ctx context.Context, args []string) error {
 		return a.providerCommand(ctx, args[1:])
 	case "model":
 		return a.modelCommand(ctx, args[1:])
+	case "skill":
+		return a.skillCommand(ctx, args[1:])
 	case "context":
 		return a.contextCommand(ctx, args[1:])
 	case "session":
@@ -222,6 +224,7 @@ func (a *App) printHelp() {
 	fmt.Fprintln(a.out, "  cyberagent learn ask")
 	fmt.Fprintln(a.out, "  cyberagent provider list|test")
 	fmt.Fprintln(a.out, "  cyberagent model list|set")
+	fmt.Fprintln(a.out, "  cyberagent skill list|show|validate")
 	fmt.Fprintln(a.out, "  cyberagent context compact|show")
 	fmt.Fprintln(a.out, "  cyberagent session create|list|send|history")
 	fmt.Fprintln(a.out, "  cyberagent tool schema|invoke|list|show|approve|deny")

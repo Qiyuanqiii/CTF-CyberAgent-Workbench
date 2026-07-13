@@ -40,19 +40,21 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 
 ## Latest Completed Slice
 
-The cross-surface lifecycle/pagination golden now uses real schema v38 SQLite state to compare CLI, TUI, authenticated HTTP/Web, and Headless for running, paused, completed, failed, and cancelled Runs. It pins complete contiguous event sequences/tails, Agent count, terminal reason, Headless exit 0/4/7, TUI latest-50 truncation over 53 Runs/Sessions, HTTP 20/20/13 opaque-cursor pages, a valid empty collection, and a zero-event resume from the durable tail. TUI exposes a defensive-copy picker projection for testing; it adds no capability.
+The first P7 Skills vertical slice adds a Go-owned bounded `skill.v1` manifest, an immutable embedded Registry, and `skill list/show/validate`. Four metadata-only built-ins cover `code`, `review`, `learn`, and `script`. Every record pins a version, Profile set, narrow valid-tool prerequisite set, relative Markdown content path, UTF-8 byte count, conservative token upper bound, and SHA-256. The loader rejects unknown/duplicate/trailing JSON, invalid UTF-8, traversal, symbolic links, profile/tool escalation, oversized data, and checksum drift. Registry results are defensive copies.
 
-Verified gates for this slice: uncached `go test ./...`, full `go test -race ./...`, `go vet`, clean `staticcheck`, `go mod verify`, empty `go mod tidy -diff`, `govulncheck` with zero reachable findings, OpenAPI/TypeScript drift checks, strict TypeScript, 15 Vitest tests, Vite production build, npm audit with zero findings, and scans showing neither user test key is tracked.
+This slice adds no migration, Store write, Provider call, prompt injection, external Skill path, tool execution, or capability grant. CLI output says both context injection and tool capability grants are disabled, and tests prove the commands do not create `cyberagent.db`. The focused audit found no unresolved high/medium issue and fixed low-risk strict-JSON, root-symlink, and deterministic-validation gaps.
+
+Verified gates: uncached `go test ./...`, full `go test -race ./...`, `go vet`, clean `staticcheck`, `go mod verify`, empty `go mod tidy -diff`, `govulncheck` with zero reachable findings, OpenAPI/TypeScript drift checks, strict TypeScript, 15 Vitest tests, Vite production build, npm audit with zero findings, tracked credential/runtime-artifact scans, and an isolated real-binary Skill CLI smoke. The new `internal/skills` package has 86.3% statement coverage.
 
 ## Next Slice
 
-Implement the first P7 Skills vertical slice:
+Implement the second P7 Skills vertical slice:
 
-1. Define a bounded, deterministic `skill.v1` manifest owned by Go.
-2. Validate name/version/checksum, Profile compatibility, declared tool dependencies, paths, UTF-8, and size/token limits.
-3. Add a read-only Registry and `skill list/show/validate` CLI.
-4. Seed metadata for `code`, `review`, `learn`, and `script` only.
-5. Do not inject Skill content into prompts or grant tools in this slice; version-pinned, token-budgeted context selection comes later.
+1. Define immutable `skill_selection.v1` in Go for one Run and validated Profile.
+2. Resolve exact Skill name/version/content-hash tuples from the read-only Registry.
+3. Enforce an aggregate conservative token budget and deterministic ordering/fingerprint.
+4. Persist only bounded selection provenance for recovery and audit.
+5. Still do not inject Skill content into Provider prompts or grant tools; context assembly/redaction remains a later separately audited slice.
 
 ## Delivery Loop
 

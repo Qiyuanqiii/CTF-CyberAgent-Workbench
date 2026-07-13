@@ -1,0 +1,12 @@
+{
+  "protocol": "skill.v1",
+  "name": "learn",
+  "version": "1.0.0",
+  "description": "Metadata for future version-pinned learning guidance.",
+  "profiles": ["learn"],
+  "tool_dependencies": [],
+  "content_path": "SKILL.md",
+  "content_sha256": "26e607e424070a11b29b263c1445fc22506e4fbd04e73d65168724086a27984f",
+  "content_bytes": 174,
+  "content_token_upper_bound": 174
+}

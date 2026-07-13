@@ -501,7 +501,11 @@ React client 现验证 opaque cursor 只进入 query、bearer 只进入 Authoriz
 
 ## 七、下一开发切片
 
-唯一推荐切片：启动 P7 的 Go-owned `skill.v1` 第一纵向切片，定义有界 manifest、版本/校验和、Profile/工具依赖、只读 Registry 与 `skill list/show/validate`；先内置 `code/review/learn/script` 元数据并保持默认不注入模型上下文、不授予工具或执行能力。后续再把经版本固定和 token 预算选择的 Skill 内容接入 Run context。
+Go-owned `skill.v1` 第一纵向切片不增加 schema、Store 写入、Provider 调用、prompt 注入、工具执行或权限。`internal/skills` 以内嵌 FS 注册 `code/review/learn/script` 四份元数据，固定 core semantic version、Profile、窄工具前置依赖、slash-relative Markdown 路径、UTF-8 字节数、保守 token 上界和 SHA-256。只读 Registry 没有 Register/Update/Content API，返回切片均为防御性副本；`skill list/show/validate` 不打开 SQLite，也不接受任意外部路径，并明确输出 `context_injection: disabled` 与 `tool_capability_grant: disabled`。
+
+定向测试覆盖严格 JSON unknown/duplicate/trailing、非法 UTF-8、Profile/工具提权、排序与重复、路径逃逸、Windows 路径、根目录/内容 symlink、非普通文件、字节/token/hash 漂移、内部状态漂移、防御性副本、CLI Profile 过滤、稳定 exit code 和零运行数据。审计未发现未解决的高/中风险问题，并修复三类低风险边界：显式拒绝 Go JSON 默认容忍的非法 UTF-8 与重复字段，检查 Registry 根路径 symlink，并按名称稳定执行 Registry 自检。`internal/skills` 语句覆盖率为 86.3%；uncached 全仓测试、全仓 race、`go vet`、零告警 `staticcheck`、`go mod verify/tidy -diff`、`govulncheck`、OpenAPI/TypeScript 漂移检查、strict TypeScript、15 项 Vitest、Vite production build、npm audit、凭据/运行产物扫描和真实二进制 CLI smoke 全部通过，Go/npm 已知可达漏洞为 0。
+
+唯一推荐下一切片：继续 P7，定义不可变 `skill_selection.v1`，为一个 Run/Profile 固定 name/version/content hash，执行总保守 token 预算并持久化确定性来源；该选择仍不得授予工具权限，也暂不把 Skill 内容注入 Provider prompt，直至后续脱敏与上下文组装独立审计完成。
 
 Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过独立审计。
 
