@@ -12,6 +12,7 @@ export type HealthView = components["schemas"]["HealthView"];
 export type MessageView = components["schemas"]["MessageView"];
 export type NoteView = components["schemas"]["NoteView"];
 export type Page = components["schemas"]["Page"];
+export type PlanDeliveryStateView = components["schemas"]["PlanDeliveryStateView"];
 export type RunDetailView = components["schemas"]["RunDetailView"];
 export type RunEventStreamView = components["schemas"]["RunEventStreamView"];
 export type RunModeView = components["schemas"]["RunModeView"];

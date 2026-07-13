@@ -96,6 +96,11 @@ func SupervisorToolDefinition(name ToolName) (ToolDefinition, bool) {
 	if definition, found := StructuredMemoryToolDefinition(name); found {
 		return definition, true
 	}
+	if name == PlanDeliveryProposeTool {
+		definition := planDeliveryDefinition
+		definition.InputSchema = append(json.RawMessage(nil), definition.InputSchema...)
+		return definition, true
+	}
 	if name != SpecialistDelegationProposeTool {
 		return ToolDefinition{}, false
 	}
@@ -105,6 +110,10 @@ func SupervisorToolDefinition(name ToolName) (ToolDefinition, bool) {
 }
 
 func NormalizeSupervisorToolPayload(name ToolName, payload json.RawMessage) (json.RawMessage, error) {
+	if name == PlanDeliveryProposeTool {
+		_, canonical, err := normalizePlanDeliveryPayload(payload)
+		return canonical, err
+	}
 	if name == SpecialistDelegationProposeTool {
 		_, canonical, err := normalizeSpecialistDelegationPayload(payload)
 		return canonical, err

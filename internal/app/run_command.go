@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,6 +51,10 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runDelegations(ctx, args[1:])
 	case "delegation":
 		return a.runDelegation(ctx, args[1:])
+	case "plans":
+		return a.runPlanDeliveryProposals(ctx, args[1:])
+	case "plan":
+		return a.runPlanDelivery(ctx, args[1:])
 	case "fanouts":
 		return a.runFanouts(ctx, args[1:])
 	case "fanout":
@@ -73,6 +78,183 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown run subcommand %q", args[0])
 	}
+}
+
+func (a *App) runPlanDelivery(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: cyberagent run plan show|choose|selection")
+	}
+	switch args[0] {
+	case "show":
+		return a.runPlanDeliveryShow(ctx, args[1:])
+	case "choose":
+		return a.runPlanDeliveryChoose(ctx, args[1:])
+	case "selection":
+		return a.runPlanDeliverySelection(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown run plan subcommand %q", args[0])
+	}
+}
+
+func (a *App) runPlanDeliveryProposals(ctx context.Context, args []string) error {
+	fs := newFlagSet("run plans", a.errOut)
+	limit := fs.Int("limit", 20, "maximum Plan/Delivery proposals")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{"limit": true})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run plans <run-id> [--limit <n>]")
+	}
+	proposals, err := application.NewPlanDeliveryService(a.store).
+		ListProposals(ctx, fs.Arg(0), *limit)
+	if err != nil {
+		return err
+	}
+	if len(proposals) == 0 {
+		fmt.Fprintln(a.out, "no Plan/Delivery proposals")
+		return nil
+	}
+	selection, selected, err := application.NewPlanDeliveryService(a.store).
+		SelectionForRun(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	for _, proposal := range proposals {
+		selectedDirection := 0
+		if selected && selection.ProposalID == proposal.ID {
+			selectedDirection = selection.DirectionOrdinal
+		}
+		fmt.Fprintf(a.out, "%s\tstatus=%s\tdirections=%d\tmode_revision=%d\tselected_direction=%d\tfingerprint=%s\tcreated_at=%s\n",
+			proposal.ID, proposal.Status, len(proposal.Spec.Directions),
+			proposal.ModeRevision, selectedDirection, proposal.Fingerprint,
+			proposal.CreatedAt.Format(time.RFC3339Nano))
+	}
+	return nil
+}
+
+func (a *App) runPlanDeliveryShow(ctx context.Context, args []string) error {
+	fs := newFlagSet("run plan show", a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run plan show <proposal-id>")
+	}
+	proposal, err := application.NewPlanDeliveryService(a.store).
+		GetProposal(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	printPlanDeliveryProposal(a, proposal)
+	return nil
+}
+
+func (a *App) runPlanDeliveryChoose(ctx context.Context, args []string) error {
+	fs := newFlagSet("run plan choose", a.errOut)
+	operationKey := fs.String("operation-key", "", "stable direction choice operation key")
+	operator := fs.String("operator", "cli_operator", "operator identity")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"operation-key": true, "operator": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 || strings.TrimSpace(*operationKey) == "" {
+		return errors.New("usage: cyberagent run plan choose <proposal-id> 1|2|3 --operation-key <key> [--operator <id>]")
+	}
+	direction, err := strconv.Atoi(fs.Arg(1))
+	if err != nil {
+		return errors.New("Plan/Delivery direction must be 1, 2, or 3")
+	}
+	result, err := application.NewPlanDeliveryService(a.store).Select(ctx,
+		application.SelectPlanDeliveryDirectionRequest{
+			ProposalID: fs.Arg(0), Direction: direction,
+			OperationKey: *operationKey, RequestedBy: *operator,
+		})
+	if err != nil {
+		return err
+	}
+	printPlanDeliverySelection(a, result.Selection)
+	for _, item := range result.WorkItems {
+		fmt.Fprintf(a.out, "work_item[%d]: %s title=%s dependencies=%s\n",
+			indexPlanDeliveryWorkItem(result.Selection, item.ID), item.ID,
+			item.Title, strings.Join(item.Dependencies, ","))
+	}
+	fmt.Fprintf(a.out, "handoff_note: %s\nreplayed: %t\nphase_changed: false\ncapability_grant: false\n",
+		result.Note.ID, result.Replayed)
+	fmt.Fprintf(a.out, "next: cyberagent run phase %s deliver --operation-key <key> --operator %s --reason \"accepted direction %d\"\n",
+		result.Selection.RunID, result.Selection.RequestedBy,
+		result.Selection.DirectionOrdinal)
+	return nil
+}
+
+func (a *App) runPlanDeliverySelection(ctx context.Context, args []string) error {
+	fs := newFlagSet("run plan selection", a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run plan selection <run-id>")
+	}
+	selection, found, err := application.NewPlanDeliveryService(a.store).
+		SelectionForRun(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	if !found {
+		fmt.Fprintln(a.out, "no Plan/Delivery direction selected")
+		return nil
+	}
+	printPlanDeliverySelection(a, selection)
+	return nil
+}
+
+func printPlanDeliveryProposal(a *App, proposal domain.PlanDeliveryProposal) {
+	fmt.Fprintf(a.out, "proposal: %s\nrun: %s\nprotocol: %s\nstatus: %s\nmode_revision: %d\ndirection_count: %d\nfingerprint: %s\noperator_choice_required: true\nselection_authorized: false\nphase_change_authorized: false\nexecution_authorized: false\n",
+		proposal.ID, proposal.RunID, proposal.Spec.Version, proposal.Status,
+		proposal.ModeRevision, len(proposal.Spec.Directions), proposal.Fingerprint)
+	for _, direction := range proposal.Spec.Directions {
+		fmt.Fprintf(a.out, "\ndirection %d: %s\nsummary: %s\ntradeoffs: %s\n",
+			direction.Ordinal, planDeliveryCLIText(direction.Title),
+			planDeliveryCLIText(direction.Summary),
+			planDeliveryCLIText(strings.Join(direction.Tradeoffs, " | ")))
+		for _, module := range direction.Modules {
+			dependencies := make([]string, len(module.Dependencies))
+			for index, dependency := range module.Dependencies {
+				dependencies[index] = strconv.Itoa(dependency)
+			}
+			fmt.Fprintf(a.out, "  slice %d: %s\n    objective: %s\n    acceptance: %s\n    depends_on: %s\n",
+				module.Ordinal, planDeliveryCLIText(module.Title),
+				planDeliveryCLIText(module.Objective),
+				planDeliveryCLIText(strings.Join(module.AcceptanceCriteria, " | ")),
+				strings.Join(dependencies, ","))
+		}
+	}
+}
+
+func planDeliveryCLIText(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func printPlanDeliverySelection(a *App, selection domain.PlanDeliverySelection) {
+	fmt.Fprintf(a.out, "selection: %s\nproposal: %s\nrun: %s\ndirection: %d\nmodule_count: %d\nnote: %s\nrequested_by: %s\ncreated_at: %s\n",
+		selection.ID, selection.ProposalID, selection.RunID,
+		selection.DirectionOrdinal, len(selection.Items), selection.NoteID,
+		selection.RequestedBy, selection.CreatedAt.Format(time.RFC3339Nano))
+	for _, item := range selection.Items {
+		fmt.Fprintf(a.out, "selected_slice[%d]: module=%d work_item=%s\n",
+			item.Ordinal, item.ModuleOrdinal, item.WorkItemID)
+	}
+}
+
+func indexPlanDeliveryWorkItem(selection domain.PlanDeliverySelection,
+	workItemID string,
+) int {
+	for _, item := range selection.Items {
+		if item.WorkItemID == workItemID {
+			return item.Ordinal
+		}
+	}
+	return 0
 }
 
 func (a *App) runFanouts(ctx context.Context, args []string) error {

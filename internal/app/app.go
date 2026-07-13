@@ -92,6 +92,7 @@ func (a *App) newToolGateway() *toolgateway.Gateway {
 	return toolgateway.New(a.store, a.checker).
 		WithStructuredMemoryExecutor(application.NewStructuredMemoryToolExecutor(a.store)).
 		WithSpecialistDelegationExecutor(application.NewSpecialistDelegationToolExecutor(a.store)).
+		WithPlanDeliveryExecutor(application.NewPlanDeliveryToolExecutor(a.store)).
 		WithWorkspaceRootResolver(func(ctx context.Context, workspaceID string) (string, error) {
 			rec, err := a.store.GetWorkspaceByID(ctx, workspaceID)
 			return rec.RootPath, err
@@ -235,7 +236,8 @@ func (a *App) printHelp() {
 	fmt.Fprintln(a.out, "  cyberagent report finding attach|validate|reject|accept|remediation|fix|verify")
 	fmt.Fprintln(a.out, "  cyberagent api serve|openapi")
 	fmt.Fprintln(a.out, "  cyberagent headless events")
-	fmt.Fprintln(a.out, "  cyberagent run create|adapt-task|list|show|mode|phase|events|usage|start|step|execute|checkpoint|graph|lease|finish|fail|pause|resume|cancel|delegations|delegation|fanouts|fanout")
+	fmt.Fprintln(a.out, "  cyberagent run create|adapt-task|list|show|mode|phase|events|usage|start|step|execute|checkpoint|graph|lease|finish|fail|pause|resume|cancel|delegations|delegation|plans|plan|fanouts|fanout")
+	fmt.Fprintln(a.out, "  cyberagent run plan show|choose|selection")
 	fmt.Fprintln(a.out, "  cyberagent run fanout plan|execute|show|execution|report")
 	fmt.Fprintln(a.out, "  cyberagent todo create|list|show|update|start|block|reopen|complete|cancel")
 	fmt.Fprintln(a.out, "  cyberagent note create|list|show|update|archive|restore")

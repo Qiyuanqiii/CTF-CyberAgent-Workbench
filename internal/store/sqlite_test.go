@@ -999,7 +999,7 @@ func removeSchemaV40ForTestStatements() []string {
 }
 
 func removeSchemaV41ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV42ForTestStatements(), []string{
 		`DROP TRIGGER trg_run_mode_plan_completion_guard`,
 		`DROP TRIGGER trg_run_mode_operation_delete_immutable`,
 		`DROP TRIGGER trg_run_mode_operation_update_immutable`,
@@ -1011,6 +1011,102 @@ func removeSchemaV41ForTestStatements() []string {
 		`DROP INDEX idx_run_mode_snapshots_run_revision`,
 		`DROP TABLE run_mode_snapshots`,
 		`DELETE FROM schema_migrations WHERE version = 41`,
+	}...)
+}
+
+func removeSchemaV42ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_plan_delivery_selection_operation_delete_immutable`,
+		`DROP TRIGGER trg_plan_delivery_selection_operation_update_immutable`,
+		`DROP TRIGGER trg_plan_delivery_selection_item_delete_immutable`,
+		`DROP TRIGGER trg_plan_delivery_selection_item_update_immutable`,
+		`DROP TRIGGER trg_plan_delivery_selection_delete_immutable`,
+		`DROP TRIGGER trg_plan_delivery_selection_update_immutable`,
+		`DROP TRIGGER trg_plan_delivery_proposal_operation_delete_immutable`,
+		`DROP TRIGGER trg_plan_delivery_proposal_operation_update_immutable`,
+		`DROP TRIGGER trg_plan_delivery_module_delete_immutable`,
+		`DROP TRIGGER trg_plan_delivery_module_update_immutable`,
+		`DROP TRIGGER trg_plan_delivery_direction_delete_immutable`,
+		`DROP TRIGGER trg_plan_delivery_direction_update_immutable`,
+		`DROP TRIGGER trg_plan_delivery_proposal_delete_immutable`,
+		`DROP TRIGGER trg_plan_delivery_proposal_update_immutable`,
+		`DROP TRIGGER trg_plan_delivery_selection_operation_insert`,
+		`DROP TRIGGER trg_plan_delivery_selection_item_insert`,
+		`DROP TRIGGER trg_plan_delivery_selection_insert`,
+		`DROP TRIGGER trg_plan_delivery_proposal_operation_insert`,
+		`DROP TRIGGER trg_plan_delivery_module_insert`,
+		`DROP TRIGGER trg_plan_delivery_direction_insert`,
+		`DROP TRIGGER trg_plan_delivery_proposal_insert`,
+		`DROP TABLE plan_delivery_selection_operations`,
+		`DROP TABLE plan_delivery_selection_items`,
+		`DROP TABLE plan_delivery_selections`,
+		`DROP TABLE plan_delivery_proposal_operations`,
+		`DROP TABLE plan_delivery_modules`,
+		`DROP TABLE plan_delivery_directions`,
+		`DROP INDEX idx_plan_delivery_proposals_run_created`,
+		`DROP TABLE plan_delivery_proposals`,
+		`DROP TRIGGER trg_supervisor_tool_call_model_attempt`,
+		`DROP TRIGGER trg_supervisor_tool_round_completion`,
+		`DROP INDEX idx_run_supervisor_tool_calls_pending`,
+		`ALTER TABLE run_supervisor_tool_calls RENAME TO run_supervisor_tool_calls_v42`,
+		`CREATE TABLE run_supervisor_tool_calls (
+			run_id TEXT NOT NULL,
+			turn INTEGER NOT NULL,
+			attempt_id TEXT NOT NULL,
+			round INTEGER NOT NULL,
+			position INTEGER NOT NULL,
+			model_attempt INTEGER NOT NULL,
+			call_id TEXT NOT NULL,
+			tool_name TEXT NOT NULL,
+			payload_json TEXT NOT NULL,
+			status TEXT NOT NULL,
+			result_json TEXT NOT NULL DEFAULT '',
+			error_code TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			completed_at TEXT,
+			PRIMARY KEY(run_id, turn, attempt_id, round, position),
+			UNIQUE(run_id, turn, attempt_id, call_id),
+			FOREIGN KEY(run_id, turn, attempt_id, round)
+				REFERENCES run_supervisor_tool_rounds(run_id, turn, attempt_id, round) ON DELETE CASCADE,
+			CHECK(position BETWEEN 1 AND 4),
+			CHECK(model_attempt > 0),
+			CHECK(tool_name IN ('work_item_create', 'note_create', 'specialist_delegation_propose')),
+			CHECK(status IN ('pending', 'completed', 'denied', 'failed')),
+			CHECK((status = 'pending' AND result_json = '' AND error_code = '' AND completed_at IS NULL)
+				OR (status = 'completed' AND length(result_json) > 0 AND error_code = '' AND completed_at IS NOT NULL)
+				OR (status IN ('denied', 'failed') AND length(result_json) > 0 AND length(error_code) > 0
+					AND completed_at IS NOT NULL))
+		)`,
+		`INSERT INTO run_supervisor_tool_calls
+			(run_id, turn, attempt_id, round, position, model_attempt, call_id, tool_name,
+			payload_json, status, result_json, error_code, created_at, completed_at)
+			SELECT run_id, turn, attempt_id, round, position, model_attempt, call_id, tool_name,
+			payload_json, status, result_json, error_code, created_at, completed_at
+			FROM run_supervisor_tool_calls_v42`,
+		`DROP TABLE run_supervisor_tool_calls_v42`,
+		`CREATE INDEX idx_run_supervisor_tool_calls_pending
+			ON run_supervisor_tool_calls(run_id, turn, attempt_id, status, round, position)`,
+		`CREATE TRIGGER trg_supervisor_tool_call_model_attempt
+			BEFORE INSERT ON run_supervisor_tool_calls
+			WHEN NOT EXISTS (
+				SELECT 1 FROM run_supervisor_tool_rounds
+				WHERE run_id = NEW.run_id AND turn = NEW.turn AND attempt_id = NEW.attempt_id
+					AND round = NEW.round AND model_attempt = NEW.model_attempt
+			)
+			BEGIN
+				SELECT RAISE(ABORT, 'supervisor tool call model attempt mismatch');
+			END`,
+		`CREATE TRIGGER trg_supervisor_tool_round_completion
+			BEFORE UPDATE OF completed_at ON run_supervisor_tool_rounds
+			WHEN NEW.completed_at IS NOT NULL AND EXISTS (
+				SELECT 1 FROM run_supervisor_tool_calls
+				WHERE run_id = NEW.run_id AND turn = NEW.turn AND attempt_id = NEW.attempt_id
+					AND round = NEW.round AND status = 'pending'
+			)
+			BEGIN
+				SELECT RAISE(ABORT, 'supervisor tool round still has pending calls');
+			END`,
+		`DELETE FROM schema_migrations WHERE version = 42`,
 	}
 }
 

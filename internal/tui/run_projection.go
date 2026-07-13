@@ -31,6 +31,8 @@ type RunProjection struct {
 	AgentCount         int
 	FindingReportCount int
 	FindingCount       int
+	PlanProposalID     string
+	PlanDirection      int
 }
 
 func (m *Model) CurrentRunProjection() (RunProjection, bool) {
@@ -41,14 +43,57 @@ func (m *Model) CurrentRunProjection() (RunProjection, bool) {
 	for _, report := range m.runContext.FindingReports {
 		findingCount += report.FindingCount
 	}
-	return RunProjection{
+	projection := RunProjection{
 		RunID: m.runContext.Run.ID, MissionID: m.runContext.Run.MissionID,
 		SessionID: m.runContext.Run.SessionID, Status: m.runContext.Run.Status,
 		Surface: m.runContext.Mode.Surface, Phase: m.runContext.Mode.Phase,
 		ModeRevision:  m.runContext.Mode.Revision,
 		EventSequence: m.runContext.EventSequence, AgentCount: len(m.runContext.Agents),
 		FindingReportCount: len(m.runContext.FindingReports), FindingCount: findingCount,
-	}, true
+	}
+	if m.runContext.PlanProposal != nil {
+		projection.PlanProposalID = m.runContext.PlanProposal.ID
+	}
+	if m.runContext.PlanSelection != nil {
+		projection.PlanDirection = m.runContext.PlanSelection.DirectionOrdinal
+	}
+	return projection, true
+}
+
+func loadPlanDeliveryContext(ctx context.Context, stateStore RunStateStore,
+	run domain.Run,
+) (*domain.PlanDeliveryProposal, *domain.PlanDeliverySelection, error) {
+	proposals, err := stateStore.ListPlanDeliveryProposals(ctx, run.ID, 1)
+	if err != nil {
+		return nil, nil, err
+	}
+	selection, selected, err := stateStore.GetPlanDeliverySelectionByRun(ctx, run.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var proposal *domain.PlanDeliveryProposal
+	if selected {
+		value, err := stateStore.GetPlanDeliveryProposal(ctx, selection.ProposalID)
+		if err != nil {
+			return nil, nil, err
+		}
+		proposal = &value
+	} else if len(proposals) != 0 {
+		value := proposals[0]
+		proposal = &value
+	}
+	if proposal != nil && (proposal.Validate() != nil || proposal.RunID != run.ID) {
+		return nil, nil, errors.New("TUI Plan/Delivery proposal is invalid or cross-Run")
+	}
+	if selected {
+		if selection.Validate() != nil || selection.RunID != run.ID || proposal == nil ||
+			selection.ProposalID != proposal.ID {
+			return nil, nil, errors.New("TUI Plan/Delivery selection is invalid or cross-Run")
+		}
+		copy := domain.ClonePlanDeliverySelection(selection)
+		return proposal, &copy, nil
+	}
+	return proposal, nil, nil
 }
 
 func loadAgentContext(ctx context.Context, stateStore RunStateStore,

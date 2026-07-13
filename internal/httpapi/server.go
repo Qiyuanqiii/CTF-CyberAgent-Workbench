@@ -55,6 +55,9 @@ type Store interface {
 		request domain.RequestSpecialistModelCancellation) (domain.SpecialistModelCancellationResult, error)
 	GetToolCallUsage(ctx context.Context, runID string) (toolbudget.Usage, error)
 	ListRunSupervisorToolRoundsPage(ctx context.Context, runID string, offset int, limit int) ([]domain.SupervisorToolRound, error)
+	ListPlanDeliveryProposals(ctx context.Context, runID string, limit int) ([]domain.PlanDeliveryProposal, error)
+	GetPlanDeliveryProposal(ctx context.Context, id string) (domain.PlanDeliveryProposal, error)
+	GetPlanDeliverySelectionByRun(ctx context.Context, runID string) (domain.PlanDeliverySelection, bool, error)
 	ListAgentNodes(ctx context.Context, runID string) ([]domain.AgentNode, error)
 	GetAgentCompletion(ctx context.Context, agentID string) (domain.AgentCompletion, bool, error)
 	ListSpecialistDelegationProposalsPage(ctx context.Context, runID string,

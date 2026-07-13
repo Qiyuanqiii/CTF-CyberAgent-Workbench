@@ -74,7 +74,8 @@ func (c SupervisorToolCall) Validate() error {
 		return errors.New("supervisor tool turn, round, position, and model attempt are invalid")
 	}
 	if c.ToolName != "work_item_create" && c.ToolName != "note_create" &&
-		c.ToolName != "specialist_delegation_propose" {
+		c.ToolName != "specialist_delegation_propose" &&
+		c.ToolName != "plan_delivery_propose" {
 		return fmt.Errorf("unsupported supervisor tool %q", c.ToolName)
 	}
 	if len(c.PayloadJSON) == 0 || len(c.PayloadJSON) > MaxSupervisorToolPayloadBytes ||

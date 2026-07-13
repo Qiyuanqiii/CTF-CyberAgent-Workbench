@@ -523,7 +523,17 @@ RunSupervisor 在开始 turn 的 SQLite 事务中读取权威模式，并在 Ski
 
 最终发布门禁通过全仓 `go test ./...`、全仓 `go test -race ./...`、`go vet`、零告警 `staticcheck`、`go mod verify/tidy -diff`、零漏洞 `govulncheck`、OpenAPI/TypeScript 确定性再生成、strict TypeScript、6 个 Vitest 文件 15 项测试、Vite production build、零漏洞 npm audit 和凭据模式扫描。隔离真实二进制 smoke 仅使用 mock Provider，验证 `cyber/plan` 创建、Plan 完成拒绝、显式切换 `deliver`、执行一轮、CLI list/show/mode 与 TUI 一致投影；临时 runtime 已删除，没有调用真实模型、Shell、网络或 Sandbox。
 
-唯一推荐下一切片：继续 P7，在 schema v41 上实现完整 Go-owned Plan/Delivery 内置 Skill。它应提供三个有界方向供操作者选择，把接受方案投影到现有 WorkItems 与 durable Notes，进入 `deliver` 后按切片推进，并在每片后执行聚焦测试、diff/安全审计与交接更新，在较大模块结束后执行整体验证和健壮性门禁。Skill 仍只是指导，Go 继续拥有模式、状态、预算、审批与完成判定；Specialist Skill 最小化另行审计。
+P7 第五纵向切片新增 schema v42 与 Go-owned `plan_delivery.v1`。root 模型只可在活动 Plan turn 中调用 `plan_delivery_propose`，提交恰好三个有界方向；每个方向包含 1-8 个有序模块、验收条件、权衡与只能引用前序模块的依赖。Gateway 在任何预算扣减前执行严格 JSON/UTF-8/大小/重复项校验，再绑定 root Agent、Supervisor attempt、活动 execution lease、Run/Session/Workspace Scope、当前 Plan revision、Policy 和工具预算。提案结果始终声明 selection、phase change、execution 与 capability 均未授权。
+
+操作者只能在 Run 暂停且 lease 释放后，用 `run plan choose <proposal> 1|2|3 --operation-key ...` 选择方向。16-256 字节规范化 key 只以域分隔摘要落库；同一事务创建不可变 selection、所选 WorkItem 依赖图、置顶 decision Note、operation 与元数据事件。两条 SQLite Store 并发同 key/同意图收敛到同一组 ID，改方向或操作者冲突。选择后 Run 仍为 `plan`，必须另行执行 schema v41 的显式 `run phase ... deliver`；该选择不是审批或 capability grant。
+
+CLI 新增 proposal 列表/详情/选择/selection 查询；HTTP/OpenAPI、TypeScript DTO、React overview 与 Bubble Tea Plan 标签只读显示三个方向、选择、WorkItem 映射和是否仍需 Deliver。公共投影不包含原始 key、operation/fingerprint、root/requester 内部身份、lease/fencing 或模型正文。内置 `plan-delivery` Skill 作为第五份 `1.1.0` 指导跨 `code/learn/review/script` Profile 可选，但即使未选择该 Skill，Go 生成的 Plan 协议仍然生效；Skill 不增加工具或权限。
+
+本轮审计未发现未解决的高/中风险问题，并在收口时修复八类低风险完整性与隐私缺口：协议版本前后空白不再被默许；重复依赖不再被静默去重；方向与模块标题在 Go 和 SQLite 双层拒绝重复；operation key 与 operator identity 使用精确规范化语义并拒绝空白/控制字符；`plan_delivery_propose` 在进入 Tool Gateway 和预算扣减前即被限制为 Plan phase，越阶段调用只进入一次有界协议修复；内部 proposal fingerprint 不再进入 Run event 或交接 Note；CLI 展示的模型文本被折叠为单行，不能注入额外终端行；最大合法方向标题和极端文本不再产生无法持久化的交接 Note，稳定编号标题与领域层字节证明保证每个已接受方向都可选择。测试覆盖领域协议、Gateway、proposal->wait->choose 端到端、双 Store 十轮并发、重放/冲突、活动 lease 与过期 revision、v41 原地升级、直接 SQL 篡改、HTTP 隐私、TUI 非 Tools mutation 拒绝和 React 只读渲染。
+
+schema v42 本地发布门禁通过：`go test -count=1 ./...`、全仓 `go test -race -count=1 ./...`、`go vet ./...`、零告警 `staticcheck ./...`、`go mod verify`、无差异 `go mod tidy -diff` 和零可达漏洞 `govulncheck ./...`；Application Plan 用例连续 10 轮、Store Plan 用例连续 3 轮、交接 Note 极限边界连续 10 轮通过。OpenAPI/TypeScript 两次生成 SHA-256 一致；strict TypeScript、7 个 Vitest 文件共 16 项测试、Vite production build 与零高危 npm audit 均通过。凭证扫描仅命中两个 `_test.go` 固定鉴权夹具，真实 `sk-`/`tp-` 模式与受跟踪运行产物均为零。隔离真实二进制 smoke 仅注册 mock Provider，验证 version、workspace、第五个 Skill、`code/plan` Run、Plan schema、空 proposal 查询和 TUI 投影后删除全部临时 runtime；没有调用真实 Provider、Shell、网络、Docker 或 Sandbox。GitHub CI 结果在推送后复核。
+
+唯一推荐下一切片：继续 P7，在 schema v42 上增加 Go-owned Delivery 切片门禁。每个 checkpoint 绑定所选 WorkItem、验收条件和当前 Deliver revision；完成前要求聚焦测试、diff/安全审计与紧凑交接 Note，较大模块边界再要求整体验证和健壮性门禁。模型只能提出证据，Go 拥有门禁事实、状态、预算、阶段和完成判定；Specialist Skill 最小化继续作为后续独立审计。
 
 Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过独立审计。
 

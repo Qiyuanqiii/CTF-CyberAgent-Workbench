@@ -263,6 +263,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 39, Name: "immutable Run Skill selection", Statements: skillSelectionStatements},
 		{Version: 40, Name: "root Skill context provenance", Statements: rootSkillContextStatements},
 		{Version: 41, Name: "immutable Run execution mode", Statements: runModeStatements},
+		{Version: 42, Name: "review-gated Plan Delivery workflow", Statements: planDeliveryStatements},
 	})
 }
 

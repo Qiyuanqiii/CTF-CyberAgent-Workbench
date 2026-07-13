@@ -14,18 +14,21 @@ func TestSkillCLIListsShowsAndValidatesBuiltinsWithoutRuntimeState(t *testing.T)
 	listed, stderr, code := executeTestCommand(t, "skill", "list")
 	if code != 0 || stderr != "" || !strings.Contains(listed, "code@1.1.0") ||
 		!strings.Contains(listed, "learn@1.1.0") || !strings.Contains(listed, "review@1.1.0") ||
+		!strings.Contains(listed, "plan-delivery@1.1.0") ||
 		!strings.Contains(listed, "script@1.1.0") || !strings.Contains(listed, "context_injection: root_selected_only") ||
 		!strings.Contains(listed, "tool_capability_grant: disabled") {
 		t.Fatalf("unexpected skill list: code=%d stderr=%q output=%q", code, stderr, listed)
 	}
 	if strings.Index(listed, "code@") > strings.Index(listed, "learn@") ||
-		strings.Index(listed, "learn@") > strings.Index(listed, "review@") ||
+		strings.Index(listed, "learn@") > strings.Index(listed, "plan-delivery@") ||
+		strings.Index(listed, "plan-delivery@") > strings.Index(listed, "review@") ||
 		strings.Index(listed, "review@") > strings.Index(listed, "script@") {
 		t.Fatalf("skill list is not deterministic: %q", listed)
 	}
 
 	filtered, stderr, code := executeTestCommand(t, "skill", "list", "--profile", "review")
 	if code != 0 || stderr != "" || !strings.Contains(filtered, "review@1.1.0") ||
+		!strings.Contains(filtered, "plan-delivery@1.1.0") ||
 		strings.Contains(filtered, "code@1.1.0") || strings.Contains(filtered, "script@1.1.0") {
 		t.Fatalf("unexpected profile filter: code=%d stderr=%q output=%q", code, stderr, filtered)
 	}
@@ -39,7 +42,7 @@ func TestSkillCLIListsShowsAndValidatesBuiltinsWithoutRuntimeState(t *testing.T)
 	}
 
 	validated, stderr, code := executeTestCommand(t, "skill", "validate")
-	if code != 0 || stderr != "" || !strings.Contains(validated, "validated 4 built-in skill.v1 manifests") {
+	if code != 0 || stderr != "" || !strings.Contains(validated, "validated 5 built-in skill.v1 manifests") {
 		t.Fatalf("unexpected skill validation: code=%d stderr=%q output=%q", code, stderr, validated)
 	}
 	if _, err := os.Stat(filepath.Join(home, "cyberagent.db")); !os.IsNotExist(err) {

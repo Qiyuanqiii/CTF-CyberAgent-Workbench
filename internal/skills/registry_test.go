@@ -30,11 +30,11 @@ func TestBuiltinRegistryIsDeterministicBoundedAndReadOnly(t *testing.T) {
 			}
 		}
 	}
-	if want := []string{"code", "learn", "review", "script"}; !reflect.DeepEqual(names, want) {
+	if want := []string{"code", "learn", "plan-delivery", "review", "script"}; !reflect.DeepEqual(names, want) {
 		t.Fatalf("built-in order = %v, want %v", names, want)
 	}
 	review := registry.List(domain.ProfileReview)
-	if len(review) != 1 || review[0].Name != "review" {
+	if len(review) != 2 || review[0].Name != "plan-delivery" || review[1].Name != "review" {
 		t.Fatalf("review profile projection = %#v", review)
 	}
 

@@ -113,13 +113,64 @@ type RunExecutionLeaseView struct {
 	ReleasedAt *time.Time `json:"released_at,omitempty"`
 }
 
+type PlanDeliveryModuleView struct {
+	Ordinal            int      `json:"ordinal"`
+	Title              string   `json:"title"`
+	Objective          string   `json:"objective"`
+	AcceptanceCriteria []string `json:"acceptance_criteria"`
+	Dependencies       []int    `json:"dependencies"`
+}
+
+type PlanDeliveryDirectionView struct {
+	Ordinal   int                      `json:"ordinal"`
+	Title     string                   `json:"title"`
+	Summary   string                   `json:"summary"`
+	Tradeoffs []string                 `json:"tradeoffs"`
+	Modules   []PlanDeliveryModuleView `json:"modules"`
+}
+
+type PlanDeliveryProposalView struct {
+	ID              string                      `json:"id"`
+	ProtocolVersion string                      `json:"protocol_version"`
+	Status          string                      `json:"status"`
+	ModeRevision    int64                       `json:"mode_revision"`
+	Directions      []PlanDeliveryDirectionView `json:"directions"`
+	Version         int64                       `json:"version"`
+	CreatedAt       time.Time                   `json:"created_at"`
+}
+
+type PlanDeliverySelectionItemView struct {
+	Ordinal       int    `json:"ordinal"`
+	ModuleOrdinal int    `json:"module_ordinal"`
+	WorkItemID    string `json:"work_item_id"`
+}
+
+type PlanDeliverySelectionView struct {
+	ID               string                          `json:"id"`
+	ProposalID       string                          `json:"proposal_id"`
+	DirectionOrdinal int                             `json:"direction_ordinal"`
+	NoteID           string                          `json:"note_id"`
+	Items            []PlanDeliverySelectionItemView `json:"items"`
+	Version          int64                           `json:"version"`
+	CreatedAt        time.Time                       `json:"created_at"`
+}
+
+type PlanDeliveryStateView struct {
+	Proposal             *PlanDeliveryProposalView  `json:"proposal,omitempty"`
+	Selection            *PlanDeliverySelectionView `json:"selection,omitempty"`
+	OperatorChoiceNeeded bool                       `json:"operator_choice_needed"`
+	PhaseChangeNeeded    bool                       `json:"phase_change_needed"`
+	CapabilityGrant      bool                       `json:"capability_grant"`
+}
+
 type RunDetailView struct {
-	Run        RunView                   `json:"run"`
-	Mission    MissionView               `json:"mission"`
-	Mode       RunModeView               `json:"mode"`
-	Checkpoint *SupervisorCheckpointView `json:"checkpoint,omitempty"`
-	Lease      *RunExecutionLeaseView    `json:"execution_lease,omitempty"`
-	ToolUsage  ToolUsageView             `json:"tool_usage"`
+	Run          RunView                   `json:"run"`
+	Mission      MissionView               `json:"mission"`
+	Mode         RunModeView               `json:"mode"`
+	Checkpoint   *SupervisorCheckpointView `json:"checkpoint,omitempty"`
+	Lease        *RunExecutionLeaseView    `json:"execution_lease,omitempty"`
+	ToolUsage    ToolUsageView             `json:"tool_usage"`
+	PlanDelivery *PlanDeliveryStateView    `json:"plan_delivery,omitempty"`
 }
 
 type SessionView struct {
@@ -292,6 +343,42 @@ func runExecutionLeaseView(value domain.RunExecutionLease, now time.Time) RunExe
 		OwnerID: value.OwnerID, Generation: value.Generation, Status: string(value.Status),
 		Active: value.ActiveAt(now), AcquiredAt: value.AcquiredAt, RenewedAt: value.RenewedAt,
 		ExpiresAt: value.ExpiresAt, ReleasedAt: value.ReleasedAt,
+	}
+}
+
+func planDeliveryProposalView(value domain.PlanDeliveryProposal) PlanDeliveryProposalView {
+	directions := make([]PlanDeliveryDirectionView, len(value.Spec.Directions))
+	for directionIndex, direction := range value.Spec.Directions {
+		modules := make([]PlanDeliveryModuleView, len(direction.Modules))
+		for moduleIndex, module := range direction.Modules {
+			modules[moduleIndex] = PlanDeliveryModuleView{
+				Ordinal: module.Ordinal, Title: module.Title, Objective: module.Objective,
+				AcceptanceCriteria: append([]string{}, module.AcceptanceCriteria...),
+				Dependencies:       append([]int{}, module.Dependencies...),
+			}
+		}
+		directions[directionIndex] = PlanDeliveryDirectionView{
+			Ordinal: direction.Ordinal, Title: direction.Title, Summary: direction.Summary,
+			Tradeoffs: append([]string{}, direction.Tradeoffs...), Modules: modules,
+		}
+	}
+	return PlanDeliveryProposalView{
+		ID: value.ID, ProtocolVersion: value.Spec.Version, Status: string(value.Status),
+		ModeRevision: value.ModeRevision, Directions: directions, Version: value.Version,
+		CreatedAt: value.CreatedAt,
+	}
+}
+
+func planDeliverySelectionView(value domain.PlanDeliverySelection) PlanDeliverySelectionView {
+	items := make([]PlanDeliverySelectionItemView, len(value.Items))
+	for index, item := range value.Items {
+		items[index] = PlanDeliverySelectionItemView{
+			Ordinal: item.Ordinal, ModuleOrdinal: item.ModuleOrdinal, WorkItemID: item.WorkItemID,
+		}
+	}
+	return PlanDeliverySelectionView{
+		ID: value.ID, ProposalID: value.ProposalID, DirectionOrdinal: value.DirectionOrdinal,
+		NoteID: value.NoteID, Items: items, Version: value.Version, CreatedAt: value.CreatedAt,
 	}
 }
 

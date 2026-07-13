@@ -2,6 +2,8 @@
 
 ## 中文
 
+schema v42 的 Run 概览会只读显示三个 Plan 方向、已选方向、切片数量与是否仍需显式切换到 Deliver。浏览器没有方向选择、阶段切换或执行入口，`capability_grant` 始终为 `false`。
+
 这是 CyberAgent Workbench 的本地只读运维界面。React/Vite 只消费 Go 生成的 OpenAPI 3.1 DTO 和 `api.v1`，不会重新实现 Policy、审批、工作区权限、Shell、Docker、模型路由或 SQLite 逻辑。
 
 当前界面提供：
@@ -52,7 +54,7 @@ npm run dev
 
 This is the local read-only operations UI for CyberAgent Workbench. React/Vite consumes the Go-generated OpenAPI 3.1 DTOs and `api.v1`; it does not reimplement policy, approvals, workspace authorization, Shell, Docker, model routing, or SQLite behavior.
 
-The current UI includes Run and Session browsing, a bounded root/Specialist Agent graph, operator-gated delegation summaries, read-only Fan-out plan/execution/shard metadata, Finding/Report projections, bounded pagination, authenticated resumable Run-event SSE, WorkItems, Notes, Artifact descriptors, Supervisor ToolRounds, budgets, leases, and compacted message history. The read bearer remains in page memory, never enters a URL or browser storage, and is distinct from the unavailable control token. Raw Fan-out reports, private decision narratives, Artifact content, digests, and lease/fencing identities are omitted from browser DTOs.
+The current UI includes Run and Session browsing, read-only schema v42 three-direction Plan/Delivery state, a bounded root/Specialist Agent graph, operator-gated delegation summaries, read-only Fan-out plan/execution/shard metadata, Finding/Report projections, bounded pagination, authenticated resumable Run-event SSE, WorkItems, Notes, Artifact descriptors, Supervisor ToolRounds, budgets, leases, and compacted message history. The Plan panel may display the selected direction and whether a separate Deliver transition is needed, but it has no selection, phase-change, or execution control and always receives `capability_grant=false`. The read bearer remains in page memory, never enters a URL or browser storage, and is distinct from the unavailable control token. Raw Fan-out reports, private decision narratives, Artifact content, digests, and lease/fencing identities are omitted from browser DTOs.
 
 For the production-style local path, run `npm run build`, then start `cyberagent api serve --ui-dir web/dist`. Go validates and snapshots the bundle at startup, serves it from the same loopback origin as `api.v1`, applies a strict CSP, disables HTML caching, and gives only hashed assets immutable caching. Static requests are anonymous but reject authorization headers, queries, bodies, and methods other than GET/HEAD. For frontend development, Vite can still proxy same-origin `/api` requests to a loopback Go service and rejects non-loopback targets.
 

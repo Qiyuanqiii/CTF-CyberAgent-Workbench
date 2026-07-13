@@ -16,18 +16,19 @@ Read in this order after a long context break:
 6. `docs/adr/0001-go-control-plane.md`
 7. `docs/adr/0002-run-centric-runtime.md`
 8. `docs/adr/0003-run-execution-modes.md`
+9. `docs/adr/0004-plan-delivery-workflow.md`
 
 ## Current Baseline
 
 - Overall product vision: about 97%.
 - General Agent MVP: about 99%.
 - V2 run-centric runtime: about 99%.
-- Database schema: v41.
+- Database schema: v42.
 - Main languages: Go control plane, TypeScript React/Vite read console; Rust has not started.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
 
-Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, loopback read API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite read console.
+Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, loopback read API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite read console.
 
 ## Security Invariants
 
@@ -41,27 +42,25 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 
 ## Latest Completed Slice
 
-Schema v41 establishes Go-owned `run_mode.v1` before the Plan/Delivery Skill itself. Every Run receives an append-only mode snapshot with two orthogonal axes: execution surface `code|cyber` and execution phase `plan|deliver`. Scope, Profile, policy version, and surface are immutable for the lifetime of the Run. Phase changes require an explicit operator operation key and are accepted only while the Run is `created` or `paused` with no active execution lease. Legacy v40 rows and omitted create fields backfill/default to `code/deliver`.
+Schema v42 adds the Go-owned `plan_delivery.v1` protocol on top of immutable schema v41 modes. During a root Plan turn, the model may call `plan_delivery_propose` to persist exactly three bounded directions. Each direction contains 1-8 ordered modules, explicit acceptance criteria, bounded tradeoffs, and only backward dependency references. The tool is bound to the current root Agent, Supervisor attempt, execution lease, Run scope, Plan revision, Policy, and tool budget. Its result always keeps selection, phase change, and execution unauthorized.
 
-Run creation, script-process Run creation, and legacy Task adaptation now persist the initial snapshot and `run.mode_selected` event in their existing transaction. Phase replay is digest-keyed and converges across Store connections; changed intent conflicts, transition records are immutable, and events expose metadata rather than scope targets or raw keys. The Store recomputes operation fingerprints and independently checks lifecycle and active leases, so application-only validation cannot be bypassed.
+After the proposal has paused and released the execution lease, the operator is the only actor that may choose direction 1, 2, or 3. `run plan choose` requires an exact normalized 16-256-byte operation key and a bounded operator identity. Go atomically writes the immutable selection, the chosen WorkItem dependency graph, a pinned decision Note, digest-only operation facts, and metadata-only Run events. Same-key concurrent calls across two SQLite Stores converge; changed intent conflicts. The Run remains paused in `plan`, and a separate `run phase ... deliver` operation is required.
 
-RunSupervisor loads the authoritative snapshot inside its turn transaction and places a Go-generated, bounded mode contract before selected Skill guidance. Plan phase permits reasoning and the existing create-only WorkItem/Note tools, but rejects both model and operator completion. A model `finish` uses the existing one-repair path and must converge to `continue` or `wait`. Persistence rechecks the current phase during finalization to close a mode-change time-of-check/time-of-use window. Code/Cyber changes require a new Run; mode is never a capability grant.
+CLI adds `run plans`, `run plan show`, `run plan choose`, and `run plan selection`. HTTP/OpenAPI, generated TypeScript DTOs, the React Run overview, and the Bubble Tea Plan tab expose read-only state. They omit operation keys, lease/fencing identity, requester internals, and model text, and explicitly project `capability_grant=false`. The embedded cross-Profile `plan-delivery` Skill is guidance only; the hard Go protocol remains authoritative even when that Skill was not selected.
 
-CLI adds `run create --surface/--phase`, `run mode`, and replay-safe `run phase`. Run list/show, Run-first TUI, HTTP/OpenAPI, generated TypeScript DTOs, and the React Run overview project the same revision. This slice intentionally adds no HTTP mutation, model-selected mode, Shell, network, file-write, Sandbox execution, or extra child authority.
+The slice audit found no unresolved high- or medium-severity issue. Hardening rejects protocol-version whitespace, duplicate dependency references, duplicate direction/module titles in both Go and SQLite, malformed operation identities, active-lease selection, stale Plan revisions, direct SQL update/delete, and selection replay drift. Phase fencing now rejects `plan_delivery_propose` before Tool Gateway admission or budget use outside Plan; internal proposal fingerprints no longer enter events or handoff Notes; CLI model text is forced onto one terminal-safe line. Stable numbered handoff titles plus domain-level byte checks guarantee every accepted direction can produce a durable Note even at protocol bounds. The transaction and migration suites cover v41-to-v42 upgrade, rollback, tamper resistance, cross-store concurrency, HTTP privacy, TUI mutation denial, and React read-only rendering.
 
-The slice audit found no unresolved high- or medium-severity issue. Hardening during review replaced migration IDs derived from unbounded legacy Run strings, made lease checks use Store/SQLite time rather than caller timestamps, blocked phase changes while an execution lease is active, enforced Plan completion denial in both Supervisor completion transactions and a SQLite trigger, rejected unredacted mode metadata at the Store boundary, recomputed operation fingerprints at persistence, included the complete mode tuple in script-process idempotency, and clamped phase-transition time against clock rollback.
-
-Release verification passed full `go test ./...`, full `go test -race ./...`, `go vet`, clean `staticcheck`, module verification/tidy diff, zero-finding `govulncheck`, deterministic OpenAPI-to-TypeScript regeneration, strict TypeScript, 15 Vitest cases, Vite production build, zero-finding npm audit, credential-pattern scanning, and an isolated real-binary `cyber/plan -> deliver -> step -> TUI` smoke. No real Provider key, host command, network target, or Sandbox execution was used.
+The complete local release gates, deterministic generation checks, credential/runtime scans, and isolated real-binary smoke passed; exact commands and counts are recorded in the final schema-v42 entry in `docs/PROGRESS_BOOK.md`. GitHub CI is verified after the commit is pushed. No real Provider key, host command, network target, or Sandbox execution belongs in this slice.
 
 ## Next Slice
 
-Build the fourth P7 Skills vertical slice on schema v41 as an explicit, bounded Plan/Delivery workflow inspired by strong coding-agent product patterns without copying proprietary implementation:
+Build schema v43 Delivery audit gates over the selected v42 WorkItems without creating another task engine:
 
-1. Add one embedded cross-Profile planning Skill with three concise operator-selectable directions and a strict bounded plan document.
-2. Persist operator choice and project accepted modules into existing WorkItems and durable handoff Notes rather than creating a second task engine.
-3. Advance one slice at a time in `deliver`; require focused verification, diff/security audit, and compact handoff state after each slice.
-4. Require broader functional and robustness gates after each larger module before allowing completion.
-5. Keep Go authoritative for workflow state, phase transitions, budgets, and completion. Skill text remains guidance, and Specialist Skill minimization follows as a separate audited slice.
+1. Bind each delivery checkpoint to one selected WorkItem, its acceptance criteria, exact source selection, and current Deliver-mode revision.
+2. Require focused verification, diff/security audit, and a compact durable handoff Note before that slice can complete.
+3. Require a broader functional and robustness gate when a larger module boundary is reached, then let existing Run completion checks consume those facts.
+4. Keep model assertions non-authoritative: Go owns gate state, evidence references, phase, budgets, and completion.
+5. Audit Specialist Skill minimization separately after the single-root Delivery loop is stable.
 
 ## Delivery Loop
 

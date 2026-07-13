@@ -505,7 +505,7 @@
       "get": {
         "operationId": "getRun",
         "summary": "Inspect a Run",
-        "description": "Returns Run, Mission, checkpoint, tool usage, and token-free execution-lease metadata.",
+        "description": "Returns Run, Mission, checkpoint, tool usage, token-free execution-lease metadata, and the read-only Plan/Delivery projection when present.",
         "tags": [
           "Runs"
         ],
@@ -4038,6 +4038,233 @@
         ],
         "type": "object"
       },
+      "PlanDeliveryDirectionView": {
+        "additionalProperties": false,
+        "properties": {
+          "modules": {
+            "items": {
+              "$ref": "#/components/schemas/PlanDeliveryModuleView"
+            },
+            "type": "array"
+          },
+          "ordinal": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tradeoffs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ordinal",
+          "title",
+          "summary",
+          "tradeoffs",
+          "modules"
+        ],
+        "type": "object"
+      },
+      "PlanDeliveryModuleView": {
+        "additionalProperties": false,
+        "properties": {
+          "acceptance_criteria": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "dependencies": {
+            "items": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "ordinal": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ordinal",
+          "title",
+          "objective",
+          "acceptance_criteria",
+          "dependencies"
+        ],
+        "type": "object"
+      },
+      "PlanDeliveryProposalView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "directions": {
+            "items": {
+              "$ref": "#/components/schemas/PlanDeliveryDirectionView"
+            },
+            "type": "array"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "mode_revision": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "protocol_version": {
+            "enum": [
+              "plan_delivery.v1"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "proposed"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "protocol_version",
+          "status",
+          "mode_revision",
+          "directions",
+          "version",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "PlanDeliverySelectionItemView": {
+        "additionalProperties": false,
+        "properties": {
+          "module_ordinal": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "ordinal": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "work_item_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ordinal",
+          "module_ordinal",
+          "work_item_id"
+        ],
+        "type": "object"
+      },
+      "PlanDeliverySelectionView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "direction_ordinal": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlanDeliverySelectionItemView"
+            },
+            "type": "array"
+          },
+          "note_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "proposal_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "proposal_id",
+          "direction_ordinal",
+          "note_id",
+          "items",
+          "version",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "PlanDeliveryStateView": {
+        "additionalProperties": false,
+        "properties": {
+          "capability_grant": {
+            "type": "boolean"
+          },
+          "operator_choice_needed": {
+            "type": "boolean"
+          },
+          "phase_change_needed": {
+            "type": "boolean"
+          },
+          "proposal": {
+            "$ref": "#/components/schemas/PlanDeliveryProposalView"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/PlanDeliverySelectionView"
+          }
+        },
+        "required": [
+          "operator_choice_needed",
+          "phase_change_needed",
+          "capability_grant"
+        ],
+        "type": "object"
+      },
       "RunConfigView": {
         "additionalProperties": false,
         "properties": {
@@ -4068,6 +4295,9 @@
           },
           "mode": {
             "$ref": "#/components/schemas/RunModeView"
+          },
+          "plan_delivery": {
+            "$ref": "#/components/schemas/PlanDeliveryStateView"
           },
           "run": {
             "$ref": "#/components/schemas/RunView"

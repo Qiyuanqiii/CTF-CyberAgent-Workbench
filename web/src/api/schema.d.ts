@@ -133,7 +133,7 @@ export interface paths {
         };
         /**
          * Inspect a Run
-         * @description Returns Run, Mission, checkpoint, tool usage, and token-free execution-lease metadata.
+         * @description Returns Run, Mission, checkpoint, tool usage, token-free execution-lease metadata, and the read-only Plan/Delivery projection when present.
          */
         get: operations["getRun"];
         put?: never;
@@ -922,6 +922,62 @@ export interface components {
             next_cursor?: string;
             truncated?: boolean;
         };
+        PlanDeliveryDirectionView: {
+            modules: components["schemas"]["PlanDeliveryModuleView"][];
+            /** Format: int32 */
+            ordinal: number;
+            summary: string;
+            title: string;
+            tradeoffs: string[];
+        };
+        PlanDeliveryModuleView: {
+            acceptance_criteria: string[];
+            dependencies: number[];
+            objective: string;
+            /** Format: int32 */
+            ordinal: number;
+            title: string;
+        };
+        PlanDeliveryProposalView: {
+            /** Format: date-time */
+            created_at: string;
+            directions: components["schemas"]["PlanDeliveryDirectionView"][];
+            id: string;
+            /** Format: int64 */
+            mode_revision: number;
+            /** @enum {string} */
+            protocol_version: "plan_delivery.v1";
+            /** @enum {string} */
+            status: "proposed";
+            /** Format: int64 */
+            version: number;
+        };
+        PlanDeliverySelectionItemView: {
+            /** Format: int32 */
+            module_ordinal: number;
+            /** Format: int32 */
+            ordinal: number;
+            work_item_id: string;
+        };
+        PlanDeliverySelectionView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int32 */
+            direction_ordinal: number;
+            id: string;
+            items: components["schemas"]["PlanDeliverySelectionItemView"][];
+            note_id: string;
+            proposal_id: string;
+            /** Format: int64 */
+            version: number;
+        };
+        PlanDeliveryStateView: {
+            capability_grant: boolean;
+            operator_choice_needed: boolean;
+            phase_change_needed: boolean;
+            proposal?: components["schemas"]["PlanDeliveryProposalView"];
+            selection?: components["schemas"]["PlanDeliverySelectionView"];
+        };
         RunConfigView: {
             interactive: boolean;
             model_route: string;
@@ -931,6 +987,7 @@ export interface components {
             execution_lease?: components["schemas"]["RunExecutionLeaseView"];
             mission: components["schemas"]["MissionView"];
             mode: components["schemas"]["RunModeView"];
+            plan_delivery?: components["schemas"]["PlanDeliveryStateView"];
             run: components["schemas"]["RunView"];
             tool_usage: components["schemas"]["ToolUsageView"];
         };

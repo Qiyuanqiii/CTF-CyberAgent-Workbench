@@ -10,6 +10,10 @@ cyberagent run list
 cyberagent run list --status paused
 cyberagent run show <run-id>
 cyberagent run mode <run-id>
+cyberagent run plans <run-id>
+cyberagent run plan show <proposal-id>
+cyberagent run plan choose <proposal-id> 2 --operation-key <stable-key>
+cyberagent run plan selection <run-id>
 cyberagent run phase <run-id> deliver --operation-key <stable-key> --reason "plan accepted"
 cyberagent run events <run-id>
 cyberagent headless events <run-id> --max-events 1000
@@ -42,6 +46,10 @@ Root actions use `continue`, `finish`, or `wait`. `continue` advances to another
 
 In `plan` phase, `finish` is deliberately invalid: the model receives one bounded lifecycle repair and must return `continue` or `wait`, while explicit operator completion is also rejected. After the plan is accepted, pause the Run if needed and use `run phase <id> deliver`; the following turn receives the new durable mode revision. The current root tools remain proposal/create-only, so Plan mode cannot silently execute Shell, files, processes, network calls, or Specialist schedules.
 
+Schema v42 adds the strict `plan_delivery.v1` proposal tool for root Plan turns. A valid proposal has exactly three directions. Each direction contains 1-8 ordered delivery modules with a title, summary, acceptance criteria, bounded tradeoffs, and dependencies that may reference earlier modules only. Unknown fields, duplicate titles or dependencies, stale mode revisions, inactive root turns, invalid leases, Policy denial, and exhausted tool budgets fail closed. Proposal creation records no selection and authorizes no phase change, work execution, tool, Shell, network, file mutation, or child Agent.
+
+Use `run plans` and `run plan show` to inspect proposals after the Run pauses. `run plan choose` is the only selection path and accepts direction `1`, `2`, or `3`, an optional bounded operator identity, and an exact normalized 16-256-byte operation key. It requires a paused Plan Run with no active execution lease, then atomically creates the selected WorkItems and backward dependency graph, a pinned decision Note, the immutable selection, and metadata-only events. Exact cross-process replay returns the same objects; a changed direction or identity under the key conflicts. Selection still leaves the Run in Plan, so `run phase <id> deliver` remains a separate explicit action. HTTP, TUI, and Web only read this state.
+
 ## Skills
 
 ```powershell
@@ -53,7 +61,7 @@ cyberagent skill select <run-id> review --operation-key <stable-key> --token-bud
 cyberagent skill selection <run-id>
 ```
 
-The embedded read-only `skill.v1` Registry exposes bounded version `1.1.0` workflow guidance for `code`, `review`, `learn`, and `script`. Schema v39 `skill select` is operator-only and must create the Run's single immutable selection before `run start`. It accepts one to eight names compatible with the Mission Profile, deterministically pins each version/content hash/byte count/token upper bound, and rejects an aggregate above `--token-budget` (maximum 8192). Operation keys must be stable normalized 16-256-byte values; SQLite stores only a domain-separated digest. Exact selection replay returns the original tuples after Run start, while changed intent conflicts. `skill selection` reads those pinned tuples.
+The embedded read-only `skill.v1` Registry exposes bounded version `1.1.0` workflow guidance for `code`, `review`, `learn`, `script`, and the cross-Profile `plan-delivery` workflow. Schema v39 `skill select` is operator-only and must create the Run's single immutable selection before `run start`. It accepts one to eight names compatible with the Mission Profile, deterministically pins each version/content hash/byte count/token upper bound, and rejects an aggregate above `--token-budget` (maximum 8192). Operation keys must be stable normalized 16-256-byte values; SQLite stores only a domain-separated digest. Exact selection replay returns the original tuples after Run start, while changed intent conflicts. `skill selection` reads those pinned tuples.
 
 Schema v40 loads the selected text only for root Supervisor turns. Before every Provider call, Go reconstructs `skill_context.v1` from the persisted tuples and embedded Registry, rechecks exact version/hash/bytes/Profile, redacts it, and enforces a separate deterministic token budget. New selection sees only the current `1.1.0` manifests; a hard-bounded embedded history resolves existing `1.0.0` selections exactly and is not a user-controlled load path. A metadata-only preparation is committed with the first model-start event and safely replays after restart; neither SQLite nor Run events contain Skill text, paths, names, or hashes. A selected Skill never authorizes its declared tool dependencies. There is no HTTP, model-tool, Tool Gateway, child-scheduler, or external-directory selection path, and Specialist contexts do not receive these Skills yet.
 
@@ -330,7 +338,7 @@ Keyboard controls:
 Tab              switch focus between input and the activity pane
 Enter            send, approve a selected Tool, or open/close an Edit diff
 PgUp / PgDn      scroll messages or an open diff
-h / l            switch among Tools, Work, Notes, Rounds, Events, Agents, Findings, and Edits
+h / l            switch among Tools, Plan, Work, Notes, Rounds, Events, Agents, Findings, and Edits
 j / k            select the next/previous item in the active view
 a                approve the selected Shell proposal once
 g                approve it and grant the exact current Session scope
@@ -344,7 +352,7 @@ Esc              return from diff detail, otherwise quit when idle
 
 Message sends, live-call discovery, refreshes, cancellation, and tool approval/deny actions run asynchronously. During a Run-bound model call, the status line shows provider/model, attempt, chunk/byte progress, cancellation, slow-consumer disconnect, and terminal state. `Ctrl+X` prefers the application audit-first cancellation API; if a legacy or not-yet-active request has no registry entry, it cancels the current application request context instead. Additional input is held until the current action finishes, and raw model text is never included in the live envelope.
 
-For a Run-bound Session, the activity pane reads WorkItems, Notes, durable Supervisor ToolRounds, recent Run Events, Agent nodes/completions, bounded Finding-report summaries, active Shell grants, ToolRuns, and FileEdit previews from the Go Store. Work, Notes, Rounds, Events, Agents, Findings, and Edits are read-only views; approval keys act only in Tools. Edits loads at most the latest 20 exact-Session/Workspace records through a metadata/diff-only SQL query that excludes `original_text` and `proposed_text`. `Enter` opens a full-screen read-only diff; `j/k` or `PgUp/PgDn` scrolls and `Enter`, `b`, or `Esc` returns. Displayed diff data is valid UTF-8, terminal-control neutralized, and capped at 128 KiB/4096 lines even though the durable proposal remains unchanged. `a` uses the existing durable per-call decision, while `g` creates or reuses a revocable Grant scoped to the exact Run, Session, Workspace, `shell` tool, and `shell` ActionClass. Keyboard and slash-command approval paths both reject ToolRun IDs outside the currently open Session. The current proposal is matched against its persisted fingerprint and rechecked by Policy before the Grant is created. Later allowed Shell calls may complete automatically as dry runs; Policy denial always wins.
+For a Run-bound Session, the activity pane reads Plan/Delivery state, WorkItems, Notes, durable Supervisor ToolRounds, recent Run Events, Agent nodes/completions, bounded Finding-report summaries, active Shell grants, ToolRuns, and FileEdit previews from the Go Store. Plan shows the three directions, any selected direction and projected WorkItem count, and whether an explicit Deliver transition is still needed. Plan, Work, Notes, Rounds, Events, Agents, Findings, and Edits are read-only views; approval keys act only in Tools. Edits loads at most the latest 20 exact-Session/Workspace records through a metadata/diff-only SQL query that excludes `original_text` and `proposed_text`. `Enter` opens a full-screen read-only diff; `j/k` or `PgUp/PgDn` scrolls and `Enter`, `b`, or `Esc` returns. Displayed diff data is valid UTF-8, terminal-control neutralized, and capped at 128 KiB/4096 lines even though the durable proposal remains unchanged. `a` uses the existing durable per-call decision, while `g` creates or reuses a revocable Grant scoped to the exact Run, Session, Workspace, `shell` tool, and `shell` ActionClass. Keyboard and slash-command approval paths both reject ToolRun IDs outside the currently open Session. The current proposal is matched against its persisted fingerprint and rechecked by Policy before the Grant is created. Later allowed Shell calls may complete automatically as dry runs; Policy denial always wins.
 
 The interactive TUI polls only the local Store and never starts a Run by polling. It reads at most 32 new events per batch, keeps the most recent 50 in the panel, validates contiguous sequence plus exact Run/Mission binding, and refreshes the composite Session/tool/Run/FileEdit projection only when durable events arrive. Each refresh compares the event tail before and after all reads and retries up to eight times if a concurrent transaction lands in the middle. A stale asynchronous result cannot overwrite a newer manual/action refresh; a terminal Run stops polling. Event payloads are not rendered, Finding details and Evidence remain on the existing CLI/Web detail surfaces, and all displayed C0/DEL terminal controls are converted to visible text.
 

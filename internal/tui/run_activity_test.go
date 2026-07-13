@@ -55,6 +55,48 @@ func TestRunActivityViewsRenderEventsAgentsAndFindings(t *testing.T) {
 	}
 }
 
+func TestRunActivityProjectsPlanDeliveryAsReadOnly(t *testing.T) {
+	proposal := &domain.PlanDeliveryProposal{ID: "plan-proposal-view", RunID: "run-plan",
+		Spec: domain.PlanDeliverySpec{Version: domain.PlanDeliveryProtocolVersion,
+			Directions: []domain.PlanDeliveryDirection{
+				{Ordinal: 1, Title: "Conservative", Summary: "Keep changes narrow.",
+					Modules: []domain.PlanDeliveryModule{{Ordinal: 1, Title: "Inspect"}}},
+				{Ordinal: 2, Title: "Balanced", Summary: "Deliver a vertical slice.",
+					Modules: []domain.PlanDeliveryModule{{Ordinal: 1, Title: "Implement"},
+						{Ordinal: 2, Title: "Audit"}}},
+				{Ordinal: 3, Title: "Accelerated", Summary: "Prepare independent slices.",
+					Modules: []domain.PlanDeliveryModule{{Ordinal: 1, Title: "Prepare"}}},
+			}}}
+	selection := &domain.PlanDeliverySelection{ID: "plan-selection-view",
+		ProposalID: proposal.ID, RunID: "run-plan", DirectionOrdinal: 2,
+		Items: []domain.PlanDeliverySelectionItem{{Ordinal: 1, ModuleOrdinal: 1,
+			WorkItemID: "work-plan-one"}, {Ordinal: 2, ModuleOrdinal: 2,
+			WorkItemID: "work-plan-two"}}}
+	model := &Model{focus: focusTools, activityView: activityPlan, runContext: runContext{
+		Found: true, Run: domain.Run{ID: "run-plan", MissionID: "mission-plan",
+			SessionID: "session-plan", Status: domain.RunPaused},
+		Mode:         domain.RunModeSnapshot{Phase: domain.ExecutionPhasePlan},
+		PlanProposal: proposal, PlanSelection: selection,
+	}}
+	output := model.renderActivity(80, 18)
+	for _, want := range []string{"Plan / Delivery", "selected=2 work-items=2",
+		"explicit Deliver phase required", "1. Conservative", "* 2. Balanced",
+		"3. Accelerated"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("Plan/Delivery activity missing %q:\n%s", want, output)
+		}
+	}
+	projection, found := model.CurrentRunProjection()
+	if !found || projection.PlanProposalID != proposal.ID || projection.PlanDirection != 2 {
+		t.Fatalf("Plan/Delivery stable projection drifted: %#v found=%t", projection, found)
+	}
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	model = updated.(*Model)
+	if cmd != nil || !strings.Contains(model.status, "plan view is read-only") {
+		t.Fatalf("Plan activity exposed control: status=%q cmd=%#v", model.status, cmd)
+	}
+}
+
 func TestTUITextRenderingNeutralizesTerminalControlCharacters(t *testing.T) {
 	rendered := truncate("unsafe\x1b[31m title\nsecond", 80)
 	if strings.ContainsRune(rendered, '\x1b') || strings.ContainsRune(rendered, '\n') ||

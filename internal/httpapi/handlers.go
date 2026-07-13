@@ -217,6 +217,40 @@ func (a *API) run(request *http.Request, runID string) (any, *Page, error) {
 		view := runExecutionLeaseView(lease, time.Now().UTC())
 		detail.Lease = &view
 	}
+	selection, selected, err := a.store.GetPlanDeliverySelectionByRun(request.Context(), run.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	proposals, err := a.store.ListPlanDeliveryProposals(request.Context(), run.ID, 1)
+	if err != nil {
+		return nil, nil, err
+	}
+	var proposal *domain.PlanDeliveryProposal
+	if selected {
+		value, err := a.store.GetPlanDeliveryProposal(request.Context(), selection.ProposalID)
+		if err != nil {
+			return nil, nil, err
+		}
+		proposal = &value
+	} else if len(proposals) != 0 {
+		proposal = &proposals[0]
+	}
+	if proposal != nil || selected {
+		state := PlanDeliveryStateView{
+			OperatorChoiceNeeded: proposal != nil && !selected,
+			PhaseChangeNeeded:    selected && mode.Phase == domain.ExecutionPhasePlan,
+			CapabilityGrant:      false,
+		}
+		if proposal != nil {
+			view := planDeliveryProposalView(*proposal)
+			state.Proposal = &view
+		}
+		if selected {
+			view := planDeliverySelectionView(selection)
+			state.Selection = &view
+		}
+		detail.PlanDelivery = &state
+	}
 	return detail, nil, nil
 }
 

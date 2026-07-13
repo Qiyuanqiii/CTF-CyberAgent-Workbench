@@ -111,6 +111,9 @@ type RunStateStore interface {
 	ListNotes(ctx context.Context, filter domain.NoteFilter) ([]domain.Note, error)
 	ListRunSupervisorToolRoundsPage(ctx context.Context, runID string, offset int,
 		limit int) ([]domain.SupervisorToolRound, error)
+	ListPlanDeliveryProposals(ctx context.Context, runID string, limit int) ([]domain.PlanDeliveryProposal, error)
+	GetPlanDeliveryProposal(ctx context.Context, id string) (domain.PlanDeliveryProposal, error)
+	GetPlanDeliverySelectionByRun(ctx context.Context, runID string) (domain.PlanDeliverySelection, bool, error)
 	ListSessionGrants(ctx context.Context, filter approval.GrantListFilter) ([]approval.SessionGrant, error)
 	ListAgentNodes(ctx context.Context, runID string) ([]domain.AgentNode, error)
 	GetAgentCompletion(ctx context.Context, agentID string) (domain.AgentCompletion, bool, error)
@@ -149,6 +152,8 @@ type runContext struct {
 	FindingReports     []domain.FindingReportSummary
 	FileEdits          []fileEditContext
 	FileEditsTruncated bool
+	PlanProposal       *domain.PlanDeliveryProposal
+	PlanSelection      *domain.PlanDeliverySelection
 }
 
 type agentContext struct {
@@ -160,6 +165,7 @@ type activityView string
 
 const (
 	activityTools        activityView = "tools"
+	activityPlan         activityView = "plan"
 	activityWork         activityView = "work"
 	activityNotes        activityView = "notes"
 	activityRounds       activityView = "rounds"
@@ -520,7 +526,7 @@ func (m *Model) PreviousActivityView() {
 
 func (m *Model) setActivityView(view activityView) {
 	switch view {
-	case activityTools, activityWork, activityNotes, activityRounds,
+	case activityTools, activityPlan, activityWork, activityNotes, activityRounds,
 		activityEvents, activityAgents, activityFindings, activityEdits:
 		m.activityView = view
 	default:
@@ -550,6 +556,8 @@ func (m *Model) SelectNextActivityItem() {
 	switch m.activityView {
 	case activityTools:
 		m.SelectNextTool()
+	case activityPlan:
+		m.status = "Plan/Delivery view is read-only"
 	case activityWork:
 		m.selectedWorkItem++
 		m.normalizeActivitySelection()
@@ -585,6 +593,8 @@ func (m *Model) SelectPreviousActivityItem() {
 	switch m.activityView {
 	case activityTools:
 		m.SelectPreviousTool()
+	case activityPlan:
+		m.status = "Plan/Delivery view is read-only"
 	case activityWork:
 		m.selectedWorkItem--
 		m.normalizeActivitySelection()
@@ -944,6 +954,8 @@ func (m *Model) messageLines(width int) []string {
 
 func (m *Model) renderActivity(width int, height int) string {
 	switch m.activityView {
+	case activityPlan:
+		return m.renderPlanDelivery(width, height)
 	case activityWork:
 		return m.renderWorkItems(width, height)
 	case activityNotes:
@@ -961,6 +973,41 @@ func (m *Model) renderActivity(width int, height int) string {
 	default:
 		return m.renderTools(width, height)
 	}
+}
+
+func (m *Model) renderPlanDelivery(width int, height int) string {
+	lines := m.activityHeader("Plan / Delivery", activityPlan, width)
+	if !m.runContext.Found {
+		lines = append(lines, "no Run attached")
+		return strings.Join(lines, "\n")
+	}
+	proposal := m.runContext.PlanProposal
+	if proposal == nil {
+		lines = append(lines, "none")
+		return strings.Join(lines, "\n")
+	}
+	if m.runContext.PlanSelection == nil {
+		lines = append(lines, "operator choice required; no capability granted")
+	} else {
+		selection := m.runContext.PlanSelection
+		state := fmt.Sprintf("selected=%d work-items=%d", selection.DirectionOrdinal,
+			len(selection.Items))
+		if m.runContext.Mode.Phase == domain.ExecutionPhasePlan {
+			state += "; explicit Deliver phase required"
+		}
+		lines = append(lines, state)
+	}
+	for _, direction := range proposal.Spec.Directions {
+		marker := " "
+		if m.runContext.PlanSelection != nil &&
+			m.runContext.PlanSelection.DirectionOrdinal == direction.Ordinal {
+			marker = "*"
+		}
+		lines = append(lines, truncate(fmt.Sprintf("%s %d. %s (%d slices)", marker,
+			direction.Ordinal, direction.Title, len(direction.Modules)), width))
+		lines = append(lines, truncate("  "+singleLine(direction.Summary), width))
+	}
+	return strings.Join(windowTop(lines, height+1), "\n")
 }
 
 func (m *Model) renderTools(width int, height int) string {
@@ -1174,6 +1221,8 @@ func (m *Model) activityHeader(label string, selected activityView, width int) [
 
 func activityLabel(view activityView) string {
 	switch view {
+	case activityPlan:
+		return "Plan"
 	case activityWork:
 		return "Work"
 	case activityNotes:
@@ -1194,7 +1243,7 @@ func activityLabel(view activityView) string {
 }
 
 func activityViews() []activityView {
-	return []activityView{activityTools, activityWork, activityNotes, activityRounds,
+	return []activityView{activityTools, activityPlan, activityWork, activityNotes, activityRounds,
 		activityEvents, activityAgents, activityFindings, activityEdits}
 }
 
@@ -1308,10 +1357,15 @@ func loadRunContext(ctx context.Context, runStateStore RunStateStore,
 	if err != nil {
 		return runContext{}, err
 	}
+	planProposal, planSelection, err := loadPlanDeliveryContext(ctx, runStateStore, run)
+	if err != nil {
+		return runContext{}, err
+	}
 	return runContext{Found: true, Run: run, Mode: mode, WorkItems: workItems, Notes: notes,
 		ToolRounds: rounds, Grants: grants, Events: eventList, EventSequence: eventSequence,
 		Agents: agents, FindingReports: reports, FileEdits: edits,
-		FileEditsTruncated: editsTruncated}, nil
+		FileEditsTruncated: editsTruncated, PlanProposal: planProposal,
+		PlanSelection: planSelection}, nil
 }
 
 func loadWorkspaceContext(ctx context.Context, workspaceStore WorkspaceStore,

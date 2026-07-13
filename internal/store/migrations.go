@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 41
+const LatestSchemaVersion = 42
 
 type migration struct {
 	Version    int
@@ -4903,6 +4903,493 @@ var runModeStatements = []string{
 			), '') != 'deliver'
 		BEGIN
 			SELECT RAISE(ABORT, 'Plan-phase Run cannot be completed');
+		END;`,
+}
+
+var planDeliveryStatements = []string{
+	`DROP TRIGGER trg_supervisor_tool_call_model_attempt;`,
+	`DROP TRIGGER trg_supervisor_tool_round_completion;`,
+	`DROP INDEX idx_run_supervisor_tool_calls_pending;`,
+	`ALTER TABLE run_supervisor_tool_calls RENAME TO run_supervisor_tool_calls_v41;`,
+	`CREATE TABLE run_supervisor_tool_calls (
+		run_id TEXT NOT NULL,
+		turn INTEGER NOT NULL,
+		attempt_id TEXT NOT NULL,
+		round INTEGER NOT NULL,
+		position INTEGER NOT NULL,
+		model_attempt INTEGER NOT NULL,
+		call_id TEXT NOT NULL,
+		tool_name TEXT NOT NULL,
+		payload_json TEXT NOT NULL,
+		status TEXT NOT NULL,
+		result_json TEXT NOT NULL DEFAULT '',
+		error_code TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		completed_at TEXT,
+		PRIMARY KEY(run_id, turn, attempt_id, round, position),
+		UNIQUE(run_id, turn, attempt_id, call_id),
+		FOREIGN KEY(run_id, turn, attempt_id, round)
+			REFERENCES run_supervisor_tool_rounds(run_id, turn, attempt_id, round) ON DELETE CASCADE,
+		CHECK(position BETWEEN 1 AND 4),
+		CHECK(model_attempt > 0),
+		CHECK(tool_name IN ('work_item_create', 'note_create',
+			'specialist_delegation_propose', 'plan_delivery_propose')),
+		CHECK(status IN ('pending', 'completed', 'denied', 'failed')),
+		CHECK((status = 'pending' AND result_json = '' AND error_code = '' AND completed_at IS NULL)
+			OR (status = 'completed' AND length(result_json) > 0 AND error_code = '' AND completed_at IS NOT NULL)
+			OR (status IN ('denied', 'failed') AND length(result_json) > 0 AND length(error_code) > 0
+				AND completed_at IS NOT NULL))
+	);`,
+	`INSERT INTO run_supervisor_tool_calls
+		(run_id, turn, attempt_id, round, position, model_attempt, call_id, tool_name,
+		payload_json, status, result_json, error_code, created_at, completed_at)
+		SELECT run_id, turn, attempt_id, round, position, model_attempt, call_id, tool_name,
+		payload_json, status, result_json, error_code, created_at, completed_at
+		FROM run_supervisor_tool_calls_v41;`,
+	`DROP TABLE run_supervisor_tool_calls_v41;`,
+	`CREATE INDEX idx_run_supervisor_tool_calls_pending
+		ON run_supervisor_tool_calls(run_id, turn, attempt_id, status, round, position);`,
+	`CREATE TRIGGER trg_supervisor_tool_call_model_attempt
+		BEFORE INSERT ON run_supervisor_tool_calls
+		WHEN NOT EXISTS (
+			SELECT 1 FROM run_supervisor_tool_rounds
+			WHERE run_id = NEW.run_id AND turn = NEW.turn AND attempt_id = NEW.attempt_id
+				AND round = NEW.round AND model_attempt = NEW.model_attempt
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'supervisor tool call model attempt mismatch');
+		END;`,
+	`CREATE TRIGGER trg_supervisor_tool_round_completion
+		BEFORE UPDATE OF completed_at ON run_supervisor_tool_rounds
+		WHEN NEW.completed_at IS NOT NULL AND EXISTS (
+			SELECT 1 FROM run_supervisor_tool_calls
+			WHERE run_id = NEW.run_id AND turn = NEW.turn AND attempt_id = NEW.attempt_id
+				AND round = NEW.round AND status = 'pending'
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'supervisor tool round still has pending calls');
+		END;`,
+	`CREATE TABLE plan_delivery_proposals (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		root_agent_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL DEFAULT '',
+		mode_revision INTEGER NOT NULL,
+		protocol_version TEXT NOT NULL,
+		status TEXT NOT NULL,
+		direction_count INTEGER NOT NULL,
+		proposal_fingerprint TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id, root_agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id, mode_revision) REFERENCES run_mode_snapshots(run_id, revision) ON DELETE RESTRICT,
+		CHECK(protocol_version = 'plan_delivery.v1'),
+		CHECK(status = 'proposed'),
+		CHECK(direction_count = 3),
+		CHECK(mode_revision > 0),
+		CHECK(length(proposal_fingerprint) = 64
+			AND proposal_fingerprint = lower(proposal_fingerprint)
+			AND proposal_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = 'run_supervisor'),
+		CHECK(version = 1)
+	);`,
+	`CREATE INDEX idx_plan_delivery_proposals_run_created
+		ON plan_delivery_proposals(run_id, created_at, id);`,
+	`CREATE TABLE plan_delivery_directions (
+		proposal_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		title TEXT NOT NULL,
+		summary TEXT NOT NULL,
+		tradeoffs_json TEXT NOT NULL,
+		module_count INTEGER NOT NULL,
+		PRIMARY KEY(proposal_id, ordinal),
+		FOREIGN KEY(proposal_id) REFERENCES plan_delivery_proposals(id) ON DELETE RESTRICT,
+		CHECK(ordinal BETWEEN 1 AND 3),
+		CHECK(title = trim(title) AND length(title) BETWEEN 1 AND 240
+			AND length(CAST(title AS BLOB)) <= 960 AND instr(title, char(0)) = 0),
+		CHECK(summary = trim(summary) AND length(summary) BETWEEN 1 AND 1200
+			AND length(CAST(summary AS BLOB)) <= 4800 AND instr(summary, char(0)) = 0),
+		CHECK(json_valid(tradeoffs_json) AND json_type(tradeoffs_json) = 'array'
+			AND json_array_length(tradeoffs_json) BETWEEN 1 AND 8),
+		CHECK(module_count BETWEEN 1 AND 8)
+	);`,
+	`CREATE TABLE plan_delivery_modules (
+		proposal_id TEXT NOT NULL,
+		direction_ordinal INTEGER NOT NULL,
+		ordinal INTEGER NOT NULL,
+		title TEXT NOT NULL,
+		objective TEXT NOT NULL,
+		acceptance_json TEXT NOT NULL,
+		dependencies_json TEXT NOT NULL,
+		PRIMARY KEY(proposal_id, direction_ordinal, ordinal),
+		FOREIGN KEY(proposal_id, direction_ordinal)
+			REFERENCES plan_delivery_directions(proposal_id, ordinal) ON DELETE RESTRICT,
+		CHECK(direction_ordinal BETWEEN 1 AND 3),
+		CHECK(ordinal BETWEEN 1 AND 8),
+		CHECK(title = trim(title) AND length(title) BETWEEN 1 AND 240
+			AND length(CAST(title AS BLOB)) <= 960 AND instr(title, char(0)) = 0),
+		CHECK(objective = trim(objective) AND length(objective) BETWEEN 1 AND 2400
+			AND length(CAST(objective AS BLOB)) <= 9600 AND instr(objective, char(0)) = 0),
+		CHECK(json_valid(acceptance_json) AND json_type(acceptance_json) = 'array'
+			AND json_array_length(acceptance_json) BETWEEN 1 AND 8),
+		CHECK(json_valid(dependencies_json) AND json_type(dependencies_json) = 'array'
+			AND json_array_length(dependencies_json) BETWEEN 0 AND 7)
+	);`,
+	`CREATE TABLE plan_delivery_proposal_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		invocation_id TEXT NOT NULL UNIQUE,
+		proposal_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL DEFAULT '',
+		root_agent_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(proposal_id) REFERENCES plan_delivery_proposals(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(invocation_id) REFERENCES run_tool_calls(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64
+			AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64
+			AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = 'run_supervisor')
+	);`,
+	`CREATE TABLE plan_delivery_selections (
+		id TEXT PRIMARY KEY,
+		proposal_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL UNIQUE,
+		root_agent_id TEXT NOT NULL,
+		direction_ordinal INTEGER NOT NULL,
+		note_id TEXT NOT NULL UNIQUE,
+		module_count INTEGER NOT NULL,
+		requested_by TEXT NOT NULL,
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(proposal_id, direction_ordinal)
+			REFERENCES plan_delivery_directions(proposal_id, ordinal) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id, root_agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id, note_id) REFERENCES notes(run_id, id) ON DELETE RESTRICT,
+		CHECK(direction_ordinal BETWEEN 1 AND 3),
+		CHECK(module_count BETWEEN 1 AND 8),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0),
+		CHECK(version = 1)
+	);`,
+	`CREATE TABLE plan_delivery_selection_items (
+		selection_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		module_ordinal INTEGER NOT NULL,
+		work_item_id TEXT NOT NULL UNIQUE,
+		PRIMARY KEY(selection_id, ordinal),
+		FOREIGN KEY(selection_id) REFERENCES plan_delivery_selections(id) ON DELETE RESTRICT,
+		FOREIGN KEY(work_item_id) REFERENCES work_items(id) ON DELETE RESTRICT,
+		CHECK(ordinal BETWEEN 1 AND 8),
+		CHECK(module_ordinal = ordinal)
+	);`,
+	`CREATE TABLE plan_delivery_selection_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		selection_id TEXT NOT NULL UNIQUE,
+		proposal_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL UNIQUE,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(selection_id) REFERENCES plan_delivery_selections(id) ON DELETE RESTRICT,
+		FOREIGN KEY(proposal_id) REFERENCES plan_delivery_proposals(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64
+			AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64
+			AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE TRIGGER trg_plan_delivery_proposal_insert
+		BEFORE INSERT ON plan_delivery_proposals
+		WHEN NOT EXISTS (
+			SELECT 1 FROM runs run
+			JOIN missions mission ON mission.id = run.mission_id
+			JOIN sessions session ON session.id = run.session_id
+			JOIN agent_nodes root ON root.run_id = run.id AND root.id = NEW.root_agent_id
+			JOIN run_mode_snapshots mode ON mode.run_id = run.id
+				AND mode.revision = NEW.mode_revision
+			WHERE run.id = NEW.run_id AND run.session_id = NEW.session_id
+				AND mission.workspace_id = NEW.workspace_id
+				AND run.status = 'running' AND session.status = 'active'
+				AND root.role = 'root' AND root.parent_id IS NULL
+				AND root.status = 'running' AND root.active_attempt_id <> ''
+				AND mode.phase = 'plan'
+				AND NOT EXISTS (SELECT 1 FROM run_mode_snapshots later
+					WHERE later.run_id = run.id AND later.revision > mode.revision)
+				AND julianday(NEW.created_at) >= julianday(mode.created_at)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery proposal binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_direction_insert
+		BEFORE INSERT ON plan_delivery_directions
+		WHEN NOT EXISTS (
+			SELECT 1 FROM plan_delivery_proposals proposal
+			WHERE proposal.id = NEW.proposal_id AND proposal.status = 'proposed'
+				AND NEW.ordinal <= proposal.direction_count
+				AND NOT EXISTS (SELECT 1 FROM plan_delivery_directions existing
+					WHERE existing.proposal_id = NEW.proposal_id
+						AND lower(existing.title) = lower(NEW.title))
+				AND NOT EXISTS (SELECT 1 FROM json_each(NEW.tradeoffs_json) item
+					WHERE item.type != 'text' OR length(trim(item.value)) = 0
+						OR length(item.value) > 512 OR instr(item.value, char(0)) > 0)
+				AND (SELECT COUNT(*) FROM json_each(NEW.tradeoffs_json)) =
+					(SELECT COUNT(DISTINCT lower(value)) FROM json_each(NEW.tradeoffs_json))
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery direction is invalid');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_module_insert
+		BEFORE INSERT ON plan_delivery_modules
+		WHEN NOT EXISTS (
+			SELECT 1 FROM plan_delivery_directions direction
+			WHERE direction.proposal_id = NEW.proposal_id
+				AND direction.ordinal = NEW.direction_ordinal
+				AND NEW.ordinal <= direction.module_count
+				AND NOT EXISTS (SELECT 1 FROM plan_delivery_modules existing
+					WHERE existing.proposal_id = NEW.proposal_id
+						AND existing.direction_ordinal = NEW.direction_ordinal
+						AND lower(existing.title) = lower(NEW.title))
+				AND NOT EXISTS (SELECT 1 FROM json_each(NEW.acceptance_json) item
+					WHERE item.type != 'text' OR length(trim(item.value)) = 0
+						OR length(item.value) > 512 OR instr(item.value, char(0)) > 0)
+				AND (SELECT COUNT(*) FROM json_each(NEW.acceptance_json)) =
+					(SELECT COUNT(DISTINCT lower(value)) FROM json_each(NEW.acceptance_json))
+				AND NOT EXISTS (SELECT 1 FROM json_each(NEW.dependencies_json) dependency
+					WHERE dependency.type != 'integer' OR dependency.value < 1
+						OR dependency.value >= NEW.ordinal)
+				AND (SELECT COUNT(*) FROM json_each(NEW.dependencies_json)) =
+					(SELECT COUNT(DISTINCT value) FROM json_each(NEW.dependencies_json))
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery module is invalid');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_proposal_operation_insert
+		BEFORE INSERT ON plan_delivery_proposal_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM plan_delivery_proposals proposal
+			JOIN runs run ON run.id = proposal.run_id
+			JOIN agent_nodes root ON root.run_id = run.id AND root.id = proposal.root_agent_id
+			JOIN run_supervisor_checkpoints checkpoint ON checkpoint.run_id = run.id
+			JOIN run_tool_calls invocation ON invocation.id = NEW.invocation_id
+			WHERE proposal.id = NEW.proposal_id AND proposal.run_id = NEW.run_id
+				AND proposal.session_id = NEW.session_id
+				AND proposal.workspace_id = NEW.workspace_id
+				AND proposal.root_agent_id = NEW.root_agent_id
+				AND proposal.requested_by = NEW.requested_by
+				AND proposal.created_at = NEW.created_at
+				AND run.status = 'running' AND root.role = 'root'
+				AND root.status = 'running' AND root.active_attempt_id <> ''
+				AND checkpoint.phase = 'turn_started'
+				AND checkpoint.attempt_id = root.active_attempt_id
+				AND invocation.run_id = run.id AND invocation.session_id = proposal.session_id
+				AND invocation.workspace_id = proposal.workspace_id
+				AND invocation.tool_name = 'plan_delivery_propose'
+				AND invocation.action_class = 'agent_proposal'
+				AND (SELECT COUNT(*) FROM plan_delivery_directions direction
+					WHERE direction.proposal_id = proposal.id) = proposal.direction_count
+				AND NOT EXISTS (SELECT 1 FROM plan_delivery_directions direction
+					WHERE direction.proposal_id = proposal.id
+						AND (SELECT COUNT(*) FROM plan_delivery_modules module
+							WHERE module.proposal_id = proposal.id
+								AND module.direction_ordinal = direction.ordinal)
+							!= direction.module_count)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery proposal operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_selection_insert
+		BEFORE INSERT ON plan_delivery_selections
+		WHEN NOT EXISTS (
+			SELECT 1 FROM plan_delivery_proposals proposal
+			JOIN plan_delivery_directions direction ON direction.proposal_id = proposal.id
+				AND direction.ordinal = NEW.direction_ordinal
+			JOIN runs run ON run.id = proposal.run_id
+			JOIN agent_nodes root ON root.run_id = run.id AND root.id = NEW.root_agent_id
+			JOIN notes note ON note.run_id = run.id AND note.id = NEW.note_id
+			JOIN run_mode_snapshots mode ON mode.run_id = run.id
+				AND mode.revision = proposal.mode_revision
+			WHERE proposal.id = NEW.proposal_id AND proposal.run_id = NEW.run_id
+				AND proposal.root_agent_id = NEW.root_agent_id
+				AND run.status = 'paused' AND mode.phase = 'plan'
+				AND NOT EXISTS (SELECT 1 FROM run_mode_snapshots later
+					WHERE later.run_id = run.id AND later.revision > mode.revision)
+				AND NOT EXISTS (SELECT 1 FROM run_execution_leases lease
+					WHERE lease.run_id = run.id AND lease.status = 'active'
+						AND julianday(lease.expires_at) > julianday('now'))
+				AND root.role = 'root' AND root.parent_id IS NULL
+				AND root.status IN ('ready', 'waiting') AND root.active_attempt_id = ''
+				AND NEW.module_count = direction.module_count
+				AND julianday(NEW.created_at) >= julianday(proposal.created_at)
+				AND note.status = 'active' AND note.category = 'decision'
+				AND note.visibility = 'run' AND note.owner = '' AND note.pinned = 1
+				AND note.owner_agent_id = NEW.root_agent_id
+				AND note.version = 1 AND note.created_at = NEW.created_at
+				AND (SELECT COUNT(*) FROM note_tags tag
+					WHERE tag.run_id = run.id AND tag.note_id = note.id
+						AND tag.tag IN ('plan-delivery', 'selected-direction')) = 2
+				AND (SELECT COUNT(*) FROM note_tags tag
+					WHERE tag.run_id = run.id AND tag.note_id = note.id) = 2
+				AND (SELECT COUNT(*) FROM note_sources source
+					WHERE source.run_id = run.id AND source.note_id = note.id
+						AND source.source_ref = 'plan_delivery:' || proposal.id) = 1
+				AND (SELECT COUNT(*) FROM note_sources source
+					WHERE source.run_id = run.id AND source.note_id = note.id) = 1
+				AND NOT EXISTS (SELECT 1 FROM note_evidence evidence
+					WHERE evidence.run_id = run.id AND evidence.note_id = note.id)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery selection binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_selection_item_insert
+		BEFORE INSERT ON plan_delivery_selection_items
+		WHEN NOT EXISTS (
+			SELECT 1 FROM plan_delivery_selections selection
+			JOIN plan_delivery_modules module ON module.proposal_id = selection.proposal_id
+				AND module.direction_ordinal = selection.direction_ordinal
+				AND module.ordinal = NEW.module_ordinal
+			JOIN work_items item ON item.id = NEW.work_item_id
+			WHERE selection.id = NEW.selection_id AND NEW.ordinal <= selection.module_count
+				AND item.run_id = selection.run_id AND item.status = 'pending'
+				AND item.priority = 'normal' AND item.owner = ''
+				AND item.owner_agent_id = selection.root_agent_id
+				AND item.title = module.title AND item.description = module.objective
+				AND item.version = 1 AND item.created_at = selection.created_at
+				AND NOT EXISTS (SELECT 1 FROM json_each(module.acceptance_json) expected
+					WHERE NOT EXISTS (SELECT 1 FROM json_each(item.acceptance_json) actual
+						WHERE actual.type = 'text' AND actual.value = expected.value))
+				AND NOT EXISTS (SELECT 1 FROM json_each(item.acceptance_json) actual
+					WHERE NOT EXISTS (SELECT 1 FROM json_each(module.acceptance_json) expected
+						WHERE expected.type = 'text' AND expected.value = actual.value))
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery selection item is invalid');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_selection_operation_insert
+		BEFORE INSERT ON plan_delivery_selection_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM plan_delivery_selections selection
+			JOIN plan_delivery_proposals proposal ON proposal.id = selection.proposal_id
+			JOIN runs run ON run.id = selection.run_id
+			JOIN run_mode_snapshots mode ON mode.run_id = run.id
+				AND mode.revision = proposal.mode_revision
+			WHERE selection.id = NEW.selection_id
+				AND selection.proposal_id = NEW.proposal_id
+				AND selection.run_id = NEW.run_id
+				AND selection.requested_by = NEW.requested_by
+				AND selection.created_at = NEW.created_at
+				AND run.status = 'paused' AND mode.phase = 'plan'
+				AND NOT EXISTS (SELECT 1 FROM run_mode_snapshots later
+					WHERE later.run_id = run.id AND later.revision > mode.revision)
+				AND NOT EXISTS (SELECT 1 FROM run_execution_leases lease
+					WHERE lease.run_id = run.id AND lease.status = 'active'
+						AND julianday(lease.expires_at) > julianday('now'))
+				AND (SELECT COUNT(*) FROM plan_delivery_selection_items item
+					WHERE item.selection_id = selection.id) = selection.module_count
+				AND NOT EXISTS (
+					SELECT 1 FROM plan_delivery_modules module
+					JOIN plan_delivery_selection_items current_item
+						ON current_item.selection_id = selection.id
+						AND current_item.module_ordinal = module.ordinal
+					JOIN json_each(module.dependencies_json) dependency
+					WHERE module.proposal_id = proposal.id
+						AND module.direction_ordinal = selection.direction_ordinal
+						AND NOT EXISTS (
+							SELECT 1 FROM plan_delivery_selection_items dependency_item
+							JOIN work_item_dependencies edge
+								ON edge.run_id = selection.run_id
+								AND edge.work_item_id = current_item.work_item_id
+								AND edge.depends_on_id = dependency_item.work_item_id
+							WHERE dependency_item.selection_id = selection.id
+								AND dependency_item.module_ordinal = dependency.value))
+				AND NOT EXISTS (
+					SELECT 1 FROM plan_delivery_selection_items current_item
+					JOIN work_item_dependencies edge ON edge.run_id = selection.run_id
+						AND edge.work_item_id = current_item.work_item_id
+					WHERE current_item.selection_id = selection.id
+						AND NOT EXISTS (
+							SELECT 1 FROM plan_delivery_modules module
+							JOIN json_each(module.dependencies_json) dependency
+							JOIN plan_delivery_selection_items dependency_item
+								ON dependency_item.selection_id = selection.id
+								AND dependency_item.module_ordinal = dependency.value
+							WHERE module.proposal_id = proposal.id
+								AND module.direction_ordinal = selection.direction_ordinal
+								AND module.ordinal = current_item.module_ordinal
+								AND dependency_item.work_item_id = edge.depends_on_id))
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery selection operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_proposal_update_immutable
+		BEFORE UPDATE ON plan_delivery_proposals BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery proposal cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_proposal_delete_immutable
+		BEFORE DELETE ON plan_delivery_proposals BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery proposal cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_direction_update_immutable
+		BEFORE UPDATE ON plan_delivery_directions BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery direction cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_direction_delete_immutable
+		BEFORE DELETE ON plan_delivery_directions BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery direction cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_module_update_immutable
+		BEFORE UPDATE ON plan_delivery_modules BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery module cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_module_delete_immutable
+		BEFORE DELETE ON plan_delivery_modules BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery module cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_proposal_operation_update_immutable
+		BEFORE UPDATE ON plan_delivery_proposal_operations BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery proposal operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_proposal_operation_delete_immutable
+		BEFORE DELETE ON plan_delivery_proposal_operations BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery proposal operation cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_selection_update_immutable
+		BEFORE UPDATE ON plan_delivery_selections BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery selection cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_selection_delete_immutable
+		BEFORE DELETE ON plan_delivery_selections BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery selection cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_selection_item_update_immutable
+		BEFORE UPDATE ON plan_delivery_selection_items BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery selection item cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_selection_item_delete_immutable
+		BEFORE DELETE ON plan_delivery_selection_items BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery selection item cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_selection_operation_update_immutable
+		BEFORE UPDATE ON plan_delivery_selection_operations BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery selection operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_plan_delivery_selection_operation_delete_immutable
+		BEFORE DELETE ON plan_delivery_selection_operations BEGIN
+			SELECT RAISE(ABORT, 'Plan/Delivery selection operation cannot be deleted');
 		END;`,
 }
 

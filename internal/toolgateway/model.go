@@ -40,13 +40,15 @@ const (
 	ScriptProcessTool               ToolName = "script_process"
 	WorkItemCreateTool              ToolName = "work_item_create"
 	NoteCreateTool                  ToolName = "note_create"
+	PlanDeliveryProposeTool         ToolName = "plan_delivery_propose"
 	SpecialistDelegationProposeTool ToolName = "specialist_delegation_propose"
 )
 
 func (n ToolName) Valid() bool {
 	switch n {
 	case ReadFileTool, ListWorkspaceTool, ShellTool, ReplaceFileTool, ScriptProcessTool,
-		WorkItemCreateTool, NoteCreateTool, SpecialistDelegationProposeTool:
+		WorkItemCreateTool, NoteCreateTool, PlanDeliveryProposeTool,
+		SpecialistDelegationProposeTool:
 		return true
 	default:
 		return false
@@ -86,7 +88,7 @@ func ClassForTool(name ToolName) (ActionClass, bool) {
 		return ClassProcess, true
 	case WorkItemCreateTool, NoteCreateTool:
 		return ClassRunMemory, true
-	case SpecialistDelegationProposeTool:
+	case PlanDeliveryProposeTool, SpecialistDelegationProposeTool:
 		return ClassAgentProposal, true
 	default:
 		return "", false

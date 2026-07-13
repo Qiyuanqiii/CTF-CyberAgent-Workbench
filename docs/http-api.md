@@ -1,8 +1,8 @@
 # 本地 HTTP API / Local HTTP API
 
-CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`。它主要用于检查 SQLite 中的持久化 Agent 状态（包括 schema v41 Run 模式快照），并通过可恢复 SSE 投影 Run events；唯一控制操作是经过独立授权、审计优先的活动模型调用取消。API 不执行工具、不切换执行阶段，也不替代 Policy、Approval 或 Tool Gateway。
+CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`。它主要用于检查 SQLite 中的持久化 Agent 状态（包括 schema v41 Run 模式快照与 schema v42 Plan/Delivery 只读状态），并通过可恢复 SSE 投影 Run events；唯一控制操作是经过独立授权、审计优先的活动模型调用取消。API 不选择 Plan 方向、不执行工具、不切换执行阶段，也不替代 Policy、Approval 或 Tool Gateway。
 
-CyberAgent Workbench exposes a Go-controlled local `api.v1`. It primarily inspects durable Agent state in SQLite, including the schema v41 Run-mode snapshot, and projects persisted Run events through resumable SSE. Its only control operation is separately authorized, audit-first cancellation of an active model call. The API cannot execute tools or change execution phase and does not replace Policy, Approval, or the Tool Gateway.
+CyberAgent Workbench exposes a Go-controlled local `api.v1`. It primarily inspects durable Agent state in SQLite, including the schema v41 Run-mode snapshot and schema v42 read-only Plan/Delivery state, and projects persisted Run events through resumable SSE. Its only control operation is separately authorized, audit-first cancellation of an active model call. The API cannot select a Plan direction, execute tools, or change execution phase and does not replace Policy, Approval, or the Tool Gateway.
 
 ## 启动 / Start
 
@@ -84,7 +84,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/runs/<run-id>/agents
 | `GET` | `/api/v1/health` | Health and SQLite schema version |
 | `GET` | `/api/v1/openapi.json` | Raw deterministic OpenAPI 3.1 JSON document |
 | `GET` | `/api/v1/runs` | Runs; `status`, `mission_id`, pagination |
-| `GET` | `/api/v1/runs/{run_id}` | Run, Mission, immutable execution-mode snapshot, checkpoint metadata, tool usage, token-free execution-lease summary |
+| `GET` | `/api/v1/runs/{run_id}` | Run, Mission, immutable execution-mode snapshot, read-only Plan proposal/selection, checkpoint metadata, tool usage, token-free execution-lease summary |
 | `GET` | `/api/v1/runs/{run_id}/events` | Ordered Run events; pagination |
 | `GET` | `/api/v1/runs/{run_id}/events/stream` | Bounded SSE projection; opaque `cursor` or `Last-Event-ID` resume |
 | `GET` | `/api/v1/runs/{run_id}/agent-graph` | Root/Specialist nodes, budgets, lifecycle, and redacted completion summaries |
@@ -107,6 +107,8 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/runs/<run-id>/agents
 
 Nested routes verify their parent first. A missing Run or Session returns `NOT_FOUND` rather than an empty child collection. Unknown query fields and repeated singleton fields are rejected.
 
+Schema v42 Plan/Delivery data is embedded only in Run detail. The API chooses the accepted proposal when a selection exists, otherwise the latest proposal, and returns bounded directions/modules plus selected direction and projected WorkItems. It omits proposal fingerprints, operation digests, requester/root internals, lease identity, and model text. `operator_choice_needed`, `phase_change_needed`, and `capability_grant=false` are display facts only; no HTTP route can choose a direction or move the Run into Deliver.
+
 ## OpenAPI Contract
 
 Go DTO 是响应结构的唯一来源。以下命令不启动数据库、不读取 token，并可复现仓库内受测试的 [openapi.json](openapi.json)：
@@ -118,9 +120,9 @@ cyberagent api openapi
 cyberagent api openapi --output docs/openapi.json
 ```
 
-运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 24 个 path、45 个 schema：22 个只读 GET 使用全局 read capability，两个精确取消 POST 显式覆盖为 `ControlBearerAuth`。测试会逐条命中公开 handler，并确认契约不包含 Artifact 正文、checkpoint pending input、raw Fan-out report、私有审批/生命周期叙述、`lease_id`、fencing token、摘要或 API key 字段。
+运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 24 个 path、52 个 schema：22 个只读 GET 使用全局 read capability，两个精确取消 POST 显式覆盖为 `ControlBearerAuth`。测试会逐条命中公开 handler，并确认契约不包含 Artifact 正文、checkpoint pending input、raw Fan-out report、私有审批/生命周期叙述、Plan operation/fencing 身份、`lease_id`、摘要或 API key 字段。
 
-The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract currently contains 24 paths and 45 schemas: 22 read-only GET operations use the global read capability, while two exact-cancellation POST operations override security with `ControlBearerAuth`. Tests exercise every published handler and verify that the contract omits Artifact content, checkpoint pending input, raw Fan-out reports, private approval/lifecycle narratives, `lease_id`, fencing tokens, digests, and API-key fields.
+The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract currently contains 24 paths and 52 schemas: 22 read-only GET operations use the global read capability, while two exact-cancellation POST operations override security with `ControlBearerAuth`. Tests exercise every published handler and verify that the contract omits Artifact content, checkpoint pending input, raw Fan-out reports, private approval/lifecycle narratives, Plan operation/fencing identity, `lease_id`, digests, and API-key fields.
 
 ## 主动取消 / Active-Call Cancellation
 

@@ -53,6 +53,7 @@ type Gateway struct {
 	artifacts             *artifact.Manager
 	structuredMemory      StructuredMemoryExecutor
 	delegationProposals   SpecialistDelegationExecutor
+	planDeliveryProposals PlanDeliveryExecutor
 }
 
 type WorkspaceRootResolver func(ctx context.Context, workspaceID string) (string, error)
@@ -108,6 +109,9 @@ func (g *Gateway) Invoke(ctx context.Context, call ToolCall) (Outcome, error) {
 	if normalized.Name == SpecialistDelegationProposeTool && g.delegationProposals == nil {
 		return Outcome{}, errors.New("specialist delegation proposal executor is required")
 	}
+	if normalized.Name == PlanDeliveryProposeTool && g.planDeliveryProposals == nil {
+		return Outcome{}, errors.New("Plan/Delivery proposal executor is required")
+	}
 	class, ok := ClassForTool(normalized.Name)
 	if !ok {
 		return Outcome{}, fmt.Errorf("unsupported tool %q", normalized.Name)
@@ -133,6 +137,8 @@ func (g *Gateway) Invoke(ctx context.Context, call ToolCall) (Outcome, error) {
 		return g.invokeStructuredMemory(ctx, normalized)
 	case SpecialistDelegationProposeTool:
 		return g.invokeSpecialistDelegation(ctx, normalized)
+	case PlanDeliveryProposeTool:
+		return g.invokePlanDelivery(ctx, normalized)
 	default:
 		return Outcome{}, fmt.Errorf("unsupported tool %q", normalized.Name)
 	}
@@ -662,7 +668,7 @@ func gatewayDecision(source policy.Decision, mode ApprovalMode, fallbackRisk str
 
 func validateToolArguments(call ToolCall) error {
 	if call.Name == WorkItemCreateTool || call.Name == NoteCreateTool ||
-		call.Name == SpecialistDelegationProposeTool {
+		call.Name == SpecialistDelegationProposeTool || call.Name == PlanDeliveryProposeTool {
 		if len(call.Arguments) != 0 {
 			return fmt.Errorf("tool %s accepts a JSON payload instead of string arguments", call.Name)
 		}
@@ -684,6 +690,12 @@ func validateToolArguments(call ToolCall) error {
 				return errors.New("specialist delegation proposals require a fenced root Supervisor")
 			}
 			_, _, err := normalizeSpecialistDelegationPayload(call.Payload)
+			return err
+		case PlanDeliveryProposeTool:
+			if call.RequestedBy != "run_supervisor" || call.AgentID == "" || call.LeaseID == "" {
+				return errors.New("Plan/Delivery proposals require a fenced root Supervisor")
+			}
+			_, _, err := normalizePlanDeliveryPayload(call.Payload)
 			return err
 		}
 	}

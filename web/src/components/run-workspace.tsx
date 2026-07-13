@@ -8,6 +8,7 @@ import {
   FileArchive,
   Gauge,
   GitBranch,
+  ListChecks,
   Network,
   Radio,
   ScanSearch,
@@ -20,6 +21,7 @@ import type {
   ArtifactView,
   EventView,
   NoteView,
+  PlanDeliveryStateView,
   RunDetailView,
   SupervisorToolRoundView,
   WorkItemView,
@@ -204,7 +206,53 @@ function RunOverview({ detail }: { detail: RunDetailView }) {
           <KeyValue label="Exhausted" value={formatDate(usage.exhausted_at)} />
         </dl>
       </section>
+      {detail.plan_delivery && <PlanDeliveryPanel state={detail.plan_delivery} />}
     </div>
+  );
+}
+
+export function PlanDeliveryPanel({ state }: { state: PlanDeliveryStateView }) {
+  const selected = state.selection?.direction_ordinal;
+  const status = state.operator_choice_needed
+    ? "Operator choice required"
+    : state.phase_change_needed
+      ? "Deliver phase required"
+      : "Direction selected";
+  return (
+    <section className="detail-section plan-delivery-section">
+      <div className="section-heading">
+        <h2><ListChecks aria-hidden="true" size={15} />Plan / Delivery</h2>
+        <StatusBadge status={state.operator_choice_needed ? "pending" : "accepted"} />
+      </div>
+      <div className="plan-state-line">
+        <span>{status}</span>
+        <span>Mode revision {formatNumber(state.proposal?.mode_revision)}</span>
+        <span>Capability grant: no</span>
+      </div>
+      <div className="plan-direction-list">
+        {state.proposal?.directions.map((direction) => (
+          <details className={selected === direction.ordinal ? "plan-direction selected" : "plan-direction"}
+            key={direction.ordinal} open={selected === direction.ordinal || undefined}>
+            <summary>
+              <span className="plan-ordinal">{direction.ordinal}</span>
+              <span><strong>{direction.title}</strong><small>{direction.summary}</small></span>
+              <span>{direction.modules.length} slices</span>
+              {selected === direction.ordinal && <StatusBadge status="selected" />}
+            </summary>
+            <div className="plan-direction-body">
+              <div><h3>Tradeoffs</h3><ul>{direction.tradeoffs.map((item) => <li key={item}>{item}</li>)}</ul></div>
+              <div><h3>Delivery slices</h3><ol>{direction.modules.map((module) => (
+                <li key={module.ordinal}>
+                  <strong>{module.title}</strong>
+                  <p>{module.objective}</p>
+                  <small>{module.dependencies.length > 0 ? `Depends on ${module.dependencies.join(", ")}` : "No dependencies"}</small>
+                </li>
+              ))}</ol></div>
+            </div>
+          </details>
+        ))}
+      </div>
+    </section>
   );
 }
 

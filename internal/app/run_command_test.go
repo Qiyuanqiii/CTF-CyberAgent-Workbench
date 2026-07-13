@@ -51,6 +51,13 @@ func executeTestCommand(t *testing.T, args ...string) (string, string, int) {
 	return out.String(), errOut.String(), code
 }
 
+func TestPlanDeliveryCLITextIsSingleLine(t *testing.T) {
+	const input = "first line\r\nsecond\tline"
+	if got := planDeliveryCLIText(input); got != "first line second line" {
+		t.Fatalf("Plan/Delivery CLI text was not normalized: %q", got)
+	}
+}
+
 func TestCLIHelpListsRunGraphAndLease(t *testing.T) {
 	stdout, stderr, code := executeTestCommand(t, "help")
 	if code != 0 || stderr != "" || !strings.Contains(stdout, "checkpoint|graph|lease|finish") ||

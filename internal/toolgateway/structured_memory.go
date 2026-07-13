@@ -452,6 +452,32 @@ func redactRunMutationPayload(name ToolName, payload json.RawMessage) json.RawMe
 		if err == nil {
 			return encoded
 		}
+	case PlanDeliveryProposeTool:
+		spec, err := domain.DecodePlanDeliverySpec(payload)
+		if err != nil {
+			break
+		}
+		for directionIndex := range spec.Directions {
+			direction := &spec.Directions[directionIndex]
+			direction.Title = redact.String(direction.Title)
+			direction.Summary = redact.String(direction.Summary)
+			for index := range direction.Tradeoffs {
+				direction.Tradeoffs[index] = redact.String(direction.Tradeoffs[index])
+			}
+			for moduleIndex := range direction.Modules {
+				module := &direction.Modules[moduleIndex]
+				module.Title = redact.String(module.Title)
+				module.Objective = redact.String(module.Objective)
+				for index := range module.AcceptanceCriteria {
+					module.AcceptanceCriteria[index] = redact.String(
+						module.AcceptanceCriteria[index])
+				}
+			}
+		}
+		encoded, err := json.Marshal(spec)
+		if err == nil {
+			return encoded
+		}
 	}
 	return json.RawMessage(`{"redacted":true}`)
 }
