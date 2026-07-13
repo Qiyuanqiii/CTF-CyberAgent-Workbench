@@ -14,7 +14,6 @@ import (
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
-	"cyberagent-workbench/internal/redact"
 	"cyberagent-workbench/internal/toolbudget"
 	"cyberagent-workbench/internal/toolgateway"
 	"cyberagent-workbench/internal/toolrun"
@@ -78,6 +77,7 @@ type Message struct {
 	SessionID     string
 	Role          string
 	Content       string
+	Provenance    ContextProvenance
 	TokenEstimate int
 	Compacted     bool
 	CreatedAt     time.Time
@@ -246,6 +246,8 @@ func (m *Manager) handleSlash(ctx context.Context, sess Session, userMsg Message
 	var summaryID int64
 	var fileEditID string
 	var toolRunID string
+	replySourceKind := SourceGoCommandResult
+	replySourceRef := "/" + command
 	switch command {
 	case "help":
 		text = "Commands: /help, /compact, /model, /model <route>, /workspace, /ls [path], /read <path>, /write <path> <content>, /run <command>. /write and /run require explicit approval unless an active scoped Session grant applies."
@@ -277,9 +279,21 @@ func (m *Manager) handleSlash(ctx context.Context, sess Session, userMsg Message
 			text = "Workspace: " + sess.WorkspaceID
 		}
 	case "ls":
-		text = m.handleWorkspaceList(ctx, sess, strings.Join(args, " "))
+		var success bool
+		text, replySourceRef, success = m.handleWorkspaceList(ctx, sess, strings.Join(args, " "))
+		if success {
+			replySourceKind = SourceWorkspaceList
+		} else {
+			replySourceRef = "/ls"
+		}
 	case "read":
-		text = m.handleWorkspaceRead(ctx, sess, strings.Join(args, " "))
+		var success bool
+		text, replySourceRef, success = m.handleWorkspaceRead(ctx, sess, strings.Join(args, " "))
+		if success {
+			replySourceKind = SourceWorkspaceFile
+		} else {
+			replySourceRef = "/read"
+		}
 	case "write":
 		path, content, ok := parseWriteCommand(input)
 		if !ok {
@@ -289,6 +303,10 @@ func (m *Manager) handleSlash(ctx context.Context, sess Session, userMsg Message
 		edit, response := m.handleWorkspaceWrite(ctx, sess, path, content)
 		text = response
 		fileEditID = edit.ID
+		if edit.ID != "" {
+			replySourceKind = SourceWorkspaceDiff
+			replySourceRef = edit.Path
+		}
 	case "run":
 		if len(args) == 0 {
 			text = "Usage: /run <command>. v0.1 creates a tool proposal and does not execute directly from session chat."
@@ -300,6 +318,8 @@ func (m *Manager) handleSlash(ctx context.Context, sess Session, userMsg Message
 			return SendResult{}, err
 		}
 		toolRunID = run.ID
+		replySourceKind = SourceToolResult
+		replySourceRef = run.ID
 		if run.Status == toolrun.StatusDenied {
 			text = fmt.Sprintf("Tool run %s denied by policy: %s", run.ID, run.PolicyReason)
 			break
@@ -313,7 +333,8 @@ func (m *Manager) handleSlash(ctx context.Context, sess Session, userMsg Message
 		text = "Unknown slash command. Try /help."
 	}
 
-	reply, err := m.store.SaveSessionMessage(ctx, NewMessage(sess.ID, "assistant", text))
+	reply, err := m.store.SaveSessionMessage(ctx,
+		NewEvidenceMessage(sess.ID, replySourceKind, replySourceRef, text))
 	if err != nil {
 		return SendResult{}, err
 	}
@@ -330,13 +351,13 @@ func (m *Manager) handleSlash(ctx context.Context, sess Session, userMsg Message
 	}, nil
 }
 
-func (m *Manager) handleWorkspaceList(ctx context.Context, sess Session, path string) string {
+func (m *Manager) handleWorkspaceList(ctx context.Context, sess Session, path string) (string, string, bool) {
 	workspace, ok, err := m.workspaceInfo(ctx, sess)
 	if err != nil {
-		return "Workspace lookup failed: " + err.Error()
+		return "Workspace lookup failed: " + err.Error(), "", false
 	}
 	if !ok {
-		return "No workspace is attached to this session."
+		return "No workspace is attached to this session.", "", false
 	}
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -352,30 +373,30 @@ func (m *Manager) handleWorkspaceList(ctx context.Context, sess Session, path st
 	})
 	if err != nil {
 		if outcome.Result != nil && strings.TrimSpace(outcome.Result.Stderr) != "" {
-			return "Workspace list failed: " + outcome.Result.Stderr
+			return "Workspace list failed: " + outcome.Result.Stderr, "", false
 		}
-		return "Workspace list failed: " + err.Error()
+		return "Workspace list failed: " + err.Error(), "", false
 	}
 	if !outcome.Decision.Allowed {
-		return "Workspace list denied by policy: " + outcome.Decision.Reason
+		return "Workspace list denied by policy: " + outcome.Decision.Reason, "", false
 	}
 	if outcome.Result == nil {
-		return "Workspace list failed: tool gateway returned no result"
+		return "Workspace list failed: tool gateway returned no result", "", false
 	}
-	return fmt.Sprintf("Workspace list %s:\n%s", path, outcome.Result.Stdout)
+	return fmt.Sprintf("Workspace list %s:\n%s", path, outcome.Result.Stdout), path, true
 }
 
-func (m *Manager) handleWorkspaceRead(ctx context.Context, sess Session, path string) string {
+func (m *Manager) handleWorkspaceRead(ctx context.Context, sess Session, path string) (string, string, bool) {
 	workspace, ok, err := m.workspaceInfo(ctx, sess)
 	if err != nil {
-		return "Workspace lookup failed: " + err.Error()
+		return "Workspace lookup failed: " + err.Error(), "", false
 	}
 	if !ok {
-		return "No workspace is attached to this session."
+		return "No workspace is attached to this session.", "", false
 	}
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return "Usage: /read <workspace-relative-path>"
+		return "Usage: /read <workspace-relative-path>", "", false
 	}
 	outcome, err := m.gateway.Invoke(ctx, toolgateway.ToolCall{
 		Name: toolgateway.ReadFileTool, SessionID: sess.ID, WorkspaceID: workspace.ID,
@@ -387,17 +408,17 @@ func (m *Manager) handleWorkspaceRead(ctx context.Context, sess Session, path st
 	})
 	if err != nil {
 		if outcome.Result != nil && strings.TrimSpace(outcome.Result.Stderr) != "" {
-			return "Workspace read failed: " + outcome.Result.Stderr
+			return "Workspace read failed: " + outcome.Result.Stderr, "", false
 		}
-		return "Workspace read failed: " + err.Error()
+		return "Workspace read failed: " + err.Error(), "", false
 	}
 	if !outcome.Decision.Allowed {
-		return "Workspace read denied by policy: " + outcome.Decision.Reason
+		return "Workspace read denied by policy: " + outcome.Decision.Reason, "", false
 	}
 	if outcome.Result == nil {
-		return "Workspace read failed: tool gateway returned no result"
+		return "Workspace read failed: tool gateway returned no result", "", false
 	}
-	return fmt.Sprintf("Workspace file %s:\n%s", path, outcome.Result.Stdout)
+	return fmt.Sprintf("Workspace file %s:\n%s", path, outcome.Result.Stdout), path, true
 }
 
 func (m *Manager) handleWorkspaceWrite(ctx context.Context, sess Session, path string, content string) (fileedit.Edit, string) {
@@ -563,25 +584,15 @@ func (m *Manager) resolveModelRef(route string) (llm.ModelRef, error) {
 	return m.router.Resolve(route), nil
 }
 
-func NewMessage(sessionID string, role string, content string) Message {
-	content = redact.String(content)
-	return Message{
-		SessionID:     sessionID,
-		Role:          normalizeRole(role),
-		Content:       content,
-		TokenEstimate: contextmgr.EstimateTokens(content),
-		CreatedAt:     time.Now().UTC(),
-	}
-}
-
 func systemPrompt(sess Session) string {
-	return "You are CyberAgent Workbench, a local-first coding agent. Prefer safe, scoped, auditable actions. CTF-specific solving is deferred unless explicitly requested."
+	return "You are CyberAgent Workbench, a local-first coding agent. Prefer safe, scoped, auditable actions. " +
+		UntrustedContextPolicy + " CTF-specific solving is deferred unless explicitly requested."
 }
 
 func toContextMessages(messages []Message) []contextmgr.Message {
 	out := make([]contextmgr.Message, 0, len(messages))
 	for _, msg := range messages {
-		out = append(out, contextmgr.Message{Role: msg.Role, Content: msg.Content, CreatedAt: msg.CreatedAt})
+		out = append(out, ProjectContextMessage(msg))
 	}
 	return out
 }
@@ -592,15 +603,6 @@ func toLLMMessages(messages []contextmgr.Message) []llm.Message {
 		out = append(out, llm.Message{Role: msg.Role, Content: msg.Content})
 	}
 	return out
-}
-
-func normalizeRole(role string) string {
-	switch strings.ToLower(strings.TrimSpace(role)) {
-	case "system", "assistant", "tool":
-		return strings.ToLower(strings.TrimSpace(role))
-	default:
-		return "user"
-	}
 }
 
 func newID(prefix string) string {

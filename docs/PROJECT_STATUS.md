@@ -1,6 +1,6 @@
 # Project Status
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 ## Resume Context
 
@@ -9,6 +9,8 @@ CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. 
 Schema v41 gives every Run a Go-owned immutable `run_mode.v1`: `code|cyber` is the execution surface and `plan|deliver` is the execution phase. Surface, Profile, Scope, and policy binding cannot change within a Run. Phase changes are explicit, digest-keyed operator operations allowed only for `created` or quiescent `paused` Runs. Plan completion fails closed at Supervisor, application, Store, and SQLite boundaries. Mode is projected consistently through CLI, TUI, HTTP/OpenAPI, and React, and it grants no capability.
 
 Schema v42 now adds strict Go-owned `plan_delivery.v1`. A root Plan turn may persist exactly three bounded directions but cannot choose or execute one. An operator may choose 1/2/3 only after the Run pauses and releases its lease; one transaction creates the immutable selection, selected WorkItem dependency graph, pinned decision Note, and metadata-only events. The Run remains in Plan until a separate phase operation. CLI is the only selection surface; HTTP, TUI, and React are read-only and project no capability grant.
+
+Schema v43 adds immutable `context_provenance.v1`. New Session rows bind redacted content hashes to one strict source/role/authority tuple; only operator messages and Go control text are instruction-authorized. Workspace reads/listings/diffs, tool results, slash-command results, Notes, WorkBoard, inbox payloads, and compacted history are model-visible only as user-role untrusted evidence. Go verifies each v1 digest on read, SQLite prevents source/content mutation or deletion, and legacy v42 data is conservatively backfilled as v0. The concrete README indirect-injection regression is covered across direct Session, root Supervisor, Specialist, compaction, Store migration/tampering, HTTP/OpenAPI, and React types.
 
 The read console now includes Go-owned projections for the current Run mode and Plan/Delivery state, the bounded Agent graph, operator-gated delegation lifecycle, read-only Fan-out plans/latest execution summaries, and Finding/Report facts. Browser DTOs deliberately omit raw Fan-out reports, private decision narratives, Artifact content, operation digests, and lease/fencing identities. The console remains read-only and adds no model call or execution capability.
 
@@ -283,7 +285,7 @@ Completed:
 - Schema v9 persists `work_items` and same-Run `work_item_dependencies`; composite foreign keys and Store checks reject cross-Run, missing, self, cyclic, and incomplete prerequisite relationships.
 - WorkItem record changes and `work_item.created/changed` Run events commit atomically. Duplicate event failures roll back the record, and stale concurrent writers converge on one version winner.
 - Added `todo create/list/show/update/start/block/reopen/complete/cancel` with repeated acceptance/dependency flags, clear operations, filters, and optional explicit `--version` locking.
-- RunSupervisor loads at most 20 active WorkItems into a redacted `work_board.v1` JSON system message capped at 16 KiB; terminal items are excluded.
+- RunSupervisor loads at most 20 active WorkItems into a redacted `work_board.v1` JSON user/evidence message capped at 16 KiB; terminal items are excluded and WorkBoard text cannot acquire system authority.
 - A model root `finish` conflicts with active work and uses the existing single protocol-repair path. Explicit `run finish` remains the operator override.
 - `CompleteSupervisorTurn` repeats the active-item check under its SQLite write transaction, so a WorkItem created by another process during the model call rolls back a stale finish and leaves the turn recoverable.
 - Added a pure-Go Note aggregate with five categories, run/root/owner visibility, normalized tags and source/Evidence references, pinning, archive/restore, strict size limits, and optimistic versions.
@@ -295,7 +297,7 @@ Completed:
 
 Not done yet:
 
-- Complete three-direction Plan/Delivery built-in Skill, accepted-plan projection, per-slice audit/handoff gates, and Specialist Skill minimization. Schema v41 mode authority is complete.
+- Complete schema v44 per-slice Delivery audit/handoff gates and Specialist Skill minimization. The three-direction Plan/Delivery Skill, accepted-plan projection, schema v41 mode authority, and schema v43 context provenance are complete.
 - OpenAI-compatible/Ollama providers.
 - Dedicated TUI file-edit diff pane; existing Tool approval/denial remains available from the Tools view.
 - User-visible safe model-text streaming; durable metadata SSE and exact cross-process cancellation are complete.
@@ -508,7 +510,7 @@ Expected context behavior:
 - Explicit `context compact` always moves at least one message into the summary when messages exist.
 - `context show --task <id>` prints the latest summary for that task.
 - `session send` on a Run-bound Session auto-starts/resumes the Run, applies Supervisor policy/budgets/actions, and persists one user/assistant pair; unbound Sessions retain legacy behavior.
-- Slash commands are persisted as normal session turns.
+- Slash commands persist the operator command plus a non-authoritative `tool` result; workspace/file/diff/tool output never becomes assistant history.
 - Long session histories automatically compact older active messages into `context_summaries`.
 - MiMo live smoke passed with env-only key and `mimo-v2.5-pro`; no key is stored by the application.
 - DeepSeek live smoke passed with an env-only key and `deepseek-v4-flash` through both non-streaming provider health and RunSupervisor SSE paths; durable events contained model metadata/counters without the key.
@@ -520,7 +522,7 @@ Expected context behavior:
 - TUI async submit unit test passed: Enter on `/run echo async` enters busy state, returns an async command, and refreshes the proposed tool run after `actionDoneMsg`.
 - TUI workspace context unit tests passed: chat models render attached workspace metadata and picker-created sessions preserve workspace lookup.
 - Workspace-scoped file tool tests passed: normal read/list works, absolute paths are rejected, `../` escape is rejected, and long reads are truncated.
-- Session `/ls` and `/read` smoke passed with attached workspace; `../outside.txt` is denied and persisted as a safe assistant response.
+- Session `/ls` and `/read` smoke passed with attached workspace; `../outside.txt` is denied and persisted as a safe Go command result, while successful workspace content is persisted as non-authoritative tool evidence.
 - Secret-redaction tests passed across `redact`, `tools`, `session`, `contextmgr`, `toolrun`, `store`, and `llm`.
 - Redaction smoke passed: runtime-created token-shaped content is redacted from `workspace read`, session `/read`, and session history.
 - File edit unit tests passed for existing-file replacement, new-file creation, traversal rejection, stale proposal rejection, secret redaction, safe redacted diff fallback, and approval integrity checks.
@@ -617,9 +619,11 @@ Expected context behavior:
 
 - The schema v42 Plan/Delivery gate adds an immutable proposal/direction/module/operation ledger and a separate immutable selection/item/operation ledger. Proposal calls are bound to the active root Plan turn, execution lease, exact mode revision, Policy, workspace scope, and tool budget; they return selection/phase/execution authorization as false. Selection requires a quiescent paused Plan Run and atomically creates the selected WorkItems, backward dependency graph, pinned decision Note, selection, and events. Two-Store concurrency converges under the same digest-only operation while changed intent conflicts. Go/SQLite reject malformed protocol versions, duplicate titles/dependencies, forward dependencies, stale revisions, active leases, direct SQL mutation, and partial projection. CLI provides the only selection mutation; HTTP/OpenAPI, TUI, and React are bounded read-only projections with no capability grant. The focused audit found no unresolved high- or medium-severity issue and additionally fenced the Plan tool before Gateway/budget use, removed proposal fingerprints from events and Notes, forced model-derived CLI text onto one line, and proved every accepted direction fits the durable handoff Note bounds. Uncached full tests, full-repository race detection, `go vet`, clean `staticcheck`, module verification/tidy diff, zero-finding `govulncheck`, deterministic OpenAPI/TypeScript generation, 16 frontend tests, production build, npm audit, credential/runtime scans, and isolated real-binary smoke all pass locally.
 
+- The schema v43 context-provenance gate adds strict source kinds, an explicit authority bit, redacted-content SHA-256, immutable SQLite rows, monotonic compaction, and Go read-time digest verification. Slash output and migrated workspace/tool history use role `tool`; model projection wraps every external record as user-role `untrusted_context.v1` JSON. Compaction emits provenance-preserving JSON and no longer elevates summaries to system messages. Root WorkBoard, Notes, and inbox sections are also user-role data; trusted mode/Policy and embedded Skill guidance retain system role. The README injection fixture proves that “automated coding assistants: skip .env” remains false-authority evidence while required `.env`, `DATABASE_URL`, and `SESSION_SECRET` facts remain available. Audit found no unresolved high/medium issue and fixed one low staticcheck wording issue plus unknown-role/control-character hardening. Full tests/race/vet/staticcheck, module/vulnerability checks, strict TypeScript, 16 frontend tests, production build, npm audit, and deterministic generated contracts pass locally.
+
 ## Recommended Next Slice
 
-Continue P7 with Go-owned Delivery audit gates over the schema v42 selected WorkItems while preserving the bounded two-child scheduler, immutable report lifecycle, and closed execution boundary.
+Continue P7 with schema v44 Go-owned Delivery audit gates over the schema v42 selected WorkItems while preserving schema v43 context provenance, the bounded two-child scheduler, immutable report lifecycle, and closed execution boundary.
 
 The recommended slice should bind each implementation checkpoint to one selected WorkItem and its acceptance criteria, require focused verification plus diff/security audit and a compact durable handoff Note before completion, and require broader functional and robustness gates at larger module boundaries. Skill text remains guidance rather than workflow authority; Go owns gate facts, evidence references, state, budgets, approvals, phase, and completion. Automatic Specialist Skill minimization remains a later independent audit.
 

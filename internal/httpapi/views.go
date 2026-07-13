@@ -189,13 +189,18 @@ type SessionDetailView struct {
 }
 
 type MessageView struct {
-	ID            int64     `json:"id"`
-	SessionID     string    `json:"session_id"`
-	Role          string    `json:"role"`
-	Content       string    `json:"content"`
-	TokenEstimate int       `json:"token_estimate"`
-	Compacted     bool      `json:"compacted"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID                    int64     `json:"id"`
+	SessionID             string    `json:"session_id"`
+	Role                  string    `json:"role"`
+	Content               string    `json:"content"`
+	ProvenanceVersion     string    `json:"provenance_version"`
+	SourceKind            string    `json:"source_kind"`
+	SourceRef             string    `json:"source_ref,omitempty"`
+	ContentSHA256         string    `json:"content_sha256"`
+	InstructionAuthorized bool      `json:"instruction_authorized"`
+	TokenEstimate         int       `json:"token_estimate"`
+	Compacted             bool      `json:"compacted"`
+	CreatedAt             time.Time `json:"created_at"`
 }
 
 type EventView struct {
@@ -389,7 +394,10 @@ func sessionView(value session.Session) SessionView {
 
 func messageView(value session.Message) MessageView {
 	return MessageView{ID: value.ID, SessionID: value.SessionID, Role: value.Role, Content: value.Content,
-		TokenEstimate: value.TokenEstimate, Compacted: value.Compacted, CreatedAt: value.CreatedAt}
+		ProvenanceVersion: value.Provenance.Version, SourceKind: value.Provenance.SourceKind,
+		SourceRef: value.Provenance.SourceRef, ContentSHA256: value.Provenance.ContentSHA256,
+		InstructionAuthorized: value.Provenance.InstructionAuthorized,
+		TokenEstimate:         value.TokenEstimate, Compacted: value.Compacted, CreatedAt: value.CreatedAt}
 }
 
 func eventView(value events.Event) EventView {

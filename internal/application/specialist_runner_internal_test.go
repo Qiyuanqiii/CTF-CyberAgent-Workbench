@@ -13,9 +13,8 @@ import (
 func TestSpecialistRequestBoundsAggregateHistoryBytes(t *testing.T) {
 	history := make([]session.Message, 12)
 	for index := range history {
-		history[index] = session.Message{
-			Role: "assistant", Content: strings.Repeat(string(rune('a'+index)), 8*1024),
-		}
+		history[index] = session.NewMessage("session-child", "assistant",
+			strings.Repeat(string(rune('a'+index)), 8*1024))
 	}
 	request, err := specialistRequest(history, `{"goal":"bounded"}`, domain.AgentNode{
 		ID: "agent-child", RunID: "run-child", SessionID: "session-child",

@@ -124,7 +124,12 @@ func (a *App) sessionHistory(ctx context.Context, manager *session.Manager, args
 		if msg.Compacted {
 			marker = " compacted"
 		}
-		fmt.Fprintf(a.out, "#%d%s %s: %s\n", msg.ID, marker, msg.Role, msg.Content)
+		sourceRef := ""
+		if msg.Provenance.SourceRef != "" {
+			sourceRef = " ref=" + msg.Provenance.SourceRef
+		}
+		fmt.Fprintf(a.out, "#%d%s %s [%s authorized=%t%s]: %s\n", msg.ID, marker, msg.Role,
+			msg.Provenance.SourceKind, msg.Provenance.InstructionAuthorized, sourceRef, msg.Content)
 	}
 	return nil
 }

@@ -1015,7 +1015,7 @@ func removeSchemaV41ForTestStatements() []string {
 }
 
 func removeSchemaV42ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV43ForTestStatements(), []string{
 		`DROP TRIGGER trg_plan_delivery_selection_operation_delete_immutable`,
 		`DROP TRIGGER trg_plan_delivery_selection_operation_update_immutable`,
 		`DROP TRIGGER trg_plan_delivery_selection_item_delete_immutable`,
@@ -1107,6 +1107,22 @@ func removeSchemaV42ForTestStatements() []string {
 				SELECT RAISE(ABORT, 'supervisor tool round still has pending calls');
 			END`,
 		`DELETE FROM schema_migrations WHERE version = 42`,
+	}...)
+}
+
+func removeSchemaV43ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_session_message_delete_immutable`,
+		`DROP TRIGGER trg_session_message_compaction_monotonic`,
+		`DROP TRIGGER trg_session_message_provenance_update_immutable`,
+		`DROP TRIGGER trg_session_message_provenance_insert`,
+		`DROP INDEX idx_session_messages_source_kind`,
+		`ALTER TABLE session_messages DROP COLUMN instruction_authorized`,
+		`ALTER TABLE session_messages DROP COLUMN content_sha256`,
+		`ALTER TABLE session_messages DROP COLUMN source_ref`,
+		`ALTER TABLE session_messages DROP COLUMN source_kind`,
+		`ALTER TABLE session_messages DROP COLUMN provenance_version`,
+		`DELETE FROM schema_migrations WHERE version = 43`,
 	}
 }
 

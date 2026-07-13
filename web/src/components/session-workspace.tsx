@@ -53,7 +53,7 @@ export function SessionWorkspace({ client, sessionID }: { client: CyberAgentClie
         <div className="message-list">
           {messages.map((message) => (
             <article className={`message-row role-${message.role}`} key={message.id}>
-              <header><strong>{message.role}</strong><span>{formatNumber(message.token_estimate)} tokens</span>{message.compacted && <StatusBadge status="compacted" />}<time dateTime={message.created_at}>{formatDate(message.created_at)}</time></header>
+              <header><strong>{message.role}</strong><StatusBadge status={message.source_kind} /><span>{formatNumber(message.token_estimate)} tokens</span>{message.compacted && <StatusBadge status="compacted" />}<time dateTime={message.created_at}>{formatDate(message.created_at)}</time></header>
               <p>{message.content}</p>
             </article>
           ))}

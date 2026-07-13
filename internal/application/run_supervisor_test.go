@@ -350,6 +350,9 @@ func TestRunSupervisorInjectsOnlyActiveWorkItemsIntoModelContext(t *testing.T) {
 	var board string
 	for _, message := range request.Messages {
 		if message.Role == "system" && strings.Contains(message.Content, `"version":"work_board.v1"`) {
+			t.Fatalf("untrusted work board was elevated to system context: %s", message.Content)
+		}
+		if message.Role == "user" && strings.Contains(message.Content, `"version":"work_board.v1"`) {
 			board = message.Content
 		}
 	}
@@ -537,6 +540,10 @@ func TestRunSupervisorCommitsBoundedRootInboxContextExactlyOnce(t *testing.T) {
 	inboxContext := ""
 	for _, requestMessage := range provider.requests[0].Messages {
 		if requestMessage.Role == "system" &&
+			strings.Contains(requestMessage.Content, domain.RootInboxContextVersion) {
+			t.Fatalf("untrusted inbox payload was elevated to system context: %s", requestMessage.Content)
+		}
+		if requestMessage.Role == "user" &&
 			strings.Contains(requestMessage.Content, domain.RootInboxContextVersion) {
 			inboxContext = requestMessage.Content
 		}
@@ -1181,7 +1188,7 @@ func TestRunSupervisorCancellationDuringBackoffResumesNextModelAttempt(t *testin
 	}
 	inboxContext := func(request llm.ChatRequest) string {
 		for _, item := range request.Messages {
-			if item.Role == "system" && strings.Contains(item.Content, domain.RootInboxContextVersion) {
+			if item.Role == "user" && strings.Contains(item.Content, domain.RootInboxContextVersion) {
 				return item.Content
 			}
 		}

@@ -64,12 +64,17 @@ func appendRunEventForSessionTx(ctx context.Context, tx *sql.Tx, sessionID strin
 
 func projectSessionMessageTx(ctx context.Context, tx *sql.Tx, message session.Message) error {
 	return appendRunEventForSessionTx(ctx, tx, message.SessionID, events.SessionMessageEvent, "session_store", fmt.Sprint(message.ID), map[string]any{
-		"session_id":     message.SessionID,
-		"message_id":     message.ID,
-		"role":           message.Role,
-		"content":        message.Content,
-		"token_estimate": message.TokenEstimate,
-		"compacted":      message.Compacted,
+		"session_id":             message.SessionID,
+		"message_id":             message.ID,
+		"role":                   message.Role,
+		"content":                message.Content,
+		"provenance_version":     message.Provenance.Version,
+		"source_kind":            message.Provenance.SourceKind,
+		"source_ref":             message.Provenance.SourceRef,
+		"content_sha256":         message.Provenance.ContentSHA256,
+		"instruction_authorized": message.Provenance.InstructionAuthorized,
+		"token_estimate":         message.TokenEstimate,
+		"compacted":              message.Compacted,
 	})
 }
 

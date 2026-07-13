@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 42
+const LatestSchemaVersion = 43
 
 type migration struct {
 	Version    int
@@ -5390,6 +5390,87 @@ var planDeliveryStatements = []string{
 	`CREATE TRIGGER trg_plan_delivery_selection_operation_delete_immutable
 		BEFORE DELETE ON plan_delivery_selection_operations BEGIN
 			SELECT RAISE(ABORT, 'Plan/Delivery selection operation cannot be deleted');
+		END;`,
+}
+
+var contextProvenanceStatements = []string{
+	`ALTER TABLE session_messages ADD COLUMN provenance_version TEXT NOT NULL DEFAULT '';`,
+	`ALTER TABLE session_messages ADD COLUMN source_kind TEXT NOT NULL DEFAULT '';`,
+	`ALTER TABLE session_messages ADD COLUMN source_ref TEXT NOT NULL DEFAULT '';`,
+	`ALTER TABLE session_messages ADD COLUMN content_sha256 TEXT NOT NULL DEFAULT '';`,
+	`ALTER TABLE session_messages ADD COLUMN instruction_authorized INTEGER NOT NULL DEFAULT 0;`,
+	`UPDATE session_messages SET
+		provenance_version = 'context_provenance.v0',
+		source_kind = CASE
+			WHEN role = 'assistant' AND content LIKE 'Workspace file %' THEN 'workspace_file'
+			WHEN role = 'assistant' AND content LIKE 'Workspace list %' THEN 'workspace_listing'
+			WHEN role = 'assistant' AND content LIKE 'File edit %' THEN 'workspace_diff'
+			WHEN role = 'assistant' AND content LIKE 'Tool run %' THEN 'tool_result'
+			WHEN role = 'user' THEN 'operator_message'
+			WHEN role = 'assistant' THEN 'model_response'
+			WHEN role = 'system' THEN 'go_control'
+			ELSE 'tool_result'
+		END,
+		role = CASE
+			WHEN role = 'assistant' AND (content LIKE 'Workspace file %'
+				OR content LIKE 'Workspace list %' OR content LIKE 'File edit %'
+				OR content LIKE 'Tool run %') THEN 'tool'
+			ELSE role
+		END,
+		instruction_authorized = CASE WHEN role IN ('user', 'system') THEN 1 ELSE 0 END;`,
+	`CREATE INDEX idx_session_messages_source_kind
+		ON session_messages(session_id, source_kind, id);`,
+	`CREATE TRIGGER trg_session_message_provenance_insert
+		BEFORE INSERT ON session_messages
+		WHEN NOT (
+			NEW.provenance_version = 'context_provenance.v1'
+			AND NEW.role IN ('user', 'assistant', 'system', 'tool')
+			AND NEW.compacted IN (0, 1) AND NEW.token_estimate >= 0
+			AND length(NEW.content_sha256) = 64
+			AND NEW.content_sha256 = lower(NEW.content_sha256)
+			AND NEW.content_sha256 NOT GLOB '*[^0-9a-f]*'
+			AND NEW.source_ref = trim(NEW.source_ref)
+			AND length(NEW.source_ref) <= 512 AND instr(NEW.source_ref, char(0)) = 0
+			AND instr(NEW.source_ref, char(9)) = 0 AND instr(NEW.source_ref, char(10)) = 0
+			AND instr(NEW.source_ref, char(13)) = 0
+			AND NEW.instruction_authorized IN (0, 1)
+			AND (
+				(NEW.source_kind = 'operator_message' AND NEW.role = 'user'
+					AND NEW.instruction_authorized = 1 AND NEW.source_ref = '')
+				OR (NEW.source_kind = 'model_response' AND NEW.role = 'assistant'
+					AND NEW.instruction_authorized = 0 AND NEW.source_ref = '')
+				OR (NEW.source_kind = 'go_control' AND NEW.role = 'system'
+					AND NEW.instruction_authorized = 1 AND NEW.source_ref = '')
+				OR (NEW.source_kind IN ('workspace_file', 'workspace_listing', 'workspace_diff',
+					'tool_result', 'go_command_result') AND NEW.role = 'tool'
+					AND NEW.instruction_authorized = 0 AND length(NEW.source_ref) BETWEEN 1 AND 512)
+			)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'session message context provenance is invalid');
+		END;`,
+	`CREATE TRIGGER trg_session_message_provenance_update_immutable
+		BEFORE UPDATE ON session_messages
+		WHEN NEW.id IS NOT OLD.id OR NEW.session_id IS NOT OLD.session_id
+			OR NEW.role IS NOT OLD.role OR NEW.content IS NOT OLD.content
+			OR NEW.token_estimate IS NOT OLD.token_estimate
+			OR NEW.created_at IS NOT OLD.created_at
+			OR NEW.provenance_version IS NOT OLD.provenance_version
+			OR NEW.source_kind IS NOT OLD.source_kind OR NEW.source_ref IS NOT OLD.source_ref
+			OR NEW.content_sha256 IS NOT OLD.content_sha256
+			OR NEW.instruction_authorized IS NOT OLD.instruction_authorized
+		BEGIN
+			SELECT RAISE(ABORT, 'session message content and provenance are immutable');
+		END;`,
+	`CREATE TRIGGER trg_session_message_compaction_monotonic
+		BEFORE UPDATE OF compacted ON session_messages
+		WHEN NEW.compacted NOT IN (0, 1) OR NEW.compacted < OLD.compacted
+		BEGIN
+			SELECT RAISE(ABORT, 'session message compaction is monotonic');
+		END;`,
+	`CREATE TRIGGER trg_session_message_delete_immutable
+		BEFORE DELETE ON session_messages BEGIN
+			SELECT RAISE(ABORT, 'session messages cannot be deleted');
 		END;`,
 }
 

@@ -56,7 +56,8 @@ func (s *SQLiteStore) ListSessionMessagesPage(ctx context.Context, sessionID str
 	if err := validateStoreReadPage(offset, limit); err != nil {
 		return nil, err
 	}
-	query := `SELECT id, session_id, role, content, token_estimate, compacted, created_at
+	query := `SELECT id, session_id, role, content, provenance_version, source_kind, source_ref,
+		content_sha256, instruction_authorized, token_estimate, compacted, created_at
 		FROM session_messages WHERE session_id = ?`
 	if !includeCompacted {
 		query += ` AND compacted = 0`
@@ -88,7 +89,8 @@ func (s *SQLiteStore) ListRecentSessionMessages(ctx context.Context, sessionID s
 	if err := validateStoreReadPage(0, limit); err != nil {
 		return nil, err
 	}
-	query := `SELECT id, session_id, role, content, token_estimate, compacted, created_at
+	query := `SELECT id, session_id, role, content, provenance_version, source_kind, source_ref,
+		content_sha256, instruction_authorized, token_estimate, compacted, created_at
 		FROM session_messages WHERE session_id = ?`
 	if !includeCompacted {
 		query += ` AND compacted = 0`

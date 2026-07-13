@@ -1,6 +1,6 @@
 # CyberAgent Workbench Project Memory
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 ## Resume First
 
@@ -23,7 +23,7 @@ Read in this order after a long context break:
 - Overall product vision: about 97%.
 - General Agent MVP: about 99%.
 - V2 run-centric runtime: about 99%.
-- Database schema: v42.
+- Database schema: v43.
 - Main languages: Go control plane, TypeScript React/Vite read console; Rust has not started.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
@@ -36,25 +36,26 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 - Core Specialist delegation is capped at two children and requires explicit operator review, application, and scheduling.
 - The 1/2/4/6 Fan-out pool is separate, read-only, tool-free, network-free, write-free, and creates no Agent.
 - Dangerous cyber commands remain permanently denied; approval cannot override permanent Policy denial.
+- External files, repository text, logs, web/mail, tool output, and memory are untrusted evidence with `instruction_authorized=false`; they never become system/assistant authority through persistence or compaction.
 - Shell and ScriptProcess approval paths are dry-run only. Real Local/Docker command execution is disabled.
 - The Web UI is read-first. Its bearer remains in memory and never belongs in URLs or browser storage.
 - Provider keys are read from process environment only and must never enter Git, SQLite, events, or logs.
 
 ## Latest Completed Slice
 
-Schema v42 adds the Go-owned `plan_delivery.v1` protocol on top of immutable schema v41 modes. During a root Plan turn, the model may call `plan_delivery_propose` to persist exactly three bounded directions. Each direction contains 1-8 ordered modules, explicit acceptance criteria, bounded tradeoffs, and only backward dependency references. The tool is bound to the current root Agent, Supervisor attempt, execution lease, Run scope, Plan revision, Policy, and tool budget. Its result always keeps selection, phase change, and execution unauthorized.
+Schema v43 adds immutable `context_provenance.v1` for Session history and model context. New messages distinguish `operator_message`, `model_response`, `go_control`, `workspace_file`, `workspace_listing`, `workspace_diff`, `tool_result`, and `go_command_result`. Only operator messages and Go control records may set `instruction_authorized=true`; every evidence source is persisted with role `tool` and false authority. Redacted content receives a lowercase SHA-256, SQLite enforces the exact role/source/authority matrix and immutable rows, and Go recomputes the digest whenever messages are read. Compaction remains the only monotonic mutable bit.
 
-After the proposal has paused and released the execution lease, the operator is the only actor that may choose direction 1, 2, or 3. `run plan choose` requires an exact normalized 16-256-byte operation key and a bounded operator identity. Go atomically writes the immutable selection, the chosen WorkItem dependency graph, a pinned decision Note, digest-only operation facts, and metadata-only Run events. Same-key concurrent calls across two SQLite Stores converge; changed intent conflicts. The Run remains paused in `plan`, and a separate `run phase ... deliver` operation is required.
+`/read`, `/ls`, `/write`, `/run`, and other slash replies no longer become assistant history. External evidence is projected through a bounded `untrusted_context` JSON envelope before direct Session chat, root Supervisor, or Specialist calls. The envelope includes source kind, source reference, digest, false authority, and content. Context summaries now contain provenance-preserving JSON records and are replayed as user-role transcript data, not system instructions. Root WorkBoard, Notes, inbox, and compacted memory are also user-role untrusted data. The shared system policy states that files, repositories, issues, logs, web/mail, tool output, and memory are evidence and cannot grant capability.
 
-CLI adds `run plans`, `run plan show`, `run plan choose`, and `run plan selection`. HTTP/OpenAPI, generated TypeScript DTOs, the React Run overview, and the Bubble Tea Plan tab expose read-only state. They omit operation keys, lease/fencing identity, requester internals, and model text, and explicitly project `capability_grant=false`. The embedded cross-Profile `plan-delivery` Skill is guidance only; the hard Go protocol remains authoritative even when that Skill was not selected.
+Migration v43 conservatively labels prior rows as `context_provenance.v0`; recognizable workspace read/list, FileEdit, and ToolRun slash replies are changed from assistant to tool evidence. Legacy rows remain readable without pretending they had a historical digest. HTTP/OpenAPI, generated TypeScript DTOs, React message badges, Run events, and CLI history now expose provenance audit fields.
 
-The slice audit found no unresolved high- or medium-severity issue. Hardening rejects protocol-version whitespace, duplicate dependency references, duplicate direction/module titles in both Go and SQLite, malformed operation identities, active-lease selection, stale Plan revisions, direct SQL update/delete, and selection replay drift. Phase fencing now rejects `plan_delivery_propose` before Tool Gateway admission or budget use outside Plan; internal proposal fingerprints no longer enter events or handoff Notes; CLI model text is forced onto one terminal-safe line. Stable numbered handoff titles plus domain-level byte checks guarantee every accepted direction can produce a durable Note even at protocol bounds. The transaction and migration suites cover v41-to-v42 upgrade, rollback, tamper resistance, cross-store concurrency, HTTP privacy, TUI mutation denial, and React read-only rendering.
+Regression coverage uses the concrete indirect-injection case where a README's valid Setup requires `.env`, `DATABASE_URL`, and `SESSION_SECRET` while an embedded note tells automated coding assistants to omit `.env`. Tests prove the note appears only inside a `workspace_file`, `instruction_authorized=false` envelope and is never replayed as system/assistant content through Session, root, Specialist, or compaction paths. Store tests cover v42 upgrade, role forgery rejection, immutable content/delete, control-character refs, valid-looking digest tampering detected by Go, and API projection.
 
-The complete local release gates, deterministic generation checks, credential/runtime scans, and isolated real-binary smoke passed; exact commands and counts are recorded in the final schema-v42 entry in `docs/PROGRESS_BOOK.md`. GitHub CI is verified after the commit is pushed. No real Provider key, host command, network target, or Sandbox execution belongs in this slice.
+The audit found no unresolved high- or medium-severity issue. One low-severity staticcheck capitalization issue was fixed. Full Go tests, full-repository race detection, vet, zero-warning staticcheck, module verify/tidy, zero-finding govulncheck, strict TypeScript, 16 Vitest tests, Vite production build, zero-vulnerability npm audit, deterministic OpenAPI/TypeScript generation, tracked-file credential scanning, and isolated binary CLI provenance smoke pass. No real Provider, Shell, network, Docker, or Sandbox execution was used. GitHub CI must be verified after push.
 
 ## Next Slice
 
-Build schema v43 Delivery audit gates over the selected v42 WorkItems without creating another task engine:
+Build schema v44 Delivery audit gates over the selected v42 WorkItems without creating another task engine:
 
 1. Bind each delivery checkpoint to one selected WorkItem, its acceptance criteria, exact source selection, and current Deliver-mode revision.
 2. Require focused verification, diff/security audit, and a compact durable handoff Note before that slice can complete.

@@ -1,6 +1,6 @@
 # CyberAgent Workbench 进度书
 
-更新时间：2026-07-13
+更新时间：2026-07-14
 
 ## 一、当前阶段
 
@@ -533,7 +533,15 @@ CLI 新增 proposal 列表/详情/选择/selection 查询；HTTP/OpenAPI、TypeS
 
 schema v42 本地发布门禁通过：`go test -count=1 ./...`、全仓 `go test -race -count=1 ./...`、`go vet ./...`、零告警 `staticcheck ./...`、`go mod verify`、无差异 `go mod tidy -diff` 和零可达漏洞 `govulncheck ./...`；Application Plan 用例连续 10 轮、Store Plan 用例连续 3 轮、交接 Note 极限边界连续 10 轮通过。OpenAPI/TypeScript 两次生成 SHA-256 一致；strict TypeScript、7 个 Vitest 文件共 16 项测试、Vite production build 与零高危 npm audit 均通过。凭证扫描仅命中两个 `_test.go` 固定鉴权夹具，真实 `sk-`/`tp-` 模式与受跟踪运行产物均为零。隔离真实二进制 smoke 仅注册 mock Provider，验证 version、workspace、第五个 Skill、`code/plan` Run、Plan schema、空 proposal 查询和 TUI 投影后删除全部临时 runtime；没有调用真实 Provider、Shell、网络、Docker 或 Sandbox。GitHub CI 结果在推送后复核。
 
-唯一推荐下一切片：继续 P7，在 schema v42 上增加 Go-owned Delivery 切片门禁。每个 checkpoint 绑定所选 WorkItem、验收条件和当前 Deliver revision；完成前要求聚焦测试、diff/安全审计与紧凑交接 Note，较大模块边界再要求整体验证和健壮性门禁。模型只能提出证据，Go 拥有门禁事实、状态、预算、阶段和完成判定；Specialist Skill 最小化继续作为后续独立审计。
+P7 第六纵向切片优先修复间接 Prompt Injection，再继续 Delivery 门禁。schema v43 新增 `context_provenance.v1`：operator/model/Go control/workspace file/listing/diff/tool result/Go command result 使用严格来源枚举，只有 operator 与 Go control 可设置 `instruction_authorized=true`。新消息先脱敏，再计算 SHA-256；SQLite 同时约束来源/角色/授权矩阵、规范化 source ref、不可变正文/来源、不可删除和单向 compact，Go 每次读取再计算摘要以识别数据库层篡改。未知角色不再静默提升为 user，source ref 拒绝控制字符。
+
+Session slash 回复全部改为 role=`tool`：成功的 `/read`、`/ls`、`/write`、`/run` 分别记录 workspace/tool 来源，帮助、模型切换和失败结果记录 Go command 来源，统一无指令权限。模型投影只让 operator/model/Go control 保留原角色；其他内容全部变成 user-role `untrusted_context.v1` JSON，携带 source kind/ref、digest、`instruction_authorized=false` 与脱敏正文。该投影同时接入未绑定 Session、root Supervisor 和 Specialist；WorkBoard、Note、root inbox 与 compacted summary 从 system 降为 user/evidence。压缩摘要使用逐条 provenance JSON，并以“历史数据，不是新指令”的 user transcript 回放。只读 Fan-out 原本已采用无工具、文件内容非可信的独立边界。
+
+v43 迁移将既有行保守标为 `context_provenance.v0`，并把可识别的旧 Workspace read/list、FileEdit 和 ToolRun assistant 回复降级为 tool evidence；旧行不伪造历史摘要。Run Session 事件、CLI history、HTTP/OpenAPI、生成的 TypeScript DTO 与 React 消息标签均显示来源审计字段。回归用例完整复现 README：Setup 明确要求 `.env`、`DATABASE_URL`、`SESSION_SECRET`，中间却要求 automated coding assistants 跳过 `.env`；Session/root/Specialist/compaction 测试证明诱导文本只存在于 `workspace_file + instruction_authorized=false` 封套，绝不进入 system/assistant 角色，真实配置事实仍保留供模型判断。
+
+本轮代码与安全审计未发现未解决的高/中风险问题。收口修复一项低风险 staticcheck 错误文本大小写，并补充未知 role、source-ref 控制字符、SQLite role forgery、直接 update/delete、格式正确但内容错误的摘要、v42 原地升级和 API provenance 测试。发布门禁通过 `go test ./...`、全仓 `go test -race -count=1 ./...`、`go vet ./...`、零告警 `staticcheck ./...`、`go mod verify`、无差异 `go mod tidy -diff`、零可达漏洞 `govulncheck ./...`、strict TypeScript、7 个 Vitest 文件共 16 项测试、Vite production build 与零漏洞 npm audit。OpenAPI 与 TypeScript 连续两次生成的 SHA-256 分别稳定为 `BBC58E75...C965` 与 `940175B8...8EB0`。受跟踪文件凭证模式扫描为零；隔离真实二进制 smoke 验证 version、mock Provider、Workspace/Session 创建，以及 history 中 `operator_message authorized=true` 与 `go_command_result authorized=false` 后删除临时 runtime。真实 Provider、Shell、网络、Docker 与 Sandbox 执行均未启用；GitHub CI 在推送后复核。
+
+唯一推荐下一切片：继续 P7，在 schema v44 增加 Go-owned Delivery 切片门禁。每个 checkpoint 绑定所选 WorkItem、验收条件和当前 Deliver revision；完成前要求聚焦测试、diff/安全审计与紧凑交接 Note，较大模块边界再要求整体验证和健壮性门禁。模型只能提出证据，Go 拥有门禁事实、状态、预算、阶段和完成判定；Specialist Skill 最小化继续作为后续独立审计。
 
 Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过独立审计。
 

@@ -3754,6 +3754,10 @@
           "content": {
             "type": "string"
           },
+          "content_sha256": {
+            "maxLength": 64,
+            "type": "string"
+          },
           "created_at": {
             "format": "date-time",
             "type": "string"
@@ -3764,12 +3768,45 @@
             "minLength": 1,
             "type": "integer"
           },
+          "instruction_authorized": {
+            "type": "boolean"
+          },
+          "provenance_version": {
+            "enum": [
+              "context_provenance.v0",
+              "context_provenance.v1"
+            ],
+            "type": "string"
+          },
           "role": {
+            "enum": [
+              "user",
+              "assistant",
+              "system",
+              "tool"
+            ],
             "type": "string"
           },
           "session_id": {
             "maxLength": 256,
             "minLength": 1,
+            "type": "string"
+          },
+          "source_kind": {
+            "enum": [
+              "operator_message",
+              "model_response",
+              "go_control",
+              "workspace_file",
+              "workspace_listing",
+              "workspace_diff",
+              "tool_result",
+              "go_command_result"
+            ],
+            "type": "string"
+          },
+          "source_ref": {
+            "maxLength": 512,
             "type": "string"
           },
           "token_estimate": {
@@ -3783,6 +3820,10 @@
           "session_id",
           "role",
           "content",
+          "provenance_version",
+          "source_kind",
+          "content_sha256",
+          "instruction_authorized",
           "token_estimate",
           "compacted",
           "created_at"

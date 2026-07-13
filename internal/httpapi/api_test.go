@@ -252,6 +252,12 @@ func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *te
 	if len(messages) != 3 {
 		t.Fatalf("compacted message view is incomplete: %#v", messages)
 	}
+	for _, message := range messages {
+		if message.ProvenanceVersion != session.ContextProvenanceVersion || message.SourceKind == "" ||
+			len(message.ContentSHA256) != 64 {
+			t.Fatalf("message view omitted context provenance: %#v", message)
+		}
+	}
 
 	workResponse := fixture.get(t, "/api/v1/runs/"+fixture.run.ID+"/work-items?owner=root")
 	var workItems []WorkItemView

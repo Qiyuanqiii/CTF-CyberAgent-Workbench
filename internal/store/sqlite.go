@@ -264,6 +264,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 40, Name: "root Skill context provenance", Statements: rootSkillContextStatements},
 		{Version: 41, Name: "immutable Run execution mode", Statements: runModeStatements},
 		{Version: 42, Name: "review-gated Plan Delivery workflow", Statements: planDeliveryStatements},
+		{Version: 43, Name: "immutable session context provenance", Statements: contextProvenanceStatements},
 	})
 }
 
@@ -545,18 +546,19 @@ func (s *SQLiteStore) SaveSessionMessage(ctx context.Context, message session.Me
 }
 
 func saveSessionMessageTx(ctx context.Context, tx *sql.Tx, message session.Message) (session.Message, error) {
-	if strings.TrimSpace(message.SessionID) == "" {
-		return session.Message{}, errors.New("session id is required")
-	}
-	message.Content = redact.String(message.Content)
-	message.TokenEstimate = contextmgr.EstimateTokens(message.Content)
-	if message.CreatedAt.IsZero() {
-		message.CreatedAt = time.Now().UTC()
+	var err error
+	message, err = session.PrepareMessageForStorage(message)
+	if err != nil {
+		return session.Message{}, err
 	}
 	res, err := tx.ExecContext(ctx, `INSERT INTO session_messages
-		(session_id, role, content, token_estimate, compacted, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		message.SessionID, message.Role, message.Content, message.TokenEstimate, boolInt(message.Compacted), ts(message.CreatedAt))
+		(session_id, role, content, provenance_version, source_kind, source_ref, content_sha256,
+		instruction_authorized, token_estimate, compacted, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		message.SessionID, message.Role, message.Content, message.Provenance.Version,
+		message.Provenance.SourceKind, message.Provenance.SourceRef, message.Provenance.ContentSHA256,
+		boolInt(message.Provenance.InstructionAuthorized), message.TokenEstimate,
+		boolInt(message.Compacted), ts(message.CreatedAt))
 	if err != nil {
 		return session.Message{}, err
 	}
@@ -583,7 +585,9 @@ func saveSessionMessageTx(ctx context.Context, tx *sql.Tx, message session.Messa
 }
 
 func (s *SQLiteStore) ListSessionMessages(ctx context.Context, sessionID string, includeCompacted bool) ([]session.Message, error) {
-	query := `SELECT id, session_id, role, content, token_estimate, compacted, created_at FROM session_messages WHERE session_id = ?`
+	query := `SELECT id, session_id, role, content, provenance_version, source_kind, source_ref,
+		content_sha256, instruction_authorized, token_estimate, compacted, created_at
+		FROM session_messages WHERE session_id = ?`
 	if !includeCompacted {
 		query += ` AND compacted = 0`
 	}
@@ -866,12 +870,20 @@ func scanSession(row scanner) (session.Session, error) {
 func scanSessionMessage(row scanner) (session.Message, error) {
 	var msg session.Message
 	var compacted int
+	var instructionAuthorized int
 	var created string
-	if err := row.Scan(&msg.ID, &msg.SessionID, &msg.Role, &msg.Content, &msg.TokenEstimate, &compacted, &created); err != nil {
+	if err := row.Scan(&msg.ID, &msg.SessionID, &msg.Role, &msg.Content,
+		&msg.Provenance.Version, &msg.Provenance.SourceKind, &msg.Provenance.SourceRef,
+		&msg.Provenance.ContentSHA256, &instructionAuthorized, &msg.TokenEstimate,
+		&compacted, &created); err != nil {
 		return session.Message{}, err
 	}
+	msg.Provenance.InstructionAuthorized = instructionAuthorized != 0
 	msg.Compacted = compacted != 0
 	msg.CreatedAt = parseTS(created)
+	if err := session.ValidateStoredMessage(msg); err != nil {
+		return session.Message{}, fmt.Errorf("validate stored session message %d: %w", msg.ID, err)
+	}
 	return msg, nil
 }
 

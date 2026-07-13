@@ -11,6 +11,7 @@ import (
 
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/session"
 )
 
 const (
@@ -678,6 +679,9 @@ var openAPIFieldEnums = map[string][]string{
 	"FindingReportSummaryView.status":           {string(domain.FindingReportGenerated)},
 	"FindingView.severity":                      {string(domain.FindingSeverityInfo), string(domain.FindingSeverityLow), string(domain.FindingSeverityMedium), string(domain.FindingSeverityHigh), string(domain.FindingSeverityCritical)},
 	"FindingView.status":                        {string(domain.FindingStatusDraft), string(domain.FindingStatusValidated), string(domain.FindingStatusAccepted), string(domain.FindingStatusFixed), string(domain.FindingStatusRejected)},
+	"MessageView.role":                          {"user", "assistant", "system", "tool"},
+	"MessageView.provenance_version":            {session.LegacyContextProvenanceVersion, session.ContextProvenanceVersion},
+	"MessageView.source_kind":                   {session.SourceOperatorMessage, session.SourceModelResponse, session.SourceGoControl, session.SourceWorkspaceFile, session.SourceWorkspaceList, session.SourceWorkspaceDiff, session.SourceToolResult, session.SourceGoCommandResult},
 }
 
 var openAPIFieldMinimums = map[string]float64{
@@ -730,6 +734,8 @@ var openAPIFieldMinimums = map[string]float64{
 
 var openAPIFieldMaxLengths = map[string]int{
 	"ModelCancellationRequestView.reason": domain.MaxModelCancellationReasonRunes,
+	"MessageView.source_ref":              session.MaxContextSourceRefRunes,
+	"MessageView.content_sha256":          64,
 }
 
 func runStatuses() []string {

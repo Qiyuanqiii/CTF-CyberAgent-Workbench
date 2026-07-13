@@ -107,6 +107,8 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/runs/<run-id>/agents
 
 Nested routes verify their parent first. A missing Run or Session returns `NOT_FOUND` rather than an empty child collection. Unknown query fields and repeated singleton fields are rejected.
 
+Session message DTOs expose schema v43 provenance metadata: `provenance_version`, `source_kind`, optional `source_ref`, `content_sha256`, and `instruction_authorized`. These are read-only audit fields. A client must not infer capability from `role` or source text; only Go-owned control operations can grant or exercise authority. Legacy `context_provenance.v0` rows may have an empty stored digest, while all new v1 rows carry a verified lowercase SHA-256.
+
 Schema v42 Plan/Delivery data is embedded only in Run detail. The API chooses the accepted proposal when a selection exists, otherwise the latest proposal, and returns bounded directions/modules plus selected direction and projected WorkItems. It omits proposal fingerprints, operation digests, requester/root internals, lease identity, and model text. `operator_choice_needed`, `phase_change_needed`, and `capability_grant=false` are display facts only; no HTTP route can choose a direction or move the Run into Deliver.
 
 ## OpenAPI Contract

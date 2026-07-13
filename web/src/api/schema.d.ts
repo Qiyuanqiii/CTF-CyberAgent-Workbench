@@ -851,12 +851,20 @@ export interface components {
         MessageView: {
             compacted: boolean;
             content: string;
+            content_sha256: string;
             /** Format: date-time */
             created_at: string;
             /** Format: int64 */
             id: number;
-            role: string;
+            instruction_authorized: boolean;
+            /** @enum {string} */
+            provenance_version: "context_provenance.v0" | "context_provenance.v1";
+            /** @enum {string} */
+            role: "user" | "assistant" | "system" | "tool";
             session_id: string;
+            /** @enum {string} */
+            source_kind: "operator_message" | "model_response" | "go_control" | "workspace_file" | "workspace_listing" | "workspace_diff" | "tool_result" | "go_command_result";
+            source_ref?: string;
             /** Format: int32 */
             token_estimate: number;
         };

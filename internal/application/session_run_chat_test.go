@@ -256,7 +256,10 @@ func TestSessionRunChatFeedsCompactedSummaryBackToSupervisor(t *testing.T) {
 	}
 	foundSummary := false
 	for _, message := range provider.requests[5].Messages {
-		if message.Role == "system" && strings.Contains(message.Content, "Compacted session context:") {
+		if message.Role == "system" && strings.Contains(message.Content, "Compacted session context") {
+			t.Fatalf("compacted transcript was elevated to system context: %s", message.Content)
+		}
+		if message.Role == "user" && strings.Contains(message.Content, "Compacted session context") {
 			foundSummary = true
 			break
 		}
