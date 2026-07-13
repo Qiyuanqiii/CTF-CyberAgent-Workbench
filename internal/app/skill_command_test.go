@@ -12,9 +12,9 @@ func TestSkillCLIListsShowsAndValidatesBuiltinsWithoutRuntimeState(t *testing.T)
 	t.Setenv("CYBERAGENT_HOME", home)
 
 	listed, stderr, code := executeTestCommand(t, "skill", "list")
-	if code != 0 || stderr != "" || !strings.Contains(listed, "code@1.0.0") ||
-		!strings.Contains(listed, "learn@1.0.0") || !strings.Contains(listed, "review@1.0.0") ||
-		!strings.Contains(listed, "script@1.0.0") || !strings.Contains(listed, "context_injection: disabled") ||
+	if code != 0 || stderr != "" || !strings.Contains(listed, "code@1.1.0") ||
+		!strings.Contains(listed, "learn@1.1.0") || !strings.Contains(listed, "review@1.1.0") ||
+		!strings.Contains(listed, "script@1.1.0") || !strings.Contains(listed, "context_injection: root_selected_only") ||
 		!strings.Contains(listed, "tool_capability_grant: disabled") {
 		t.Fatalf("unexpected skill list: code=%d stderr=%q output=%q", code, stderr, listed)
 	}
@@ -25,15 +25,15 @@ func TestSkillCLIListsShowsAndValidatesBuiltinsWithoutRuntimeState(t *testing.T)
 	}
 
 	filtered, stderr, code := executeTestCommand(t, "skill", "list", "--profile", "review")
-	if code != 0 || stderr != "" || !strings.Contains(filtered, "review@1.0.0") ||
-		strings.Contains(filtered, "code@1.0.0") || strings.Contains(filtered, "script@1.0.0") {
+	if code != 0 || stderr != "" || !strings.Contains(filtered, "review@1.1.0") ||
+		strings.Contains(filtered, "code@1.1.0") || strings.Contains(filtered, "script@1.1.0") {
 		t.Fatalf("unexpected profile filter: code=%d stderr=%q output=%q", code, stderr, filtered)
 	}
 
 	shown, stderr, code := executeTestCommand(t, "skill", "show", "code")
 	if code != 0 || stderr != "" || !strings.Contains(shown, "protocol: skill.v1") ||
 		!strings.Contains(shown, "tool_dependencies: list_workspace,read_file,replace_file") ||
-		!strings.Contains(shown, "content_sha256: 10e7219a") ||
+		!strings.Contains(shown, "content_sha256: 279113f9") ||
 		strings.Contains(shown, "The current runtime does not inject") {
 		t.Fatalf("unexpected skill show: code=%d stderr=%q output=%q", code, stderr, shown)
 	}

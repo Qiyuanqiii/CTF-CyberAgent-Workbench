@@ -326,7 +326,7 @@ Context is assembled from:
 - active work items;
 - selected notes/evidence.
 
-Skills are versioned knowledge packages with metadata, applicability rules, prompt content, and optional tool prerequisites. The embedded `skill.v1` Registry strictly pins metadata and content identity. Schema v39 adds one immutable, Profile-compatible, aggregate-budgeted `skill_selection.v1` per Run with digest-only operation replay. Selection is provenance only at this boundary: Skill text is not yet part of root or Specialist context, and prerequisites grant no tool capability. Profiles include `code`, `review`, `learn`, and `script`; CTF Skills are added only after the generic runtime is stable.
+Skills are versioned knowledge packages with metadata, applicability rules, prompt content, and optional tool prerequisites. The embedded `skill.v1` Registry strictly pins metadata and content identity; a bounded version index retains at most eight embedded versions per Skill, exposes only the current version for new selection, and resolves historical content only by an already-persisted exact version. Schema v39 adds one immutable, Profile-compatible, aggregate-budgeted `skill_selection.v1` per Run with digest-only operation replay. Schema v40 adds root-only `skill_context.v1`: each Supervisor turn reloads only the persisted selection, rechecks exact version/hash/bytes/Profile, redacts before independent budgeting, and injects deterministic in-memory system guidance. Metadata-only preparation commits atomically with the first `model.started`; no Skill text, path, name, or content hash is persisted in that ledger or its events. Prerequisites grant no tool capability, and the root policy remains authoritative. Profiles include `code`, `review`, `learn`, and `script`; Specialist minimization and CTF Skills remain later work.
 
 ## Findings and Reports
 
@@ -350,6 +350,7 @@ model.cancel_requested / model.cancel_observed
 agent.schedule_started / agent.schedule_stopped
 agent.delegation_proposed
 skill.selection_created
+skill.context_prepared / skill.context_committed
 readonly_fanout.planned
 readonly_fanout.execution_started / readonly_fanout.execution_recovered
 readonly_fanout.shard_started / readonly_fanout.shard_completed

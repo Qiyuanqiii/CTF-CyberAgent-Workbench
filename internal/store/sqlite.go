@@ -261,6 +261,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 37, Name: "accepted and fixed finding remediation lifecycle", Statements: findingRemediationStatements},
 		{Version: 38, Name: "operator-controlled Specialist scheduling", Statements: specialistOperatorScheduleStatements},
 		{Version: 39, Name: "immutable Run Skill selection", Statements: skillSelectionStatements},
+		{Version: 40, Name: "root Skill context provenance", Statements: rootSkillContextStatements},
 	})
 }
 

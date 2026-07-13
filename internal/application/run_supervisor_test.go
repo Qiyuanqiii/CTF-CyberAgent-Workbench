@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
+	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/store"
 	"cyberagent-workbench/internal/toolrun"
 )
@@ -76,6 +78,152 @@ func TestRunSupervisorCompletesOneTurnAndEnforcesBudget(t *testing.T) {
 		countEventType(after, events.RunExecutionLeaseAcquiredEvent) != countEventType(before, events.RunExecutionLeaseAcquiredEvent)+1 ||
 		countEventType(after, events.RunExecutionLeaseReleasedEvent) != countEventType(before, events.RunExecutionLeaseReleasedEvent)+1 {
 		t.Fatalf("budget rejection did not record exactly one lease attempt: before=%d after=%d", len(before), len(after))
+	}
+}
+
+func TestRunSupervisorInjectsPersistedSkillContextWithoutGrantingTools(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "supervisor-skill-context.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	provider := &lifecycleProvider{responses: []string{
+		rootActionResponse(domain.RootActionContinue, "selected Skill observed", "", ""),
+	}}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	runs := application.NewRunService(st)
+	_, run, err := runs.Create(ctx, application.CreateRunRequest{
+		Goal: "use selected coding guidance", Profile: "code",
+		ModelRoute: provider.Name() + "/model", Budget: domain.Budget{MaxTurns: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := skills.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := application.NewSkillSelectionService(st, registry).Select(ctx,
+		application.SelectSkillsRequest{
+			RunID: run.ID, Names: []string{"code"}, TokenBudget: 4096,
+			OperationKey: "supervisor-skill-context-0001", RequestedBy: "operator",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assembly, err := registry.AssembleContext(selected.Selection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runs.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SkillItems != 1 || result.SkillTokens != assembly.TokenUpperBound ||
+		result.SkillBudget != assembly.TokenBudget || result.SkillRedactions != assembly.RedactionCount ||
+		result.SkillRecovered {
+		t.Fatalf("unexpected root Skill lifecycle result: %#v", result)
+	}
+	if len(provider.requests) != 1 {
+		t.Fatalf("expected one provider request, got %d", len(provider.requests))
+	}
+	request := provider.requests[0]
+	if request.Metadata["skill_protocol"] != skills.ContextProtocolVersion ||
+		request.Metadata["skill_items"] != "1" ||
+		request.Metadata["skill_tokens"] != fmt.Sprint(assembly.TokenUpperBound) ||
+		request.Metadata["skill_budget"] != "4096" ||
+		request.Metadata["skill_redactions"] != fmt.Sprint(assembly.RedactionCount) ||
+		request.Metadata["skill_recovered"] != "false" {
+		t.Fatalf("unexpected Skill request metadata: %#v", request.Metadata)
+	}
+	if _, exposed := request.Metadata["skill_name"]; exposed {
+		t.Fatalf("provider metadata exposed selected Skill identity: %#v", request.Metadata)
+	}
+	var delivered string
+	for _, message := range request.Messages {
+		if strings.Contains(message.Content, "Selected embedded Skill code version") {
+			delivered = message.Content
+		}
+	}
+	if delivered == "" || !strings.Contains(delivered, assembly.Items[0].Content) ||
+		!strings.Contains(delivered, "guidance only; no capability grant") {
+		t.Fatalf("selected Skill context was not delivered safely: %q", delivered)
+	}
+	for _, tool := range request.Tools {
+		for _, forbidden := range []string{"list_workspace", "read_file", "replace_file"} {
+			if tool.Name == forbidden {
+				t.Fatalf("Skill dependency unexpectedly granted tool %q", tool.Name)
+			}
+		}
+	}
+	eventList, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countEventType(eventList, events.SkillContextPreparedEvent) != 1 ||
+		countEventType(eventList, events.SkillContextCommittedEvent) != 1 {
+		t.Fatalf("root Skill context provenance drifted: %#v", eventList)
+	}
+	for _, item := range eventList {
+		if strings.Contains(item.PayloadJSON, assembly.Items[0].Content) ||
+			strings.Contains(item.PayloadJSON, "# Code workflow") {
+			t.Fatalf("Run event persisted Skill body in %s", item.Type)
+		}
+	}
+}
+
+func TestRunSupervisorFailsBeforeProviderWhenSelectedSkillRegistryIsUnavailable(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "missing-skill-registry.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	provider := &lifecycleProvider{responses: []string{
+		rootActionResponse(domain.RootActionContinue, "must not be called", "", ""),
+	}}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	runs := application.NewRunService(st)
+	_, run, err := runs.Create(ctx, application.CreateRunRequest{
+		Goal: "fail closed on missing Skill Registry", Profile: "code",
+		ModelRoute: provider.Name() + "/model", Budget: domain.Budget{MaxTurns: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := skills.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.NewSkillSelectionService(st, registry).Select(ctx,
+		application.SelectSkillsRequest{
+			RunID: run.ID, Names: []string{"code"}, TokenBudget: 4096,
+			OperationKey: "supervisor-skill-context-0002", RequestedBy: "operator",
+		}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runs.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).
+		WithSkillRegistry(nil).Step(ctx, run.ID)
+	if apperror.CodeOf(err) != apperror.CodeFailedPrecondition || provider.calls != 0 {
+		t.Fatalf("missing Skill Registry did not fail before provider: calls=%d err=%v", provider.calls, err)
+	}
+	eventList, listErr := st.ListRunEvents(ctx, run.ID)
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+	if countEventType(eventList, events.SkillContextPreparedEvent) != 0 ||
+		countEventType(eventList, events.SkillContextCommittedEvent) != 0 ||
+		countEventType(eventList, events.ModelStartedEvent) != 0 {
+		t.Fatalf("failed Skill assembly left model provenance: %#v", eventList)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/fs"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -20,10 +21,14 @@ type registryEntry struct {
 	content  []byte
 }
 
-// Registry is immutable after construction. It intentionally exposes no Skill
-// content or mutation API in the first skill.v1 slice.
+const MaxVersionsPerSkill = 8
+
+// Registry is immutable after construction. entries contains only the current
+// selectable version, while versions retains a bounded embedded history for
+// exact resumption of previously pinned Runs.
 type Registry struct {
-	entries map[string]registryEntry
+	entries  map[string]registryEntry
+	versions map[string]map[string]registryEntry
 }
 
 func LoadFS(source fs.FS, root string) (*Registry, error) {
@@ -43,7 +48,10 @@ func LoadFS(source fs.FS, root string) (*Registry, error) {
 	if len(directories) == 0 || len(directories) > MaxSkills {
 		return nil, fmt.Errorf("skill registry must contain between 1 and %d entries", MaxSkills)
 	}
-	registry := &Registry{entries: make(map[string]registryEntry, len(directories))}
+	registry := &Registry{
+		entries:  make(map[string]registryEntry, len(directories)),
+		versions: make(map[string]map[string]registryEntry, len(directories)),
+	}
 	for _, directory := range directories {
 		info, infoErr := directory.Info()
 		if infoErr != nil || info.Mode()&fs.ModeSymlink != 0 || !info.IsDir() || !validName(directory.Name()) {
@@ -80,9 +88,13 @@ func LoadFS(source fs.FS, root string) (*Registry, error) {
 		if _, exists := registry.entries[manifest.Name]; exists {
 			return nil, fmt.Errorf("duplicate skill %q", manifest.Name)
 		}
-		registry.entries[manifest.Name] = registryEntry{
+		entry := registryEntry{
 			manifest: cloneManifest(manifest),
 			content:  bytes.Clone(content),
+		}
+		registry.entries[manifest.Name] = cloneRegistryEntry(entry)
+		registry.versions[manifest.Name] = map[string]registryEntry{
+			manifest.Version: cloneRegistryEntry(entry),
 		}
 	}
 	return registry, nil
@@ -119,7 +131,8 @@ func (r *Registry) Get(name string) (Manifest, bool) {
 }
 
 func (r *Registry) Validate() error {
-	if r == nil || len(r.entries) == 0 || len(r.entries) > MaxSkills {
+	if r == nil || len(r.entries) == 0 || len(r.entries) > MaxSkills ||
+		len(r.versions) != len(r.entries) {
 		return errors.New("skill registry is empty or exceeds its bound")
 	}
 	names := make([]string, 0, len(r.entries))
@@ -135,8 +148,85 @@ func (r *Registry) Validate() error {
 		if err := entry.manifest.Validate(entry.content); err != nil {
 			return fmt.Errorf("skill %q manifest: %w", name, err)
 		}
+		versions, found := r.versions[name]
+		if !found || len(versions) == 0 || len(versions) > MaxVersionsPerSkill {
+			return fmt.Errorf("skill %q version history is missing or exceeds its bound", name)
+		}
+		for version, versioned := range versions {
+			if version != versioned.manifest.Version || name != versioned.manifest.Name {
+				return fmt.Errorf("skill %q version history key is invalid", name)
+			}
+			if err := versioned.manifest.Validate(versioned.content); err != nil {
+				return fmt.Errorf("skill %q version %q manifest: %w", name, version, err)
+			}
+		}
+		current, found := versions[entry.manifest.Version]
+		if !found || !sameRegistryEntry(current, entry) {
+			return fmt.Errorf("skill %q current version is not pinned in its history", name)
+		}
 	}
 	return nil
+}
+
+func (r *Registry) version(name string, version string) (registryEntry, bool) {
+	if r == nil || !validName(name) || !validCoreVersion(version) {
+		return registryEntry{}, false
+	}
+	versions, found := r.versions[name]
+	if !found {
+		return registryEntry{}, false
+	}
+	entry, found := versions[version]
+	return entry, found
+}
+
+func (r *Registry) mergeHistory(history *Registry) error {
+	if r == nil || history == nil {
+		return errors.New("current and historical skill registries are required")
+	}
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	if err := history.Validate(); err != nil {
+		return err
+	}
+	for name, historyVersions := range history.versions {
+		currentVersions, found := r.versions[name]
+		if !found {
+			return fmt.Errorf("historical skill %q has no current version", name)
+		}
+		for version, entry := range historyVersions {
+			if existing, exists := currentVersions[version]; exists {
+				if !sameRegistryEntry(existing, entry) {
+					return fmt.Errorf("historical skill %q version %q conflicts with current content", name, version)
+				}
+				continue
+			}
+			if len(currentVersions) >= MaxVersionsPerSkill {
+				return fmt.Errorf("skill %q version history exceeds %d entries", name, MaxVersionsPerSkill)
+			}
+			currentVersions[version] = cloneRegistryEntry(entry)
+		}
+	}
+	return r.Validate()
+}
+
+func cloneRegistryEntry(entry registryEntry) registryEntry {
+	return registryEntry{manifest: cloneManifest(entry.manifest), content: bytes.Clone(entry.content)}
+}
+
+func sameRegistryEntry(left registryEntry, right registryEntry) bool {
+	return left.manifest.Protocol == right.manifest.Protocol &&
+		left.manifest.Name == right.manifest.Name &&
+		left.manifest.Version == right.manifest.Version &&
+		left.manifest.Description == right.manifest.Description &&
+		slices.Equal(left.manifest.Profiles, right.manifest.Profiles) &&
+		slices.Equal(left.manifest.ToolDependencies, right.manifest.ToolDependencies) &&
+		left.manifest.ContentPath == right.manifest.ContentPath &&
+		left.manifest.ContentSHA256 == right.manifest.ContentSHA256 &&
+		left.manifest.ContentBytes == right.manifest.ContentBytes &&
+		left.manifest.ContentTokenUpperBound == right.manifest.ContentTokenUpperBound &&
+		bytes.Equal(left.content, right.content)
 }
 
 func decodeManifest(raw []byte) (Manifest, error) {

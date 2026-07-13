@@ -1,0 +1,12 @@
+{
+  "protocol": "skill.v1",
+  "name": "review",
+  "version": "1.0.0",
+  "description": "Metadata for future version-pinned code review guidance.",
+  "profiles": ["review"],
+  "tool_dependencies": ["list_workspace", "read_file"],
+  "content_path": "SKILL.md",
+  "content_sha256": "2a2af9b4956272f16866df7c7eadc4cbd7051edbe6207473765d6253a1ca737e",
+  "content_bytes": 173,
+  "content_token_upper_bound": 173
+}

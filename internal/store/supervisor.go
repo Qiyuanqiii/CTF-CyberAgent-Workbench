@@ -327,6 +327,9 @@ func (s *SQLiteStore) RecordSupervisorModelStarted(ctx context.Context, checkpoi
 	if err != nil {
 		return false, err
 	}
+	if err := commitRootSkillContextTx(ctx, tx, run, current, attempt.Number); err != nil {
+		return false, err
+	}
 	subject := supervisorModelSubject(checkpoint, attempt.Number)
 	exists, err := supervisorModelEventExistsTx(ctx, tx, run.ID, events.ModelStartedEvent, subject)
 	if err != nil {

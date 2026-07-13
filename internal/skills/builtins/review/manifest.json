@@ -1,12 +1,12 @@
 {
   "protocol": "skill.v1",
   "name": "review",
-  "version": "1.0.0",
-  "description": "Metadata for future version-pinned code review guidance.",
+  "version": "1.1.0",
+  "description": "Severity-first code review and residual-risk guidance.",
   "profiles": ["review"],
   "tool_dependencies": ["list_workspace", "read_file"],
   "content_path": "SKILL.md",
-  "content_sha256": "2a2af9b4956272f16866df7c7eadc4cbd7051edbe6207473765d6253a1ca737e",
-  "content_bytes": 173,
-  "content_token_upper_bound": 173
+  "content_sha256": "b8e55af0094db9844cd47fa4db459897a8200ec9f39fe9f31aa74316113563c3",
+  "content_bytes": 407,
+  "content_token_upper_bound": 407
 }

@@ -14,10 +14,17 @@ func TestResolveSelectionIsDeterministicBoundedAndDefensive(t *testing.T) {
 	second := fixtureManifest(content)
 	second.Name = "code-review"
 	second.Description = "Second coding metadata."
-	registry := &Registry{entries: map[string]registryEntry{
-		first.Name:  {manifest: first, content: append([]byte(nil), content...)},
-		second.Name: {manifest: second, content: append([]byte(nil), content...)},
-	}}
+	firstEntry := registryEntry{manifest: first, content: append([]byte(nil), content...)}
+	secondEntry := registryEntry{manifest: second, content: append([]byte(nil), content...)}
+	registry := &Registry{
+		entries: map[string]registryEntry{
+			first.Name: firstEntry, second.Name: secondEntry,
+		},
+		versions: map[string]map[string]registryEntry{
+			first.Name:  {first.Version: cloneRegistryEntry(firstEntry)},
+			second.Name: {second.Version: cloneRegistryEntry(secondEntry)},
+		},
+	}
 	request := ResolveSelectionRequest{
 		SelectionID: "skill-selection-first", RunID: "run-selection",
 		MissionID: "mission-selection", Profile: domain.ProfileCode,

@@ -35,7 +35,7 @@ func TestSkillSelectionIsImmutableIdempotentAndMetadataOnly(t *testing.T) {
 	}
 	if created.Replayed || created.Selection.ItemCount != 1 ||
 		created.Selection.Items[0].Name != "code" ||
-		created.Selection.TokenUpperBound != 171 {
+		created.Selection.TokenUpperBound != 398 {
 		t.Fatalf("created selection drifted: %#v", created)
 	}
 	loaded, found, err := st.GetSkillSelectionByRun(ctx, run.ID)
@@ -224,12 +224,7 @@ func TestSkillSelectionEventFailureRollsBackAndV38UpgradesCleanly(t *testing.T) 
 		t.Fatalf("failed transaction left Skill selection: found=%t err=%v", found, err)
 	}
 
-	for _, statement := range []string{
-		`DROP TABLE run_skill_selection_operations`,
-		`DROP TABLE run_skill_selection_items`,
-		`DROP TABLE run_skill_selections`,
-		`DELETE FROM schema_migrations WHERE version = 39`,
-	} {
+	for _, statement := range removeSchemaV39ForTestStatements() {
 		if _, err := st.db.ExecContext(ctx, statement); err != nil {
 			t.Fatal(err)
 		}

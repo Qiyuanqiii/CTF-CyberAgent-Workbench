@@ -1,0 +1,12 @@
+{
+  "protocol": "skill.v1",
+  "name": "code",
+  "version": "1.0.0",
+  "description": "Metadata for future version-pinned coding guidance.",
+  "profiles": ["code"],
+  "tool_dependencies": ["list_workspace", "read_file", "replace_file"],
+  "content_path": "SKILL.md",
+  "content_sha256": "10e7219a5fb6a3ecb60cf5ae400c2966f3ee42f52284a0a1c416a3e639dd5b6d",
+  "content_bytes": 171,
+  "content_token_upper_bound": 171
+}

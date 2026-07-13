@@ -21,7 +21,7 @@ Read in this order after a long context break:
 - Overall product vision: about 97%.
 - General Agent MVP: about 99%.
 - V2 run-centric runtime: about 99%.
-- Database schema: v39.
+- Database schema: v40.
 - Main languages: Go control plane, TypeScript React/Vite read console; Rust has not started.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
@@ -40,21 +40,21 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 
 ## Latest Completed Slice
 
-The second P7 Skills vertical slice adds schema v39 and a Go-owned immutable `skill_selection.v1`. An operator may select one to eight Skills only while a Run is `created`; the Registry resolves a deterministic name order and pins each version, content SHA-256, UTF-8 byte count, and conservative token upper bound. One Run has at most one selection. Go and SQLite independently enforce Mission/Profile binding, contiguous items, aggregate budget, immutable rows, and one digest-only idempotency operation. Exact replay remains valid after Run start and across Registry content/version drift, while changed intent conflicts.
+The third P7 Skills vertical slice adds schema v40 and root-only `skill_context.v1`. Every Supervisor turn loads the Run's persisted `skill_selection.v1`, then the immutable embedded Registry rechecks exact name/version/content-hash/byte/token tuples and Profile before exposing any text. Delivery is redacted, stable-name ordered, and bounded by the selection's independent token budget. The four built-in workflow guides are now useful version `1.1.0` content instead of stale metadata placeholders. A hard-bounded embedded history retains at most eight versions per Skill: new selection sees only current entries, while old `1.0.0` selections resume against their exact original body.
 
-The only write entry is operator CLI `skill select`; `skill selection` is read-only. Models, HTTP, the Tool Gateway, and child scheduling cannot select Skills. Events contain protocol/Profile/count/budgets and explicit `context_injection=false` / `tool_capability_grant=false`, never Skill names, content, paths, hashes, dependencies, or raw operation keys. No Skill content enters a Provider prompt and no tool authority is granted.
+Preparation is persisted before the model call and committed in the same SQLite transaction as the first `model.started`. Replay through another Store connection converges on the same preparation; reconstructed context drift conflicts, missing preparation fails model start closed, and a failed model-start event rolls the commit back. The two v40 tables and `skill.context_prepared/committed` events contain aggregate provenance only. Skill text exists only in the in-memory Provider request; text, paths, Skill names, versions, content hashes, and declared tool dependencies never enter the v40 ledger or events.
 
-The audit found no unresolved high/medium issue. It fixed five robustness gaps: actionable CLI validation reasons were hidden, replay depended on the current Registry result, application replay did not independently verify the operation identity/timestamp binding, duplicate event JSON fields were accepted ambiguously, and historical migration fixtures did not remove v39. Focused tests cover deterministic resolution, Profile/budget/duplicate rejection, underreported accounting, immutable SQL, metadata-only events, rollback, v38 upgrade, post-start replay, Registry-drift replay, operation-binding drift, and eight concurrent callers over two SQLite connections; the concurrency test also passed 20 repeated runs. Verified gates: uncached full tests, full-repository race detection, `go vet`, zero-warning `staticcheck`, module verification/tidy diff, `govulncheck` with zero findings, OpenAPI/TypeScript drift, 15 Vitest tests, production build, npm audit with zero findings, tracked credential/runtime scans, and an isolated real-binary schema-v39 selection/replay smoke.
+Skill guidance is subordinate to the root system policy and does not alter the offered tool list. Models, HTTP, the Tool Gateway, and child scheduling still cannot select Skills; Specialist contexts receive none. A missing or mismatched Registry fails before Provider invocation. Focused tests cover deterministic current and archived assembly, redaction, tampering and Registry drift, SQL immutability, atomic commit/rollback, cross-Store replay, v39 upgrade, prompt delivery, metadata-only persistence, no tool grant, and fail-closed Registry loss. Full repository gates and CI are recorded in `docs/PROGRESS_BOOK.md` for the slice.
 
 ## Next Slice
 
-Implement the third P7 Skills vertical slice:
+Implement the fourth P7 Skills vertical slice as a bounded Plan/Delivery workflow inspired by strong coding-agent product patterns without copying proprietary implementation:
 
-1. Assemble context only from the Run's persisted selection and the immutable embedded Registry.
-2. Reverify exact name/version/content-hash/byte tuples before every prepared delivery.
-3. Redact and bound selected Skill text under a separate context budget with deterministic ordering.
-4. Persist metadata-only preparation/commit provenance without Skill text or paths in events.
-5. Start with the root Supervisor only; grant no tools and leave Specialist Skill minimization for a later slice.
+1. Add one embedded cross-Profile planning Skill with three concise operator-selectable directions, a strict bounded plan shape, and no new tool authority.
+2. Project accepted modules into existing WorkItems and durable handoff Notes instead of introducing a second task engine.
+3. Advance one slice at a time; after each slice require focused verification, a diff/security audit, and a compact handoff update.
+4. After each larger module, require broader functional and robustness gates before completion.
+5. Keep Go authoritative for workflow state and budgets; Skill text remains guidance, and Specialist Skill minimization follows as a separate audited slice.
 
 ## Delivery Loop
 

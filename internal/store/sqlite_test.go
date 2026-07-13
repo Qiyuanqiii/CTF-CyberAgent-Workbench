@@ -965,7 +965,7 @@ func removeSchemaV38ForTestStatements() []string {
 }
 
 func removeSchemaV39ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV40ForTestStatements(), []string{
 		`DROP TRIGGER trg_run_skill_selection_operation_delete_immutable`,
 		`DROP TRIGGER trg_run_skill_selection_operation_update_immutable`,
 		`DROP TRIGGER trg_run_skill_selection_item_delete_immutable`,
@@ -980,6 +980,21 @@ func removeSchemaV39ForTestStatements() []string {
 		`DROP TABLE run_skill_selection_items`,
 		`DROP TABLE run_skill_selections`,
 		`DELETE FROM schema_migrations WHERE version = 39`,
+	}...)
+}
+
+func removeSchemaV40ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_root_skill_context_commit_delete_immutable`,
+		`DROP TRIGGER trg_root_skill_context_commit_update_immutable`,
+		`DROP TRIGGER trg_root_skill_context_preparation_delete_immutable`,
+		`DROP TRIGGER trg_root_skill_context_preparation_update_immutable`,
+		`DROP TRIGGER trg_root_skill_context_commit_insert`,
+		`DROP TRIGGER trg_root_skill_context_preparation_insert`,
+		`DROP INDEX idx_root_skill_context_run_turn`,
+		`DROP TABLE root_skill_context_commits`,
+		`DROP TABLE root_skill_context_preparations`,
+		`DELETE FROM schema_migrations WHERE version = 40`,
 	}
 }
 

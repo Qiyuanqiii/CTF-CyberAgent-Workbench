@@ -1,0 +1,12 @@
+{
+  "protocol": "skill.v1",
+  "name": "script",
+  "version": "1.0.0",
+  "description": "Metadata for future version-pinned script guidance.",
+  "profiles": ["script"],
+  "tool_dependencies": ["list_workspace", "read_file", "script_process"],
+  "content_path": "SKILL.md",
+  "content_sha256": "23823cd2fc85467257817f02819316a1b6b34d15b462b797a9972f1d6b58d741",
+  "content_bytes": 173,
+  "content_token_upper_bound": 173
+}

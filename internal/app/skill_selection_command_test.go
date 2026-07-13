@@ -24,9 +24,9 @@ func TestSkillSelectionCLIIsPinnedReplayableAndMetadataOnly(t *testing.T) {
 	selectionID := skillSelectionIDPattern.FindString(selected)
 	if code != 0 || stderr != "" || selectionID == "" ||
 		!strings.Contains(selected, "protocol: skill_selection.v1") ||
-		!strings.Contains(selected, "skill[1]: code@1.0.0") ||
+		!strings.Contains(selected, "skill[1]: code@1.1.0") ||
 		!strings.Contains(selected, "replayed: false") ||
-		!strings.Contains(selected, "context_injection: disabled") ||
+		!strings.Contains(selected, "context_injection: root_selected_only") ||
 		!strings.Contains(selected, "tool_capability_grant: disabled") ||
 		strings.Contains(selected, "SKILL.md") || strings.Contains(selected, "tool_dependencies") {
 		t.Fatalf("Skill selection failed: code=%d stderr=%q output=%q", code, stderr, selected)
