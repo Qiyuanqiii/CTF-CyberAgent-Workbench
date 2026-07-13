@@ -10,6 +10,8 @@ cyberagent run list
 cyberagent run list --status paused
 cyberagent run show <run-id>
 cyberagent run events <run-id>
+cyberagent headless events <run-id> --max-events 1000
+cyberagent headless events <run-id> --after-sequence <n> --follow --timeout 30m
 cyberagent run start <run-id>
 cyberagent run step <run-id>
 cyberagent run execute <run-id> --max-steps 3
@@ -31,6 +33,16 @@ Session messages, assistant policy decisions, ToolRun changes, and FileEdit chan
 `run step` asks the RunSupervisor to execute exactly one root Agent planning turn. It writes a `turn_started` checkpoint before the model call, permits only the bounded create-only WorkItem/Note tool loop, and ultimately requires one strict `root_lifecycle.v1` JSON action. The Supervisor validates and interprets the action, then atomically stores the user-facing message, policy decision, model usage, lifecycle events, cumulative token/model-time counters, and next checkpoint. Raw protocol JSON is not written to Session history. `run checkpoint` displays the durable phase, protocol-repair phase/reason, next turn, token counters, and execution milliseconds. A process restart resumes an unfinished started turn or pending tool batch; a committed turn is never appended twice. Turn or token budget exhaustion returns exit code 8, while the persisted execution-time boundary returns a deadline error.
 
 Root actions use `continue`, `finish`, or `wait`. `continue` advances to another idle turn. `finish` requires a summary and atomically completes the Run. `wait` requires a reason, atomically pauses the Run, and resumes at the next turn after `run resume`. Unknown fields, trailing data, Markdown fences, invalid combinations, and responses over 64 KiB fail the current turn without writing user/assistant messages. Assistant prose by itself cannot mutate Run state.
+
+## Headless NDJSON
+
+`cyberagent headless events <run-id>` exports the same redacted, append-only SQLite Run events used by CLI, SSE, and Web. The protocol is `headless.v1`; stdout contains only newline-delimited JSON. Each durable event is one `kind: "run.event"` record, followed by exactly one `kind: "stream.end"` record for every normal snapshot, terminal outcome, event bound, cancellation, or deadline. Human-readable diagnostics remain on stderr.
+
+`--after-sequence <n>` resumes strictly after a previously emitted durable sequence. A cursor beyond the current tail is rejected before stdout is written. `--max-events` defaults to 1,000 and is bounded to 10,000; a truncated export returns exit 8 and reports `suggested_resume_after` in the end record. Reads occur in batches of at most 100 and validate contiguous sequence, Run/Mission identity, UTF-8 metadata, and a 1 MiB payload ceiling. The command never writes a Run event.
+
+Without `--follow`, a nonterminal Run ends with `reason: "snapshot"` and exit 0. `--follow` polls the same local SQLite database every 250 ms by default, accepts only 50 ms through 5 s, drains any final event before returning, and may be bounded with `--timeout` up to 24 hours. Terminal completion returns 0, terminal failure returns 4, terminal cancellation returns 7, the event cap returns 8, and timeout returns 9. Caller cancellation returns 7. These codes reuse the stable `apperror` contract.
+
+Headless mode is a read adapter, not another execution engine: it does not call `RunSupervisor`, a Provider, Tool Gateway, Sandbox, Shell, network, or file-write path. Run execution remains in the existing CLI/Session/operator services, so closing the Headless consumer cannot stop or mutate a background Run.
 
 Schema v19 assigns every new Run one stable root Agent identity. The root is `ready` before a turn, `running` only while bound to the persisted Supervisor attempt, `waiting` when the Run pauses, and terminal with the Run. These projections, coordinator events, and a bounded recovery snapshot commit in the same transaction as the existing Run/Supervisor change. `run graph <run-id>` lazily registers older Runs when needed, validates the current node and pending-inbox metadata against the latest `agent_graph.v1` snapshot, and prints only bounded metadata. Current roots have `child_limit=0`: no public child-spawn path or concurrent sub-agent execution exists yet. The durable inbox primitive is internal and is not inserted into model prompts in this slice.
 

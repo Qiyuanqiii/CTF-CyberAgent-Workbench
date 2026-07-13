@@ -106,6 +106,13 @@ func TestSQLiteReadPagesUseStableOffsetsAndBoundedMetadataQueries(t *testing.T) 
 	if err != nil || len(noLaterEvents) != 0 || noLaterEvents == nil {
 		t.Fatalf("empty event sequence page is unstable: %#v err=%v", noLaterEvents, err)
 	}
+	latestSequence, err := st.LatestRunEventSequence(ctx, firstRun.ID)
+	if err != nil || latestSequence != eventList[len(eventList)-1].Sequence {
+		t.Fatalf("latest event sequence drifted: latest=%d err=%v", latestSequence, err)
+	}
+	if _, err := st.LatestRunEventSequence(ctx, "run-missing"); err == nil {
+		t.Fatal("missing Run returned a synthetic event tail")
+	}
 
 	workService := application.NewWorkItemService(st)
 	noteService := application.NewNoteService(st)

@@ -196,6 +196,8 @@ func (a *App) dispatch(ctx context.Context, args []string) error {
 		return a.reportCommand(ctx, args[1:])
 	case "api":
 		return a.apiCommand(ctx, args[1:])
+	case "headless":
+		return a.headlessCommand(ctx, args[1:])
 	case "run":
 		return a.runCommand(ctx, args[1:])
 	case "todo":
@@ -229,6 +231,7 @@ func (a *App) printHelp() {
 	fmt.Fprintln(a.out, "  cyberagent report show|finding|check")
 	fmt.Fprintln(a.out, "  cyberagent report finding attach|validate|reject|accept|remediation|fix|verify")
 	fmt.Fprintln(a.out, "  cyberagent api serve|openapi")
+	fmt.Fprintln(a.out, "  cyberagent headless events")
 	fmt.Fprintln(a.out, "  cyberagent run create|adapt-task|list|show|events|usage|start|step|execute|checkpoint|graph|lease|finish|fail|pause|resume|cancel|delegations|delegation|fanouts|fanout")
 	fmt.Fprintln(a.out, "  cyberagent run fanout plan|execute|show|execution|report")
 	fmt.Fprintln(a.out, "  cyberagent todo create|list|show|update|start|block|reopen|complete|cancel")

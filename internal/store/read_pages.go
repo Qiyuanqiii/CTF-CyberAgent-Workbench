@@ -174,6 +174,23 @@ func (s *SQLiteStore) ListRunEventsAfterSequence(ctx context.Context, runID stri
 	return out, rows.Err()
 }
 
+func (s *SQLiteStore) LatestRunEventSequence(ctx context.Context,
+	runID string,
+) (int64, error) {
+	var err error
+	if runID, err = validateReadRunID(runID); err != nil {
+		return 0, err
+	}
+	var sequence int64
+	err = s.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(e.sequence), 0)
+		FROM runs r LEFT JOIN run_events e ON e.run_id = r.id
+		WHERE r.id = ? GROUP BY r.id`, runID).Scan(&sequence)
+	if err != nil {
+		return 0, err
+	}
+	return sequence, nil
+}
+
 func validateReadRunID(runID string) (string, error) {
 	runID = strings.TrimSpace(runID)
 	if runID == "" || !utf8.ValidString(runID) || len([]rune(runID)) > 256 {
