@@ -1111,7 +1111,7 @@ func removeSchemaV42ForTestStatements() []string {
 }
 
 func removeSchemaV43ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV44ForTestStatements(), []string{
 		`DROP TRIGGER trg_session_message_delete_immutable`,
 		`DROP TRIGGER trg_session_message_compaction_monotonic`,
 		`DROP TRIGGER trg_session_message_provenance_update_immutable`,
@@ -1123,6 +1123,39 @@ func removeSchemaV43ForTestStatements() []string {
 		`ALTER TABLE session_messages DROP COLUMN source_kind`,
 		`ALTER TABLE session_messages DROP COLUMN provenance_version`,
 		`DELETE FROM schema_migrations WHERE version = 43`,
+	}...)
+}
+
+func removeSchemaV44ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_delivery_run_completion_guard`,
+		`DROP TRIGGER trg_delivery_work_item_completion_guard`,
+		`DROP TRIGGER trg_delivery_handoff_note_evidence_delete_immutable`,
+		`DROP TRIGGER trg_delivery_handoff_note_evidence_update_immutable`,
+		`DROP TRIGGER trg_delivery_handoff_note_evidence_insert_immutable`,
+		`DROP TRIGGER trg_delivery_handoff_note_source_delete_immutable`,
+		`DROP TRIGGER trg_delivery_handoff_note_source_update_immutable`,
+		`DROP TRIGGER trg_delivery_handoff_note_source_insert_immutable`,
+		`DROP TRIGGER trg_delivery_handoff_note_tag_delete_immutable`,
+		`DROP TRIGGER trg_delivery_handoff_note_tag_update_immutable`,
+		`DROP TRIGGER trg_delivery_handoff_note_tag_insert_immutable`,
+		`DROP TRIGGER trg_delivery_handoff_note_delete_immutable`,
+		`DROP TRIGGER trg_delivery_handoff_note_update_immutable`,
+		`DROP TRIGGER trg_delivery_checkpoint_operation_delete_immutable`,
+		`DROP TRIGGER trg_delivery_checkpoint_operation_update_immutable`,
+		`DROP TRIGGER trg_delivery_checkpoint_delete_immutable`,
+		`DROP TRIGGER trg_delivery_checkpoint_update_immutable`,
+		`DROP TRIGGER trg_delivery_checkpoint_operation_insert`,
+		`DROP TRIGGER trg_delivery_checkpoint_insert`,
+		`DROP TRIGGER trg_delivery_gate_enrollment_delete_immutable`,
+		`DROP TRIGGER trg_delivery_gate_enrollment_update_immutable`,
+		`DROP TRIGGER trg_delivery_gate_enrollment_insert`,
+		`DROP TRIGGER trg_delivery_gate_selection_enroll`,
+		`DROP TABLE delivery_checkpoint_operations`,
+		`DROP INDEX idx_delivery_checkpoints_run_module`,
+		`DROP TABLE delivery_checkpoints`,
+		`DROP TABLE delivery_gate_enrollments`,
+		`DELETE FROM schema_migrations WHERE version = 44`,
 	}
 }
 

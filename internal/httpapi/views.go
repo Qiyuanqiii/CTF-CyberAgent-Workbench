@@ -155,12 +155,29 @@ type PlanDeliverySelectionView struct {
 	CreatedAt        time.Time                       `json:"created_at"`
 }
 
+type DeliveryCheckpointView struct {
+	ID               string    `json:"id"`
+	WorkItemID       string    `json:"work_item_id"`
+	ModuleOrdinal    int       `json:"module_ordinal"`
+	ModuleCount      int       `json:"module_count"`
+	ModeRevision     int64     `json:"mode_revision"`
+	WorkItemVersion  int64     `json:"work_item_version"`
+	FullGateRequired bool      `json:"full_gate_required"`
+	HandoffNoteID    string    `json:"handoff_note_id"`
+	GateReady        bool      `json:"gate_ready"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
 type PlanDeliveryStateView struct {
 	Proposal             *PlanDeliveryProposalView  `json:"proposal,omitempty"`
 	Selection            *PlanDeliverySelectionView `json:"selection,omitempty"`
 	OperatorChoiceNeeded bool                       `json:"operator_choice_needed"`
 	PhaseChangeNeeded    bool                       `json:"phase_change_needed"`
 	CapabilityGrant      bool                       `json:"capability_grant"`
+	DeliveryGateEnforced bool                       `json:"delivery_gate_enforced"`
+	RequiredCheckpoints  int                        `json:"required_checkpoints"`
+	ReadyCheckpoints     int                        `json:"ready_checkpoints"`
+	Checkpoints          []DeliveryCheckpointView   `json:"checkpoints"`
 }
 
 type RunDetailView struct {
@@ -384,6 +401,18 @@ func planDeliverySelectionView(value domain.PlanDeliverySelection) PlanDeliveryS
 	return PlanDeliverySelectionView{
 		ID: value.ID, ProposalID: value.ProposalID, DirectionOrdinal: value.DirectionOrdinal,
 		NoteID: value.NoteID, Items: items, Version: value.Version, CreatedAt: value.CreatedAt,
+	}
+}
+
+func deliveryCheckpointView(value domain.DeliveryCheckpoint,
+	ready bool,
+) DeliveryCheckpointView {
+	return DeliveryCheckpointView{
+		ID: value.ID, WorkItemID: value.WorkItemID,
+		ModuleOrdinal: value.ModuleOrdinal, ModuleCount: value.ModuleCount,
+		ModeRevision: value.ModeRevision, WorkItemVersion: value.WorkItemVersion,
+		FullGateRequired: value.FullGateRequired, HandoffNoteID: value.HandoffNoteID,
+		GateReady: ready, CreatedAt: value.CreatedAt,
 	}
 }
 

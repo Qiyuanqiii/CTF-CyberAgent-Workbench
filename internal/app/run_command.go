@@ -55,6 +55,8 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runPlanDeliveryProposals(ctx, args[1:])
 	case "plan":
 		return a.runPlanDelivery(ctx, args[1:])
+	case "delivery":
+		return a.runDeliveryCheckpoint(ctx, args[1:])
 	case "fanouts":
 		return a.runFanouts(ctx, args[1:])
 	case "fanout":
@@ -77,6 +79,127 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runTransition(ctx, service, "cancel", args[1:])
 	default:
 		return fmt.Errorf("unknown run subcommand %q", args[0])
+	}
+}
+
+func (a *App) runDeliveryCheckpoint(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: cyberagent run delivery checkpoint|list|show")
+	}
+	switch args[0] {
+	case "checkpoint":
+		return a.runDeliveryCheckpointRecord(ctx, args[1:])
+	case "list":
+		return a.runDeliveryCheckpointList(ctx, args[1:])
+	case "show":
+		return a.runDeliveryCheckpointShow(ctx, args[1:])
+	default:
+		return fmt.Errorf("unknown run delivery subcommand %q", args[0])
+	}
+}
+
+func (a *App) runDeliveryCheckpointRecord(ctx context.Context, args []string) error {
+	fs := newFlagSet("run delivery checkpoint", a.errOut)
+	operationKey := fs.String("operation-key", "", "stable Delivery checkpoint operation key")
+	operator := fs.String("operator", "cli_operator", "operator identity")
+	focused := fs.String("focused", "", "focused verification evidence")
+	diffAudit := fs.String("diff-audit", "", "diff audit evidence")
+	securityAudit := fs.String("security-audit", "", "security audit evidence")
+	functional := fs.String("functional", "", "final-boundary functional verification evidence")
+	robustness := fs.String("robustness", "", "final-boundary robustness audit evidence")
+	handoff := fs.String("handoff", "", "compact durable handoff summary")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"operation-key": true, "operator": true, "focused": true,
+		"diff-audit": true, "security-audit": true, "functional": true,
+		"robustness": true, "handoff": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 || strings.TrimSpace(*operationKey) == "" {
+		return errors.New("usage: cyberagent run delivery checkpoint <work-id> --operation-key <key> --focused <evidence> --diff-audit <evidence> --security-audit <evidence> --handoff <summary> [--functional <evidence> --robustness <evidence>] [--operator <id>]")
+	}
+	result, err := application.NewDeliveryCheckpointService(a.store).Record(ctx,
+		application.RecordDeliveryCheckpointRequest{
+			WorkItemID: fs.Arg(0), OperationKey: *operationKey,
+			RequestedBy: *operator, FocusedVerification: *focused,
+			DiffAudit: *diffAudit, SecurityAudit: *securityAudit,
+			FunctionalVerification: *functional, RobustnessAudit: *robustness,
+			HandoffSummary: *handoff,
+		})
+	if err != nil {
+		return err
+	}
+	printDeliveryCheckpoint(a, result.Checkpoint, false)
+	fmt.Fprintf(a.out, "handoff_note: %s\nreplayed: %t\ncompletion_gate_ready: true\nnext: cyberagent todo complete %s --version %d\n",
+		result.Note.ID, result.Replayed, result.Checkpoint.WorkItemID,
+		result.Checkpoint.WorkItemVersion)
+	return nil
+}
+
+func (a *App) runDeliveryCheckpointList(ctx context.Context, args []string) error {
+	fs := newFlagSet("run delivery list", a.errOut)
+	limit := fs.Int("limit", 100, "maximum Delivery checkpoints")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{"limit": true})); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run delivery list <run-id> [--limit <n>]")
+	}
+	values, err := application.NewDeliveryCheckpointService(a.store).List(ctx,
+		fs.Arg(0), *limit)
+	if err != nil {
+		return err
+	}
+	if len(values) == 0 {
+		fmt.Fprintln(a.out, "no Delivery checkpoints")
+		return nil
+	}
+	for _, value := range values {
+		fmt.Fprintf(a.out, "%s\twork_item=%s\tslice=%d/%d\tmode_revision=%d\twork_item_version=%d\tfull_gate=%t\thandoff_note=%s\tcreated_at=%s\n",
+			value.ID, value.WorkItemID, value.ModuleOrdinal, value.ModuleCount,
+			value.ModeRevision, value.WorkItemVersion, value.FullGateRequired,
+			value.HandoffNoteID, value.CreatedAt.Format(time.RFC3339Nano))
+	}
+	return nil
+}
+
+func (a *App) runDeliveryCheckpointShow(ctx context.Context, args []string) error {
+	fs := newFlagSet("run delivery show", a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run delivery show <checkpoint-id>")
+	}
+	value, err := application.NewDeliveryCheckpointService(a.store).Get(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	printDeliveryCheckpoint(a, value, true)
+	return nil
+}
+
+func printDeliveryCheckpoint(a *App, value domain.DeliveryCheckpoint,
+	includeEvidence bool,
+) {
+	fmt.Fprintf(a.out, "checkpoint: %s\nrun: %s\nselection: %s\nproposal: %s\nwork_item: %s\ndirection: %d\nslice: %d/%d\nmode_snapshot: %s\nmode_revision: %d\nwork_item_version: %d\nacceptance_fingerprint: %s\nsource_fingerprint: %s\nfull_gate_required: %t\nhandoff_note: %s\nhandoff_digest: %s\nrequested_by: %s\nversion: %d\ncreated_at: %s\n",
+		value.ID, value.RunID, value.SelectionID, value.ProposalID,
+		value.WorkItemID, value.DirectionOrdinal, value.ModuleOrdinal,
+		value.ModuleCount, value.ModeSnapshotID, value.ModeRevision,
+		value.WorkItemVersion, value.AcceptanceFingerprint,
+		value.SourceFingerprint, value.FullGateRequired, value.HandoffNoteID,
+		value.HandoffDigest, value.RequestedBy, value.Version,
+		value.CreatedAt.Format(time.RFC3339Nano))
+	if includeEvidence {
+		fmt.Fprintf(a.out, "focused_verification: %s\ndiff_audit: %s\nsecurity_audit: %s\n",
+			planDeliveryCLIText(value.FocusedVerification),
+			planDeliveryCLIText(value.DiffAudit),
+			planDeliveryCLIText(value.SecurityAudit))
+		if value.FullGateRequired {
+			fmt.Fprintf(a.out, "functional_verification: %s\nrobustness_audit: %s\n",
+				planDeliveryCLIText(value.FunctionalVerification),
+				planDeliveryCLIText(value.RobustnessAudit))
+		}
 	}
 }
 

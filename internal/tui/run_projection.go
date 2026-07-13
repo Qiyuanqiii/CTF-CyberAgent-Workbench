@@ -20,19 +20,21 @@ const (
 // RunProjection is the small, stable state contract used to compare the TUI
 // with other read surfaces without parsing terminal styling.
 type RunProjection struct {
-	RunID              string
-	MissionID          string
-	SessionID          string
-	Status             domain.RunStatus
-	Surface            domain.ExecutionSurface
-	Phase              domain.ExecutionPhase
-	ModeRevision       int64
-	EventSequence      int64
-	AgentCount         int
-	FindingReportCount int
-	FindingCount       int
-	PlanProposalID     string
-	PlanDirection      int
+	RunID                   string
+	MissionID               string
+	SessionID               string
+	Status                  domain.RunStatus
+	Surface                 domain.ExecutionSurface
+	Phase                   domain.ExecutionPhase
+	ModeRevision            int64
+	EventSequence           int64
+	AgentCount              int
+	FindingReportCount      int
+	FindingCount            int
+	PlanProposalID          string
+	PlanDirection           int
+	DeliveryCheckpointCount int
+	DeliveryGateReadyCount  int
 }
 
 func (m *Model) CurrentRunProjection() (RunProjection, bool) {
@@ -57,6 +59,9 @@ func (m *Model) CurrentRunProjection() (RunProjection, bool) {
 	if m.runContext.PlanSelection != nil {
 		projection.PlanDirection = m.runContext.PlanSelection.DirectionOrdinal
 	}
+	projection.DeliveryCheckpointCount = len(m.runContext.DeliveryCheckpoints)
+	projection.DeliveryGateReadyCount = readyDeliveryCheckpointCount(
+		m.runContext.DeliveryCheckpoints, m.runContext.WorkItems, m.runContext.Mode)
 	return projection, true
 }
 

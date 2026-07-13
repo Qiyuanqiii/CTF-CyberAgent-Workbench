@@ -75,11 +75,17 @@ func TestRunActivityProjectsPlanDeliveryAsReadOnly(t *testing.T) {
 	model := &Model{focus: focusTools, activityView: activityPlan, runContext: runContext{
 		Found: true, Run: domain.Run{ID: "run-plan", MissionID: "mission-plan",
 			SessionID: "session-plan", Status: domain.RunPaused},
-		Mode:         domain.RunModeSnapshot{Phase: domain.ExecutionPhasePlan},
-		PlanProposal: proposal, PlanSelection: selection,
+		Mode: domain.RunModeSnapshot{ID: "mode-plan", Revision: 3,
+			Phase: domain.ExecutionPhasePlan},
+		WorkItems: []domain.WorkItem{{ID: "work-plan-one", RunID: "run-plan",
+			Status: domain.WorkItemCompleted, Version: 2}},
+		PlanProposal: proposal, PlanSelection: selection, DeliveryGateEnforced: true,
+		DeliveryCheckpoints: []domain.DeliveryCheckpoint{{ID: "checkpoint-plan-one",
+			RunID: "run-plan", WorkItemID: "work-plan-one", WorkItemVersion: 1}},
 	}}
 	output := model.renderActivity(80, 18)
 	for _, want := range []string{"Plan / Delivery", "selected=2 work-items=2",
+		"delivery-gates=1/2 enforced=true",
 		"explicit Deliver phase required", "1. Conservative", "* 2. Balanced",
 		"3. Accelerated"} {
 		if !strings.Contains(output, want) {
@@ -87,7 +93,8 @@ func TestRunActivityProjectsPlanDeliveryAsReadOnly(t *testing.T) {
 		}
 	}
 	projection, found := model.CurrentRunProjection()
-	if !found || projection.PlanProposalID != proposal.ID || projection.PlanDirection != 2 {
+	if !found || projection.PlanProposalID != proposal.ID || projection.PlanDirection != 2 ||
+		projection.DeliveryCheckpointCount != 1 || projection.DeliveryGateReadyCount != 1 {
 		t.Fatalf("Plan/Delivery stable projection drifted: %#v found=%t", projection, found)
 	}
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})

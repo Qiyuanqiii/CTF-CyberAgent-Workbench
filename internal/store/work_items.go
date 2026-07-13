@@ -243,6 +243,11 @@ func (s *SQLiteStore) UpdateWorkItem(ctx context.Context, item domain.WorkItem, 
 			return err
 		}
 	}
+	if current.Status != item.Status && item.Status == domain.WorkItemCompleted {
+		if err := requireSelectedWorkItemDeliveryCheckpointTx(ctx, tx, current); err != nil {
+			return err
+		}
+	}
 	acceptanceJSON, err := json.Marshal(item.AcceptanceCriteria)
 	if err != nil {
 		return err

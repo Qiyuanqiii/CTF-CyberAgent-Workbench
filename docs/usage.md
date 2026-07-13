@@ -15,6 +15,10 @@ cyberagent run plan show <proposal-id>
 cyberagent run plan choose <proposal-id> 2 --operation-key <stable-key>
 cyberagent run plan selection <run-id>
 cyberagent run phase <run-id> deliver --operation-key <stable-key> --reason "plan accepted"
+cyberagent run delivery checkpoint <work-id> --operation-key <stable-key> --focused "focused tests passed" --diff-audit "diff reviewed" --security-audit "security reviewed" --handoff "slice handoff"
+cyberagent run delivery checkpoint <final-work-id> --operation-key <stable-key> --focused "focused tests passed" --diff-audit "diff reviewed" --security-audit "security reviewed" --handoff "module handoff" --functional "full suite passed" --robustness "race and failure paths passed"
+cyberagent run delivery list <run-id>
+cyberagent run delivery show <checkpoint-id>
 cyberagent run events <run-id>
 cyberagent headless events <run-id> --max-events 1000
 cyberagent headless events <run-id> --after-sequence <n> --follow --timeout 30m
@@ -49,6 +53,10 @@ In `plan` phase, `finish` is deliberately invalid: the model receives one bounde
 Schema v42 adds the strict `plan_delivery.v1` proposal tool for root Plan turns. A valid proposal has exactly three directions. Each direction contains 1-8 ordered delivery modules with a title, summary, acceptance criteria, bounded tradeoffs, and dependencies that may reference earlier modules only. Unknown fields, duplicate titles or dependencies, stale mode revisions, inactive root turns, invalid leases, Policy denial, and exhausted tool budgets fail closed. Proposal creation records no selection and authorizes no phase change, work execution, tool, Shell, network, file mutation, or child Agent.
 
 Use `run plans` and `run plan show` to inspect proposals after the Run pauses. `run plan choose` is the only selection path and accepts direction `1`, `2`, or `3`, an optional bounded operator identity, and an exact normalized 16-256-byte operation key. It requires a paused Plan Run with no active execution lease, then atomically creates the selected WorkItems and backward dependency graph, a pinned decision Note, the immutable selection, and metadata-only events. Exact cross-process replay returns the same objects; a changed direction or identity under the key conflicts. Selection still leaves the Run in Plan, so `run phase <id> deliver` remains a separate explicit action. HTTP, TUI, and Web only read this state.
+
+Schema v44 enrolls new and untouched legacy selections in `delivery_checkpoint.v1`. Before a selected WorkItem can complete, move it to `in_progress`, pause the Run in Deliver phase, and record one checkpoint for its exact current WorkItem version and mode revision. `--focused`, `--diff-audit`, `--security-audit`, and `--handoff` are mandatory, redacted, normalized operator attestations. The last selected module is the deterministic larger-module boundary and also requires `--functional` plus `--robustness`; non-final modules reject those flags. Recording atomically creates an immutable pinned handoff Note, a digest-keyed idempotency operation, and metadata-only events. Exact retries converge across processes; changed evidence under the same key conflicts. Afterward, `todo complete <work-id>` uses the existing WorkItem transition path and rechecks the gate in Go and SQLite.
+
+The model has no checkpoint tool. HTTP, TUI, and Web expose only enforcement, required/ready counts, and bounded checkpoint metadata; they omit evidence, internal digests, operation keys, and requester identity. Policy also denies obvious Agent attempts to execute `cyberagent run delivery checkpoint` through Shell, process, script, or Sandbox tools. This is defense in depth rather than a claim that command-text regexes are a complete OS security boundary; real process execution remains disabled. A pre-v44 selection that already contained a completed or cancelled WorkItem is left explicitly compatibility-exempt (`delivery_gate_enforced=false`) rather than receiving invented evidence.
 
 ## Skills
 

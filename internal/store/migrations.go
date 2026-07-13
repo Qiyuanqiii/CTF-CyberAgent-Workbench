@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 43
+const LatestSchemaVersion = 44
 
 type migration struct {
 	Version    int
@@ -5471,6 +5471,335 @@ var contextProvenanceStatements = []string{
 	`CREATE TRIGGER trg_session_message_delete_immutable
 		BEFORE DELETE ON session_messages BEGIN
 			SELECT RAISE(ABORT, 'session messages cannot be deleted');
+		END;`,
+}
+
+var deliveryCheckpointStatements = []string{
+	`CREATE TABLE delivery_gate_enrollments (
+		run_id TEXT PRIMARY KEY,
+		selection_id TEXT NOT NULL UNIQUE,
+		enrolled_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(selection_id) REFERENCES plan_delivery_selections(id) ON DELETE RESTRICT
+	);`,
+	`INSERT INTO delivery_gate_enrollments (run_id, selection_id, enrolled_at)
+		SELECT selection.run_id, selection.id, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+		FROM plan_delivery_selections selection
+		WHERE NOT EXISTS (
+			SELECT 1 FROM plan_delivery_selection_items selected
+			JOIN work_items work ON work.id = selected.work_item_id
+			WHERE selected.selection_id = selection.id
+				AND work.status IN ('completed', 'cancelled')
+		);`,
+	`CREATE TRIGGER trg_delivery_gate_enrollment_insert
+		BEFORE INSERT ON delivery_gate_enrollments
+		WHEN NOT EXISTS (
+			SELECT 1 FROM plan_delivery_selections selection
+			WHERE selection.id = NEW.selection_id AND selection.run_id = NEW.run_id
+				AND NOT EXISTS (
+					SELECT 1 FROM plan_delivery_selection_items selected
+					JOIN work_items work ON work.id = selected.work_item_id
+					WHERE selected.selection_id = selection.id
+						AND work.status IN ('completed', 'cancelled')
+				)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Delivery gate enrollment is invalid');
+		END;`,
+	`CREATE TRIGGER trg_delivery_gate_selection_enroll
+		AFTER INSERT ON plan_delivery_selections BEGIN
+			INSERT INTO delivery_gate_enrollments (run_id, selection_id, enrolled_at)
+			VALUES (NEW.run_id, NEW.id, NEW.created_at);
+		END;`,
+	`CREATE TRIGGER trg_delivery_gate_enrollment_update_immutable
+		BEFORE UPDATE ON delivery_gate_enrollments BEGIN
+			SELECT RAISE(ABORT, 'Delivery gate enrollment cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_delivery_gate_enrollment_delete_immutable
+		BEFORE DELETE ON delivery_gate_enrollments BEGIN
+			SELECT RAISE(ABORT, 'Delivery gate enrollment cannot be deleted');
+		END;`,
+	`CREATE TABLE delivery_checkpoints (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		selection_id TEXT NOT NULL,
+		proposal_id TEXT NOT NULL,
+		work_item_id TEXT NOT NULL,
+		direction_ordinal INTEGER NOT NULL,
+		module_ordinal INTEGER NOT NULL,
+		module_count INTEGER NOT NULL,
+		mode_snapshot_id TEXT NOT NULL,
+		mode_revision INTEGER NOT NULL,
+		work_item_version INTEGER NOT NULL,
+		acceptance_fingerprint TEXT NOT NULL,
+		source_fingerprint TEXT NOT NULL,
+		focused_verification TEXT NOT NULL,
+		diff_audit TEXT NOT NULL,
+		security_audit TEXT NOT NULL,
+		full_gate_required INTEGER NOT NULL,
+		functional_verification TEXT NOT NULL DEFAULT '',
+		robustness_audit TEXT NOT NULL DEFAULT '',
+		handoff_note_id TEXT NOT NULL UNIQUE,
+		handoff_digest TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		version INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(selection_id) REFERENCES plan_delivery_selections(id) ON DELETE RESTRICT,
+		FOREIGN KEY(proposal_id) REFERENCES plan_delivery_proposals(id) ON DELETE RESTRICT,
+		FOREIGN KEY(selection_id, module_ordinal)
+			REFERENCES plan_delivery_selection_items(selection_id, ordinal) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id, work_item_id) REFERENCES work_items(run_id, id) ON DELETE RESTRICT,
+		FOREIGN KEY(mode_snapshot_id) REFERENCES run_mode_snapshots(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id, mode_revision) REFERENCES run_mode_snapshots(run_id, revision) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id, handoff_note_id) REFERENCES notes(run_id, id) ON DELETE RESTRICT,
+		UNIQUE(work_item_id, mode_revision, work_item_version),
+		CHECK(direction_ordinal BETWEEN 1 AND 3),
+		CHECK(module_ordinal BETWEEN 1 AND 8),
+		CHECK(module_count BETWEEN 1 AND 8 AND module_ordinal <= module_count),
+		CHECK(mode_revision > 0 AND work_item_version > 0),
+		CHECK(length(acceptance_fingerprint) = 64
+			AND acceptance_fingerprint = lower(acceptance_fingerprint)
+			AND acceptance_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(source_fingerprint) = 64
+			AND source_fingerprint = lower(source_fingerprint)
+			AND source_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(handoff_digest) = 64
+			AND handoff_digest = lower(handoff_digest)
+			AND handoff_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(focused_verification = trim(focused_verification)
+			AND length(focused_verification) BETWEEN 1 AND 1024
+			AND length(CAST(focused_verification AS BLOB)) <= 4096
+			AND instr(focused_verification, char(0)) = 0),
+		CHECK(diff_audit = trim(diff_audit) AND length(diff_audit) BETWEEN 1 AND 1024
+			AND length(CAST(diff_audit AS BLOB)) <= 4096 AND instr(diff_audit, char(0)) = 0),
+		CHECK(security_audit = trim(security_audit) AND length(security_audit) BETWEEN 1 AND 1024
+			AND length(CAST(security_audit AS BLOB)) <= 4096 AND instr(security_audit, char(0)) = 0),
+		CHECK(full_gate_required IN (0, 1)
+			AND full_gate_required = CASE WHEN module_ordinal = module_count THEN 1 ELSE 0 END),
+		CHECK((full_gate_required = 0 AND functional_verification = '' AND robustness_audit = '')
+			OR (full_gate_required = 1
+				AND functional_verification = trim(functional_verification)
+				AND length(functional_verification) BETWEEN 1 AND 1024
+				AND length(CAST(functional_verification AS BLOB)) <= 4096
+				AND instr(functional_verification, char(0)) = 0
+				AND robustness_audit = trim(robustness_audit)
+				AND length(robustness_audit) BETWEEN 1 AND 1024
+				AND length(CAST(robustness_audit AS BLOB)) <= 4096
+				AND instr(robustness_audit, char(0)) = 0)),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0),
+		CHECK(version = 1)
+	);`,
+	`CREATE INDEX idx_delivery_checkpoints_run_module
+		ON delivery_checkpoints(run_id, module_ordinal, created_at);`,
+	`CREATE TABLE delivery_checkpoint_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		checkpoint_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		work_item_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(checkpoint_id) REFERENCES delivery_checkpoints(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id, work_item_id) REFERENCES work_items(run_id, id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64
+			AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64
+			AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE TRIGGER trg_delivery_checkpoint_insert
+		BEFORE INSERT ON delivery_checkpoints
+		WHEN NOT EXISTS (
+			SELECT 1 FROM plan_delivery_selections selection
+			JOIN delivery_gate_enrollments enrollment
+				ON enrollment.run_id = selection.run_id AND enrollment.selection_id = selection.id
+			JOIN plan_delivery_proposals proposal ON proposal.id = selection.proposal_id
+			JOIN plan_delivery_selection_items selected
+				ON selected.selection_id = selection.id AND selected.ordinal = NEW.module_ordinal
+			JOIN work_items work ON work.run_id = selection.run_id
+				AND work.id = selected.work_item_id
+			JOIN runs run ON run.id = selection.run_id
+			JOIN run_mode_snapshots mode ON mode.id = NEW.mode_snapshot_id
+				AND mode.run_id = run.id AND mode.revision = NEW.mode_revision
+			WHERE selection.id = NEW.selection_id AND selection.run_id = NEW.run_id
+				AND selection.proposal_id = NEW.proposal_id
+				AND selection.direction_ordinal = NEW.direction_ordinal
+				AND selection.module_count = NEW.module_count
+				AND selected.module_ordinal = NEW.module_ordinal
+				AND selected.work_item_id = NEW.work_item_id
+				AND proposal.run_id = NEW.run_id
+				AND work.status = 'in_progress' AND work.version = NEW.work_item_version
+				AND run.status = 'paused' AND mode.phase = 'deliver'
+				AND NOT EXISTS (SELECT 1 FROM run_mode_snapshots later
+					WHERE later.run_id = run.id AND later.revision > mode.revision)
+				AND NOT EXISTS (SELECT 1 FROM run_execution_leases lease
+					WHERE lease.run_id = run.id AND lease.status = 'active'
+						AND julianday(lease.expires_at) > julianday('now'))
+				AND julianday(NEW.created_at) >= julianday(mode.created_at)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Delivery checkpoint binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_delivery_checkpoint_operation_insert
+		BEFORE INSERT ON delivery_checkpoint_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM delivery_checkpoints checkpoint
+			WHERE checkpoint.id = NEW.checkpoint_id AND checkpoint.run_id = NEW.run_id
+				AND checkpoint.work_item_id = NEW.work_item_id
+				AND checkpoint.requested_by = NEW.requested_by
+				AND checkpoint.created_at = NEW.created_at
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Delivery checkpoint operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_delivery_checkpoint_update_immutable
+		BEFORE UPDATE ON delivery_checkpoints BEGIN
+			SELECT RAISE(ABORT, 'Delivery checkpoint cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_delivery_checkpoint_delete_immutable
+		BEFORE DELETE ON delivery_checkpoints BEGIN
+			SELECT RAISE(ABORT, 'Delivery checkpoint cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_delivery_checkpoint_operation_update_immutable
+		BEFORE UPDATE ON delivery_checkpoint_operations BEGIN
+			SELECT RAISE(ABORT, 'Delivery checkpoint operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_delivery_checkpoint_operation_delete_immutable
+		BEFORE DELETE ON delivery_checkpoint_operations BEGIN
+			SELECT RAISE(ABORT, 'Delivery checkpoint operation cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_delivery_handoff_note_update_immutable
+		BEFORE UPDATE ON notes
+		WHEN EXISTS (SELECT 1 FROM delivery_checkpoints checkpoint
+			WHERE checkpoint.handoff_note_id = OLD.id)
+		BEGIN
+			SELECT RAISE(ABORT, 'Delivery handoff Note cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_delivery_handoff_note_delete_immutable
+		BEFORE DELETE ON notes
+		WHEN EXISTS (SELECT 1 FROM delivery_checkpoints checkpoint
+			WHERE checkpoint.handoff_note_id = OLD.id)
+		BEGIN
+			SELECT RAISE(ABORT, 'Delivery handoff Note cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_delivery_handoff_note_tag_insert_immutable
+		BEFORE INSERT ON note_tags
+		WHEN EXISTS (SELECT 1 FROM delivery_checkpoints checkpoint
+			WHERE checkpoint.handoff_note_id = NEW.note_id)
+		BEGIN
+			SELECT RAISE(ABORT, 'Delivery handoff Note tags cannot be inserted');
+		END;`,
+	`CREATE TRIGGER trg_delivery_handoff_note_tag_update_immutable
+		BEFORE UPDATE ON note_tags
+		WHEN EXISTS (SELECT 1 FROM delivery_checkpoints checkpoint
+			WHERE checkpoint.handoff_note_id IN (OLD.note_id, NEW.note_id))
+		BEGIN
+			SELECT RAISE(ABORT, 'Delivery handoff Note tags cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_delivery_handoff_note_tag_delete_immutable
+		BEFORE DELETE ON note_tags
+		WHEN EXISTS (SELECT 1 FROM delivery_checkpoints checkpoint
+			WHERE checkpoint.handoff_note_id = OLD.note_id)
+		BEGIN
+			SELECT RAISE(ABORT, 'Delivery handoff Note tags cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_delivery_handoff_note_source_insert_immutable
+		BEFORE INSERT ON note_sources
+		WHEN EXISTS (SELECT 1 FROM delivery_checkpoints checkpoint
+			WHERE checkpoint.handoff_note_id = NEW.note_id)
+		BEGIN
+			SELECT RAISE(ABORT, 'Delivery handoff Note sources cannot be inserted');
+		END;`,
+	`CREATE TRIGGER trg_delivery_handoff_note_source_update_immutable
+		BEFORE UPDATE ON note_sources
+		WHEN EXISTS (SELECT 1 FROM delivery_checkpoints checkpoint
+			WHERE checkpoint.handoff_note_id IN (OLD.note_id, NEW.note_id))
+		BEGIN
+			SELECT RAISE(ABORT, 'Delivery handoff Note sources cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_delivery_handoff_note_source_delete_immutable
+		BEFORE DELETE ON note_sources
+		WHEN EXISTS (SELECT 1 FROM delivery_checkpoints checkpoint
+			WHERE checkpoint.handoff_note_id = OLD.note_id)
+		BEGIN
+			SELECT RAISE(ABORT, 'Delivery handoff Note sources cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_delivery_handoff_note_evidence_insert_immutable
+		BEFORE INSERT ON note_evidence
+		WHEN EXISTS (SELECT 1 FROM delivery_checkpoints checkpoint
+			WHERE checkpoint.handoff_note_id = NEW.note_id)
+		BEGIN
+			SELECT RAISE(ABORT, 'Delivery handoff Note evidence cannot be inserted');
+		END;`,
+	`CREATE TRIGGER trg_delivery_handoff_note_evidence_update_immutable
+		BEFORE UPDATE ON note_evidence
+		WHEN EXISTS (SELECT 1 FROM delivery_checkpoints checkpoint
+			WHERE checkpoint.handoff_note_id IN (OLD.note_id, NEW.note_id))
+		BEGIN
+			SELECT RAISE(ABORT, 'Delivery handoff Note evidence cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_delivery_handoff_note_evidence_delete_immutable
+		BEFORE DELETE ON note_evidence
+		WHEN EXISTS (SELECT 1 FROM delivery_checkpoints checkpoint
+			WHERE checkpoint.handoff_note_id = OLD.note_id)
+		BEGIN
+			SELECT RAISE(ABORT, 'Delivery handoff Note evidence cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_delivery_work_item_completion_guard
+		BEFORE UPDATE OF status ON work_items
+		WHEN NEW.status = 'completed' AND OLD.status != 'completed'
+			AND EXISTS (SELECT 1 FROM plan_delivery_selection_items selected
+				JOIN plan_delivery_selections selection ON selection.id = selected.selection_id
+				JOIN delivery_gate_enrollments enrollment
+					ON enrollment.run_id = selection.run_id AND enrollment.selection_id = selection.id
+				WHERE selected.work_item_id = OLD.id)
+			AND NOT EXISTS (
+				SELECT 1 FROM delivery_checkpoints checkpoint
+				JOIN delivery_checkpoint_operations operation
+					ON operation.checkpoint_id = checkpoint.id
+				JOIN run_mode_snapshots mode ON mode.id = checkpoint.mode_snapshot_id
+				WHERE checkpoint.run_id = OLD.run_id AND checkpoint.work_item_id = OLD.id
+					AND checkpoint.work_item_version = OLD.version
+					AND mode.run_id = OLD.run_id AND mode.revision = checkpoint.mode_revision
+					AND mode.phase = 'deliver'
+					AND NOT EXISTS (SELECT 1 FROM run_mode_snapshots later
+						WHERE later.run_id = OLD.run_id AND later.revision > mode.revision)
+			)
+		BEGIN
+			SELECT RAISE(ABORT, 'selected WorkItem requires a current Delivery checkpoint');
+		END;`,
+	`CREATE TRIGGER trg_delivery_run_completion_guard
+		BEFORE UPDATE OF status ON runs
+		WHEN NEW.status = 'completed' AND OLD.status != 'completed'
+			AND EXISTS (SELECT 1 FROM delivery_gate_enrollments enrollment
+				WHERE enrollment.run_id = NEW.id)
+			AND EXISTS (
+				SELECT 1 FROM plan_delivery_selection_items selected
+				JOIN plan_delivery_selections selection ON selection.id = selected.selection_id
+				JOIN work_items work ON work.id = selected.work_item_id
+				WHERE selection.run_id = NEW.id AND (
+					work.status != 'completed' OR NOT EXISTS (
+						SELECT 1 FROM delivery_checkpoints checkpoint
+						JOIN delivery_checkpoint_operations operation
+							ON operation.checkpoint_id = checkpoint.id
+						JOIN run_mode_snapshots mode ON mode.id = checkpoint.mode_snapshot_id
+						WHERE checkpoint.run_id = NEW.id
+							AND checkpoint.selection_id = selection.id
+							AND checkpoint.work_item_id = work.id
+							AND checkpoint.work_item_version = work.version - 1
+							AND mode.run_id = NEW.id
+							AND mode.revision = checkpoint.mode_revision
+							AND mode.phase = 'deliver'
+					)
+				)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Run has incomplete Delivery checkpoint gates');
 		END;`,
 }
 

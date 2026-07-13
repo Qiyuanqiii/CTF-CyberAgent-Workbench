@@ -271,6 +271,15 @@ func (s *SQLiteStore) UpdateNote(ctx context.Context, note domain.Note, expected
 		return apperror.New(apperror.CodeConflict,
 			fmt.Sprintf("note %s changed concurrently: expected version %d, got %d", note.ID, expectedVersion, current.Version))
 	}
+	var deliveryHandoff int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_checkpoints
+		WHERE handoff_note_id = ?)`, current.ID).Scan(&deliveryHandoff); err != nil {
+		return err
+	}
+	if deliveryHandoff != 0 {
+		return apperror.New(apperror.CodeFailedPrecondition,
+			"Delivery handoff Note is immutable")
+	}
 	if err := validateNoteReplacement(current, note); err != nil {
 		return err
 	}

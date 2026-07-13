@@ -20,6 +20,13 @@ describe("PlanDeliveryPanel", () => {
       operator_choice_needed: false,
       phase_change_needed: true,
       capability_grant: false,
+      delivery_gate_enforced: true,
+      required_checkpoints: 1,
+      ready_checkpoints: 1,
+      checkpoints: [{ id: "checkpoint-1", work_item_id: "work-1", module_ordinal: 1,
+        module_count: 1, mode_revision: 5, work_item_version: 2,
+        full_gate_required: true, handoff_note_id: "note-handoff",
+        gate_ready: true, created_at: "2026-07-13T00:02:00Z" }],
       proposal: { id: "proposal-1", protocol_version: "plan_delivery.v1", status: "proposed",
         mode_revision: 4, directions, version: 1, created_at: "2026-07-13T00:00:00Z" },
       selection: { id: "selection-1", proposal_id: "proposal-1", direction_ordinal: 2,
@@ -29,6 +36,9 @@ describe("PlanDeliveryPanel", () => {
     const { container } = render(<PlanDeliveryPanel state={state} />);
     expect(screen.getByText("Deliver phase required")).toBeInTheDocument();
     expect(screen.getByText("Capability grant: no")).toBeInTheDocument();
+    expect(screen.getByText("Delivery gates 1 / 1")).toBeInTheDocument();
+    expect(screen.getByText("Checkpoint history")).toBeInTheDocument();
+    expect(screen.getByText("full gate")).toBeInTheDocument();
     expect(screen.getByText("Balanced")).toBeInTheDocument();
     expect(screen.getByText("Implement the core path.")).toBeInTheDocument();
     expect(container.querySelector("details.selected")?.getAttribute("open")).not.toBeNull();

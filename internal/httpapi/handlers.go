@@ -240,6 +240,7 @@ func (a *API) run(request *http.Request, runID string) (any, *Page, error) {
 			OperatorChoiceNeeded: proposal != nil && !selected,
 			PhaseChangeNeeded:    selected && mode.Phase == domain.ExecutionPhasePlan,
 			CapabilityGrant:      false,
+			Checkpoints:          []DeliveryCheckpointView{},
 		}
 		if proposal != nil {
 			view := planDeliveryProposalView(*proposal)
@@ -248,6 +249,30 @@ func (a *API) run(request *http.Request, runID string) (any, *Page, error) {
 		if selected {
 			view := planDeliverySelectionView(selection)
 			state.Selection = &view
+			state.RequiredCheckpoints = len(selection.Items)
+			state.DeliveryGateEnforced, err = a.store.DeliveryGateEnforced(
+				request.Context(), run.ID)
+			if err != nil {
+				return nil, nil, err
+			}
+			checkpoints, err := a.store.ListDeliveryCheckpoints(request.Context(), run.ID, 500)
+			if err != nil {
+				return nil, nil, err
+			}
+			readyItems := make(map[string]struct{}, len(selection.Items))
+			state.Checkpoints = make([]DeliveryCheckpointView, len(checkpoints))
+			for index, checkpoint := range checkpoints {
+				item, err := a.store.GetWorkItem(request.Context(), checkpoint.WorkItemID)
+				if err != nil {
+					return nil, nil, err
+				}
+				ready := domain.DeliveryCheckpointReady(checkpoint, item, mode)
+				state.Checkpoints[index] = deliveryCheckpointView(checkpoint, ready)
+				if ready {
+					readyItems[checkpoint.WorkItemID] = struct{}{}
+				}
+			}
+			state.ReadyCheckpoints = len(readyItems)
 		}
 		detail.PlanDelivery = &state
 	}

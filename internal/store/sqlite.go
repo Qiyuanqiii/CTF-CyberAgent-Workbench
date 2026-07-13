@@ -265,6 +265,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 41, Name: "immutable Run execution mode", Statements: runModeStatements},
 		{Version: 42, Name: "review-gated Plan Delivery workflow", Statements: planDeliveryStatements},
 		{Version: 43, Name: "immutable session context provenance", Statements: contextProvenanceStatements},
+		{Version: 44, Name: "immutable Delivery checkpoint gates", Statements: deliveryCheckpointStatements},
 	})
 }
 

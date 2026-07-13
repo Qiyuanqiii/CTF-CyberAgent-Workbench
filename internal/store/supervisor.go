@@ -1237,7 +1237,7 @@ func requireNoActiveWorkItemsForFinishTx(ctx context.Context, tx *sql.Tx, runID 
 		return apperror.New(apperror.CodeFailedPrecondition,
 			fmt.Sprintf("root lifecycle finish conflicts with %d active work item(s)", active))
 	}
-	return nil
+	return requireDeliverySelectionCompletionTx(ctx, tx, runID)
 }
 
 func requireRunModeAllowsCompletionTx(ctx context.Context, tx *sql.Tx, runID string) error {
@@ -1468,6 +1468,9 @@ func (s *SQLiteStore) FinalizeSupervisorRun(ctx context.Context, lease domain.Ru
 	}
 	if target == domain.RunCompleted {
 		if err := requireRunModeAllowsCompletionTx(ctx, tx, run.ID); err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, err
+		}
+		if err := requireNoActiveWorkItemsForFinishTx(ctx, tx, run.ID); err != nil {
 			return domain.Run{}, domain.SupervisorCheckpoint{}, err
 		}
 	}

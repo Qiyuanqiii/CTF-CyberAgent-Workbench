@@ -23,7 +23,7 @@ Read in this order after a long context break:
 - Overall product vision: about 97%.
 - General Agent MVP: about 99%.
 - V2 run-centric runtime: about 99%.
-- Database schema: v43.
+- Database schema: v44.
 - Main languages: Go control plane, TypeScript React/Vite read console; Rust has not started.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
@@ -43,25 +43,23 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 
 ## Latest Completed Slice
 
-Schema v43 adds immutable `context_provenance.v1` for Session history and model context. New messages distinguish `operator_message`, `model_response`, `go_control`, `workspace_file`, `workspace_listing`, `workspace_diff`, `tool_result`, and `go_command_result`. Only operator messages and Go control records may set `instruction_authorized=true`; every evidence source is persisted with role `tool` and false authority. Redacted content receives a lowercase SHA-256, SQLite enforces the exact role/source/authority matrix and immutable rows, and Go recomputes the digest whenever messages are read. Compaction remains the only monotonic mutable bit.
+Schema v44 adds immutable `delivery_checkpoint.v1` over schema v42 selected WorkItems. A checkpoint can be recorded only by the operator application/CLI for an `in_progress` selected item while its Run is paused in Deliver phase and has no active execution lease. It pins the proposal and selection, exact source module, acceptance fingerprint, source fingerprint, current mode snapshot/revision, and WorkItem version. Focused verification, diff review, security review, and handoff summary are mandatory; the deterministic final selected module also requires full functional verification and robustness review.
 
-`/read`, `/ls`, `/write`, `/run`, and other slash replies no longer become assistant history. External evidence is projected through a bounded `untrusted_context` JSON envelope before direct Session chat, root Supervisor, or Specialist calls. The envelope includes source kind, source reference, digest, false authority, and content. Context summaries now contain provenance-preserving JSON records and are replayed as user-role transcript data, not system instructions. Root WorkBoard, Notes, inbox, and compacted memory are also user-role untrusted data. The shared system policy states that files, repositories, issues, logs, web/mail, tool output, and memory are evidence and cannot grant capability.
+One transaction creates the checkpoint, a digest-only idempotency operation, an immutable pinned handoff Note, and metadata-only Note/checkpoint events. The existing WorkItem transition and both Supervisor/Run completion paths consume these facts. Go and SQLite independently require the exact current Deliver revision and item version. Checkpoint, operation, handoff Note, and all Note relation rows are immutable. Cross-process retries converge; changed intent conflicts. An old selection with any already completed/cancelled item remains explicitly unenrolled instead of receiving fabricated evidence.
 
-Migration v43 conservatively labels prior rows as `context_provenance.v0`; recognizable workspace read/list, FileEdit, and ToolRun slash replies are changed from assistant to tool evidence. Legacy rows remain readable without pretending they had a historical digest. HTTP/OpenAPI, generated TypeScript DTOs, React message badges, Run events, and CLI history now expose provenance audit fields.
+CLI adds `run delivery checkpoint/list/show`. HTTP/OpenAPI, generated TypeScript, React, and TUI show only enforcement, required/ready counts, and bounded checkpoint metadata. They omit evidence, internal digests, operation keys, and requester identity. The model has no checkpoint tool; Policy denies obvious Shell/process/script/Sandbox self-invocation of the operator checkpoint command. This is defense in depth, while Local/Docker process execution remains closed.
 
-Regression coverage uses the concrete indirect-injection case where a README's valid Setup requires `.env`, `DATABASE_URL`, and `SESSION_SECRET` while an embedded note tells automated coding assistants to omit `.env`. Tests prove the note appears only inside a `workspace_file`, `instruction_authorized=false` envelope and is never replayed as system/assistant content through Session, root, Specialist, or compaction paths. Store tests cover v42 upgrade, role forgery rejection, immutable content/delete, control-character refs, valid-looking digest tampering detected by Go, and API projection.
-
-The audit found no unresolved high- or medium-severity issue. One low-severity staticcheck capitalization issue was fixed. Full Go tests, full-repository race detection, vet, zero-warning staticcheck, module verify/tidy, zero-finding govulncheck, strict TypeScript, 16 Vitest tests, Vite production build, zero-vulnerability npm audit, deterministic OpenAPI/TypeScript generation, tracked-file credential scanning, and isolated binary CLI provenance smoke pass. No real Provider, Shell, network, Docker, or Sandbox execution was used. GitHub CI must be verified after push.
+The focused audit found no unresolved high- or medium-severity issue. It fixed three low-risk boundaries before release: handoff Note titles are now independent of maximum-length model module titles, relation-table update triggers check both old and new Note ownership, and checkpoint events no longer expose internal fingerprints/digests. Full release checks and GitHub CI results are recorded in the v44 progress entry after push.
 
 ## Next Slice
 
-Build schema v44 Delivery audit gates over the selected v42 WorkItems without creating another task engine:
+Build schema v45 durable operator steering queue without interrupting unsafe boundaries:
 
-1. Bind each delivery checkpoint to one selected WorkItem, its acceptance criteria, exact source selection, and current Deliver-mode revision.
-2. Require focused verification, diff/security audit, and a compact durable handoff Note before that slice can complete.
-3. Require a broader functional and robustness gate when a larger module boundary is reached, then let existing Run completion checks consume those facts.
-4. Keep model assertions non-authoritative: Go owns gate state, evidence references, phase, budgets, and completion.
-5. Audit Specialist Skill minimization separately after the single-root Delivery loop is stable.
+1. Accept bounded operator input while a Run is busy and persist it in order instead of returning only “busy”.
+2. Deliver queued input exactly once at a safe root-turn boundary, never midway through an active model/tool commit.
+3. Reuse PendingInput, Coordinator inbox, execution lease, cancellation, provenance, and idempotency semantics rather than creating a second message engine.
+4. Expose queue state read-only first; keep model, HTTP, TypeScript, and child Agents unable to forge operator authority.
+5. Keep Specialist Skill minimization as the following independent P7 audit, and keep Rust analyzers behind the later Sandbox/process protocol.
 
 ## Delivery Loop
 

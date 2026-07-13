@@ -109,6 +109,11 @@ code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 .plan-direction-body li strong { font-size: 11px; }
 .plan-direction-body li p { margin: 3px 0; }
 .plan-direction-body li small { color: var(--muted); font-size: 10px; }
+.delivery-checkpoint-list { display: grid; gap: 7px; margin-top: 14px; }
+.delivery-checkpoint-list h3 { margin: 0; color: var(--muted); font-size: 10px; text-transform: uppercase; }
+.delivery-checkpoint-list > p { margin: 0; color: var(--muted); font-size: 11px; }
+.delivery-checkpoint-row { min-height: 34px; display: grid; grid-template-columns: 76px minmax(90px, 1fr) minmax(150px, 1fr) auto auto; align-items: center; gap: 10px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface); font-size: 10px; }
+.delivery-checkpoint-row code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .status-badge { max-width: 150px; display: inline-flex; align-items: center; padding: 2px 6px; overflow: hidden; border: 1px solid #cdd5dc; border-radius: 4px; background: #f4f6f7; color: #52606c; font-size: 10px; line-height: 1.3; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
 .status-running, .status-active, .status-completed, .status-live { border-color: #9ccdbb; background: #e9f7f1; color: #146c4e; }
@@ -227,6 +232,7 @@ td code { font-size: 11px; }
   .metric-strip > div:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
   .detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .plan-direction-list { grid-template-columns: 1fr; }
+  .delivery-checkpoint-row { grid-template-columns: 1fr auto; }
   .event-row summary { grid-template-columns: 58px minmax(150px, 1fr) auto; }
   .event-row summary > span:nth-of-type(2) { display: none; }
 }

@@ -651,6 +651,23 @@ export interface components {
             run_id: string;
             status: string;
         };
+        DeliveryCheckpointView: {
+            /** Format: date-time */
+            created_at: string;
+            full_gate_required: boolean;
+            gate_ready: boolean;
+            handoff_note_id: string;
+            id: string;
+            /** Format: int64 */
+            mode_revision: number;
+            /** Format: int32 */
+            module_count: number;
+            /** Format: int32 */
+            module_ordinal: number;
+            work_item_id: string;
+            /** Format: int64 */
+            work_item_version: number;
+        };
         ErrorEnvelope: {
             error: components["schemas"]["APIError"];
             request_id: string;
@@ -981,9 +998,15 @@ export interface components {
         };
         PlanDeliveryStateView: {
             capability_grant: boolean;
+            checkpoints: components["schemas"]["DeliveryCheckpointView"][];
+            delivery_gate_enforced: boolean;
             operator_choice_needed: boolean;
             phase_change_needed: boolean;
             proposal?: components["schemas"]["PlanDeliveryProposalView"];
+            /** Format: int32 */
+            ready_checkpoints: number;
+            /** Format: int32 */
+            required_checkpoints: number;
             selection?: components["schemas"]["PlanDeliverySelectionView"];
         };
         RunConfigView: {

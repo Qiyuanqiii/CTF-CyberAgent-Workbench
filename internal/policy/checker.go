@@ -50,6 +50,9 @@ type DefaultChecker struct {
 	denyPatterns []*regexp.Regexp
 }
 
+var agentDeliveryCheckpointMutation = regexp.MustCompile(
+	`(?i)(?:\bcyberagent(?:\.exe)?\b|go\s+run\s+(?:\.[\\/])?cmd[\\/]cyberagent)\s+run\s+delivery\s+checkpoint\b`)
+
 func NewDefaultChecker() DefaultChecker {
 	phrases := []string{
 		`(?i)\bmasscan\b`,
@@ -91,6 +94,16 @@ func (c DefaultChecker) CheckToolCall(call tools.Call) Decision {
 		parts = append(parts, k, v)
 	}
 	joined := strings.Join(parts, " ")
+	toolName := strings.ToLower(strings.TrimSpace(call.Name))
+	if (strings.Contains(toolName, "shell") || strings.Contains(toolName, "sandbox") ||
+		strings.Contains(toolName, "process") || strings.Contains(toolName, "script")) &&
+		agentDeliveryCheckpointMutation.MatchString(joined) {
+		return Decision{
+			Allowed: false,
+			Reason:  "agent command execution cannot create operator Delivery checkpoints",
+			Risk:    "high",
+		}
+	}
 	decision := c.CheckText("tool_call", joined)
 	if !decision.Allowed {
 		return decision

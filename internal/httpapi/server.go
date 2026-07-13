@@ -58,6 +58,8 @@ type Store interface {
 	ListPlanDeliveryProposals(ctx context.Context, runID string, limit int) ([]domain.PlanDeliveryProposal, error)
 	GetPlanDeliveryProposal(ctx context.Context, id string) (domain.PlanDeliveryProposal, error)
 	GetPlanDeliverySelectionByRun(ctx context.Context, runID string) (domain.PlanDeliverySelection, bool, error)
+	ListDeliveryCheckpoints(ctx context.Context, runID string, limit int) ([]domain.DeliveryCheckpoint, error)
+	DeliveryGateEnforced(ctx context.Context, runID string) (bool, error)
 	ListAgentNodes(ctx context.Context, runID string) ([]domain.AgentNode, error)
 	GetAgentCompletion(ctx context.Context, agentID string) (domain.AgentCompletion, bool, error)
 	ListSpecialistDelegationProposalsPage(ctx context.Context, runID string,

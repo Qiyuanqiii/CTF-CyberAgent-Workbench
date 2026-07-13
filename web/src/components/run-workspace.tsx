@@ -227,6 +227,8 @@ export function PlanDeliveryPanel({ state }: { state: PlanDeliveryStateView }) {
       <div className="plan-state-line">
         <span>{status}</span>
         <span>Mode revision {formatNumber(state.proposal?.mode_revision)}</span>
+        <span>Delivery gates {formatNumber(state.ready_checkpoints)} / {formatNumber(state.required_checkpoints)}</span>
+        <span>Gate enforcement: {state.delivery_gate_enforced ? "on" : "legacy exempt"}</span>
         <span>Capability grant: no</span>
       </div>
       <div className="plan-direction-list">
@@ -252,6 +254,20 @@ export function PlanDeliveryPanel({ state }: { state: PlanDeliveryStateView }) {
           </details>
         ))}
       </div>
+      {state.selection && (
+        <div className="delivery-checkpoint-list" aria-label="Delivery checkpoint history">
+          <h3>Checkpoint history</h3>
+          {state.checkpoints.length === 0 ? <p>No checkpoints recorded</p> : state.checkpoints.map((checkpoint) => (
+            <div className="delivery-checkpoint-row" key={checkpoint.id}>
+              <span>Slice {checkpoint.module_ordinal}/{checkpoint.module_count}</span>
+              <code>{shortID(checkpoint.work_item_id)}</code>
+              <span>mode r{checkpoint.mode_revision} / work v{checkpoint.work_item_version}</span>
+              {checkpoint.full_gate_required && <span>full gate</span>}
+              <StatusBadge status={checkpoint.gate_ready ? "ready" : "stale"} />
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }

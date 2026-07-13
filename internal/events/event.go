@@ -69,6 +69,7 @@ const (
 	AgentDelegationApplicationAbortedEvent   = "agent.delegation_application_aborted"
 	PlanDeliveryProposedEvent                = "plan_delivery.proposed"
 	PlanDeliveryDirectionSelectedEvent       = "plan_delivery.direction_selected"
+	DeliveryCheckpointRecordedEvent          = "delivery.checkpoint_recorded"
 	ReadOnlyFanoutPlannedEvent               = "readonly_fanout.planned"
 	ReadOnlyFanoutExecutionStartedEvent      = "readonly_fanout.execution_started"
 	ReadOnlyFanoutExecutionRecoveredEvent    = "readonly_fanout.execution_recovered"

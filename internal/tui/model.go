@@ -114,6 +114,8 @@ type RunStateStore interface {
 	ListPlanDeliveryProposals(ctx context.Context, runID string, limit int) ([]domain.PlanDeliveryProposal, error)
 	GetPlanDeliveryProposal(ctx context.Context, id string) (domain.PlanDeliveryProposal, error)
 	GetPlanDeliverySelectionByRun(ctx context.Context, runID string) (domain.PlanDeliverySelection, bool, error)
+	ListDeliveryCheckpoints(ctx context.Context, runID string, limit int) ([]domain.DeliveryCheckpoint, error)
+	DeliveryGateEnforced(ctx context.Context, runID string) (bool, error)
 	ListSessionGrants(ctx context.Context, filter approval.GrantListFilter) ([]approval.SessionGrant, error)
 	ListAgentNodes(ctx context.Context, runID string) ([]domain.AgentNode, error)
 	GetAgentCompletion(ctx context.Context, agentID string) (domain.AgentCompletion, bool, error)
@@ -139,21 +141,23 @@ type workspaceItem struct {
 }
 
 type runContext struct {
-	Found              bool
-	Run                domain.Run
-	Mode               domain.RunModeSnapshot
-	WorkItems          []domain.WorkItem
-	Notes              []domain.Note
-	ToolRounds         []domain.SupervisorToolRound
-	Grants             []approval.SessionGrant
-	Events             []events.Event
-	EventSequence      int64
-	Agents             []agentContext
-	FindingReports     []domain.FindingReportSummary
-	FileEdits          []fileEditContext
-	FileEditsTruncated bool
-	PlanProposal       *domain.PlanDeliveryProposal
-	PlanSelection      *domain.PlanDeliverySelection
+	Found                bool
+	Run                  domain.Run
+	Mode                 domain.RunModeSnapshot
+	WorkItems            []domain.WorkItem
+	Notes                []domain.Note
+	ToolRounds           []domain.SupervisorToolRound
+	Grants               []approval.SessionGrant
+	Events               []events.Event
+	EventSequence        int64
+	Agents               []agentContext
+	FindingReports       []domain.FindingReportSummary
+	FileEdits            []fileEditContext
+	FileEditsTruncated   bool
+	PlanProposal         *domain.PlanDeliveryProposal
+	PlanSelection        *domain.PlanDeliverySelection
+	DeliveryGateEnforced bool
+	DeliveryCheckpoints  []domain.DeliveryCheckpoint
 }
 
 type agentContext struct {
@@ -992,6 +996,10 @@ func (m *Model) renderPlanDelivery(width int, height int) string {
 		selection := m.runContext.PlanSelection
 		state := fmt.Sprintf("selected=%d work-items=%d", selection.DirectionOrdinal,
 			len(selection.Items))
+		ready := readyDeliveryCheckpointCount(m.runContext.DeliveryCheckpoints,
+			m.runContext.WorkItems, m.runContext.Mode)
+		state += fmt.Sprintf("; delivery-gates=%d/%d enforced=%t", ready,
+			len(selection.Items), m.runContext.DeliveryGateEnforced)
 		if m.runContext.Mode.Phase == domain.ExecutionPhasePlan {
 			state += "; explicit Deliver phase required"
 		}
@@ -1361,11 +1369,37 @@ func loadRunContext(ctx context.Context, runStateStore RunStateStore,
 	if err != nil {
 		return runContext{}, err
 	}
+	deliveryCheckpoints, err := runStateStore.ListDeliveryCheckpoints(ctx, run.ID, 500)
+	if err != nil {
+		return runContext{}, err
+	}
+	deliveryGateEnforced, err := runStateStore.DeliveryGateEnforced(ctx, run.ID)
+	if err != nil {
+		return runContext{}, err
+	}
 	return runContext{Found: true, Run: run, Mode: mode, WorkItems: workItems, Notes: notes,
 		ToolRounds: rounds, Grants: grants, Events: eventList, EventSequence: eventSequence,
 		Agents: agents, FindingReports: reports, FileEdits: edits,
 		FileEditsTruncated: editsTruncated, PlanProposal: planProposal,
-		PlanSelection: planSelection}, nil
+		PlanSelection: planSelection, DeliveryGateEnforced: deliveryGateEnforced,
+		DeliveryCheckpoints: deliveryCheckpoints}, nil
+}
+
+func readyDeliveryCheckpointCount(checkpoints []domain.DeliveryCheckpoint,
+	items []domain.WorkItem, mode domain.RunModeSnapshot,
+) int {
+	byID := make(map[string]domain.WorkItem, len(items))
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	ready := make(map[string]struct{}, len(items))
+	for _, checkpoint := range checkpoints {
+		if item, found := byID[checkpoint.WorkItemID]; found &&
+			domain.DeliveryCheckpointReady(checkpoint, item, mode) {
+			ready[item.ID] = struct{}{}
+		}
+	}
+	return len(ready)
 }
 
 func loadWorkspaceContext(ctx context.Context, workspaceStore WorkspaceStore,
