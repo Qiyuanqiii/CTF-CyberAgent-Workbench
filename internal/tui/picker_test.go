@@ -130,6 +130,19 @@ func TestPickerDefaultsToBoundedRunListAndOpensExactRun(t *testing.T) {
 	if picker.view != pickerRuns || len(picker.runs) != 1 {
 		t.Fatalf("picker did not default to the bounded Run list: %#v", picker)
 	}
+	pickerProjection := picker.CurrentProjection()
+	if pickerProjection.View != "runs" || len(pickerProjection.Runs) != 1 ||
+		pickerProjection.Runs[0].RunID != run.ID ||
+		pickerProjection.Runs[0].SessionID != run.SessionID ||
+		len(pickerProjection.Sessions) != 1 ||
+		pickerProjection.Sessions[0].SessionID != run.SessionID ||
+		pickerProjection.RunsTruncated || pickerProjection.SessionsTruncated {
+		t.Fatalf("picker projection drifted: %#v", pickerProjection)
+	}
+	pickerProjection.Runs[0].RunID = "mutated"
+	if current := picker.CurrentProjection(); current.Runs[0].RunID != run.ID {
+		t.Fatal("picker projection leaked mutable internal state")
+	}
 	snapshot := picker.Snapshot()
 	for _, want := range []string{"[Runs] Sessions", run.ID, "created", "inspect the selected Run"} {
 		if !strings.Contains(snapshot, want) {

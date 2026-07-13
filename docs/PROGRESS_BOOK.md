@@ -495,9 +495,13 @@ Run 稳定复合快照新增最近 20 条 exact-Session/Workspace FileEdit previ
 
 审计未发现未解决的高/中风险问题，并修复三项低风险健壮性/可用性问题：生产 picker 的旧 Session 读取改为有界 page，100 列标题改为优先显示 Run/status，窄活动栏保证当前标签可见。定向 Store/TUI/App 测试覆盖分页、非法状态、Run-first 精确打开、scope 校验、正文排除、Diff 字节/行截断、终端控制字符和非 Tools 审批旁路。最终门禁通过 uncached 全仓测试、全仓 race、`go vet`、零告警 `staticcheck`、`go mod verify/tidy -diff`、`govulncheck`、OpenAPI/TypeScript DTO 一致性、13 个 Vitest、Vite production build、npm audit、凭据/运行产物扫描与真实二进制 smoke；Go/npm 已知可达漏洞均为 0，TUI 覆盖率为 65.9%。隔离 smoke 创建 schema v38 workspace/Run/FileEdit，确认 Run-first picker 与 `--run --print` 后清理全部 runtime。当前进度估计保持为整体愿景约 97%、通用 Agent MVP 约 99%、V2 Runtime 约 99%。
 
+Cross-surface Lifecycle/Pagination Golden 切片不增加 schema、Provider 调用、工具执行、HTTP route、Sandbox capability 或 Store mutation。一个真实 schema v38 SQLite fixture 同时建立 running、paused、completed、failed、cancelled 五类 Run，再扩展到 53 条 Run/Session；CLI、TUI stable projection、带鉴权 HTTP 和 Headless NDJSON 必须逐条同意 Run/Mission/Session/status、完整连续 event sequence/tail、Agent count、terminal 标志、reason 与 0/4/7 outcome exit。TUI picker 的稳定只读投影返回防御性副本，并固定最近 50 条与 truncation；HTTP 以 20/20/13 三页验证 opaque cursor、顺序、无遗漏、无循环及合法空集合；Headless 以每页 2 条验证 max-events 8、suggested resume、无重复/无 gap，以及从 durable tail 恢复时只输出零事件 `stream.end`。
+
+React client 现验证 opaque cursor 只进入 query、bearer 只进入 Authorization；ResourceSidebar 回归覆盖 paused/completed/failed/cancelled 徽标并追加下一页 running Run。前端测试由 13 项增至 15 项。审计未发现未解决的高/中风险代码问题；修复一项低风险文档恢复缺口：README 已引用但仓库缺失的 `docs/PROJECT_MEMORY.md` 现已补齐。最终门禁通过 uncached 全仓测试、全仓 race、`go vet`、零告警 `staticcheck`、`go mod verify/tidy -diff`、OpenAPI/TypeScript DTO 漂移检查、15 个 Vitest、strict TypeScript、Vite production build、npm audit、凭据扫描与 `govulncheck`；Go/npm 可达漏洞为 0。当前完成度保持整体愿景约 97%、通用 Agent MVP 约 99%、V2 Runtime 约 99%。
+
 ## 七、下一开发切片
 
-唯一推荐切片：把 CLI/TUI/Web/Headless golden 扩展到 `paused/completed/failed/cancelled` 与 Run/Session/Event 分页边界，固定所有读取面共享的 lifecycle、terminal event tail、空页和续传语义，避免各界面自行解释状态。
+唯一推荐切片：启动 P7 的 Go-owned `skill.v1` 第一纵向切片，定义有界 manifest、版本/校验和、Profile/工具依赖、只读 Registry 与 `skill list/show/validate`；先内置 `code/review/learn/script` 元数据并保持默认不注入模型上下文、不授予工具或执行能力。后续再把经版本固定和 token 预算选择的 Skill 内容接入 Run context。
 
 Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过独立审计。
 

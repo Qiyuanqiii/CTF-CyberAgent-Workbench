@@ -61,6 +61,39 @@ describe("CyberAgentClient", () => {
     });
   });
 
+  it("forwards an opaque collection cursor without leaking the bearer", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        version: "api.v1",
+        request_id: "req-runs-1",
+        data: [{ id: "run-paused", status: "paused" }],
+        page: { limit: 1, next_cursor: "opaque+/cursor=one" },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        version: "api.v1",
+        request_id: "req-runs-2",
+        data: [{ id: "run-completed", status: "completed" }],
+        page: { limit: 1 },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret");
+
+    const first = await client.getPage<{ id: string; status: string }>("/runs", { limit: 1 });
+    const second = await client.getPage<{ id: string; status: string }>(
+      "/runs", { limit: 1 }, first.page.next_cursor,
+    );
+
+    expect(first.items[0]?.status).toBe("paused");
+    expect(second.items[0]?.status).toBe("completed");
+    const [firstURL] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [secondURL, secondInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(firstURL).toBe("/api/v1/runs?limit=1");
+    expect(secondURL).toContain("limit=1");
+    expect(secondURL).toContain("cursor=opaque%2B%2Fcursor%3Done");
+    expect(secondURL).not.toContain("read-secret");
+    expect(secondInit.headers).toMatchObject({ Authorization: "Bearer read-secret" });
+  });
+
   it("resumes SSE with Last-Event-ID and validates the matching cursor", async () => {
     const frame: RunEventStreamView = {
       version: "run-events.v1",
