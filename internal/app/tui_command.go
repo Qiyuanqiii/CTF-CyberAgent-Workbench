@@ -18,18 +18,23 @@ func (a *App) tuiCommand(ctx context.Context, args []string) error {
 	}
 	fs := newFlagSet("tui", a.errOut)
 	sessionID := fs.String("session", "", "session id")
+	runID := fs.String("run", "", "run id")
 	workspaceName := fs.String("workspace", "", "workspace name")
 	title := fs.String("title", "TUI session", "session title")
 	route := fs.String("route", "learn", "model route")
 	printOnly := fs.Bool("print", false, "print one TUI snapshot and exit")
 	if err := fs.Parse(reorderFlags(args, map[string]bool{
 		"session":   true,
+		"run":       true,
 		"workspace": true,
 		"title":     true,
 		"route":     true,
 		"print":     false,
 	})); err != nil {
 		return err
+	}
+	if strings.TrimSpace(*sessionID) != "" && strings.TrimSpace(*runID) != "" {
+		return errors.New("--session and --run cannot be used together")
 	}
 
 	sessionManager := a.newSessionManager()
@@ -45,8 +50,20 @@ func (a *App) tuiCommand(ctx context.Context, args []string) error {
 		workspaceID = rec.ID
 	}
 
-	if strings.TrimSpace(*sessionID) != "" {
-		sess, err := a.store.GetSession(ctx, strings.TrimSpace(*sessionID))
+	requestedSessionID := strings.TrimSpace(*sessionID)
+	requestedRunID := strings.TrimSpace(*runID)
+	if requestedRunID != "" {
+		run, err := a.store.GetRun(ctx, requestedRunID)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(run.SessionID) == "" {
+			return errors.New("selected Run has no attached Session")
+		}
+		requestedSessionID = run.SessionID
+	}
+	if requestedSessionID != "" {
+		sess, err := a.store.GetSession(ctx, requestedSessionID)
 		if err != nil {
 			return err
 		}
@@ -55,6 +72,12 @@ func (a *App) tuiCommand(ctx context.Context, args []string) error {
 			return err
 		}
 		model.WithActiveCallController(activeCalls)
+		if requestedRunID != "" {
+			projection, found := model.CurrentRunProjection()
+			if !found || projection.RunID != requestedRunID {
+				return errors.New("selected Run did not resolve to the expected TUI projection")
+			}
+		}
 		if *printOnly {
 			fmt.Fprintln(a.out, model.Snapshot())
 			return nil

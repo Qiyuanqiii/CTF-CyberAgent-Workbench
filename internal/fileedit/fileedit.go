@@ -18,7 +18,12 @@ import (
 	"cyberagent-workbench/internal/tools"
 )
 
-const MaxContentBytes = 256 * 1024
+const (
+	MaxContentBytes = 256 * 1024
+	// MaxDiffBytes bounds a persisted unified diff generated from two bounded
+	// file versions, including per-line prefixes and headers.
+	MaxDiffBytes = 4*MaxContentBytes + 16*1024
+)
 
 const (
 	StatusProposed = "proposed"
@@ -45,6 +50,32 @@ type Edit struct {
 	SecretsRedacted bool
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+// Preview is the read-only FileEdit projection used by operator surfaces.
+// It deliberately excludes the original and proposed file bodies.
+type Preview struct {
+	ID              string
+	SessionID       string
+	WorkspaceID     string
+	Path            string
+	Status          string
+	Diff            string
+	OriginalHash    string
+	ProposedHash    string
+	Reason          string
+	SecretsRedacted bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+func ValidStatus(status string) bool {
+	switch status {
+	case StatusProposed, StatusApproved, StatusApplied, StatusDenied, StatusFailed:
+		return true
+	default:
+		return false
+	}
 }
 
 type Proposal struct {

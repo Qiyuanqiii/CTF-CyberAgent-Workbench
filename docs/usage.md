@@ -285,11 +285,13 @@ cyberagent model set script mock/mock-code
 ```powershell
 cyberagent tui
 cyberagent tui --workspace demo --title "Agent basics" --route learn
+cyberagent tui --run <run-id>
+cyberagent tui --run <run-id> --print
 cyberagent tui --session <session-id>
 cyberagent tui --session <session-id> --print
 ```
 
-Without `--session`, the TUI opens a session picker. Press `Enter` to open the selected session, `n` to create a new one, `j/k` to move, `r` to refresh, and `q` or `Esc` to quit.
+Without `--run` or `--session`, the TUI opens a Run-first picker backed by bounded Store pages. `Tab` or `h/l` switches between the latest 50 Runs and latest 50 Sessions. Press `Enter` to open the selected item, `n` to create and open a new Session, `j/k` to move, `r` to refresh, and `q` or `Esc` to quit. `--run` and `--session` are mutually exclusive; an exact Run open rechecks that its persisted Session resolves back to the same Run projection.
 
 The chat TUI uses the same session and tool approval runtime as the CLI. Normal text sends a session message. Slash commands such as `/run echo hello`, `/model script`, and `/compact` go through the session manager. Tool approvals can be handled in the input box:
 
@@ -303,25 +305,25 @@ Keyboard controls:
 
 ```text
 Tab              switch focus between input and the activity pane
-Enter            send from input or approve one selected proposed tool
-PgUp / PgDn      scroll messages
-h / l            switch among Tools, Work, Notes, Rounds, Events, Agents, and Findings
+Enter            send, approve a selected Tool, or open/close an Edit diff
+PgUp / PgDn      scroll messages or an open diff
+h / l            switch among Tools, Work, Notes, Rounds, Events, Agents, Findings, and Edits
 j / k            select the next/previous item in the active view
 a                approve the selected Shell proposal once
 g                approve it and grant the exact current Session scope
 d                deny the selected Shell proposal
 Ctrl+R           refresh Session, Run, memory, and tool state
 Ctrl+X           request audited cancellation of the current model call
-Esc              quit when idle; a busy action must finish or be cancelled first
+Esc              return from diff detail, otherwise quit when idle
 ```
 
 `--print` renders one snapshot and exits, which is useful for non-interactive verification.
 
 Message sends, live-call discovery, refreshes, cancellation, and tool approval/deny actions run asynchronously. During a Run-bound model call, the status line shows provider/model, attempt, chunk/byte progress, cancellation, slow-consumer disconnect, and terminal state. `Ctrl+X` prefers the application audit-first cancellation API; if a legacy or not-yet-active request has no registry entry, it cancels the current application request context instead. Additional input is held until the current action finishes, and raw model text is never included in the live envelope.
 
-For a Run-bound Session, the activity pane reads WorkItems, Notes, durable Supervisor ToolRounds, recent Run Events, Agent nodes/completions, bounded Finding-report summaries, active Shell grants, and ToolRuns from the Go Store. Work, Notes, Rounds, Events, Agents, and Findings are read-only views; approval keys act only in Tools. `a` uses the existing durable per-call decision, while `g` creates or reuses a revocable Grant scoped to the exact Run, Session, Workspace, `shell` tool, and `shell` ActionClass. Keyboard and slash-command approval paths both reject ToolRun IDs outside the currently open Session. The current proposal is matched against its persisted fingerprint and rechecked by Policy before the Grant is created. Later allowed Shell calls may complete automatically as dry runs; Policy denial always wins.
+For a Run-bound Session, the activity pane reads WorkItems, Notes, durable Supervisor ToolRounds, recent Run Events, Agent nodes/completions, bounded Finding-report summaries, active Shell grants, ToolRuns, and FileEdit previews from the Go Store. Work, Notes, Rounds, Events, Agents, Findings, and Edits are read-only views; approval keys act only in Tools. Edits loads at most the latest 20 exact-Session/Workspace records through a metadata/diff-only SQL query that excludes `original_text` and `proposed_text`. `Enter` opens a full-screen read-only diff; `j/k` or `PgUp/PgDn` scrolls and `Enter`, `b`, or `Esc` returns. Displayed diff data is valid UTF-8, terminal-control neutralized, and capped at 128 KiB/4096 lines even though the durable proposal remains unchanged. `a` uses the existing durable per-call decision, while `g` creates or reuses a revocable Grant scoped to the exact Run, Session, Workspace, `shell` tool, and `shell` ActionClass. Keyboard and slash-command approval paths both reject ToolRun IDs outside the currently open Session. The current proposal is matched against its persisted fingerprint and rechecked by Policy before the Grant is created. Later allowed Shell calls may complete automatically as dry runs; Policy denial always wins.
 
-The interactive TUI polls only the local Store and never starts a Run by polling. It reads at most 32 new events per batch, keeps the most recent 50 in the panel, validates contiguous sequence plus exact Run/Mission binding, and refreshes the composite Session/tool/Run projection only when durable events arrive. Each refresh compares the event tail before and after all reads and retries up to eight times if a concurrent transaction lands in the middle. A stale asynchronous result cannot overwrite a newer manual/action refresh; a terminal Run stops polling. Event payloads are not rendered, Finding details and Evidence remain on the existing CLI/Web detail surfaces, and all displayed C0/DEL terminal controls are converted to visible text.
+The interactive TUI polls only the local Store and never starts a Run by polling. It reads at most 32 new events per batch, keeps the most recent 50 in the panel, validates contiguous sequence plus exact Run/Mission binding, and refreshes the composite Session/tool/Run/FileEdit projection only when durable events arrive. Each refresh compares the event tail before and after all reads and retries up to eight times if a concurrent transaction lands in the middle. A stale asynchronous result cannot overwrite a newer manual/action refresh; a terminal Run stops polling. Event payloads are not rendered, Finding details and Evidence remain on the existing CLI/Web detail surfaces, and all displayed C0/DEL terminal controls are converted to visible text.
 
 TUI text layout uses terminal-cell-aware grapheme wrapping, so wide Unicode text does not break panel boundaries.
 

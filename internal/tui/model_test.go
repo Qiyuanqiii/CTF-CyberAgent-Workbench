@@ -16,6 +16,7 @@ import (
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/runmutation"
@@ -226,6 +227,63 @@ func TestModelRendersWorkspaceContext(t *testing.T) {
 		if !strings.Contains(snapshot, want) {
 			t.Fatalf("snapshot missing %q:\n%s", want, snapshot)
 		}
+	}
+}
+
+func TestModelLoadsRunBoundFileEditAsReadOnlyPreview(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "tui-file-edit.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	rec, err := workspace.NewManager(t.TempDir(), st).Init(ctx, "TUI File Edit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(rec.RootPath, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rec.RootPath, "src", "main.go"),
+		[]byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, run, err := application.NewRunService(st).Create(ctx, application.CreateRunRequest{
+		Goal: "review a proposed edit", Profile: "review", WorkspaceID: rec.ID,
+		Budget: domain.Budget{MaxTurns: 4, MaxToolCalls: 10},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway := toolgateway.New(st, policy.NewDefaultChecker())
+	edit, err := gateway.FileEdits().Propose(ctx, fileedit.Proposal{
+		SessionID: run.SessionID, WorkspaceID: rec.ID, WorkspaceRoot: rec.RootPath,
+		Path: "src/main.go", ProposedText: "package main\n\nfunc main() {}\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := st.GetSession(ctx, run.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := NewModel(ctx, sess,
+		session.NewManager(st, llm.NewDefaultRouter(), policy.NewDefaultChecker()),
+		gateway.ToolRuns(), st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(model.runContext.FileEdits) != 1 ||
+		model.runContext.FileEdits[0].Preview.ID != edit.ID ||
+		model.runContext.FileEdits[0].Preview.Diff != "" ||
+		len(model.runContext.FileEdits[0].DiffLines) == 0 {
+		t.Fatalf("unexpected bounded FileEdit projection: %#v", model.runContext.FileEdits)
+	}
+	model.ToggleFocus()
+	model.setActivityView(activityEdits)
+	if snapshot := model.Snapshot(); !strings.Contains(snapshot, "src/main.go") ||
+		!strings.Contains(snapshot, "Enter: read-only diff") {
+		t.Fatalf("FileEdit activity was not rendered:\n%s", snapshot)
 	}
 }
 

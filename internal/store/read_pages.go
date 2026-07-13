@@ -9,6 +9,7 @@ import (
 
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/events"
+	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/session"
 )
 
@@ -113,6 +114,49 @@ func (s *SQLiteStore) ListRecentSessionMessages(ctx context.Context, sessionID s
 		out[left], out[right] = out[right], out[left]
 	}
 	return out, nil
+}
+
+func (s *SQLiteStore) ListFileEditPreviewsPage(ctx context.Context,
+	filter fileedit.ListFilter, offset int, limit int,
+) ([]fileedit.Preview, error) {
+	if err := validateStoreReadPage(offset, limit); err != nil {
+		return nil, err
+	}
+	query := `SELECT id, session_id, workspace_id, path, status, diff_text,
+		original_hash, proposed_hash, reason, secrets_redacted, created_at, updated_at
+		FROM file_edits WHERE 1=1`
+	var args []any
+	if sessionID := strings.TrimSpace(filter.SessionID); sessionID != "" {
+		query += ` AND session_id = ?`
+		args = append(args, sessionID)
+	}
+	if workspaceID := strings.TrimSpace(filter.WorkspaceID); workspaceID != "" {
+		query += ` AND workspace_id = ?`
+		args = append(args, workspaceID)
+	}
+	if status := strings.TrimSpace(filter.Status); status != "" {
+		if !fileedit.ValidStatus(status) {
+			return nil, fmt.Errorf("invalid file edit status %q", status)
+		}
+		query += ` AND status = ?`
+		args = append(args, status)
+	}
+	query += ` ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?`
+	args = append(args, limit, offset)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]fileedit.Preview, 0, limit)
+	for rows.Next() {
+		preview, err := scanFileEditPreview(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, preview)
+	}
+	return out, rows.Err()
 }
 
 func (s *SQLiteStore) ListRunEventsPage(ctx context.Context, runID string,

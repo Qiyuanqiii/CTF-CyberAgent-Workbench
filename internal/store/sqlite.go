@@ -900,6 +900,22 @@ func scanFileEdit(row scanner) (fileedit.Edit, error) {
 	return edit, nil
 }
 
+func scanFileEditPreview(row scanner) (fileedit.Preview, error) {
+	var preview fileedit.Preview
+	var secretsRedacted int
+	var created string
+	var updated string
+	if err := row.Scan(&preview.ID, &preview.SessionID, &preview.WorkspaceID, &preview.Path,
+		&preview.Status, &preview.Diff, &preview.OriginalHash, &preview.ProposedHash,
+		&preview.Reason, &secretsRedacted, &created, &updated); err != nil {
+		return fileedit.Preview{}, err
+	}
+	preview.SecretsRedacted = secretsRedacted != 0
+	preview.CreatedAt = parseTS(created)
+	preview.UpdatedAt = parseTS(updated)
+	return preview, nil
+}
+
 func boolInt(value bool) int {
 	if value {
 		return 1

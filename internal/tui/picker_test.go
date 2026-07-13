@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"cyberagent-workbench/internal/application"
+	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/session"
@@ -95,5 +97,56 @@ func TestPickerPassesWorkspaceStoreToNewModel(t *testing.T) {
 	}
 	if model.workspace.Name != rec.Name || model.workspace.RootPath != rec.RootPath {
 		t.Fatalf("expected workspace context from picker, got %#v", model.workspace)
+	}
+}
+
+func TestPickerDefaultsToBoundedRunListAndOpensExactRun(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	st, err := store.Open(filepath.Join(t.TempDir(), "tui-run-picker.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	rec, err := workspace.NewManager(home, st).Init(ctx, "Run Picker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, run, err := application.NewRunService(st).Create(ctx, application.CreateRunRequest{
+		Goal: "inspect the selected Run", Profile: "review", WorkspaceID: rec.ID,
+		Budget: domain.Budget{MaxTurns: 4, MaxToolCalls: 10},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionManager := session.NewManager(st, llm.NewDefaultRouter(), policy.NewDefaultChecker())
+	toolManager := toolrun.NewManager(st, policy.NewDefaultChecker())
+	picker, err := NewPicker(ctx, sessionManager, toolManager, rec.ID, "new", "review", st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller := &fakeActiveCallController{}
+	picker.WithActiveCallController(controller)
+	if picker.view != pickerRuns || len(picker.runs) != 1 {
+		t.Fatalf("picker did not default to the bounded Run list: %#v", picker)
+	}
+	snapshot := picker.Snapshot()
+	for _, want := range []string{"[Runs] Sessions", run.ID, "created", "inspect the selected Run"} {
+		if !strings.Contains(snapshot, want) {
+			t.Fatalf("Run picker snapshot missing %q:\n%s", want, snapshot)
+		}
+	}
+	model, err := picker.SelectedRunModel(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, found := model.CurrentRunProjection()
+	if !found || projection.RunID != run.ID || projection.SessionID != run.SessionID ||
+		model.activeCalls != controller {
+		t.Fatalf("selected Run resolved incorrectly: projection=%#v found=%t", projection, found)
+	}
+	picker.ToggleView()
+	if picker.view != pickerSessions || !strings.Contains(picker.Snapshot(), "Runs [Sessions]") {
+		t.Fatalf("picker did not switch to Sessions:\n%s", picker.Snapshot())
 	}
 }

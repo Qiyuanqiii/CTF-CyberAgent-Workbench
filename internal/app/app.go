@@ -236,7 +236,7 @@ func (a *App) printHelp() {
 	fmt.Fprintln(a.out, "  cyberagent run fanout plan|execute|show|execution|report")
 	fmt.Fprintln(a.out, "  cyberagent todo create|list|show|update|start|block|reopen|complete|cancel")
 	fmt.Fprintln(a.out, "  cyberagent note create|list|show|update|archive|restore")
-	fmt.Fprintln(a.out, "  cyberagent tui")
+	fmt.Fprintln(a.out, "  cyberagent tui [--run <run-id> | --session <session-id>] [--print]")
 }
 
 func (a *App) ensureStore() error {

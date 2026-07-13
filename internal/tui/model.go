@@ -16,6 +16,7 @@ import (
 	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
+	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/store"
@@ -56,6 +57,10 @@ type Model struct {
 	agentScroll        int
 	selectedFinding    int
 	findingScroll      int
+	selectedEdit       int
+	editScroll         int
+	editDetailOpen     bool
+	editDetailScroll   int
 	eventPollError     bool
 	live               activeCallView
 	liveGeneration     uint64
@@ -110,6 +115,8 @@ type RunStateStore interface {
 	GetAgentCompletion(ctx context.Context, agentID string) (domain.AgentCompletion, bool, error)
 	ListFindingReportSummariesPage(ctx context.Context, runID string,
 		offset int, limit int) ([]domain.FindingReportSummary, error)
+	ListFileEditPreviewsPage(ctx context.Context, filter fileedit.ListFilter,
+		offset int, limit int) ([]fileedit.Preview, error)
 }
 
 type workspaceContext struct {
@@ -128,16 +135,18 @@ type workspaceItem struct {
 }
 
 type runContext struct {
-	Found          bool
-	Run            domain.Run
-	WorkItems      []domain.WorkItem
-	Notes          []domain.Note
-	ToolRounds     []domain.SupervisorToolRound
-	Grants         []approval.SessionGrant
-	Events         []events.Event
-	EventSequence  int64
-	Agents         []agentContext
-	FindingReports []domain.FindingReportSummary
+	Found              bool
+	Run                domain.Run
+	WorkItems          []domain.WorkItem
+	Notes              []domain.Note
+	ToolRounds         []domain.SupervisorToolRound
+	Grants             []approval.SessionGrant
+	Events             []events.Event
+	EventSequence      int64
+	Agents             []agentContext
+	FindingReports     []domain.FindingReportSummary
+	FileEdits          []fileEditContext
+	FileEditsTruncated bool
 }
 
 type agentContext struct {
@@ -155,6 +164,7 @@ const (
 	activityEvents       activityView = "events"
 	activityAgents       activityView = "agents"
 	activityFindings     activityView = "findings"
+	activityEdits        activityView = "edits"
 	maxTUIRunItems                    = 50
 	maxTUIToolRounds                  = 20
 	maxTUIFindingReports              = 10
@@ -232,6 +242,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.input.Width = max(20, msg.Width-4)
 	case tea.KeyMsg:
+		if m.editDetailOpen {
+			switch msg.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "esc", "enter", "b":
+				m.editDetailOpen = false
+				m.editDetailScroll = 0
+				m.status = m.selectedEditStatus()
+				return m, nil
+			case "up", "k":
+				m.scrollEditDetail(-1)
+				return m, nil
+			case "down", "j":
+				m.scrollEditDetail(1)
+				return m, nil
+			case "pgup":
+				m.scrollEditDetail(-8)
+				return m, nil
+			case "pgdown":
+				m.scrollEditDetail(8)
+				return m, nil
+			default:
+				return m, nil
+			}
+		}
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			if m.busy {
@@ -308,6 +343,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "enter":
 			if m.focus == focusTools {
+				if m.activityView == activityEdits {
+					m.openSelectedEditDetail()
+					return m, nil
+				}
 				return m.selectedToolAction("approving", m.approveToolCmd)
 			}
 			value := strings.TrimSpace(m.input.Value())
@@ -332,6 +371,9 @@ func (m *Model) View() string {
 }
 
 func (m *Model) Snapshot() string {
+	if m.editDetailOpen {
+		return m.renderEditDetailScreen()
+	}
 	width := max(80, m.width)
 	height := max(24, m.height)
 	contentHeight := max(8, height-8)
@@ -344,7 +386,8 @@ func (m *Model) Snapshot() string {
 
 	headerText := fmt.Sprintf("CyberAgent Workbench  session=%s  route=%s", m.session.ID, m.session.Route)
 	if m.runContext.Found {
-		headerText += fmt.Sprintf("  run=%s  status=%s", m.runContext.Run.ID, m.runContext.Run.Status)
+		headerText = fmt.Sprintf("CyberAgent Workbench  run=%s  status=%s  session=%s  route=%s",
+			m.runContext.Run.ID, m.runContext.Run.Status, m.session.ID, m.session.Route)
 	}
 	header := headerStyle.Width(width).Render(truncate(headerText, max(20, width-2)))
 	messages := panelStyle.Width(messageWidth).Height(contentHeight).Render(m.renderMessages(messageWidth-2, contentHeight-2))
@@ -475,7 +518,7 @@ func (m *Model) PreviousActivityView() {
 func (m *Model) setActivityView(view activityView) {
 	switch view {
 	case activityTools, activityWork, activityNotes, activityRounds,
-		activityEvents, activityAgents, activityFindings:
+		activityEvents, activityAgents, activityFindings, activityEdits:
 		m.activityView = view
 	default:
 		m.activityView = activityTools
@@ -528,6 +571,10 @@ func (m *Model) SelectNextActivityItem() {
 		m.selectedFinding++
 		m.normalizeActivitySelection()
 		m.status = m.selectedFindingStatus()
+	case activityEdits:
+		m.selectedEdit++
+		m.normalizeActivitySelection()
+		m.status = m.selectedEditStatus()
 	}
 }
 
@@ -559,6 +606,10 @@ func (m *Model) SelectPreviousActivityItem() {
 		m.selectedFinding--
 		m.normalizeActivitySelection()
 		m.status = m.selectedFindingStatus()
+	case activityEdits:
+		m.selectedEdit--
+		m.normalizeActivitySelection()
+		m.status = m.selectedEditStatus()
 	}
 }
 
@@ -847,6 +898,10 @@ func (m *Model) applyActionResult(result actionResult) {
 	if len(m.runContext.FindingReports) > 0 {
 		oldFindingID = m.runContext.FindingReports[m.selectedFinding].ID
 	}
+	oldEditID := ""
+	if len(m.runContext.FileEdits) > 0 {
+		oldEditID = m.runContext.FileEdits[m.selectedEdit].Preview.ID
+	}
 	m.session = result.session
 	m.messages = result.messages
 	m.toolRuns = result.toolRuns
@@ -861,6 +916,7 @@ func (m *Model) applyActionResult(result actionResult) {
 	m.selectEvent(oldEventSequence, followEventTail)
 	m.selectAgentByID(oldAgentID)
 	m.selectFindingByID(oldFindingID)
+	m.selectEditByID(oldEditID)
 	m.normalizeActivitySelection()
 }
 
@@ -897,6 +953,8 @@ func (m *Model) renderActivity(width int, height int) string {
 		return m.renderAgents(width, height)
 	case activityFindings:
 		return m.renderFindings(width, height)
+	case activityEdits:
+		return m.renderEdits(width, height)
 	default:
 		return m.renderTools(width, height)
 	}
@@ -1090,15 +1148,25 @@ func (m *Model) activityHeader(label string, selected activityView, width int) [
 	if m.focus == focusTools {
 		label += " (focused)"
 	}
-	tabs := make([]string, 0, len(activityViews()))
-	for _, view := range activityViews() {
+	views := activityViews()
+	tabs := make([]string, 0, len(views))
+	selectedIndex := 0
+	for index, view := range views {
 		name := activityLabel(view)
 		if view == selected {
 			name = "[" + name + "]"
+			selectedIndex = index
 		}
 		tabs = append(tabs, name)
 	}
-	return []string{truncate(label, width), truncate(strings.Join(tabs, " "), width)}
+	tabLine := strings.Join(tabs, " ")
+	if ansi.StringWidth(tabLine) > width {
+		previous := views[(selectedIndex-1+len(views))%len(views)]
+		next := views[(selectedIndex+1)%len(views)]
+		tabLine = fmt.Sprintf("[%s]  h:%s  l:%s", activityLabel(selected),
+			activityLabel(previous), activityLabel(next))
+	}
+	return []string{truncate(label, width), truncate(tabLine, width)}
 }
 
 func activityLabel(view activityView) string {
@@ -1115,6 +1183,8 @@ func activityLabel(view activityView) string {
 		return "Agents"
 	case activityFindings:
 		return "Findings"
+	case activityEdits:
+		return "Edits"
 	default:
 		return "Tools"
 	}
@@ -1122,7 +1192,7 @@ func activityLabel(view activityView) string {
 
 func activityViews() []activityView {
 	return []activityView{activityTools, activityWork, activityNotes, activityRounds,
-		activityEvents, activityAgents, activityFindings}
+		activityEvents, activityAgents, activityFindings, activityEdits}
 }
 
 func (m *Model) statusLine() string {
@@ -1148,7 +1218,7 @@ func (m *Model) statusLine() string {
 
 func footerHelp(width int) string {
 	if width < 100 {
-		return "Tab | h/l views | j/k | a once | g session | d deny | Ctrl+X | Esc"
+		return "Tab | h/l views | j/k | tools:a/g/d | Ctrl+X | Esc"
 	}
 	if width < 145 {
 		return "Tab focus | h/l views | j/k select | a once | g session | d deny | Ctrl+X cancel | Ctrl+R | Esc"
@@ -1224,9 +1294,14 @@ func loadRunContext(ctx context.Context, runStateStore RunStateStore,
 	if err != nil {
 		return runContext{}, err
 	}
+	edits, editsTruncated, err := loadFileEditContext(ctx, runStateStore, run, sess)
+	if err != nil {
+		return runContext{}, err
+	}
 	return runContext{Found: true, Run: run, WorkItems: workItems, Notes: notes,
 		ToolRounds: rounds, Grants: grants, Events: eventList, EventSequence: eventSequence,
-		Agents: agents, FindingReports: reports}, nil
+		Agents: agents, FindingReports: reports, FileEdits: edits,
+		FileEditsTruncated: editsTruncated}, nil
 }
 
 func loadWorkspaceContext(ctx context.Context, workspaceStore WorkspaceStore,
@@ -1287,6 +1362,7 @@ func (m *Model) normalizeActivitySelection() {
 	normalizeListSelection(len(m.runContext.Events), &m.selectedEvent, &m.eventScroll)
 	normalizeListSelection(len(m.runContext.Agents), &m.selectedAgent, &m.agentScroll)
 	normalizeListSelection(len(m.runContext.FindingReports), &m.selectedFinding, &m.findingScroll)
+	normalizeListSelection(len(m.runContext.FileEdits), &m.selectedEdit, &m.editScroll)
 }
 
 func normalizeListSelection(length int, selected *int, scroll *int) {
@@ -1367,6 +1443,18 @@ func (m *Model) selectFindingByID(id string) {
 	}
 }
 
+func (m *Model) selectEditByID(id string) {
+	if id == "" {
+		return
+	}
+	for index, edit := range m.runContext.FileEdits {
+		if edit.Preview.ID == id {
+			m.selectedEdit = index
+			return
+		}
+	}
+}
+
 func (m *Model) ensureSelectedVisible(visible int) {
 	m.normalizeSelection()
 	if visible <= 0 || len(m.toolRuns) == 0 {
@@ -1409,6 +1497,11 @@ func (m *Model) ensureAgentVisible(visible int) {
 func (m *Model) ensureFindingVisible(visible int) {
 	m.normalizeActivitySelection()
 	ensureListSelectionVisible(len(m.runContext.FindingReports), m.selectedFinding, visible, &m.findingScroll)
+}
+
+func (m *Model) ensureEditVisible(visible int) {
+	m.normalizeActivitySelection()
+	ensureListSelectionVisible(len(m.runContext.FileEdits), m.selectedEdit, visible, &m.editScroll)
 }
 
 func ensureListSelectionVisible(length int, selected int, visible int, scroll *int) {
@@ -1480,6 +1573,13 @@ func (m *Model) selectedFindingStatus() string {
 		return "no Findings"
 	}
 	return "selected " + m.runContext.FindingReports[m.selectedFinding].ID
+}
+
+func (m *Model) selectedEditStatus() string {
+	if len(m.runContext.FileEdits) == 0 {
+		return "no file edits"
+	}
+	return "selected " + m.runContext.FileEdits[m.selectedEdit].Preview.ID + "; Enter opens read-only diff"
 }
 
 func wrap(value string, width int) []string {

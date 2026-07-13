@@ -3,12 +3,14 @@ package store
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/toolgateway"
@@ -60,6 +62,28 @@ func TestSQLiteReadPagesUseStableOffsetsAndBoundedMetadataQueries(t *testing.T) 
 	if err != nil || len(recent) != 2 || recent[0].Content != "message 2" ||
 		recent[1].Content != "message 3" {
 		t.Fatalf("recent message page is not bounded and chronological: %#v err=%v", recent, err)
+	}
+	for index := 1; index <= 3; index++ {
+		original := "before\n"
+		proposed := "after " + string(rune('0'+index)) + "\n"
+		at := base.Add(time.Duration(index) * time.Second)
+		if _, err := st.SaveFileEdit(ctx, fileedit.Edit{
+			ID: "edit-page-" + string(rune('0'+index)), SessionID: messageSession.ID,
+			WorkspaceID: "ws-edit-page", Path: "src/page-" + string(rune('0'+index)) + ".go",
+			Status: fileedit.StatusProposed, OriginalText: original, ProposedText: proposed,
+			Diff:         fileedit.UnifiedDiff("src/page.go", original, proposed),
+			OriginalHash: fileedit.HashText(original), ProposedHash: fileedit.HashText(proposed),
+			CreatedAt: at, UpdatedAt: at,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	editPage, err := st.ListFileEditPreviewsPage(ctx, fileedit.ListFilter{
+		SessionID: messageSession.ID, WorkspaceID: "ws-edit-page",
+	}, 1, 1)
+	if err != nil || len(editPage) != 1 || editPage[0].ID != "edit-page-2" ||
+		!strings.Contains(editPage[0].Diff, "+after 2") {
+		t.Fatalf("FileEdit preview page is unstable: %#v err=%v", editPage, err)
 	}
 
 	runService := application.NewRunService(st)
@@ -202,5 +226,12 @@ func TestSQLiteReadPagesRejectOutOfRangeBounds(t *testing.T) {
 	}
 	if _, err := st.ListRuns(ctx, domain.RunFilter{Offset: maxStoreListOffset + 1}); err == nil {
 		t.Fatal("oversized Run list offset was accepted")
+	}
+	if _, err := st.ListFileEditPreviewsPage(ctx, fileedit.ListFilter{}, 0, 0); err == nil {
+		t.Fatal("zero FileEdit preview page limit was accepted")
+	}
+	if _, err := st.ListFileEditPreviewsPage(ctx,
+		fileedit.ListFilter{Status: "unknown"}, 0, 1); err == nil {
+		t.Fatal("invalid FileEdit preview status was accepted")
 	}
 }
