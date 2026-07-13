@@ -54,6 +54,25 @@ type Store interface {
 		request domain.RequestSpecialistModelCancellation) (domain.SpecialistModelCancellationResult, error)
 	GetToolCallUsage(ctx context.Context, runID string) (toolbudget.Usage, error)
 	ListRunSupervisorToolRoundsPage(ctx context.Context, runID string, offset int, limit int) ([]domain.SupervisorToolRound, error)
+	ListAgentNodes(ctx context.Context, runID string) ([]domain.AgentNode, error)
+	GetAgentCompletion(ctx context.Context, agentID string) (domain.AgentCompletion, bool, error)
+	ListSpecialistDelegationProposalsPage(ctx context.Context, runID string,
+		offset int, limit int) ([]domain.SpecialistDelegationProposal, error)
+	GetSpecialistDelegationReviewByProposal(ctx context.Context,
+		proposalID string) (domain.SpecialistDelegationReview, bool, error)
+	GetSpecialistDelegationApplicationByProposal(ctx context.Context,
+		proposalID string) (domain.SpecialistDelegationApplication, bool, error)
+	GetLatestSpecialistOperatorScheduleRequestByApplication(ctx context.Context,
+		applicationID string) (domain.SpecialistOperatorScheduleRequest, bool, error)
+	GetLatestSpecialistOperatorScheduleAttempt(ctx context.Context,
+		requestID string) (domain.SpecialistSchedule, domain.SpecialistOperatorScheduleAttempt, bool, error)
+	ListReadOnlyFanoutPlanSummariesPage(ctx context.Context, runID string,
+		offset int, limit int) ([]domain.ReadOnlyFanoutPlanSummary, error)
+	GetLatestReadOnlyFanoutExecutionSummary(ctx context.Context,
+		planID string) (domain.ReadOnlyFanoutExecutionSummary, bool, error)
+	ListFindingReportSummariesPage(ctx context.Context, runID string,
+		offset int, limit int) ([]domain.FindingReportSummary, error)
+	GetFindingReport(ctx context.Context, id string) (domain.FindingReport, error)
 
 	GetSession(ctx context.Context, id string) (session.Session, error)
 	ListSessionsPage(ctx context.Context, offset int, limit int) ([]session.Session, error)

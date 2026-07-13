@@ -49,3 +49,46 @@ func TestReadOnlyFanoutExecutionAllowsCancellationBeforeModelStart(t *testing.T)
 		t.Fatal(err)
 	}
 }
+
+func TestReadOnlyFanoutExecutionSummaryRejectsStateMetadataDrift(t *testing.T) {
+	now := time.Now().UTC()
+	summary := ReadOnlyFanoutExecutionSummary{
+		ID: "fanout-execution-1", PlanID: "fanout-plan-1", RunID: "run-1",
+		WorkspaceID: "workspace-1", Status: ReadOnlyFanoutExecutionRunning,
+		Parallelism: 1, MaxOutputTokensPerShard: DefaultReadOnlyFanoutMaxOutputTokens,
+		RequestedBy: "operator", Version: 1, StartedAt: now, UpdatedAt: now,
+		Shards: []ReadOnlyFanoutExecutionShardSummary{{
+			ExecutionID: "fanout-execution-1", PlanID: "fanout-plan-1", Ordinal: 1,
+			Status: ReadOnlyFanoutExecutionShardPending, Version: 1,
+			CreatedAt: now, UpdatedAt: now,
+		}},
+	}
+	if err := summary.Validate(); err != nil {
+		t.Fatalf("valid pending summary was rejected: %v", err)
+	}
+
+	checks := []struct {
+		name   string
+		mutate func(*ReadOnlyFanoutExecutionShardSummary)
+	}{
+		{name: "pending provider", mutate: func(shard *ReadOnlyFanoutExecutionShardSummary) {
+			shard.Provider = "forged"
+		}},
+		{name: "pending usage", mutate: func(shard *ReadOnlyFanoutExecutionShardSummary) {
+			shard.InputTokens = 1
+		}},
+		{name: "pending error", mutate: func(shard *ReadOnlyFanoutExecutionShardSummary) {
+			shard.ErrorCode = "forged"
+		}},
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			candidate := summary
+			candidate.Shards = append([]ReadOnlyFanoutExecutionShardSummary(nil), summary.Shards...)
+			check.mutate(&candidate.Shards[0])
+			if err := candidate.Validate(); err == nil {
+				t.Fatal("state-incompatible summary metadata was accepted")
+			}
+		})
+	}
+}

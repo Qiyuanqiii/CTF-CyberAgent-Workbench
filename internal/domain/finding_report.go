@@ -608,6 +608,47 @@ type FindingReport struct {
 	Findings         []Finding              `json:"findings"`
 }
 
+type FindingReportSummary struct {
+	ID            string
+	RunID         string
+	SourceKind    string
+	SourceID      string
+	Status        FindingReportStatus
+	Title         string
+	FindingCount  int
+	EvidenceCount int
+	Severity      FindingSeveritySummary
+	Version       int64
+	CreatedAt     time.Time
+}
+
+func (r FindingReportSummary) Validate() error {
+	for _, value := range []string{r.ID, r.RunID, r.SourceID} {
+		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {
+			return errors.New("finding report summary identities are invalid")
+		}
+	}
+	if r.SourceKind != FindingReportSourceReadOnlyFanoutExecution ||
+		!r.Status.Valid() || !utf8.ValidString(r.Title) ||
+		strings.TrimSpace(r.Title) != r.Title || r.Title == "" ||
+		utf8.RuneCountInString(r.Title) > MaxFindingReportTitleRunes ||
+		r.FindingCount < 0 || r.FindingCount > MaxFindingReportFindings ||
+		r.EvidenceCount < 0 || r.EvidenceCount > MaxFindingReportEvidence ||
+		r.Severity.Total() != r.FindingCount || r.Version != 2 || r.CreatedAt.IsZero() {
+		return errors.New("finding report summary metadata is invalid")
+	}
+	return nil
+}
+
+func (r FindingReport) Summary() FindingReportSummary {
+	return FindingReportSummary{
+		ID: r.ID, RunID: r.RunID, SourceKind: r.SourceKind, SourceID: r.SourceID,
+		Status: r.Status, Title: r.Title, FindingCount: r.FindingCount,
+		EvidenceCount: r.EvidenceCount, Severity: r.Severity,
+		Version: r.Version, CreatedAt: r.CreatedAt,
+	}
+}
+
 func (r FindingReport) Validate() error {
 	for _, value := range []string{r.ID, r.RunID, r.SourceID} {
 		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {

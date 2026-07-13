@@ -31,6 +31,18 @@
       "description": "Durable Run state and Run-scoped projections."
     },
     {
+      "name": "Agents",
+      "description": "Bounded Agent graph and operator-gated delegation projections."
+    },
+    {
+      "name": "Analysis",
+      "description": "Read-only Fan-out plans and execution summaries."
+    },
+    {
+      "name": "Reports",
+      "description": "Finding reports and redacted lifecycle evidence summaries."
+    },
+    {
       "name": "Sessions",
       "description": "Persisted Session metadata and redacted messages."
     },
@@ -684,6 +696,84 @@
         "x-cyberagent-read-only": false
       }
     },
+    "/api/v1/runs/{run_id}/agent-graph": {
+      "get": {
+        "operationId": "getRunAgentGraph",
+        "summary": "Inspect the bounded Agent graph",
+        "description": "Returns root and Specialist projections plus completion summaries without lease or fencing state.",
+        "tags": [
+          "Agents"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AgentGraphView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
     "/api/v1/runs/{run_id}/agents/{agent_id}/active-call/cancel": {
       "post": {
         "operationId": "requestSpecialistModelCancellation",
@@ -943,6 +1033,112 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/runs/{run_id}/delegations": {
+      "get": {
+        "operationId": "listRunDelegations",
+        "summary": "List operator-gated delegations",
+        "description": "Returns proposal, review, application, and latest scheduling summaries without operation digests or review reasons.",
+        "tags": [
+          "Agents"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size from 1 to 100; defaults to 50",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor bound to this route and exact filter set",
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/DelegationView"
+                      },
+                      "type": "array"
+                    },
+                    "page": {
+                      "$ref": "#/components/schemas/Page"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data",
+                    "page"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
     "/api/v1/runs/{run_id}/events": {
       "get": {
         "operationId": "listRunEvents",
@@ -1126,6 +1322,112 @@
         },
         "x-cyberagent-read-only": true,
         "x-cyberagent-streaming": true
+      }
+    },
+    "/api/v1/runs/{run_id}/fanout-plans": {
+      "get": {
+        "operationId": "listRunFanoutPlans",
+        "summary": "List read-only Fan-out plans",
+        "description": "Returns bounded plan metadata and the latest shard execution summary without file manifests or model report JSON.",
+        "tags": [
+          "Analysis"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size from 1 to 100; defaults to 50",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor bound to this route and exact filter set",
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/FanoutPlanView"
+                      },
+                      "type": "array"
+                    },
+                    "page": {
+                      "$ref": "#/components/schemas/Page"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data",
+                    "page"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
       }
     },
     "/api/v1/runs/{run_id}/notes": {
@@ -1315,6 +1617,202 @@
                     "request_id",
                     "data",
                     "page"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/runs/{run_id}/reports": {
+      "get": {
+        "operationId": "listRunFindingReports",
+        "summary": "List Finding Report summaries",
+        "description": "Returns bounded report counts and severity summaries without Finding narratives.",
+        "tags": [
+          "Reports"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size from 1 to 100; defaults to 50",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor bound to this route and exact filter set",
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/FindingReportSummaryView"
+                      },
+                      "type": "array"
+                    },
+                    "page": {
+                      "$ref": "#/components/schemas/Page"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data",
+                    "page"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/runs/{run_id}/reports/{report_id}": {
+      "get": {
+        "operationId": "getRunFindingReport",
+        "summary": "Inspect one Finding Report",
+        "description": "Returns Findings and evidence references while omitting operator reasons, Evidence notes, digests, and Artifact content.",
+        "tags": [
+          "Reports"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "report_id",
+            "in": "path",
+            "description": "Finding Report identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FindingReportView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
                   ],
                   "type": "object"
                 }
@@ -1982,6 +2480,204 @@
         ],
         "type": "object"
       },
+      "AgentCompletionView": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "note_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "work_item_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "attempt_id",
+          "outcome",
+          "summary",
+          "work_item_ids",
+          "note_ids",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "AgentGraphView": {
+        "additionalProperties": false,
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/AgentNodeView"
+            },
+            "type": "array"
+          },
+          "protocol_version": {
+            "enum": [
+              "agent_graph.v1"
+            ],
+            "type": "string"
+          },
+          "root_agent_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "nodes"
+        ],
+        "type": "object"
+      },
+      "AgentNodeView": {
+        "additionalProperties": false,
+        "properties": {
+          "active_attempt_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "child_limit": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "completion": {
+            "$ref": "#/components/schemas/AgentCompletionView"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "depth": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "parent_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "profile": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "root",
+              "specialist"
+            ],
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "ready",
+              "running",
+              "waiting",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "token_limit": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "tokens_used": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "turn_limit": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "turns_used": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "role",
+          "profile",
+          "skills",
+          "status",
+          "depth",
+          "child_limit",
+          "turn_limit",
+          "token_limit",
+          "turns_used",
+          "tokens_used",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
       "ArtifactView": {
         "additionalProperties": false,
         "properties": {
@@ -2100,6 +2796,264 @@
         ],
         "type": "object"
       },
+      "DelegationApplicationView": {
+        "additionalProperties": false,
+        "properties": {
+          "assignment_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "max_children": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "max_tokens_per_child": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "max_turns_per_child": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "stop_code": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "assignment_count",
+          "max_children",
+          "max_turns_per_child",
+          "max_tokens_per_child",
+          "requested_by",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "DelegationAssignmentView": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "application_status": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "ordinal": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "skills": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          },
+          "token_limit": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "turn_limit": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ordinal",
+          "title",
+          "goal",
+          "skills",
+          "turn_limit",
+          "token_limit"
+        ],
+        "type": "object"
+      },
+      "DelegationReviewView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "decision": {
+            "enum": [
+              "approved",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "reviewed_by": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "decision",
+          "reviewed_by",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "DelegationScheduleView": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "attempt_ordinal": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "max_rounds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "recovered_attempts": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "request_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "requested_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "rounds_completed": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "schedule_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "turns_started": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "request_id",
+          "agent_ids",
+          "max_rounds",
+          "requested_by",
+          "requested_at"
+        ],
+        "type": "object"
+      },
+      "DelegationView": {
+        "additionalProperties": false,
+        "properties": {
+          "application": {
+            "$ref": "#/components/schemas/DelegationApplicationView"
+          },
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/DelegationAssignmentView"
+            },
+            "type": "array"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "latest_schedule": {
+            "$ref": "#/components/schemas/DelegationScheduleView"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "review": {
+            "$ref": "#/components/schemas/DelegationReviewView"
+          },
+          "root_agent_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "root_agent_id",
+          "status",
+          "requested_by",
+          "created_at",
+          "assignments"
+        ],
+        "type": "object"
+      },
       "ErrorEnvelope": {
         "additionalProperties": false,
         "properties": {
@@ -2175,6 +3129,561 @@
           "source",
           "payload",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "FanoutExecutionShardView": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "current_attempt": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "elapsed_millis": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "finding_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "input_tokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "ordinal": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "total_tokens": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ordinal",
+          "status",
+          "attempt_count",
+          "current_attempt",
+          "input_tokens",
+          "output_tokens",
+          "total_tokens",
+          "elapsed_millis",
+          "finding_count"
+        ],
+        "type": "object"
+      },
+      "FanoutExecutionView": {
+        "additionalProperties": false,
+        "properties": {
+          "finished_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "max_output_tokens_per_shard": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "parallelism": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "shards": {
+            "items": {
+              "$ref": "#/components/schemas/FanoutExecutionShardView"
+            },
+            "type": "array"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "stop_code": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "parallelism",
+          "max_output_tokens_per_shard",
+          "requested_by",
+          "started_at",
+          "updated_at",
+          "shards"
+        ],
+        "type": "object"
+      },
+      "FanoutPlanView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "effective_parallelism": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "excluded_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "file_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "latest_execution": {
+            "$ref": "#/components/schemas/FanoutExecutionView"
+          },
+          "protocol_version": {
+            "type": "string"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "requested_tier": {
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "scope_path": {
+            "type": "string"
+          },
+          "shard_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "planned"
+            ],
+            "type": "string"
+          },
+          "total_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "workspace_id",
+          "scope_path",
+          "goal",
+          "protocol_version",
+          "requested_tier",
+          "effective_parallelism",
+          "status",
+          "file_count",
+          "total_bytes",
+          "excluded_count",
+          "shard_count",
+          "requested_by",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "FindingArtifactEvidenceView": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "artifact_mime": {
+            "type": "string"
+          },
+          "artifact_redacted": {
+            "type": "boolean"
+          },
+          "artifact_size_bytes": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "artifact_stream": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "artifact_id",
+          "artifact_size_bytes",
+          "artifact_mime",
+          "artifact_stream",
+          "artifact_redacted",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "FindingEvidenceView": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "line_end": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "line_start": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "relative_path": {
+            "type": "string"
+          },
+          "source_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_ordinal": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "source_shard": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "source_id",
+          "source_shard",
+          "source_ordinal",
+          "relative_path",
+          "line_start",
+          "line_end",
+          "confidence"
+        ],
+        "type": "object"
+      },
+      "FindingLifecycleView": {
+        "additionalProperties": false,
+        "properties": {
+          "accepted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "fixed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "remediation_evidence_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "validation_decided_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "validation_evidence_count": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "validation_evidence_count",
+          "remediation_evidence_count"
+        ],
+        "type": "object"
+      },
+      "FindingReportSummaryView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "evidence_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "finding_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/FindingSeverityView"
+          },
+          "source_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_kind": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "generated"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "source_kind",
+          "source_id",
+          "status",
+          "title",
+          "finding_count",
+          "evidence_count",
+          "severity",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "FindingReportView": {
+        "additionalProperties": false,
+        "properties": {
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/FindingView"
+            },
+            "type": "array"
+          },
+          "report": {
+            "$ref": "#/components/schemas/FindingReportSummaryView"
+          }
+        },
+        "required": [
+          "report",
+          "findings"
+        ],
+        "type": "object"
+      },
+      "FindingSeverityView": {
+        "additionalProperties": false,
+        "properties": {
+          "critical": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "high": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "info": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "low": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "medium": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "info",
+          "low",
+          "medium",
+          "high",
+          "critical"
+        ],
+        "type": "object"
+      },
+      "FindingView": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/FindingArtifactEvidenceView"
+            },
+            "type": "array"
+          },
+          "category": {
+            "type": "string"
+          },
+          "confidence": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/FindingEvidenceView"
+            },
+            "type": "array"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/FindingLifecycleView"
+          },
+          "line_end": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "line_start": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "ordinal": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "relative_path": {
+            "type": "string"
+          },
+          "remediation_evidence": {
+            "items": {
+              "$ref": "#/components/schemas/FindingArtifactEvidenceView"
+            },
+            "type": "array"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "validated",
+              "accepted",
+              "fixed",
+              "rejected"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ordinal",
+          "status",
+          "severity",
+          "category",
+          "title",
+          "detail",
+          "relative_path",
+          "line_start",
+          "line_end",
+          "confidence",
+          "evidence",
+          "artifact_evidence",
+          "remediation_evidence",
+          "lifecycle"
         ],
         "type": "object"
       },

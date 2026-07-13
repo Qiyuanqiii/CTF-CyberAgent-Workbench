@@ -164,6 +164,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/agent-graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect the bounded Agent graph
+         * @description Returns root and Specialist projections plus completion summaries without lease or fencing state.
+         */
+        get: operations["getRunAgentGraph"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/agents/{agent_id}/active-call/cancel": {
         parameters: {
             query?: never;
@@ -196,6 +216,26 @@ export interface paths {
          * @description Returns metadata and hashes only; Artifact content is never returned by HTTP.
          */
         get: operations["listRunArtifacts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/delegations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List operator-gated delegations
+         * @description Returns proposal, review, application, and latest scheduling summaries without operation digests or review reasons.
+         */
+        get: operations["listRunDelegations"];
         put?: never;
         post?: never;
         delete?: never;
@@ -244,6 +284,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/fanout-plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List read-only Fan-out plans
+         * @description Returns bounded plan metadata and the latest shard execution summary without file manifests or model report JSON.
+         */
+        get: operations["listRunFanoutPlans"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/notes": {
         parameters: {
             query?: never;
@@ -256,6 +316,46 @@ export interface paths {
          * @description Returns structured, redacted Run Notes.
          */
         get: operations["listRunNotes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Finding Report summaries
+         * @description Returns bounded report counts and severity summaries without Finding narratives.
+         */
+        get: operations["listRunFindingReports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/reports/{report_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect one Finding Report
+         * @description Returns Findings and evidence references while omitting operator reasons, Evidence notes, digests, and Artifact content.
+         */
+        get: operations["getRunFindingReport"];
         put?: never;
         post?: never;
         delete?: never;
@@ -392,6 +492,56 @@ export interface components {
             code: string;
             message: string;
         };
+        AgentCompletionView: {
+            attempt_id: string;
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            note_ids: string[];
+            outcome: string;
+            summary: string;
+            work_item_ids: string[];
+        };
+        AgentGraphView: {
+            nodes: components["schemas"]["AgentNodeView"][];
+            /** @enum {string} */
+            protocol_version: "agent_graph.v1";
+            root_agent_id?: string;
+            run_id: string;
+        };
+        AgentNodeView: {
+            active_attempt_id?: string;
+            /** Format: int32 */
+            child_limit: number;
+            completion?: components["schemas"]["AgentCompletionView"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int32 */
+            depth: number;
+            /** Format: date-time */
+            finished_at?: string;
+            id: string;
+            parent_id?: string;
+            profile: string;
+            /** @enum {string} */
+            role: "root" | "specialist";
+            session_id: string;
+            skills: string[];
+            /** @enum {string} */
+            status: "ready" | "running" | "waiting" | "completed" | "failed" | "cancelled";
+            /** Format: int64 */
+            token_limit: number;
+            /** Format: int64 */
+            tokens_used: number;
+            /** Format: int64 */
+            turn_limit: number;
+            /** Format: int64 */
+            turns_used: number;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: int64 */
+            version: number;
+        };
         ArtifactView: {
             /** Format: date-time */
             created_at: string;
@@ -424,6 +574,83 @@ export interface components {
             /** Format: int64 */
             timeout_seconds?: number;
         };
+        DelegationApplicationView: {
+            /** Format: int32 */
+            assignment_count: number;
+            /** Format: date-time */
+            completed_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            /** Format: int32 */
+            max_children: number;
+            /** Format: int64 */
+            max_tokens_per_child: number;
+            /** Format: int64 */
+            max_turns_per_child: number;
+            requested_by: string;
+            status: string;
+            stop_code?: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        DelegationAssignmentView: {
+            agent_id?: string;
+            application_status?: string;
+            goal: string;
+            /** Format: int32 */
+            ordinal: number;
+            skills: string[];
+            title: string;
+            /** Format: int64 */
+            token_limit: number;
+            /** Format: int64 */
+            turn_limit: number;
+        };
+        DelegationReviewView: {
+            /** Format: date-time */
+            created_at: string;
+            /** @enum {string} */
+            decision: "approved" | "rejected";
+            id: string;
+            reviewed_by: string;
+        };
+        DelegationScheduleView: {
+            agent_ids: string[];
+            /** Format: int32 */
+            attempt_ordinal?: number;
+            /** Format: date-time */
+            finished_at?: string;
+            /** Format: int32 */
+            max_rounds: number;
+            /** Format: int32 */
+            recovered_attempts?: number;
+            request_id: string;
+            /** Format: date-time */
+            requested_at: string;
+            requested_by: string;
+            /** Format: int32 */
+            rounds_completed?: number;
+            schedule_id?: string;
+            /** Format: date-time */
+            started_at?: string;
+            status?: string;
+            /** Format: int32 */
+            turns_started?: number;
+        };
+        DelegationView: {
+            application?: components["schemas"]["DelegationApplicationView"];
+            assignments: components["schemas"]["DelegationAssignmentView"][];
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            latest_schedule?: components["schemas"]["DelegationScheduleView"];
+            requested_by: string;
+            review?: components["schemas"]["DelegationReviewView"];
+            root_agent_id: string;
+            run_id: string;
+            status: string;
+        };
         ErrorEnvelope: {
             error: components["schemas"]["APIError"];
             request_id: string;
@@ -442,6 +669,169 @@ export interface components {
             subject_id?: string;
             type: string;
             version: string;
+        };
+        FanoutExecutionShardView: {
+            /** Format: int32 */
+            attempt_count: number;
+            /** Format: int32 */
+            current_attempt: number;
+            /** Format: int64 */
+            elapsed_millis: number;
+            error_code?: string;
+            /** Format: int32 */
+            finding_count: number;
+            /** Format: date-time */
+            finished_at?: string;
+            /** Format: int64 */
+            input_tokens: number;
+            model?: string;
+            /** Format: int32 */
+            ordinal: number;
+            /** Format: int64 */
+            output_tokens: number;
+            provider?: string;
+            /** Format: date-time */
+            started_at?: string;
+            status: string;
+            /** Format: int64 */
+            total_tokens: number;
+        };
+        FanoutExecutionView: {
+            /** Format: date-time */
+            finished_at?: string;
+            id: string;
+            /** Format: int32 */
+            max_output_tokens_per_shard: number;
+            /** Format: int32 */
+            parallelism: number;
+            requested_by: string;
+            shards: components["schemas"]["FanoutExecutionShardView"][];
+            /** Format: date-time */
+            started_at: string;
+            /** @enum {string} */
+            status: "running" | "completed" | "failed" | "cancelled";
+            stop_code?: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        FanoutPlanView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int32 */
+            effective_parallelism: number;
+            /** Format: int32 */
+            excluded_count: number;
+            /** Format: int32 */
+            file_count: number;
+            goal: string;
+            id: string;
+            latest_execution?: components["schemas"]["FanoutExecutionView"];
+            protocol_version: string;
+            requested_by: string;
+            requested_tier: string;
+            run_id: string;
+            scope_path: string;
+            /** Format: int32 */
+            shard_count: number;
+            /** @enum {string} */
+            status: "planned";
+            /** Format: int64 */
+            total_bytes: number;
+            workspace_id: string;
+        };
+        FindingArtifactEvidenceView: {
+            artifact_id: string;
+            artifact_mime: string;
+            artifact_redacted: boolean;
+            /** Format: int64 */
+            artifact_size_bytes: number;
+            artifact_stream: string;
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+        };
+        FindingEvidenceView: {
+            /** Format: int32 */
+            confidence: number;
+            id: string;
+            /** Format: int32 */
+            line_end: number;
+            /** Format: int32 */
+            line_start: number;
+            relative_path: string;
+            source_id: string;
+            /** Format: int32 */
+            source_ordinal: number;
+            /** Format: int32 */
+            source_shard: number;
+        };
+        FindingLifecycleView: {
+            /** Format: date-time */
+            accepted_at?: string;
+            /** Format: date-time */
+            fixed_at?: string;
+            /** Format: int32 */
+            remediation_evidence_count: number;
+            status: string;
+            /** Format: date-time */
+            validation_decided_at?: string;
+            /** Format: int32 */
+            validation_evidence_count: number;
+        };
+        FindingReportSummaryView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int32 */
+            evidence_count: number;
+            /** Format: int32 */
+            finding_count: number;
+            id: string;
+            run_id: string;
+            severity: components["schemas"]["FindingSeverityView"];
+            source_id: string;
+            source_kind: string;
+            /** @enum {string} */
+            status: "generated";
+            title: string;
+        };
+        FindingReportView: {
+            findings: components["schemas"]["FindingView"][];
+            report: components["schemas"]["FindingReportSummaryView"];
+        };
+        FindingSeverityView: {
+            /** Format: int32 */
+            critical: number;
+            /** Format: int32 */
+            high: number;
+            /** Format: int32 */
+            info: number;
+            /** Format: int32 */
+            low: number;
+            /** Format: int32 */
+            medium: number;
+        };
+        FindingView: {
+            artifact_evidence: components["schemas"]["FindingArtifactEvidenceView"][];
+            category: string;
+            /** Format: int32 */
+            confidence: number;
+            detail: string;
+            evidence: components["schemas"]["FindingEvidenceView"][];
+            id: string;
+            lifecycle: components["schemas"]["FindingLifecycleView"];
+            /** Format: int32 */
+            line_end: number;
+            /** Format: int32 */
+            line_start: number;
+            /** Format: int32 */
+            ordinal: number;
+            relative_path: string;
+            remediation_evidence: components["schemas"]["FindingArtifactEvidenceView"][];
+            /** @enum {string} */
+            severity: "info" | "low" | "medium" | "high" | "critical";
+            /** @enum {string} */
+            status: "draft" | "validated" | "accepted" | "fixed" | "rejected";
+            title: string;
         };
         HealthView: {
             /** @enum {string} */
@@ -1099,6 +1489,41 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    getRunAgentGraph: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AgentGraphView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     requestSpecialistModelCancellation: {
         parameters: {
             query?: never;
@@ -1192,6 +1617,47 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    listRunDelegations: {
+        parameters: {
+            query?: {
+                /** @description Page size from 1 to 100; defaults to 50 */
+                limit?: number;
+                /** @description Opaque cursor bound to this route and exact filter set */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["DelegationView"][];
+                        page: components["schemas"]["Page"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     listRunEvents: {
         parameters: {
             query?: {
@@ -1269,6 +1735,47 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    listRunFanoutPlans: {
+        parameters: {
+            query?: {
+                /** @description Page size from 1 to 100; defaults to 50 */
+                limit?: number;
+                /** @description Opaque cursor bound to this route and exact filter set */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FanoutPlanView"][];
+                        page: components["schemas"]["Page"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     listRunNotes: {
         parameters: {
             query?: {
@@ -1309,6 +1816,84 @@ export interface operations {
                     "application/json": {
                         data: components["schemas"]["NoteView"][];
                         page: components["schemas"]["Page"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listRunFindingReports: {
+        parameters: {
+            query?: {
+                /** @description Page size from 1 to 100; defaults to 50 */
+                limit?: number;
+                /** @description Opaque cursor bound to this route and exact filter set */
+                cursor?: string;
+            };
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FindingReportSummaryView"][];
+                        page: components["schemas"]["Page"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getRunFindingReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+                /** @description Finding Report identity */
+                report_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FindingReportView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";

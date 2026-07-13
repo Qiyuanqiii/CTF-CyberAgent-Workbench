@@ -160,13 +160,24 @@ func (s *SQLiteStore) GetReadOnlyFanoutPlan(ctx context.Context,
 func (s *SQLiteStore) ListReadOnlyFanoutPlans(ctx context.Context,
 	runID string, limit int,
 ) ([]domain.ReadOnlyFanoutPlan, error) {
-	runID = strings.TrimSpace(runID)
-	if !domain.ValidAgentID(runID) || limit <= 0 || limit > 100 {
+	if limit <= 0 || limit > 100 {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
-			"read-only fan-out list requires a valid Run and limit between 1 and 100")
+			"read-only fan-out list limit must be between 1 and 100")
+	}
+	return s.ListReadOnlyFanoutPlansPage(ctx, runID, 0, limit)
+}
+
+func (s *SQLiteStore) ListReadOnlyFanoutPlansPage(ctx context.Context,
+	runID string, offset int, limit int,
+) ([]domain.ReadOnlyFanoutPlan, error) {
+	runID = strings.TrimSpace(runID)
+	if !domain.ValidAgentID(runID) || offset < 0 || limit <= 0 || limit > 101 {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"read-only fan-out page requires a valid Run and bounded offset/limit")
 	}
 	rows, err := s.db.QueryContext(ctx, readOnlyFanoutPlanSelect+
-		` WHERE run_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`, runID, limit)
+		` WHERE run_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+		runID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -192,6 +203,44 @@ func (s *SQLiteStore) ListReadOnlyFanoutPlans(ctx context.Context,
 		}
 	}
 	return plans, nil
+}
+
+func (s *SQLiteStore) ListReadOnlyFanoutPlanSummariesPage(ctx context.Context,
+	runID string, offset int, limit int,
+) ([]domain.ReadOnlyFanoutPlanSummary, error) {
+	runID = strings.TrimSpace(runID)
+	if !domain.ValidAgentID(runID) || offset < 0 || limit <= 0 || limit > 101 {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"read-only fan-out summary page requires a valid Run and bounded offset/limit")
+	}
+	rows, err := s.db.QueryContext(ctx, readOnlyFanoutPlanSelect+
+		` WHERE run_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+		runID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]domain.ReadOnlyFanoutPlanSummary, 0)
+	for rows.Next() {
+		plan, err := scanReadOnlyFanoutPlan(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		summary := plan.Summary()
+		if err := summary.Validate(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		result = append(result, summary)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (s *SQLiteStore) GetReadOnlyFanoutOperation(ctx context.Context,

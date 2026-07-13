@@ -209,6 +209,44 @@ func (s *SQLiteStore) GetFindingReport(ctx context.Context,
 	return getFindingReport(ctx, s.db, id)
 }
 
+func (s *SQLiteStore) ListFindingReportSummariesPage(ctx context.Context,
+	runID string, offset int, limit int,
+) ([]domain.FindingReportSummary, error) {
+	runID = strings.TrimSpace(runID)
+	if !domain.ValidAgentID(runID) || offset < 0 || limit <= 0 || limit > 101 {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"finding report page requires a valid Run and bounded offset/limit")
+	}
+	rows, err := s.db.QueryContext(ctx, findingReportSelect+
+		` WHERE run_id = ? AND status = 'generated'
+		ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`, runID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]domain.FindingReportSummary, 0)
+	for rows.Next() {
+		report, err := scanFindingReport(rows)
+		if err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		summary := report.Summary()
+		if err := summary.Validate(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		result = append(result, summary)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
 func (s *SQLiteStore) GetFinding(ctx context.Context, id string) (domain.Finding, error) {
 	id = strings.TrimSpace(id)
 	if !domain.ValidAgentID(id) || strings.ContainsRune(id, 0) {

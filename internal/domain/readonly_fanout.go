@@ -197,6 +197,63 @@ type ReadOnlyFanoutPlan struct {
 	Shards                []ReadOnlyFanoutShard
 }
 
+type ReadOnlyFanoutPlanSummary struct {
+	ID                   string
+	RunID                string
+	WorkspaceID          string
+	ScopePath            string
+	Goal                 string
+	ProtocolVersion      string
+	RequestedTier        ReadOnlyFanoutTier
+	EffectiveParallelism int
+	Status               ReadOnlyFanoutStatus
+	FileCount            int
+	TotalBytes           int64
+	ExcludedCount        int
+	ShardCount           int
+	RequestedBy          string
+	Version              int64
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+func (p ReadOnlyFanoutPlanSummary) Validate() error {
+	for _, value := range []string{p.ID, p.RunID, p.WorkspaceID, p.RequestedBy} {
+		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {
+			return errors.New("read-only fan-out plan summary identities are invalid")
+		}
+	}
+	tier, err := ParseReadOnlyFanoutTier(string(p.RequestedTier))
+	if err != nil || tier != p.RequestedTier || !validReadOnlyFanoutScope(p.ScopePath) ||
+		!validReadOnlyFanoutGoal(p.Goal) || p.ProtocolVersion != ReadOnlyFanoutProtocolVersion ||
+		p.Status != ReadOnlyFanoutPlanned || p.FileCount <= 0 ||
+		p.FileCount > MaxReadOnlyFanoutFiles || p.TotalBytes < 0 ||
+		p.TotalBytes > MaxReadOnlyFanoutTotalBytes || p.ExcludedCount < 0 ||
+		p.ExcludedCount > MaxReadOnlyFanoutWalkEntries || p.ShardCount <= 0 ||
+		p.ShardCount > MaxReadOnlyFanoutParallelism ||
+		p.EffectiveParallelism != p.ShardCount || p.Version != 1 ||
+		p.CreatedAt.IsZero() || !p.UpdatedAt.Equal(p.CreatedAt) {
+		return errors.New("read-only fan-out plan summary metadata is invalid")
+	}
+	resolved, err := ResolveReadOnlyFanoutParallelism(p.RequestedTier, p.FileCount)
+	if err != nil || resolved != p.EffectiveParallelism {
+		return errors.New("read-only fan-out plan summary parallelism is invalid")
+	}
+	return nil
+}
+
+func (p ReadOnlyFanoutPlan) Summary() ReadOnlyFanoutPlanSummary {
+	return ReadOnlyFanoutPlanSummary{
+		ID: p.ID, RunID: p.RunID, WorkspaceID: p.WorkspaceID,
+		ScopePath: p.ScopePath, Goal: p.Goal, ProtocolVersion: p.ProtocolVersion,
+		RequestedTier: p.RequestedTier, EffectiveParallelism: p.EffectiveParallelism,
+		Status: p.Status, FileCount: p.FileCount, TotalBytes: p.TotalBytes,
+		ExcludedCount: p.ExcludedCount, ShardCount: p.ShardCount,
+		RequestedBy: p.RequestedBy, Version: p.Version,
+		CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
+	}
+}
+
 func (p ReadOnlyFanoutPlan) Validate() error {
 	for _, value := range []string{p.ID, p.RunID, p.WorkspaceID, p.RequestedBy} {
 		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {

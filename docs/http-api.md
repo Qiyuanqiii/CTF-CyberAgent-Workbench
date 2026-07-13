@@ -87,6 +87,11 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/runs/<run-id>/agents
 | `GET` | `/api/v1/runs/{run_id}` | Run, Mission, checkpoint metadata, tool usage, token-free execution-lease summary |
 | `GET` | `/api/v1/runs/{run_id}/events` | Ordered Run events; pagination |
 | `GET` | `/api/v1/runs/{run_id}/events/stream` | Bounded SSE projection; opaque `cursor` or `Last-Event-ID` resume |
+| `GET` | `/api/v1/runs/{run_id}/agent-graph` | Root/Specialist nodes, budgets, lifecycle, and redacted completion summaries |
+| `GET` | `/api/v1/runs/{run_id}/delegations` | Operator-gated proposal/review/application/latest-schedule projection; pagination |
+| `GET` | `/api/v1/runs/{run_id}/fanout-plans` | Read-only plan metadata plus latest bounded execution/shard summary; pagination |
+| `GET` | `/api/v1/runs/{run_id}/reports` | Finding report metadata and severity counts; pagination |
+| `GET` | `/api/v1/runs/{run_id}/reports/{report_id}` | Finding facts, model-assertion provenance, Artifact metadata, and lifecycle timestamps |
 | `POST` | `/api/v1/runs/{run_id}/active-call/cancel` | Separately authorized exact active-call cancellation request |
 | `POST` | `/api/v1/runs/{run_id}/agents/{agent_id}/active-call/cancel` | Separately authorized exact Specialist-call cancellation request |
 | `GET` | `/api/v1/runs/{run_id}/work-items` | `status`, legacy `owner`, `owner_agent_id`, pagination |
@@ -113,9 +118,9 @@ cyberagent api openapi
 cyberagent api openapi --output docs/openapi.json
 ```
 
-运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 19 个 path、27 个 schema：17 个只读 GET 使用全局 read capability，两个精确取消 POST 显式覆盖为 `ControlBearerAuth`。测试会逐条命中公开 handler，并确认契约不包含 Artifact 正文、checkpoint pending input、`lease_id`、fencing token 或 API key 字段。
+运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 24 个 path、45 个 schema：22 个只读 GET 使用全局 read capability，两个精确取消 POST 显式覆盖为 `ControlBearerAuth`。测试会逐条命中公开 handler，并确认契约不包含 Artifact 正文、checkpoint pending input、raw Fan-out report、私有审批/生命周期叙述、`lease_id`、fencing token、摘要或 API key 字段。
 
-The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract currently contains 19 paths and 27 schemas: 17 read-only GET operations use the global read capability, while two exact-cancellation POST operations override security with `ControlBearerAuth`. Tests exercise every published handler and verify that the contract omits Artifact content, checkpoint pending input, `lease_id`, fencing tokens, and API-key fields.
+The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract currently contains 24 paths and 45 schemas: 22 read-only GET operations use the global read capability, while two exact-cancellation POST operations override security with `ControlBearerAuth`. Tests exercise every published handler and verify that the contract omits Artifact content, checkpoint pending input, raw Fan-out reports, private approval/lifecycle narratives, `lease_id`, fencing tokens, digests, and API-key fields.
 
 ## 主动取消 / Active-Call Cancellation
 
@@ -199,7 +204,7 @@ Pagination is a bounded live SQLite projection, not a multi-request snapshot. Ap
 
 ## 当前限制 / Current Limits
 
-- No general write API, Web control action, Go-hosted production bundle, or user-visible model-text stream. The current browser UI is a read-only React/Vite client; the only API write capability remains exact active-call cancellation under a separate token that the UI does not accept.
+- No general write API, Web control action, or user-visible model-text stream. The Go-hosted browser UI is read-only; the only API write capability remains exact active-call cancellation under a separate token that the UI does not accept.
 - Execution-lease rows coordinate workers, but the API exposes neither `lease_id` nor any operation that accepts a fencing token.
 - No Artifact content route. Use the authenticated local CLI `artifact read` when content is explicitly required.
 - No real Shell, LocalSandbox, or Docker execution. Existing approvals still resolve to audited dry-run results.

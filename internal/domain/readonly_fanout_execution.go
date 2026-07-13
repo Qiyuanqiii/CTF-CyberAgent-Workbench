@@ -346,6 +346,153 @@ type ReadOnlyFanoutExecution struct {
 	Shards                  []ReadOnlyFanoutExecutionShard
 }
 
+type ReadOnlyFanoutExecutionShardSummary struct {
+	ExecutionID    string
+	PlanID         string
+	Ordinal        int
+	Status         ReadOnlyFanoutExecutionShardStatus
+	AttemptCount   int
+	CurrentAttempt int
+	Provider       string
+	Model          string
+	InputTokens    int64
+	OutputTokens   int64
+	TotalTokens    int64
+	ElapsedMillis  int64
+	FindingCount   int
+	ErrorCode      string
+	Version        int64
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	StartedAt      *time.Time
+	FinishedAt     *time.Time
+}
+
+type ReadOnlyFanoutExecutionSummary struct {
+	ID                      string
+	PlanID                  string
+	RunID                   string
+	WorkspaceID             string
+	Status                  ReadOnlyFanoutExecutionStatus
+	Parallelism             int
+	MaxOutputTokensPerShard int
+	RequestedBy             string
+	StopCode                string
+	Version                 int64
+	StartedAt               time.Time
+	UpdatedAt               time.Time
+	FinishedAt              *time.Time
+	Shards                  []ReadOnlyFanoutExecutionShardSummary
+}
+
+func (e ReadOnlyFanoutExecutionSummary) Validate() error {
+	for _, value := range []string{e.ID, e.PlanID, e.RunID, e.WorkspaceID, e.RequestedBy} {
+		if !validAgentIdentity(value, false) || strings.ContainsRune(value, 0) {
+			return errors.New("read-only fan-out execution summary identities are invalid")
+		}
+	}
+	if !validReadOnlyFanoutSummaryLabel(e.StopCode, true) {
+		return errors.New("read-only fan-out execution summary stop code is invalid")
+	}
+	if !e.Status.Valid() || e.Parallelism <= 0 || e.Parallelism > MaxReadOnlyFanoutParallelism ||
+		e.MaxOutputTokensPerShard < MinReadOnlyFanoutMaxOutputTokens ||
+		e.MaxOutputTokensPerShard > MaxReadOnlyFanoutMaxOutputTokens || e.Version <= 0 ||
+		e.StartedAt.IsZero() || e.UpdatedAt.Before(e.StartedAt) || len(e.Shards) != e.Parallelism {
+		return errors.New("read-only fan-out execution summary metadata is invalid")
+	}
+	allCompleted := true
+	allTerminal := true
+	for index, shard := range e.Shards {
+		if shard.ExecutionID != e.ID || shard.PlanID != e.PlanID || shard.Ordinal != index+1 ||
+			!shard.Status.Valid() || shard.AttemptCount < 0 ||
+			shard.AttemptCount > MaxReadOnlyFanoutAttemptsPerShard ||
+			shard.CurrentAttempt < 0 || shard.CurrentAttempt > shard.AttemptCount ||
+			shard.InputTokens < 0 || shard.OutputTokens < 0 || shard.TotalTokens < 0 ||
+			shard.InputTokens > int64(^uint64(0)>>1)-shard.OutputTokens ||
+			shard.TotalTokens < shard.InputTokens+shard.OutputTokens || shard.ElapsedMillis < 0 ||
+			shard.FindingCount < 0 || shard.FindingCount > MaxReadOnlyFanoutFindings ||
+			shard.Version <= 0 || shard.CreatedAt.IsZero() || shard.UpdatedAt.Before(shard.CreatedAt) ||
+			!validReadOnlyFanoutSummaryLabel(shard.Provider, true) ||
+			!validReadOnlyFanoutSummaryLabel(shard.Model, true) ||
+			!validReadOnlyFanoutSummaryLabel(shard.ErrorCode, true) {
+			return errors.New("read-only fan-out execution shard summary is invalid")
+		}
+		switch shard.Status {
+		case ReadOnlyFanoutExecutionShardPending:
+			if shard.AttemptCount != 0 || shard.CurrentAttempt != 0 || shard.Provider != "" ||
+				shard.Model != "" || shard.ErrorCode != "" || shard.InputTokens != 0 ||
+				shard.OutputTokens != 0 || shard.TotalTokens != 0 || shard.ElapsedMillis != 0 ||
+				shard.FindingCount != 0 || shard.StartedAt != nil || shard.FinishedAt != nil {
+				return errors.New("pending read-only fan-out execution shard summary is invalid")
+			}
+		case ReadOnlyFanoutExecutionShardRunning:
+			if shard.AttemptCount <= 0 || shard.CurrentAttempt != shard.AttemptCount ||
+				shard.StartedAt == nil || shard.StartedAt.Before(shard.CreatedAt) ||
+				shard.FinishedAt != nil || shard.Provider != "" || shard.Model != "" ||
+				shard.ErrorCode != "" || shard.FindingCount != 0 {
+				return errors.New("running read-only fan-out execution shard summary is invalid")
+			}
+		case ReadOnlyFanoutExecutionShardCompleted:
+			if !validReadOnlyFanoutTerminalSummaryShard(shard) || shard.ErrorCode != "" {
+				return errors.New("completed read-only fan-out execution shard summary is invalid")
+			}
+		case ReadOnlyFanoutExecutionShardFailed:
+			if !validReadOnlyFanoutTerminalSummaryShard(shard) || shard.ErrorCode == "" ||
+				shard.FindingCount != 0 {
+				return errors.New("failed read-only fan-out execution shard summary is invalid")
+			}
+		case ReadOnlyFanoutExecutionShardCancelled:
+			attempted := validReadOnlyFanoutTerminalSummaryShard(shard)
+			beforeStart := shard.AttemptCount == 0 && shard.CurrentAttempt == 0 &&
+				shard.Provider == "" && shard.Model == "" && shard.InputTokens == 0 &&
+				shard.OutputTokens == 0 && shard.TotalTokens == 0 && shard.ElapsedMillis == 0 &&
+				shard.StartedAt == nil && shard.FinishedAt != nil &&
+				!shard.FinishedAt.Before(shard.CreatedAt)
+			if (!attempted && !beforeStart) || shard.ErrorCode == "" || shard.FindingCount != 0 {
+				return errors.New("terminal read-only fan-out execution shard summary is invalid")
+			}
+		}
+		allCompleted = allCompleted && shard.Status == ReadOnlyFanoutExecutionShardCompleted
+		allTerminal = allTerminal && shard.Status.Terminal()
+	}
+	if e.Status == ReadOnlyFanoutExecutionRunning {
+		if e.FinishedAt != nil || e.StopCode != "" {
+			return errors.New("running read-only fan-out execution summary has terminal metadata")
+		}
+		return nil
+	}
+	if e.FinishedAt == nil || e.FinishedAt.Before(e.StartedAt) ||
+		!e.UpdatedAt.Equal(*e.FinishedAt) || !allTerminal {
+		return errors.New("terminal read-only fan-out execution summary is incomplete")
+	}
+	if e.Status == ReadOnlyFanoutExecutionCompleted {
+		if !allCompleted || e.StopCode != "" {
+			return errors.New("completed read-only fan-out execution summary contains failures")
+		}
+	} else if allCompleted || strings.TrimSpace(e.StopCode) == "" {
+		return errors.New("failed read-only fan-out execution summary requires a stop code")
+	}
+	return nil
+}
+
+func validReadOnlyFanoutTerminalSummaryShard(
+	shard ReadOnlyFanoutExecutionShardSummary,
+) bool {
+	return shard.AttemptCount > 0 && shard.CurrentAttempt == shard.AttemptCount &&
+		shard.StartedAt != nil && !shard.StartedAt.Before(shard.CreatedAt) &&
+		shard.FinishedAt != nil && !shard.FinishedAt.Before(*shard.StartedAt) &&
+		shard.Provider != "" && shard.Model != ""
+}
+
+func validReadOnlyFanoutSummaryLabel(value string, allowEmpty bool) bool {
+	if value == "" {
+		return allowEmpty
+	}
+	return utf8.ValidString(value) && strings.TrimSpace(value) == value &&
+		!strings.ContainsRune(value, 0) && utf8.RuneCountInString(value) <= 256 &&
+		len([]byte(value)) <= 1024
+}
+
 func (e ReadOnlyFanoutExecution) Validate() error {
 	for _, value := range []string{e.ID, e.PlanID, e.RunID, e.WorkspaceID,
 		e.RequestedBy} {

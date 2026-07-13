@@ -30,6 +30,15 @@ const readOnlyFanoutExecutionShardSelect = `SELECT execution_id, plan_id, ordina
 	error_code, error_reason, version, created_at, updated_at, started_at, finished_at
 	FROM readonly_fanout_execution_shards`
 
+const readOnlyFanoutExecutionSummarySelect = `SELECT id, plan_id, run_id, workspace_id,
+	status, parallelism, max_output_tokens_per_shard, requested_by, stop_code, version,
+	started_at, updated_at, finished_at FROM readonly_fanout_executions`
+
+const readOnlyFanoutExecutionShardSummarySelect = `SELECT execution_id, plan_id,
+	ordinal, status, attempt_count, current_attempt, provider, model, input_tokens,
+	output_tokens, total_tokens, elapsed_millis, finding_count, error_code, version,
+	created_at, updated_at, started_at, finished_at FROM readonly_fanout_execution_shards`
+
 type readOnlyFanoutExecutionRecord struct {
 	Execution       domain.ReadOnlyFanoutExecution
 	LeaseID         string
@@ -127,6 +136,58 @@ func (s *SQLiteStore) ListReadOnlyFanoutExecutions(ctx context.Context,
 		result[index] = records[index].Execution
 	}
 	return result, nil
+}
+
+func (s *SQLiteStore) GetLatestReadOnlyFanoutExecutionSummary(ctx context.Context,
+	planID string,
+) (domain.ReadOnlyFanoutExecutionSummary, bool, error) {
+	planID = strings.TrimSpace(planID)
+	if !domain.ValidAgentID(planID) {
+		return domain.ReadOnlyFanoutExecutionSummary{}, false, apperror.New(
+			apperror.CodeInvalidArgument, "read-only fan-out plan id is invalid")
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return domain.ReadOnlyFanoutExecutionSummary{}, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	summary, err := scanReadOnlyFanoutExecutionSummary(tx.QueryRowContext(ctx,
+		readOnlyFanoutExecutionSummarySelect+
+			` WHERE plan_id = ? ORDER BY started_at DESC, id DESC LIMIT 1`, planID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ReadOnlyFanoutExecutionSummary{}, false, nil
+	}
+	if err != nil {
+		return domain.ReadOnlyFanoutExecutionSummary{}, false, err
+	}
+	rows, err := tx.QueryContext(ctx, readOnlyFanoutExecutionShardSummarySelect+
+		` WHERE execution_id = ? ORDER BY ordinal`, summary.ID)
+	if err != nil {
+		return domain.ReadOnlyFanoutExecutionSummary{}, false, err
+	}
+	for rows.Next() {
+		shard, err := scanReadOnlyFanoutExecutionShardSummary(rows)
+		if err != nil {
+			_ = rows.Close()
+			return domain.ReadOnlyFanoutExecutionSummary{}, false, err
+		}
+		summary.Shards = append(summary.Shards, shard)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return domain.ReadOnlyFanoutExecutionSummary{}, false, err
+	}
+	if err := rows.Close(); err != nil {
+		return domain.ReadOnlyFanoutExecutionSummary{}, false, err
+	}
+	if err := summary.Validate(); err != nil {
+		return domain.ReadOnlyFanoutExecutionSummary{}, false, apperror.Wrap(
+			apperror.CodeConflict, "stored read-only fan-out execution summary is invalid", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.ReadOnlyFanoutExecutionSummary{}, false, err
+	}
+	return summary, true, nil
 }
 
 func (s *SQLiteStore) GetReadOnlyFanoutExecutionOperation(ctx context.Context,
@@ -1087,6 +1148,56 @@ func scanReadOnlyFanoutExecutionRecord(row scanner) (readOnlyFanoutExecutionReco
 		record.Execution.FinishedAt = &value
 	}
 	return record, nil
+}
+
+func scanReadOnlyFanoutExecutionSummary(row scanner) (domain.ReadOnlyFanoutExecutionSummary, error) {
+	var value domain.ReadOnlyFanoutExecutionSummary
+	var status string
+	var started, updated string
+	var finished sql.NullString
+	if err := row.Scan(&value.ID, &value.PlanID, &value.RunID, &value.WorkspaceID,
+		&status, &value.Parallelism, &value.MaxOutputTokensPerShard,
+		&value.RequestedBy, &value.StopCode, &value.Version, &started, &updated,
+		&finished); err != nil {
+		return domain.ReadOnlyFanoutExecutionSummary{}, err
+	}
+	value.Status = domain.ReadOnlyFanoutExecutionStatus(status)
+	value.StartedAt = parseTS(started)
+	value.UpdatedAt = parseTS(updated)
+	if finished.Valid {
+		parsed := parseTS(finished.String)
+		value.FinishedAt = &parsed
+	}
+	value.Shards = []domain.ReadOnlyFanoutExecutionShardSummary{}
+	return value, nil
+}
+
+func scanReadOnlyFanoutExecutionShardSummary(row scanner) (
+	domain.ReadOnlyFanoutExecutionShardSummary, error,
+) {
+	var value domain.ReadOnlyFanoutExecutionShardSummary
+	var status string
+	var created, updated string
+	var started, finished sql.NullString
+	if err := row.Scan(&value.ExecutionID, &value.PlanID, &value.Ordinal, &status,
+		&value.AttemptCount, &value.CurrentAttempt, &value.Provider, &value.Model,
+		&value.InputTokens, &value.OutputTokens, &value.TotalTokens,
+		&value.ElapsedMillis, &value.FindingCount, &value.ErrorCode, &value.Version,
+		&created, &updated, &started, &finished); err != nil {
+		return domain.ReadOnlyFanoutExecutionShardSummary{}, err
+	}
+	value.Status = domain.ReadOnlyFanoutExecutionShardStatus(status)
+	value.CreatedAt = parseTS(created)
+	value.UpdatedAt = parseTS(updated)
+	if started.Valid {
+		parsed := parseTS(started.String)
+		value.StartedAt = &parsed
+	}
+	if finished.Valid {
+		parsed := parseTS(finished.String)
+		value.FinishedAt = &parsed
+	}
+	return value, nil
 }
 
 func loadReadOnlyFanoutExecutionShards(ctx context.Context,

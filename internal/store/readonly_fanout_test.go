@@ -46,6 +46,21 @@ func TestReadOnlyFanoutPlanIsImmutableIdempotentAndDoesNotCreateAgents(t *testin
 	if err != nil || len(listed) != 1 || listed[0].ID != result.Plan.ID {
 		t.Fatalf("plan list drifted: %#v err=%v", listed, err)
 	}
+	summaries, err := st.ListReadOnlyFanoutPlanSummariesPage(ctx, run.ID, 0, 1)
+	if err != nil || len(summaries) != 1 || summaries[0].ID != result.Plan.ID ||
+		summaries[0].FileCount != result.Plan.FileCount ||
+		summaries[0].EffectiveParallelism != result.Plan.EffectiveParallelism {
+		t.Fatalf("plan summary page drifted: %#v err=%v", summaries, err)
+	}
+	emptySummaries, err := st.ListReadOnlyFanoutPlanSummariesPage(ctx, run.ID, 1, 1)
+	if err != nil || len(emptySummaries) != 0 {
+		t.Fatalf("plan summary offset page drifted: %#v err=%v", emptySummaries, err)
+	}
+	if execution, found, err := st.GetLatestReadOnlyFanoutExecutionSummary(ctx,
+		result.Plan.ID); err != nil || found || execution.ID != "" {
+		t.Fatalf("planning synthesized an execution summary: found=%t value=%#v err=%v",
+			found, execution, err)
+	}
 	replayed, err := service.Create(ctx, request)
 	if err != nil || !replayed.Replayed || replayed.Plan.ID != result.Plan.ID {
 		t.Fatalf("plan replay failed: %#v err=%v", replayed, err)

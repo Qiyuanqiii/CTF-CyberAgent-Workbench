@@ -170,6 +170,9 @@ func GenerateOpenAPI() ([]byte, error) {
 		Tags: []openAPITag{
 			{Name: "System", Description: "API discovery, health, and contract metadata."},
 			{Name: "Runs", Description: "Durable Run state and Run-scoped projections."},
+			{Name: "Agents", Description: "Bounded Agent graph and operator-gated delegation projections."},
+			{Name: "Analysis", Description: "Read-only Fan-out plans and execution summaries."},
+			{Name: "Reports", Description: "Finding reports and redacted lifecycle evidence summaries."},
 			{Name: "Sessions", Description: "Persisted Session metadata and redacted messages."},
 			{Name: "Memory", Description: "Structured WorkItems and Notes."},
 			{Name: "Artifacts", Description: "Content-free Artifact descriptors."},
@@ -202,6 +205,7 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 	workItemID := pathIdentityParameter("work_item_id", "WorkItem identity")
 	noteID := pathIdentityParameter("note_id", "Note identity")
 	artifactID := pathIdentityParameter("artifact_id", "Artifact identity")
+	reportID := pathIdentityParameter("report_id", "Finding Report identity")
 	return []openAPIOperationSpec{
 		{Path: "/api/v1", OperationID: "getAPIIndex", Summary: "Inspect API resources",
 			Description: "Returns API and application versions plus top-level resources.", Tag: "System",
@@ -224,6 +228,31 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 			Tag: "Runs", Description: "Returns the ordered append-only Run event stream.",
 			DataType: reflect.TypeOf(EventView{}), Collection: true, Paginated: true, NotFound: true,
 			Parameters: append([]openAPIParameter{runID}, paginationParameters()...)},
+		{Path: "/api/v1/runs/{run_id}/agent-graph", OperationID: "getRunAgentGraph",
+			Summary: "Inspect the bounded Agent graph", Tag: "Agents",
+			Description: "Returns root and Specialist projections plus completion summaries without lease or fencing state.",
+			DataType:    reflect.TypeOf(AgentGraphView{}), NotFound: true,
+			Parameters: []openAPIParameter{runID}},
+		{Path: "/api/v1/runs/{run_id}/delegations", OperationID: "listRunDelegations",
+			Summary: "List operator-gated delegations", Tag: "Agents",
+			Description: "Returns proposal, review, application, and latest scheduling summaries without operation digests or review reasons.",
+			DataType:    reflect.TypeOf(DelegationView{}), Collection: true, Paginated: true,
+			NotFound: true, Parameters: append([]openAPIParameter{runID}, paginationParameters()...)},
+		{Path: "/api/v1/runs/{run_id}/fanout-plans", OperationID: "listRunFanoutPlans",
+			Summary: "List read-only Fan-out plans", Tag: "Analysis",
+			Description: "Returns bounded plan metadata and the latest shard execution summary without file manifests or model report JSON.",
+			DataType:    reflect.TypeOf(FanoutPlanView{}), Collection: true, Paginated: true,
+			NotFound: true, Parameters: append([]openAPIParameter{runID}, paginationParameters()...)},
+		{Path: "/api/v1/runs/{run_id}/reports", OperationID: "listRunFindingReports",
+			Summary: "List Finding Report summaries", Tag: "Reports",
+			Description: "Returns bounded report counts and severity summaries without Finding narratives.",
+			DataType:    reflect.TypeOf(FindingReportSummaryView{}), Collection: true, Paginated: true,
+			NotFound: true, Parameters: append([]openAPIParameter{runID}, paginationParameters()...)},
+		{Path: "/api/v1/runs/{run_id}/reports/{report_id}", OperationID: "getRunFindingReport",
+			Summary: "Inspect one Finding Report", Tag: "Reports",
+			Description: "Returns Findings and evidence references while omitting operator reasons, Evidence notes, digests, and Artifact content.",
+			DataType:    reflect.TypeOf(FindingReportView{}), NotFound: true,
+			Parameters: []openAPIParameter{runID, reportID}},
 		{Path: RunEventStreamPathTemplate, OperationID: "streamRunEvents", Summary: "Stream Run events",
 			Tag: "Runs", Description: "Streams bounded durable Run events as SSE and resumes from a Run-bound cursor.",
 			DataType: reflect.TypeOf(RunEventStreamView{}), Streaming: true, NotFound: true,
@@ -633,6 +662,15 @@ var openAPIFieldEnums = map[string][]string{
 	"RunEventStreamView.version":             {RunEventStreamVersion},
 	"ModelCancellationView.status":           {string(domain.ModelCancellationPending), string(domain.ModelCancellationObserved), string(domain.ModelCancellationResolved)},
 	"SpecialistModelCancellationView.status": {string(domain.ModelCancellationPending), string(domain.ModelCancellationObserved), string(domain.ModelCancellationResolved)},
+	"AgentGraphView.protocol_version":        {domain.AgentGraphProtocolVersion},
+	"AgentNodeView.role":                     {string(domain.AgentRoleRoot), string(domain.AgentRoleSpecialist)},
+	"AgentNodeView.status":                   {string(domain.AgentReady), string(domain.AgentRunning), string(domain.AgentWaiting), string(domain.AgentCompleted), string(domain.AgentFailed), string(domain.AgentCancelled)},
+	"DelegationReviewView.decision":          {string(domain.SpecialistDelegationApproved), string(domain.SpecialistDelegationRejected)},
+	"FanoutPlanView.status":                  {string(domain.ReadOnlyFanoutPlanned)},
+	"FanoutExecutionView.status":             {string(domain.ReadOnlyFanoutExecutionRunning), string(domain.ReadOnlyFanoutExecutionCompleted), string(domain.ReadOnlyFanoutExecutionFailed), string(domain.ReadOnlyFanoutExecutionCancelled)},
+	"FindingReportSummaryView.status":        {string(domain.FindingReportGenerated)},
+	"FindingView.severity":                   {string(domain.FindingSeverityInfo), string(domain.FindingSeverityLow), string(domain.FindingSeverityMedium), string(domain.FindingSeverityHigh), string(domain.FindingSeverityCritical)},
+	"FindingView.status":                     {string(domain.FindingStatusDraft), string(domain.FindingStatusValidated), string(domain.FindingStatusAccepted), string(domain.FindingStatusFixed), string(domain.FindingStatusRejected)},
 }
 
 var openAPIFieldMinimums = map[string]float64{
@@ -663,6 +701,15 @@ var openAPIFieldMinimums = map[string]float64{
 	"ModelCancellationRequestView.model_attempt":    1,
 	"ModelCancellationView.model_attempt":           1,
 	"SpecialistModelCancellationView.model_attempt": 1,
+	"AgentNodeView.depth":                           0,
+	"AgentNodeView.turn_limit":                      0,
+	"AgentNodeView.token_limit":                     0,
+	"AgentNodeView.turns_used":                      0,
+	"AgentNodeView.tokens_used":                     0,
+	"FindingReportSummaryView.finding_count":        0,
+	"FindingReportSummaryView.evidence_count":       0,
+	"FindingView.ordinal":                           1,
+	"FindingView.confidence":                        0,
 }
 
 var openAPIFieldMaxLengths = map[string]int{

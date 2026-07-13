@@ -102,6 +102,14 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "RunExecutionLeaseView", "lease_id")
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "SupervisorCheckpointView", "pending_input")
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "ArtifactView", "content")
+	assertOpenAPISchemaOmits(t, document.Components.Schemas, "AgentNodeView", "status_reason")
+	assertOpenAPISchemaOmits(t, document.Components.Schemas, "DelegationReviewView", "reason")
+	assertOpenAPISchemaOmits(t, document.Components.Schemas, "DelegationApplicationView", "policy_fingerprint")
+	assertOpenAPISchemaOmits(t, document.Components.Schemas, "FanoutExecutionShardView", "report_json")
+	assertOpenAPISchemaOmits(t, document.Components.Schemas, "FanoutExecutionShardView", "error_reason")
+	assertOpenAPISchemaOmits(t, document.Components.Schemas, "FindingArtifactEvidenceView", "note")
+	assertOpenAPISchemaOmits(t, document.Components.Schemas, "FindingArtifactEvidenceView", "attached_by")
+	assertOpenAPISchemaOptional(t, document.Components.Schemas, "AgentGraphView", "root_agent_id")
 }
 
 func TestOpenAPIGoldenDocumentMatchesGoDTOs(t *testing.T) {
@@ -131,6 +139,7 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		"{work_item_id}": fixture.workItems[0].ID,
 		"{note_id}":      fixture.notes[0].ID,
 		"{artifact_id}":  fixture.artifactID,
+		"{report_id}":    "report-openapi-missing-0001",
 	}
 	for _, spec := range openAPIOperationSpecs() {
 		requestPath := spec.Path
@@ -144,6 +153,9 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		t.Run(spec.OperationID, func(t *testing.T) {
 			var response *httptest.ResponseRecorder
 			expectedStatus := http.StatusOK
+			if spec.OperationID == "getRunFindingReport" {
+				expectedStatus = http.StatusNotFound
+			}
 			if spec.Control {
 				attemptID := fixture.checkpoint.AttemptID
 				modelAttempt := 1
@@ -264,5 +276,21 @@ func assertOpenAPISchemaOmits(t *testing.T, schemas map[string]map[string]any, n
 	}
 	if _, exposed := properties[property]; exposed {
 		t.Fatalf("OpenAPI component %s exposed forbidden property %s", name, property)
+	}
+}
+
+func assertOpenAPISchemaOptional(t *testing.T, schemas map[string]map[string]any,
+	name string, property string,
+) {
+	t.Helper()
+	schema, ok := schemas[name]
+	if !ok {
+		t.Fatalf("OpenAPI component %s is missing", name)
+	}
+	required, _ := schema["required"].([]any)
+	for _, current := range required {
+		if current == property {
+			t.Fatalf("OpenAPI component %s unexpectedly requires %s", name, property)
+		}
 	}
 }

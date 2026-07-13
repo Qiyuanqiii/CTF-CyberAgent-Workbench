@@ -42,7 +42,9 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		if err := rejectQuery(request.URL.Query()); err != nil {
 			return nil, nil, err
 		}
-		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts", "event-stream", "openapi"}
+		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
+			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
+			"event-stream", "openapi"}
 		if a.controlEnabled {
 			resources = append(resources, "model-cancellation-control",
 				"specialist-model-cancellation-control")
@@ -92,6 +94,14 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 		return a.run(request, segments[1])
 	case 3:
 		switch segments[2] {
+		case "agent-graph":
+			return a.runAgentGraph(request, segments[1])
+		case "delegations":
+			return a.runDelegations(request, segments[1])
+		case "fanout-plans":
+			return a.runFanoutPlans(request, segments[1])
+		case "reports":
+			return a.runFindingReports(request, segments[1])
 		case "events":
 			return a.runEvents(request, segments[1])
 		case "work-items":
@@ -102,6 +112,10 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 			return a.runArtifacts(request, segments[1])
 		case "tool-rounds":
 			return a.runToolRounds(request, segments[1])
+		}
+	case 4:
+		if segments[2] == "reports" {
+			return a.runFindingReport(request, segments[1], segments[3])
 		}
 	}
 	return nil, nil, apperror.New(apperror.CodeNotFound, "Run HTTP API endpoint was not found")

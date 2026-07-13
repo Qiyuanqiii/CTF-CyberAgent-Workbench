@@ -87,6 +87,14 @@ func TestSpecialistDelegationConcurrentReplayConvergesWithoutSpawning(t *testing
 	if err != nil || len(proposals) != 1 {
 		t.Fatalf("delegation ledger contains duplicates: %#v err=%v", proposals, err)
 	}
+	page, err := st.ListSpecialistDelegationProposalsPage(ctx, run.ID, 0, 1)
+	if err != nil || len(page) != 1 || page[0].ID != proposals[0].ID {
+		t.Fatalf("delegation page drifted: %#v err=%v", page, err)
+	}
+	emptyPage, err := st.ListSpecialistDelegationProposalsPage(ctx, run.ID, 1, 1)
+	if err != nil || len(emptyPage) != 0 {
+		t.Fatalf("delegation offset page drifted: %#v err=%v", emptyPage, err)
+	}
 	nodes, err := st.ListAgentNodes(ctx, run.ID)
 	if err != nil || len(nodes) != 1 {
 		t.Fatalf("delegation proposal spawned children: %#v err=%v", nodes, err)

@@ -7,7 +7,11 @@ import {
   Database,
   FileArchive,
   Gauge,
+  GitBranch,
+  Network,
   Radio,
+  ScanSearch,
+  ShieldAlert,
   StickyNote,
   Wrench,
 } from "lucide-react";
@@ -24,11 +28,16 @@ import { usePagedResource } from "../hooks/use-paged-resource";
 import { useRunEventStream } from "../hooks/use-run-event-stream";
 import { formatBytes, formatDate, formatNumber, shortID } from "../lib/format";
 import { EmptyState, ErrorState, KeyValue, LoadMoreButton, LoadingState, StatusBadge } from "./common";
+import { AgentGraphPanel, DelegationsPanel, FanoutPanel, FindingsPanel } from "./run-projections";
 
-type RunTab = "overview" | "events" | "work" | "notes" | "artifacts" | "tools";
+type RunTab = "overview" | "agents" | "delegations" | "fanout" | "findings" | "events" | "work" | "notes" | "artifacts" | "tools";
 
 const tabs: Array<{ id: RunTab; label: string; icon: typeof Activity }> = [
   { id: "overview", label: "概览", icon: Gauge },
+  { id: "agents", label: "Agents", icon: GitBranch },
+  { id: "delegations", label: "委派", icon: Network },
+  { id: "fanout", label: "Fan-out", icon: ScanSearch },
+  { id: "findings", label: "发现", icon: ShieldAlert },
   { id: "events", label: "事件", icon: Activity },
   { id: "work", label: "任务", icon: ClipboardList },
   { id: "notes", label: "记忆", icon: StickyNote },
@@ -109,6 +118,10 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
       </nav>
       <div className="workspace-content">
         {tab === "overview" && <RunOverview detail={detail} />}
+        {tab === "agents" && <AgentGraphPanel client={client} runID={runID} />}
+        {tab === "delegations" && <DelegationsPanel client={client} runID={runID} />}
+        {tab === "fanout" && <FanoutPanel client={client} runID={runID} />}
+        {tab === "findings" && <FindingsPanel client={client} runID={runID} />}
         {tab === "events" && (
           <CollectionState query={eventsQuery} empty="暂无事件">
             {stream.error && <div className="inline-warning">SSE: {stream.error}</div>}

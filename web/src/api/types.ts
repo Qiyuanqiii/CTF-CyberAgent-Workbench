@@ -1,8 +1,13 @@
 import type { components } from "./schema";
 
 export type APIErrorView = components["schemas"]["APIError"];
+export type AgentGraphView = components["schemas"]["AgentGraphView"];
 export type ArtifactView = components["schemas"]["ArtifactView"];
+export type DelegationView = components["schemas"]["DelegationView"];
 export type EventView = components["schemas"]["EventView"];
+export type FanoutPlanView = components["schemas"]["FanoutPlanView"];
+export type FindingReportSummaryView = components["schemas"]["FindingReportSummaryView"];
+export type FindingReportView = components["schemas"]["FindingReportView"];
 export type HealthView = components["schemas"]["HealthView"];
 export type MessageView = components["schemas"]["MessageView"];
 export type NoteView = components["schemas"]["NoteView"];

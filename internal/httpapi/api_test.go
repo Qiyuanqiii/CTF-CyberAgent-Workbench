@@ -205,6 +205,28 @@ func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *te
 		t.Fatal("Run detail exposed the execution fencing token")
 	}
 
+	graphResponse := fixture.get(t, "/api/v1/runs/"+fixture.run.ID+"/agent-graph")
+	var graph AgentGraphView
+	decodeData(t, graphResponse, &graph)
+	if graph.ProtocolVersion != domain.AgentGraphProtocolVersion || graph.RunID != fixture.run.ID ||
+		graph.RootAgentID != fixture.root.ID || len(graph.Nodes) != 1 ||
+		graph.Nodes[0].ID != fixture.root.ID || graph.Nodes[0].Role != string(domain.AgentRoleRoot) {
+		t.Fatalf("unexpected Agent graph: %#v", graph)
+	}
+	for _, endpoint := range []string{"delegations", "fanout-plans", "reports"} {
+		response := fixture.get(t, "/api/v1/runs/"+fixture.run.ID+"/"+endpoint+"?limit=10")
+		var values []json.RawMessage
+		decodeData(t, response, &values)
+		if len(values) != 0 {
+			t.Fatalf("empty projection %s returned %#v", endpoint, values)
+		}
+		var envelope apiTestEnvelope
+		if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil ||
+			envelope.Page == nil || envelope.Page.Limit != 10 {
+			t.Fatalf("projection %s omitted pagination: body=%s err=%v", endpoint, response.Body.String(), err)
+		}
+	}
+
 	sessions := fixture.get(t, "/api/v1/sessions")
 	var sessionViews []SessionView
 	decodeData(t, sessions, &sessionViews)

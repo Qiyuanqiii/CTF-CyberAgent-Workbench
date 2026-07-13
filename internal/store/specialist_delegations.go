@@ -135,17 +135,28 @@ func (s *SQLiteStore) GetSpecialistDelegationProposal(ctx context.Context,
 func (s *SQLiteStore) ListSpecialistDelegationProposals(ctx context.Context,
 	runID string, limit int,
 ) ([]domain.SpecialistDelegationProposal, error) {
+	if limit <= 0 || limit > 100 {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"specialist delegation list limit must be between 1 and 100")
+	}
+	return s.ListSpecialistDelegationProposalsPage(ctx, runID, 0, limit)
+}
+
+func (s *SQLiteStore) ListSpecialistDelegationProposalsPage(ctx context.Context,
+	runID string, offset int, limit int,
+) ([]domain.SpecialistDelegationProposal, error) {
 	runID = strings.TrimSpace(runID)
 	if !domain.ValidAgentID(runID) {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"specialist delegation Run id is invalid")
 	}
-	if limit <= 0 || limit > 100 {
+	if offset < 0 || limit <= 0 || limit > 101 {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
-			"specialist delegation list limit must be between 1 and 100")
+			"specialist delegation page bounds are invalid")
 	}
 	rows, err := s.db.QueryContext(ctx, specialistDelegationProposalSelect+
-		` WHERE run_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`, runID, limit)
+		` WHERE run_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`,
+		runID, limit, offset)
 	if err != nil {
 		return nil, err
 	}

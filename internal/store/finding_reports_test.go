@@ -101,6 +101,24 @@ func TestFindingReportProjectionConvergesAcrossStores(t *testing.T) {
 		len(expected.Findings[0].Evidence) != 2 {
 		t.Fatalf("unexpected converged report: created=%d report=%#v", created, expected)
 	}
+	summaries, err := st.ListFindingReportSummariesPage(ctx, run.ID, 0, 1)
+	if err != nil || len(summaries) != 1 || summaries[0].ID != expected.ID ||
+		summaries[0].FindingCount != expected.FindingCount ||
+		summaries[0].Severity != expected.Severity {
+		t.Fatalf("finding report summary page drifted: %#v err=%v", summaries, err)
+	}
+	emptySummaries, err := st.ListFindingReportSummariesPage(ctx, run.ID, 1, 1)
+	if err != nil || len(emptySummaries) != 0 {
+		t.Fatalf("finding report summary offset page drifted: %#v err=%v", emptySummaries, err)
+	}
+	executionSummary, found, err := st.GetLatestReadOnlyFanoutExecutionSummary(ctx,
+		execution.PlanID)
+	if err != nil || !found || executionSummary.ID != execution.ID ||
+		executionSummary.Status != domain.ReadOnlyFanoutExecutionCompleted ||
+		len(executionSummary.Shards) != 1 || executionSummary.Shards[0].FindingCount != 2 {
+		t.Fatalf("fan-out execution summary drifted: found=%t value=%#v err=%v",
+			found, executionSummary, err)
+	}
 	for table, want := range map[string]int{
 		"finding_reports": 1, "findings": 1, "finding_evidence": 2,
 	} {
