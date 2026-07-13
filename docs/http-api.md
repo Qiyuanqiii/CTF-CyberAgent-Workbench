@@ -13,7 +13,7 @@ When `CYBERAGENT_API_TOKEN` is absent, the process generates and prints a tempor
 ```powershell
 $env:CYBERAGENT_API_TOKEN = "<a-random-token-of-at-least-32-bytes>"
 $env:CYBERAGENT_API_CONTROL_TOKEN = "<a-different-random-token-of-at-least-32-bytes>"
-go run ./cmd/cyberagent api serve --listen 127.0.0.1:8765
+go run ./cmd/cyberagent api serve --listen 127.0.0.1:8765 --ui-dir web/dist
 ```
 
 The command prints:
@@ -23,10 +23,18 @@ api_url: http://127.0.0.1:8765/api/v1
 api_version: api.v1
 api_token_generated: false
 api_control_enabled: true
+ui_url: http://127.0.0.1:8765/
+ui_source: <absolute-path-to-web/dist>
+ui_assets: 2
+ui_digest: <sha256-bundle-digest>
 api_token_source: CYBERAGENT_API_TOKEN
 api_control_token_source: CYBERAGENT_API_CONTROL_TOKEN
 note: the API is loopback-only; control is separately authorized and tokens are not persisted
 ```
+
+`--ui-dir` 可选。设置后，Go 会在打开数据库和 listener 前校验 Vite bundle，并把 `index.html` 与 `assets/` 读成不可变内存快照；运行期间磁盘变化不会改变已服务内容。省略该选项时，根路径继续走原有 API 404/鉴权行为，不启动 Web UI。
+
+`--ui-dir` is optional. When set, Go validates the Vite bundle before opening the database or listener and loads `index.html` plus `assets/` into an immutable in-memory snapshot. On-disk changes cannot alter the served process. Without the option, root paths retain the existing authenticated API/404 behavior and no Web UI is enabled.
 
 ```powershell
 $headers = @{ Authorization = "Bearer $env:CYBERAGENT_API_TOKEN" }
@@ -45,8 +53,10 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/runs/<run-id>/agents
 ## 安全边界 / Security Boundary
 
 - Listener、HTTP `Host` 与客户端地址都必须是 loopback；`0.0.0.0`、空 host 和公网客户端会被拒绝。
-- 每个请求必须有且只有一个正确的 `Authorization: Bearer <token>`。GET 使用 read token；取消 POST 只接受不同的 control token，两种凭据不能互换。
+- 每个 `/api` 请求必须有且只有一个正确的 `Authorization: Bearer <token>`。GET 使用 read token；取消 POST 只接受不同的 control token，两种凭据不能互换。Web 静态请求匿名可读，并明确拒绝 Authorization header，避免 bearer 被意外发送到资源路径。
 - 所有读取只接受无 body 的 `GET`。两个 POST 只写入精确的 root 或 Specialist 取消意图；没有 CORS 响应头或浏览器跨源授权。
+- 启用 UI 时，只在非 `/api` 命名空间接受无 query、无 body 的 `GET`/`HEAD`。HTML 使用 `no-store`；仅允许类型且文件名带哈希的资源使用一年 immutable cache。bundle 的根目录、`assets/`、软链接、文件类型、数量、单文件/总大小与 SPA fallback 深度均受限。
+- UI 与 API 共享 loopback、Host、客户端地址、request-target 和规范路径校验。UI 响应使用无 `unsafe-inline`/`unsafe-eval` 的 CSP、同源 opener/resource policy、`nosniff`、`DENY` frame policy 和禁用敏感浏览器能力的 Permissions Policy。
 - request target 最大 8 KiB，query 最大 4 KiB，response 最大 8 MiB，header 上限为 32 KiB。
 - HTTP handler 构造后只保留两个 token 的 SHA-256 摘要；明文仍可能存在于启动环境或短期进程内存，但不会写入配置、SQLite 或 Run events。
 - Artifact API 只返回 descriptor，不读取或返回正文；Run detail 不返回 checkpoint pending input 或 execution fencing token。租约摘要仅包含 owner、generation、状态与时间。
@@ -55,8 +65,10 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/runs/<run-id>/agents
 - SSE 使用同一 Authorization header，token 不进入 URL、cursor 或事件数据。默认最多同时 16 条 stream；每条连接最多 32-event 批量、2 MiB 单帧、10,000 events、5 分钟寿命，并对每次写入设置 2 秒 deadline。
 
 - The listener, HTTP `Host`, and client address must all be loopback. `0.0.0.0`, an empty host, and public clients are rejected.
-- Every request must contain exactly one valid `Authorization: Bearer <token>` header. GET uses the read token; cancellation POST accepts only the distinct control token. The credentials are not interchangeable.
+- Every `/api` request must contain exactly one valid `Authorization: Bearer <token>` header. GET uses the read token; cancellation POST accepts only the distinct control token. The credentials are not interchangeable. Static Web requests are anonymous and explicitly reject authorization headers so a bearer is not accidentally sent to an asset path.
 - All reads accept only bodyless `GET`. The two POST routes only record exact root or Specialist cancellation intent. There are no CORS response headers or browser cross-origin grants.
+- When the UI is enabled, only queryless, bodyless GET/HEAD requests outside the reserved `/api` namespace reach it. HTML is `no-store`; only allowlisted, hash-named assets receive a one-year immutable cache. Bundle roots, `assets/`, symlinks, types, counts, per-file/aggregate size, and SPA-fallback depth are bounded.
+- UI and API requests share the loopback, Host, client-address, request-target, and canonical-path boundary. UI responses add a CSP without `unsafe-inline` or `unsafe-eval`, same-origin opener/resource policies, `nosniff`, frame denial, and a Permissions Policy disabling sensitive browser features.
 - Request targets are capped at 8 KiB, queries at 4 KiB, responses at 8 MiB, and headers at 32 KiB.
 - After construction, the HTTP handler retains only SHA-256 digests of both tokens. Plaintext may still exist in the launch environment or short-lived process memory, but is never written to configuration, SQLite, or Run events.
 - Artifact routes return descriptors only and never load content. Run detail omits checkpoint pending input and the execution fencing token; its lease summary contains only owner, generation, status, and timestamps.
@@ -144,7 +156,7 @@ data: {"version":"run-events.v1","request_id":"req-...","run_id":"run-...","curs
 
 Heartbeats are SSE comments and consume neither database rows nor sequences. The connection closes at its event/time limit or when a client misses its write deadline; resume from the last successfully received frame id. Events written by another process to the same SQLite database become visible on a later poll. Server shutdown cancels request contexts instead of waiting for the five-minute lifetime. The stream reuses the same redacted `EventView` as `/events` and adds no user-visible model-text projection.
 
-Native browser `EventSource` cannot attach the current Bearer header. The React/Vite console therefore uses authenticated `fetch` streaming through a same-origin development proxy and never puts the token in a query string or browser storage. CORS remains disabled. Direct same-origin production asset serving from Go still requires a separate reviewed slice.
+Native browser `EventSource` cannot attach the current Bearer header. The React/Vite console therefore uses authenticated `fetch` streaming and never puts the token in a query string or browser storage. Production assets and `api.v1` now share the Go loopback origin when `--ui-dir` is set; Vite provides the same-origin proxy only during development. CORS remains disabled.
 
 ## Envelopes
 

@@ -74,6 +74,7 @@ type Config struct {
 	ControlToken string
 	AppVersion   string
 	EventStream  EventStreamConfig
+	UIHandler    http.Handler
 }
 
 type API struct {
@@ -85,6 +86,7 @@ type API struct {
 	openAPI          []byte
 	eventStream      EventStreamConfig
 	eventStreamSlots chan struct{}
+	uiHandler        http.Handler
 }
 
 func New(store Store, config Config) (*API, error) {
@@ -124,7 +126,8 @@ func New(store Store, config Config) (*API, error) {
 	return &API{store: store, tokenHash: sha256.Sum256([]byte(token)),
 		controlTokenHash: controlTokenHash, controlEnabled: controlEnabled, appVersion: version,
 		openAPI: document, eventStream: eventStream,
-		eventStreamSlots: make(chan struct{}, eventStream.MaxConnections)}, nil
+		eventStreamSlots: make(chan struct{}, eventStream.MaxConnections),
+		uiHandler:        config.UIHandler}, nil
 }
 
 func GenerateAccessToken() (string, error) {
@@ -204,16 +207,35 @@ func (a *API) Handler() http.Handler {
 func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	requestID := idgen.New("req")
 	tracked := &responseWriter{ResponseWriter: writer}
-	setSecurityHeaders(tracked.Header(), requestID)
+	uiRequest := a.uiHandler != nil && request != nil && request.URL != nil &&
+		!reservedAPIPath(request.URL.Path)
+	if uiRequest {
+		setUISecurityHeaders(tracked.Header(), requestID)
+	} else {
+		setSecurityHeaders(tracked.Header(), requestID)
+	}
 	defer func() {
 		if recover() != nil && !tracked.wrote {
-			a.writeError(tracked, requestID,
-				apperror.New(apperror.CodeInternal, "internal server error"), 0)
+			if uiRequest {
+				writeUIError(tracked, request,
+					apperror.New(apperror.CodeInternal, "internal server error"), 0)
+			} else {
+				a.writeError(tracked, requestID,
+					apperror.New(apperror.CodeInternal, "internal server error"), 0)
+			}
 		}
 	}()
 
 	if status, err := validateRequestBoundary(request); err != nil {
-		a.writeError(tracked, requestID, err, status)
+		if uiRequest {
+			writeUIError(tracked, request, err, status)
+		} else {
+			a.writeError(tracked, requestID, err, status)
+		}
+		return
+	}
+	if uiRequest {
+		a.serveUI(tracked, request)
 		return
 	}
 	if runID, agentID, matched := matchSpecialistModelCancellationPath(request.URL.Path); matched {
@@ -267,6 +289,36 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	a.writeSuccess(tracked, requestID, data, page)
 }
 
+func reservedAPIPath(value string) bool {
+	return value == "/api" || strings.HasPrefix(value, "/api/")
+}
+
+func (a *API) serveUI(writer http.ResponseWriter, request *http.Request) {
+	if request.Method != http.MethodGet && request.Method != http.MethodHead {
+		writer.Header().Set("Allow", http.MethodGet+", "+http.MethodHead)
+		writeUIError(writer, request,
+			apperror.New(apperror.CodeInvalidArgument, "Web UI only supports GET and HEAD"),
+			http.StatusMethodNotAllowed)
+		return
+	}
+	if request.ContentLength != 0 || len(request.TransferEncoding) != 0 {
+		writeUIError(writer, request,
+			apperror.New(apperror.CodeInvalidArgument, "Web UI requests cannot contain a body"), 0)
+		return
+	}
+	if request.URL.RawQuery != "" {
+		writeUIError(writer, request,
+			apperror.New(apperror.CodeInvalidArgument, "Web UI requests cannot contain query parameters"), 0)
+		return
+	}
+	if len(request.Header.Values("Authorization")) != 0 {
+		writeUIError(writer, request,
+			apperror.New(apperror.CodeInvalidArgument, "Web UI asset requests cannot contain authorization"), 0)
+		return
+	}
+	a.uiHandler.ServeHTTP(writer, request)
+}
+
 func validateRequestBoundary(request *http.Request) (int, error) {
 	if request == nil || request.URL == nil {
 		return 0, apperror.New(apperror.CodeInvalidArgument, "HTTP request is required")
@@ -281,7 +333,7 @@ func validateRequestBoundary(request *http.Request) (int, error) {
 	}
 	if request.URL.Path == "" || request.URL.Path != path.Clean(request.URL.Path) ||
 		strings.Contains(request.URL.Path, `\`) {
-		return 0, apperror.New(apperror.CodeInvalidArgument, "HTTP API path is not canonical")
+		return 0, apperror.New(apperror.CodeInvalidArgument, "HTTP path is not canonical")
 	}
 	if !loopbackRequestHost(request.Host) {
 		return 0, apperror.New(apperror.CodePolicyDenied, "HTTP Host must identify a loopback address")
@@ -329,6 +381,34 @@ func setSecurityHeaders(header http.Header, requestID string) {
 	header.Set("X-Frame-Options", "DENY")
 	header.Set("X-CyberAgent-API-Version", Version)
 	header.Set("X-Request-ID", requestID)
+}
+
+func setUISecurityHeaders(header http.Header, requestID string) {
+	header.Set("Cache-Control", "no-store")
+	header.Set("Content-Security-Policy", "default-src 'none'; base-uri 'none'; connect-src 'self'; "+
+		"font-src 'self'; form-action 'none'; frame-ancestors 'none'; img-src 'self' data:; "+
+		"manifest-src 'self'; object-src 'none'; script-src 'self'; style-src 'self'; worker-src 'self'")
+	header.Set("Cross-Origin-Opener-Policy", "same-origin")
+	header.Set("Cross-Origin-Resource-Policy", "same-origin")
+	header.Set("Permissions-Policy", "camera=(), geolocation=(), microphone=(), payment=(), usb=()")
+	header.Set("Referrer-Policy", "no-referrer")
+	header.Set("X-Content-Type-Options", "nosniff")
+	header.Set("X-Frame-Options", "DENY")
+	header.Set("X-CyberAgent-UI-Version", "web-ui.v1")
+	header.Set("X-Request-ID", requestID)
+}
+
+func writeUIError(writer http.ResponseWriter, request *http.Request, err error, statusOverride int) {
+	status := statusOverride
+	if status == 0 {
+		status = apperror.HTTPStatus(apperror.Normalize(err))
+	}
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	writer.WriteHeader(status)
+	if request == nil || request.Method != http.MethodHead {
+		_, _ = io.WriteString(writer, http.StatusText(status)+"\n")
+	}
 }
 
 type Server struct {

@@ -85,8 +85,10 @@ code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
 .key-value dd { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .section-heading > span { color: var(--muted); font-size: 12px; }
-.budget-track { height: 7px; margin-top: 16px; overflow: hidden; border-radius: 3px; background: #e6ebef; }
-.budget-track span { display: block; height: 100%; background: var(--accent); }
+.budget-track { width: 100%; height: 7px; display: block; margin-top: 16px; overflow: hidden; border: 0; border-radius: 3px; background: #e6ebef; appearance: none; }
+.budget-track::-webkit-progress-bar { background: #e6ebef; }
+.budget-track::-webkit-progress-value { background: var(--accent); }
+.budget-track::-moz-progress-bar { background: var(--accent); }
 
 .status-badge { max-width: 150px; display: inline-flex; align-items: center; padding: 2px 6px; overflow: hidden; border: 1px solid #cdd5dc; border-radius: 4px; background: #f4f6f7; color: #52606c; font-size: 10px; line-height: 1.3; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
 .status-running, .status-active, .status-completed, .status-live { border-color: #9ccdbb; background: #e9f7f1; color: #146c4e; }

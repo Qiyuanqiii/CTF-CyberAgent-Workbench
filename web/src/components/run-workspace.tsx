@@ -181,7 +181,7 @@ function RunOverview({ detail }: { detail: RunDetailView }) {
       </section>
       <section className="detail-section">
         <div className="section-heading"><h2>工具预算</h2><span>{percent}%</span></div>
-        <div className="budget-track"><span style={{ width: `${percent}%` }} /></div>
+        <progress aria-label="工具预算使用率" className="budget-track" max={100} value={percent}>{percent}%</progress>
         <dl className="detail-grid compact">
           <KeyValue label="Consumed" value={formatNumber(usage.consumed)} />
           <KeyValue label="Remaining" value={formatNumber(usage.remaining)} />

@@ -9,7 +9,7 @@ CyberAgent Workbench is evolving from a CLI-first agent scaffold into a run-cent
 - Every state change is auditable and recoverable from SQLite.
 - Agent concurrency is coordinated by one owner, not by agents calling each other directly.
 - Privileged actions always cross policy, approval, scope, and sandbox boundaries.
-- CLI, TUI, future Web UI, and CI use the same application services.
+- CLI, TUI, the React/Vite read UI, and CI use the same Go-owned application and HTTP services.
 - Rust analyzers remain deterministic tools behind Go.
 - CTF-specific behavior remains a late profile, not the runtime foundation.
 
@@ -54,6 +54,8 @@ TypeScript -> Go -> LLM
 ```
 
 TypeScript and Rust never bypass Go for secrets, persistence, policy, workspace permissions, shell execution, network scope, or Docker. See [ADR 0001](adr/0001-go-control-plane.md).
+
+The production React bundle is built by Vite but hosted only when Go receives an explicit `--ui-dir`. Go validates and snapshots the static tree before serving it from the same loopback origin as `api.v1`; `/api` remains a reserved authenticated namespace. Vite's loopback proxy is a development adapter, not a second control plane.
 
 ## Core Domain
 

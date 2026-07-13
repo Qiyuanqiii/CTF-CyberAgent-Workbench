@@ -12,7 +12,24 @@
 - Session 列表、绑定 Run 和包含压缩状态的消息历史；
 - 只驻留页面内存的 read bearer token。
 
-浏览器不保存 token，不把 token 放入 URL，也不接触 control token。Vite 将同源 `/api` 代理到回环 Go 服务；跨域目标会被拒绝。Artifact 正文、checkpoint pending input、fencing token 和执行类写操作仍不向 Web 开放。
+浏览器不保存 token，不把 token 放入 URL，也不接触 control token。生产模式由 Go 在同一回环 origin 托管已构建资源；Vite 回环代理只用于前端开发，跨域代理目标会被拒绝。Artifact 正文、checkpoint pending input、fencing token 和执行类写操作仍不向 Web 开放。
+
+### 生产式本地运行
+
+```powershell
+# repository root
+cd web
+npm ci
+npm run check:api
+npm run build
+cd ..
+$env:CYBERAGENT_API_TOKEN = "<local-read-token>"
+go run ./cmd/cyberagent api serve --listen 127.0.0.1:8765 --ui-dir web/dist
+```
+
+打开 `http://127.0.0.1:8765`，输入同一个 read token。`--ui-dir` 必须指向 Vite 生产输出；Go 会在启动时校验并读入不可变快照。HTML 不缓存，带哈希的静态资源使用 immutable 缓存，未知资源与不安全 fallback fail closed。静态请求匿名可读，但携带 `Authorization`、query、body 或非 GET/HEAD 方法会被拒绝，避免 bearer 意外发送给资源处理器。
+
+### Vite 开发模式
 
 ```powershell
 # terminal 1: repository root
@@ -26,7 +43,7 @@ npm run check:api
 npm run dev
 ```
 
-打开 `http://127.0.0.1:5173`，输入同一个 read token。默认代理目标为 `http://127.0.0.1:8765`；需要改端口时设置 `CYBERAGENT_API_TARGET`，该值仍必须是 HTTP(S) 回环 URL。
+打开 `http://127.0.0.1:5173`。默认代理目标为 `http://127.0.0.1:8765`；需要改端口时设置 `CYBERAGENT_API_TARGET`，该值仍必须是 HTTP(S) 回环 URL。
 
 ## English
 
@@ -34,7 +51,9 @@ This is the local read-only operations UI for CyberAgent Workbench. React/Vite c
 
 The current UI includes Run and Session browsing, bounded pagination, authenticated resumable Run-event SSE, WorkItems, Notes, Artifact descriptors, Supervisor ToolRounds, budgets, leases, and compacted message history. The read bearer remains in page memory, never enters a URL or browser storage, and is distinct from the unavailable control token.
 
-Vite proxies same-origin `/api` requests to the loopback Go service and rejects non-loopback targets. The production bundle is built with `npm run build`; serving that bundle from Go is a later slice, so the current runnable path uses the Vite development server.
+For the production-style local path, run `npm run build`, then start `cyberagent api serve --ui-dir web/dist`. Go validates and snapshots the bundle at startup, serves it from the same loopback origin as `api.v1`, applies a strict CSP, disables HTML caching, and gives only hashed assets immutable caching. Static requests are anonymous but reject authorization headers, queries, bodies, and methods other than GET/HEAD. For frontend development, Vite can still proxy same-origin `/api` requests to a loopback Go service and rejects non-loopback targets.
+
+Open `http://127.0.0.1:8765` for the Go-hosted build or `http://127.0.0.1:5173` for Vite development, then enter the same read token shown or configured for the Go process.
 
 ## Checks
 

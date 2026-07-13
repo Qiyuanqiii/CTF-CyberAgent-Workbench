@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/httpapi"
+	"cyberagent-workbench/internal/webui"
 )
 
 const apiTokenEnvironment = "CYBERAGENT_API_TOKEN"
@@ -33,11 +35,12 @@ func (a *App) apiCommand(ctx context.Context, args []string) error {
 func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 	fs := newFlagSet("api serve", a.errOut)
 	listenAddress := fs.String("listen", httpapi.DefaultListenAddress, "loopback listen address")
-	if err := fs.Parse(reorderFlags(args, map[string]bool{"listen": true})); err != nil {
+	uiDirectory := fs.String("ui-dir", "", "optional built Web UI directory")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{"listen": true, "ui-dir": true})); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return errors.New("usage: cyberagent api serve [--listen <loopback-host:port>]")
+		return errors.New("usage: cyberagent api serve [--listen <loopback-host:port>] [--ui-dir <built-web-directory>]")
 	}
 
 	accessToken := os.Getenv(apiTokenEnvironment)
@@ -50,11 +53,20 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 			return err
 		}
 	}
+	var uiBundle *webui.Bundle
+	if strings.TrimSpace(*uiDirectory) != "" {
+		var err error
+		uiBundle, err = webui.LoadDirectory(*uiDirectory)
+		if err != nil {
+			return apperror.Wrap(apperror.CodeInvalidArgument, "invalid Web UI directory", err)
+		}
+	}
 	if err := a.ensureStore(); err != nil {
 		return err
 	}
 	api, err := httpapi.New(a.store, httpapi.Config{
 		AccessToken: accessToken, ControlToken: controlToken, AppVersion: Version,
+		UIHandler: uiBundle,
 	})
 	if err != nil {
 		return err
@@ -68,9 +80,14 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 		_ = listener.Close()
 		return err
 	}
-	baseURL := "http://" + listener.Addr().String() + "/api/v1"
+	origin := "http://" + listener.Addr().String()
+	baseURL := origin + "/api/v1"
 	fmt.Fprintf(a.out, "api_url: %s\napi_version: %s\napi_token_generated: %t\napi_control_enabled: %t\n",
 		baseURL, httpapi.Version, generated, controlToken != "")
+	if uiBundle != nil {
+		fmt.Fprintf(a.out, "ui_url: %s/\nui_source: %s\nui_assets: %d\nui_digest: %s\n",
+			origin, uiBundle.Source(), uiBundle.AssetCount(), uiBundle.Digest())
+	}
 	if generated {
 		fmt.Fprintf(a.out, "api_token: %s\n", accessToken)
 	} else {

@@ -206,8 +206,119 @@ func TestAPIServeCLIGeneratesUsableProcessToken(t *testing.T) {
 	assertDirectoryOmitsValue(t, home, token)
 }
 
+func TestAPIServeCLIHostsImmutableWebUIWithoutWeakeningAPI(t *testing.T) {
+	home := t.TempDir()
+	uiDirectory := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(uiDirectory, "assets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	indexBody := []byte(`<!doctype html><script type="module" src="/assets/index-AbCd1234.js"></script>`)
+	assetBody := []byte(`document.body.dataset.ready = "yes";`)
+	if err := os.WriteFile(filepath.Join(uiDirectory, "index.html"), indexBody, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(uiDirectory, "assets", "index-AbCd1234.js"), assetBody, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CYBERAGENT_HOME", home)
+	t.Setenv("MIMO_API_KEY", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	t.Setenv("CYBERAGENT_ANTHROPIC_API_KEY", "")
+	token := "cli-web-token-0123456789-abcdefghijkl"
+	t.Setenv(apiTokenEnvironment, token)
+	t.Setenv(apiControlTokenEnvironment, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	var stdout synchronizedBuffer
+	var stderr synchronizedBuffer
+	done := make(chan int, 1)
+	go func() {
+		done <- ExecuteContext(ctx, []string{"api", "serve", "--listen", "127.0.0.1:0",
+			"--ui-dir", uiDirectory}, &stdout, &stderr)
+	}()
+
+	var apiURL string
+	var uiURL string
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		output := stdout.String()
+		apiURL = outputField(output, "api_url")
+		uiURL = outputField(output, "ui_url")
+		if apiURL != "" && uiURL != "" && len(outputField(output, "ui_digest")) == 64 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if apiURL == "" || uiURL == "" || !strings.Contains(stdout.String(), "ui_assets: 1") ||
+		strings.Contains(stdout.String(), token) {
+		t.Fatalf("Web UI startup metadata is incomplete or unsafe: %s", stdout.String())
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	uiResponse, err := client.Get(uiURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	servedIndex, readErr := io.ReadAll(uiResponse.Body)
+	_ = uiResponse.Body.Close()
+	if readErr != nil || uiResponse.StatusCode != http.StatusOK || !bytes.Equal(servedIndex, indexBody) ||
+		strings.Contains(uiResponse.Header.Get("Content-Security-Policy"), "unsafe-inline") ||
+		uiResponse.Header.Get("X-CyberAgent-UI-Version") != "web-ui.v1" {
+		t.Fatalf("unexpected hosted UI response: status=%d headers=%#v body=%q err=%v",
+			uiResponse.StatusCode, uiResponse.Header, servedIndex, readErr)
+	}
+	assetResponse, err := client.Get(strings.TrimSuffix(uiURL, "/") + "/assets/index-AbCd1234.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	servedAsset, readErr := io.ReadAll(assetResponse.Body)
+	_ = assetResponse.Body.Close()
+	if readErr != nil || assetResponse.StatusCode != http.StatusOK || !bytes.Equal(servedAsset, assetBody) ||
+		assetResponse.Header.Get("Cache-Control") != "public, max-age=31536000, immutable" {
+		t.Fatalf("unexpected hosted asset response: status=%d headers=%#v body=%q err=%v",
+			assetResponse.StatusCode, assetResponse.Header, servedAsset, readErr)
+	}
+
+	unauthorized, err := client.Get(apiURL + "/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, unauthorized.Body)
+	_ = unauthorized.Body.Close()
+	if unauthorized.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anonymous API request returned %d", unauthorized.StatusCode)
+	}
+	authorizedRequest, err := http.NewRequest(http.MethodGet, apiURL+"/health", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizedRequest.Header.Set("Authorization", "Bearer "+token)
+	authorized, err := client.Do(authorizedRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = io.Copy(io.Discard, authorized.Body)
+	_ = authorized.Body.Close()
+	if authorized.StatusCode != http.StatusOK {
+		t.Fatalf("authorized API request returned %d", authorized.StatusCode)
+	}
+
+	cancel()
+	select {
+	case code := <-done:
+		if code != 0 || stderr.String() != "" {
+			t.Fatalf("Web UI API exit failed: code=%d stderr=%s", code, stderr.String())
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("Web UI API command did not stop")
+	}
+	assertDirectoryOmitsValue(t, home, token)
+}
+
 func TestAPIServeCLIRejectsUnsafeConfiguration(t *testing.T) {
 	t.Setenv("CYBERAGENT_HOME", t.TempDir())
+	missingUI := filepath.Join(t.TempDir(), "missing-ui")
 	tests := []struct {
 		name         string
 		token        string
@@ -226,6 +337,8 @@ func TestAPIServeCLIRejectsUnsafeConfiguration(t *testing.T) {
 			args: []string{"api", "serve", "--listen", "127.0.0.1:0"}, code: 2, text: "must be distinct"},
 		{name: "public bind", token: strings.Repeat("x", 32),
 			args: []string{"api", "serve", "--listen", "0.0.0.0:0"}, code: 5, text: "loopback"},
+		{name: "missing Web UI", token: strings.Repeat("x", 32),
+			args: []string{"api", "serve", "--ui-dir", missingUI}, code: 2, text: "invalid Web UI directory"},
 		{name: "unknown subcommand", token: strings.Repeat("x", 32),
 			args: []string{"api", "publish"}, code: 2, text: "unknown API subcommand"},
 	}
