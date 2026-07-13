@@ -49,7 +49,7 @@ One transaction creates the checkpoint, a digest-only idempotency operation, an 
 
 CLI adds `run delivery checkpoint/list/show`. HTTP/OpenAPI, generated TypeScript, React, and TUI show only enforcement, required/ready counts, and bounded checkpoint metadata. They omit evidence, internal digests, operation keys, and requester identity. The model has no checkpoint tool; Policy denies obvious Shell/process/script/Sandbox self-invocation of the operator checkpoint command. This is defense in depth, while Local/Docker process execution remains closed.
 
-The focused audit found no unresolved high- or medium-severity issue. It fixed three low-risk boundaries before release: handoff Note titles are now independent of maximum-length model module titles, relation-table update triggers check both old and new Note ownership, and checkpoint events no longer expose internal fingerprints/digests. Full release checks and GitHub CI results are recorded in the v44 progress entry after push.
+The focused audit found no unresolved high- or medium-severity issue. It fixed four low-risk boundaries before release: handoff Note titles are independent of maximum-length model module titles, relation-table update triggers check both old and new Note ownership, checkpoint events no longer expose internal fingerprints/digests, and CLI wording distinguishes gate readiness from capability authorization. Full local release checks passed. GitHub Actions run `29280076450` passed both the Go control-plane and TypeScript-console jobs for commit `0fa5ee3`.
 
 ## Next Slice
 
