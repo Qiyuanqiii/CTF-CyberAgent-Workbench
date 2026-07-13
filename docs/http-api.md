@@ -144,7 +144,7 @@ data: {"version":"run-events.v1","request_id":"req-...","run_id":"run-...","curs
 
 Heartbeats are SSE comments and consume neither database rows nor sequences. The connection closes at its event/time limit or when a client misses its write deadline; resume from the last successfully received frame id. Events written by another process to the same SQLite database become visible on a later poll. Server shutdown cancels request contexts instead of waiting for the five-minute lifetime. The stream reuses the same redacted `EventView` as `/events` and adds no user-visible model-text projection.
 
-Native browser `EventSource` cannot attach the current Bearer header. Until the Go process serves a same-origin UI with a separately reviewed browser-auth design, browser clients must use authenticated `fetch` streaming and must never put the token in a query string. CORS remains disabled.
+Native browser `EventSource` cannot attach the current Bearer header. The React/Vite console therefore uses authenticated `fetch` streaming through a same-origin development proxy and never puts the token in a query string or browser storage. CORS remains disabled. Direct same-origin production asset serving from Go still requires a separate reviewed slice.
 
 ## Envelopes
 
@@ -187,7 +187,7 @@ Pagination is a bounded live SQLite projection, not a multi-request snapshot. Ap
 
 ## 当前限制 / Current Limits
 
-- No general write API, browser UI, or user-visible model-text stream. The only write capability is exact active-call cancellation.
+- No general write API, Web control action, Go-hosted production bundle, or user-visible model-text stream. The current browser UI is a read-only React/Vite client; the only API write capability remains exact active-call cancellation under a separate token that the UI does not accept.
 - Execution-lease rows coordinate workers, but the API exposes neither `lease_id` nor any operation that accepts a fencing token.
 - No Artifact content route. Use the authenticated local CLI `artifact read` when content is explicitly required.
 - No real Shell, LocalSandbox, or Docker execution. Existing approvals still resolve to audited dry-run results.

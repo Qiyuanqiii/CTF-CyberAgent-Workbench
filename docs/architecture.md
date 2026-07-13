@@ -16,7 +16,7 @@ CyberAgent Workbench is evolving from a CLI-first agent scaffold into a run-cent
 ## Control Plane
 
 ```text
-CLI / Bubble Tea TUI / Headless CI / Future TypeScript UI
+CLI / Bubble Tea TUI / Headless CI / React-Vite read UI
                               |
                     Go Application Services
                               |

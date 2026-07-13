@@ -461,11 +461,17 @@ Explicit Operator Specialist Scheduling 切片新增 schema v38、不可变 sche
 
 GitHub Actions CI Annotations 切片不增加 schema、Store mutation 或 Provider 调用。`GateResult` 在内存中保留 `json:"-"` 的精确 matched Finding 快照，JSON 继续只输出原有计数；`report check --format github` 直接把同一结果投影为带 workspace-relative file、line/endLine、title、status、category、Finding ID 和 fingerprint 的 workflow commands，并保持既有退出码。info/low 映射 notice，medium 映射 warning，high/critical 映射 error。属性严格转义 `%`、CR/LF、冒号和逗号，正文严格转义 `%` 与 CR/LF，其余 C0/DEL 转成可见 `\u00XX`，模型输出不能注入第二条 command 或操纵终端显示。Artifact 正文、validation/acceptance/remediation Evidence note 和 operator reason 不进入快照。定向测试覆盖 JSON 兼容、exact selection/order、私密叙述隔离、命令/控制字符注入、五种 severity、192 条上限与 193 条拒绝、pass/disabled 零输出、validated CLI failure annotation 和 fixed 零 annotation。审计未发现高/中风险问题，并补上两个低风险公共输出边界：人工构造的 GateResult 现在也受 report-wide Finding 上限约束，残余终端控制字符被可视化。最终 uncached 全仓测试、全仓 race、`go vet`、零告警 `staticcheck`、`go mod verify/tidy -diff`、凭据/运行产物扫描与 `govulncheck` 全部通过，可达漏洞为 0。隔离真实 binary 只注册 mock，确认 github/unknown format 的 lookup 顺序、workspace 初始化和 Run 创建后清理全部临时数据。
 
+React/Vite Read Console 切片不增加 schema、Go Store mutation、Provider 调用或新的 HTTP capability。`web/` 使用 React 19、Vite 8、TanStack Query、Zustand 和 Lucide；`openapi-typescript` 从受测的 `docs/openapi.json` 生成 DTO，GitHub Actions 会重新生成并阻止 drift。界面覆盖 Run/Session 列表与有界分页、Mission/预算/checkpoint/lease 摘要、WorkItem、Note、Artifact descriptor、Supervisor ToolRound、包含 compacted 状态的 Session message，以及实时 Run event。SSE 明确使用带 Bearer header 的 `fetch` 而非无法加 header 的原生 EventSource，以 frame id 对照 cursor，并通过 `Last-Event-ID` 续传。
+
+安全边界复核确认 read token 只保存在页面内存，不进入 URL、localStorage、sessionStorage、日志或 Query key；断开连接会同时清理 token、选择和 React Query cache。API base 固定为同源 `/api/v1`，路径规范化后必须留在该前缀内，Vite 代理目标只接受 HTTP(S) 回环 URL。浏览器不接触 control token、Artifact 正文、checkpoint pending input、fencing token、Shell、Docker 或 SQLite，也不重写 Go Policy。审计阶段修复五项低风险健壮性/仓库卫生问题：effect abort 时的 reconnect delay 不再产生 detached rejection；400/401/403/404 SSE 停止重试，避免无效轮询；分页 envelope 在运行时强制 data 为 array；SSE 同时校验外层 id、frame cursor、Run ID 与 event/frame sequence；TypeScript 增量构建缓存不会进入 Git。未发现未解决的高/中风险问题。
+
+前端门禁通过 strict TypeScript、11 个 Vitest/Testing Library 测试、生产构建和 `npm audit --audit-level=high`，npm 漏洞为 0，bundle 主脚本约 80 KiB gzip。隔离的 schema v38 runtime 创建了 workspace、Run、WorkItem、Note 和两条 Session message；真实 Vite -> Go 代理 smoke 读取 health、Run 列表并接收 7 帧 SSE。浏览器验证 Run 概览、实时事件和 Session 消息，1440x900 与 390x844 均无横向溢出，控制台 error 为 0。当前进度估计保持为整体愿景约 97%、v0.1 通用 Agent MVP 约 99%、V2 Runtime 约 99%；P9 的第一版 Web 读取面已完成，但 Go 同源生产托管、Web 控制操作和更广只读投影仍待后续切片。
+
 ## 七、下一开发切片
 
-1. React/Vite 从 `docs/openapi.json` 生成 client/DTO，并通过带 Authorization header 的 fetch 消费 SSE，不把 token 放入 URL、不重复实现 Go Policy。
-2. Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
-3. 仅在实际需要时增加其他 CI 平台 renderer；必须复用同一 GateResult，不能增加第二套 Finding 状态。
+1. 让 Go 在显式配置下同源托管 `web/dist`，补 route-aware CSP、SPA fallback 上限、静态资源完整性和真实 binary 集成测试；不得扩大现有 API capability。
+2. 由 Go DTO/OpenAPI 先行增加 Agent graph、delegation/Fan-out 与 Finding/Report 只读接口和 Web 视图，不在 React 中复制状态机或 Policy。
+3. Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过审计。
 
 ## 八、仓库同步与恢复约定
 

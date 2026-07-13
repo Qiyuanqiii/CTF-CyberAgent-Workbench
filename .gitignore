@@ -18,6 +18,13 @@ dist/
 build/
 .tmp/
 
+# TypeScript frontend output
+node_modules/
+web/dist/
+web/coverage/
+web/.vite/
+*.tsbuildinfo
+
 # CyberAgent runtime data must stay local
 .cyberagent-workbench/
 cyberagent.db

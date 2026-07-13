@@ -9,7 +9,7 @@
 
 CyberAgent Workbench 是一个由 Go 驱动的本地 AI Agent 工作台，面向代码开发、代码审查、安全学习、脚本任务和受控网络安全分析。它把模型调用、长上下文、工作区文件、策略检查、审批、执行预算和事件记录统一到一套可恢复的运行时中，让一次任务即使在程序退出后也能继续，并且每一步都可以追踪和复核。
 
-每个用户目标会被记录为一个 `Mission`，每次可恢复的执行过程则是一个 `Run`。Go 是唯一控制平面，负责模型路由、状态机、SQLite 持久化、安全策略和工具边界；未来的 TypeScript 界面与 Rust 确定性分析器都通过 Go 协议接入，不绕过安全控制。
+每个用户目标会被记录为一个 `Mission`，每次可恢复的执行过程则是一个 `Run`。Go 是唯一控制平面，负责模型路由、状态机、SQLite 持久化、安全策略和工具边界；当前 TypeScript 只读控制台与未来的 Rust 确定性分析器都通过 Go 协议接入，不绕过安全控制。
 
 项目当前优先完善通用 Agent 运行时及其受控多 Agent 内核。CTF 将作为后续 Profile 和 Skills 能力接入，而不是另建一套独立运行系统。
 
@@ -83,13 +83,15 @@ Go 响应 DTO 现在同时生成唯一的 OpenAPI 3.1 契约。`cyberagent api o
 
 只读 Run Event Stream 也已接入同一控制面。`/api/v1/runs/{run_id}/events/stream` 使用 SSE 推送 SQLite 中已脱敏的持久化事件；每帧 `id` 是与 Run 绑定的不透明 cursor，客户端可通过 `Last-Event-ID` 精确续传。连接具有批量、帧大小、总事件数、寿命、写超时和进程并发上限，心跳不伪造 Run event；服务器关闭会主动取消长连接。SSE 本身不推送模型正文、不接受 token query、也不执行任何写操作。
 
+首个 React/Vite 只读控制台位于 `web/`。它从 `docs/openapi.json` 生成 TypeScript DTO，通过同源 Vite 代理读取 Run、Session、WorkItem、Note、Artifact descriptor、ToolRound 与预算/租约摘要，并使用带 Authorization header 的 `fetch` 消费和续传 SSE。read token 只驻留页面内存，不进入 URL、localStorage 或 sessionStorage；浏览器不持有 control token，也不重复实现 Go Policy。当前生产 bundle 尚未由 Go 直接托管，开发路径仍需同时启动 Go API 与 Vite。
+
 Bubble Tea TUI 现在可直接查看当前 Run 状态、Work Board、Notes、持久化 Supervisor Tool Rounds 与 Shell ToolRuns。工具区支持“批准一次”和“本会话授权”：后者只创建精确绑定当前 Run、Session、Workspace、Shell 与 ActionClass 的可撤销 Grant，并在推进当前提案前重新检查持久化审批作用域和最新 Policy。后续安全 Shell 可自动完成 dry-run，危险命令仍永久拒绝且不会创建 Grant；中文、组合字符和宽字符按终端单元格安全换行与截断。
 
 ### English
 
 CyberAgent Workbench is a local AI agent workbench powered by Go for coding, code review, security learning, scripting, and controlled cybersecurity analysis. It brings model calls, long-context memory, workspace files, policy checks, approvals, execution budgets, and event history into one resumable runtime, so work can continue after a process restart and every action remains inspectable.
 
-Each user objective is stored as a `Mission`, while each resumable execution is a `Run`. Go is the sole control plane for model routing, state machines, SQLite persistence, safety policy, and tool boundaries. Future TypeScript interfaces and deterministic Rust analyzers connect through Go-defined protocols instead of bypassing those controls.
+Each user objective is stored as a `Mission`, while each resumable execution is a `Run`. Go is the sole control plane for model routing, state machines, SQLite persistence, safety policy, and tool boundaries. The current read-only TypeScript console and future deterministic Rust analyzers connect through Go-defined protocols instead of bypassing those controls.
 
 The current priority is the general-purpose Agent runtime and its controlled multi-agent kernel. CTF capabilities will be added later as Profiles and Skills on top of the same foundation rather than as a separate execution system.
 
@@ -163,6 +165,8 @@ The Go response DTOs now generate the single OpenAPI 3.1 contract. `cyberagent a
 
 A read-only Run Event Stream now shares that control plane. `/api/v1/runs/{run_id}/events/stream` uses SSE to publish redacted durable SQLite events. Every frame id is an opaque Run-bound cursor that supports exact `Last-Event-ID` resume. Batch size, frame size, total events, lifetime, write timeout, and process concurrency are bounded; heartbeats never fabricate Run events, and server shutdown cancels long-lived connections. The stream contains no user-visible model text, accepts no token query, and performs no write operation itself.
 
+The first React/Vite read console now lives under `web/`. It generates TypeScript DTOs from `docs/openapi.json`, reads Runs, Sessions, WorkItems, Notes, Artifact descriptors, ToolRounds, budgets, and leases through a same-origin Vite proxy, and consumes resumable SSE with authenticated `fetch`. The read token stays in page memory and never enters a URL, localStorage, or sessionStorage. The browser has no control token and does not duplicate Go policy. Go does not serve the production bundle yet, so development currently starts the API and Vite separately.
+
 The Bubble Tea TUI now exposes the current Run state, Work Board, Notes, durable Supervisor Tool Rounds, and Shell ToolRuns. Its tool pane supports “approve once” and “approve for this session.” Session approval creates only a revocable Grant scoped to the exact Run, Session, Workspace, Shell tool, and ActionClass, then rechecks the durable approval scope and current Policy before advancing the proposal. Later safe Shell calls may complete as dry runs, while dangerous commands remain permanently denied and cannot create a Grant. Terminal wrapping and truncation account for CJK, combining characters, and other wide graphemes.
 
 ## 核心能力 / Core Capabilities
@@ -179,11 +183,11 @@ The Bubble Tea TUI now exposes the current Run state, Work Board, Notes, durable
 - **安全与审批 / Safety and approval:** policy checks, secret redaction, automatic low-risk reads, durable per-call approvals, revocable scoped Session grants, atomic Run tool budgets, permanent denial, and dry-run command completion.
 - **完整审计链 / Audit trail:** append-only Run events plus a bounded resumable SSE projection for messages, context source provenance, text-free model progress, model calls, Notes, policy decisions, tool proposals, file edits, and content-free Artifact metadata.
 - **CLI 与 TUI / CLI and TUI:** a scriptable CLI plus a Bubble Tea interface with live model progress, audited cancellation, Run memory/tool-round views, and scoped once/session approvals.
-- **可扩展架构 / Extensible architecture:** Go control plane with a generated OpenAPI 3.1 contract, loopback-only read API/SSE plus a separately authorized cancellation capability, and planned TypeScript UI, Docker sandbox, and Rust analyzer boundaries.
+- **可扩展架构 / Extensible architecture:** Go control plane with a generated OpenAPI 3.1 contract, loopback-only read API/SSE, a React/Vite read console, separately authorized cancellation, and planned Docker sandbox and Rust analyzer boundaries.
 
 > [!NOTE]
-> 当前版本仍在积极开发中。Provider 只能自动创建 WorkItem/Note；双 child 并发必须经过显式 operator review、application 与 v38 schedule request，模型不能自主启动。真实 Shell/Docker 执行、更广工具面、HTTP 或模型自主子 Agent 调度、Web UI 和 CTF 自动求解尚未开放。<br>
-> This project is under active development. Providers may only create WorkItems and Notes, and two-child concurrency exists only in the non-public Go scheduler. Real Shell/Docker execution, broader model tools, public or model-driven child scheduling, the Web UI, and automated CTF solving are not enabled yet.
+> 当前版本仍在积极开发中。Provider 只能自动创建 WorkItem/Note；双 child 并发必须经过显式 operator review、application 与 v38 schedule request，模型不能自主启动。Web 目前只读；真实 Shell/Docker 执行、更广工具面、通用 HTTP 写入、Web 控制操作、模型自主子 Agent 调度和 CTF 自动求解尚未开放。<br>
+> This project is under active development. Providers may only create WorkItems and Notes, and two-child concurrency remains explicitly operator-gated. The Web console is read-only; real Shell/Docker execution, broader model tools, general HTTP mutations, Web control actions, model-driven child scheduling, and automated CTF solving are not enabled yet.
 
 **密钥边界 / Secret boundary:** 应用不会持久化 API key；可选在线 Provider 只从当前进程环境变量读取密钥。<br>
 The application never persists API keys; optional live providers read them only from the current process environment.
@@ -298,6 +302,22 @@ go run ./cmd/cyberagent context compact --workspace demo --task task-demo --mess
 go run ./cmd/cyberagent context show --task task-demo
 ```
 
+### Web Console
+
+```powershell
+# terminal 1: repository root
+$env:CYBERAGENT_API_TOKEN = "<local-read-token>"
+go run ./cmd/cyberagent api serve --listen 127.0.0.1:8765
+
+# terminal 2
+cd web
+npm ci
+npm run check:api
+npm run dev
+```
+
+打开 / Open `http://127.0.0.1:5173`. 详细边界与检查命令见 [web/README.md](web/README.md)。
+
 Use `CYBERAGENT_HOME` to point runtime data at another directory during tests or experiments.
 
 在 Unix 上，新建的运行目录与 SQLite 数据库分别限制为 `0700` 和 `0600`；Windows 继续使用系统 ACL。LocalRunner 当前显式 fail-closed，不会启动宿主机进程，Noop dry-run 输出也会先脱敏。<br>
@@ -307,7 +327,7 @@ On Unix, newly created runtime directories and SQLite databases are restricted t
 
 ## Project Memory
 
-Read [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [docs/PROGRESS_BOOK.md](docs/PROGRESS_BOOK.md), [docs/TASK_BOOK.md](docs/TASK_BOOK.md), [docs/http-api.md](docs/http-api.md), [docs/openapi.json](docs/openapi.json), [docs/errors.md](docs/errors.md), [ADR 0001](docs/adr/0001-go-control-plane.md), and [ADR 0002](docs/adr/0002-run-centric-runtime.md) first when resuming development after a long conversation. They record current progress, language ownership, run architecture, API and error contracts, audit notes, verified commands, and the recommended next slice.
+Read [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [docs/PROGRESS_BOOK.md](docs/PROGRESS_BOOK.md), [docs/TASK_BOOK.md](docs/TASK_BOOK.md), [docs/http-api.md](docs/http-api.md), [docs/openapi.json](docs/openapi.json), [web/README.md](web/README.md), [docs/errors.md](docs/errors.md), [ADR 0001](docs/adr/0001-go-control-plane.md), and [ADR 0002](docs/adr/0002-run-centric-runtime.md) first when resuming development after a long conversation. They record current progress, language ownership, run architecture, API and error contracts, audit notes, verified commands, and the recommended next slice.
 
 ## Repository Workflow
 
@@ -323,7 +343,7 @@ This project is licensed by the repository owner under the [Apache License 2.0](
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, local and schema v18 cross-process active-call cancellation, Bubble Tea live metadata, durable model events, exactly one restart-safe lifecycle-protocol repair, the schema v16 bounded structured-memory tool loop, and schema v17 execution leases with heartbeat/fencing. P3 includes migration v9 WorkItems, migration v10 Notes, transactional relationships/events, `todo` and `note` CLI lifecycles, root/owner visibility, token-budgeted memory selection, and durable context provenance. P4 now has the schema v19 single-root Coordinator, schema v20 idempotent inbox protocol, schema v21 internal-only Specialist admission, schema v22 same-Run Agent-owned WorkItems/Notes, schema v23 attempt-bound CompletionReports, schema v24 lease-fenced Specialist Attempt scheduling/usage/crash recovery, schema v25 two-phase exactly-once root inbox context, schema v26's opt-in internal no-tool Specialist turn with an atomic model/usage/Policy ledger, schema v27's recoverable parent-instruction plus child-owned-memory context, schema v28's exactly-once child lifecycle repair, schema v29 durable schedule summaries plus exact cross-process child-call cancellation, schema v30 review-gated root delegation proposals, schema v31 immutable operator review facts, schema v32 recoverable operator application around the Go-internal two-child scheduler, schema v33 immutable read-only Fan-out plans, and schema v34 lease-fenced tool-free execution for up to six read-only shards. Core delegation remains capped at two; Fan-out is a separate read-only analysis pool with no Agent admission, tools, network, or writes. P5 includes the unified Tool Gateway, trusted workspace scope binding, schema v11 durable per-call approvals, schema v12 revocable Session grants and atomic Run tool-call accounting, schema v13 first-class typed script processes, schema v14 source-bound hashed output Artifacts, schema v15 idempotent structured-memory mutations, v16 durable Provider tool rounds, and the v30 `agent_proposal` tool class. P9 now includes the authenticated loopback-only `api.v1` read surface, distinct root/child cancellation-control operations, token-free lease status, a deterministic Go-generated OpenAPI 3.1 contract, and bounded resumable Run-event SSE; TypeScript remains pending. Real Local/Docker command execution and all executing model tools remain disabled. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, local and schema v18 cross-process active-call cancellation, Bubble Tea live metadata, durable model events, exactly one restart-safe lifecycle-protocol repair, the schema v16 bounded structured-memory tool loop, and schema v17 execution leases with heartbeat/fencing. P3 includes migration v9 WorkItems, migration v10 Notes, transactional relationships/events, `todo` and `note` CLI lifecycles, root/owner visibility, token-budgeted memory selection, and durable context provenance. P4 now has the schema v19 single-root Coordinator, schema v20 idempotent inbox protocol, schema v21 internal-only Specialist admission, schema v22 same-Run Agent-owned WorkItems/Notes, schema v23 attempt-bound CompletionReports, schema v24 lease-fenced Specialist Attempt scheduling/usage/crash recovery, schema v25 two-phase exactly-once root inbox context, schema v26's opt-in internal no-tool Specialist turn with an atomic model/usage/Policy ledger, schema v27's recoverable parent-instruction plus child-owned-memory context, schema v28's exactly-once child lifecycle repair, schema v29 durable schedule summaries plus exact cross-process child-call cancellation, schema v30 review-gated root delegation proposals, schema v31 immutable operator review facts, schema v32 recoverable operator application around the Go-internal two-child scheduler, schema v33 immutable read-only Fan-out plans, and schema v34 lease-fenced tool-free execution for up to six read-only shards. Core delegation remains capped at two; Fan-out is a separate read-only analysis pool with no Agent admission, tools, network, or writes. P5 includes the unified Tool Gateway, trusted workspace scope binding, schema v11 durable per-call approvals, schema v12 revocable Session grants and atomic Run tool-call accounting, schema v13 first-class typed script processes, schema v14 source-bound hashed output Artifacts, schema v15 idempotent structured-memory mutations, v16 durable Provider tool rounds, and the v30 `agent_proposal` tool class. P9 now includes the authenticated loopback-only `api.v1` read surface, distinct root/child cancellation-control operations, token-free lease status, a deterministic Go-generated OpenAPI 3.1 contract, bounded resumable Run-event SSE, and the first generated React/Vite read console. Same-process production asset serving and Web control mutations remain pending. Real Local/Docker command execution and all executing model tools remain disabled. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
 P8 now includes schema v35's deterministic Finding/Evidence/Report projection, schema v36's immutable same-Run Artifact Evidence plus one-time operator `validated/rejected` decisions, schema v37's independent acceptance/fresh-remediation/fix lifecycle, confirmed-unresolved SARIF 2.1.0 export, a typed read-only CI gate, and GitHub Actions workflow-command annotations derived from that same GateResult. Source projection digests remain stable across every lifecycle overlay. Additional CI-platform adapters remain future work.
 
