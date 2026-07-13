@@ -224,7 +224,7 @@ func (a *App) printHelp() {
 	fmt.Fprintln(a.out, "  cyberagent learn ask")
 	fmt.Fprintln(a.out, "  cyberagent provider list|test")
 	fmt.Fprintln(a.out, "  cyberagent model list|set")
-	fmt.Fprintln(a.out, "  cyberagent skill list|show|validate")
+	fmt.Fprintln(a.out, "  cyberagent skill list|show|validate|select|selection")
 	fmt.Fprintln(a.out, "  cyberagent context compact|show")
 	fmt.Fprintln(a.out, "  cyberagent session create|list|send|history")
 	fmt.Fprintln(a.out, "  cyberagent tool schema|invoke|list|show|approve|deny")

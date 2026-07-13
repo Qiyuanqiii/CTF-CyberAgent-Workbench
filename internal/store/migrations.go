@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 38
+const LatestSchemaVersion = 39
 
 type migration struct {
 	Version    int
@@ -4508,6 +4508,141 @@ var specialistOperatorScheduleStatements = []string{
 	`CREATE TRIGGER trg_specialist_operator_schedule_attempt_delete_immutable
 		BEFORE DELETE ON specialist_operator_schedule_attempts BEGIN
 			SELECT RAISE(ABORT, 'specialist operator schedule attempt cannot be deleted');
+		END;`,
+}
+
+var skillSelectionStatements = []string{
+	`CREATE TABLE run_skill_selections (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL UNIQUE,
+		mission_id TEXT NOT NULL,
+		protocol_version TEXT NOT NULL,
+		profile TEXT NOT NULL,
+		token_budget INTEGER NOT NULL,
+		token_upper_bound INTEGER NOT NULL,
+		item_count INTEGER NOT NULL,
+		selection_fingerprint TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE RESTRICT,
+		CHECK(protocol_version = 'skill_selection.v1'),
+		CHECK(profile IN ('code', 'review', 'learn', 'script')),
+		CHECK(token_budget BETWEEN 1 AND 8192),
+		CHECK(token_upper_bound BETWEEN 1 AND token_budget),
+		CHECK(item_count BETWEEN 1 AND 8),
+		CHECK(length(selection_fingerprint) = 64
+			AND selection_fingerprint = lower(selection_fingerprint)
+			AND selection_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(id = trim(id) AND length(id) BETWEEN 1 AND 256 AND instr(id, char(0)) = 0),
+		CHECK(run_id = trim(run_id) AND length(run_id) BETWEEN 1 AND 256 AND instr(run_id, char(0)) = 0),
+		CHECK(mission_id = trim(mission_id) AND length(mission_id) BETWEEN 1 AND 256 AND instr(mission_id, char(0)) = 0),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE INDEX idx_run_skill_selections_mission
+		ON run_skill_selections(mission_id, created_at, id);`,
+	`CREATE TABLE run_skill_selection_items (
+		selection_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		name TEXT NOT NULL,
+		version TEXT NOT NULL,
+		content_sha256 TEXT NOT NULL,
+		content_bytes INTEGER NOT NULL,
+		token_upper_bound INTEGER NOT NULL,
+		PRIMARY KEY(selection_id, ordinal),
+		UNIQUE(selection_id, name),
+		FOREIGN KEY(selection_id) REFERENCES run_skill_selections(id) ON DELETE RESTRICT,
+		CHECK(ordinal BETWEEN 1 AND 8),
+		CHECK(length(name) BETWEEN 1 AND 64 AND name = lower(name)
+			AND substr(name, 1, 1) GLOB '[a-z]' AND substr(name, -1, 1) != '-'
+			AND name NOT GLOB '*[^a-z0-9-]*'),
+		CHECK(length(version) BETWEEN 5 AND 29 AND version = trim(version)),
+		CHECK(length(content_sha256) = 64 AND content_sha256 = lower(content_sha256)
+			AND content_sha256 NOT GLOB '*[^0-9a-f]*'),
+		CHECK(content_bytes BETWEEN 1 AND 4096),
+		CHECK(token_upper_bound BETWEEN 1 AND 4096),
+		CHECK(token_upper_bound = content_bytes)
+	);`,
+	`CREATE TABLE run_skill_selection_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		selection_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL UNIQUE,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(selection_id) REFERENCES run_skill_selections(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64
+			AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64
+			AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE TRIGGER trg_run_skill_selection_insert
+		BEFORE INSERT ON run_skill_selections
+		WHEN NOT EXISTS (
+			SELECT 1 FROM runs run
+			JOIN missions mission ON mission.id = run.mission_id
+			WHERE run.id = NEW.run_id AND run.mission_id = NEW.mission_id
+				AND run.status = 'created' AND mission.profile = NEW.profile
+				AND julianday(NEW.created_at) >= julianday(run.created_at)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Skill selection Run binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_run_skill_selection_item_insert
+		BEFORE INSERT ON run_skill_selection_items
+		WHEN NOT EXISTS (
+			SELECT 1 FROM run_skill_selections selection
+			WHERE selection.id = NEW.selection_id
+				AND NEW.ordinal = 1 + (SELECT COUNT(*) FROM run_skill_selection_items existing
+					WHERE existing.selection_id = NEW.selection_id)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Skill selection item binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_run_skill_selection_operation_insert
+		BEFORE INSERT ON run_skill_selection_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM run_skill_selections selection
+			WHERE selection.id = NEW.selection_id AND selection.run_id = NEW.run_id
+				AND selection.requested_by = NEW.requested_by
+				AND selection.created_at = NEW.created_at
+				AND selection.item_count = (SELECT COUNT(*) FROM run_skill_selection_items item
+					WHERE item.selection_id = selection.id)
+				AND selection.token_upper_bound = (SELECT COALESCE(SUM(item.token_upper_bound), 0)
+					FROM run_skill_selection_items item WHERE item.selection_id = selection.id)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Skill selection operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_run_skill_selection_update_immutable
+		BEFORE UPDATE ON run_skill_selections BEGIN
+			SELECT RAISE(ABORT, 'Skill selection cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_run_skill_selection_delete_immutable
+		BEFORE DELETE ON run_skill_selections BEGIN
+			SELECT RAISE(ABORT, 'Skill selection cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_run_skill_selection_item_update_immutable
+		BEFORE UPDATE ON run_skill_selection_items BEGIN
+			SELECT RAISE(ABORT, 'Skill selection item cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_run_skill_selection_item_delete_immutable
+		BEFORE DELETE ON run_skill_selection_items BEGIN
+			SELECT RAISE(ABORT, 'Skill selection item cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_run_skill_selection_operation_update_immutable
+		BEFORE UPDATE ON run_skill_selection_operations BEGIN
+			SELECT RAISE(ABORT, 'Skill selection operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_run_skill_selection_operation_delete_immutable
+		BEFORE DELETE ON run_skill_selection_operations BEGIN
+			SELECT RAISE(ABORT, 'Skill selection operation cannot be deleted');
 		END;`,
 }
 

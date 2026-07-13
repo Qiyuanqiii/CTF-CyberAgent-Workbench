@@ -81,6 +81,7 @@ const (
 	FindingAcceptedEvent                     = "finding.accepted"
 	FindingRemediationEvidenceAttachedEvent  = "finding.remediation_evidence_attached"
 	FindingFixedEvent                        = "finding.fixed"
+	SkillSelectionCreatedEvent               = "skill.selection_created"
 	AgentProtocolRepairRequestedEvent        = "agent.protocol_repair_requested"
 	AgentProtocolRepairStartedEvent          = "agent.protocol_repair_started"
 	AgentProtocolRepairCompletedEvent        = "agent.protocol_repair_completed"

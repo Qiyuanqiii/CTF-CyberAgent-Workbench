@@ -940,7 +940,7 @@ func removeSchemaV37ForTestStatements() []string {
 }
 
 func removeSchemaV38ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV39ForTestStatements(), []string{
 		`DROP TRIGGER trg_specialist_operator_schedule_attempt_delete_immutable`,
 		`DROP TRIGGER trg_specialist_operator_schedule_attempt_update_immutable`,
 		`DROP TRIGGER trg_specialist_operator_schedule_operation_delete_immutable`,
@@ -961,6 +961,25 @@ func removeSchemaV38ForTestStatements() []string {
 		`DROP TABLE specialist_operator_schedule_request_agents`,
 		`DROP TABLE specialist_operator_schedule_requests`,
 		`DELETE FROM schema_migrations WHERE version = 38`,
+	}...)
+}
+
+func removeSchemaV39ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_run_skill_selection_operation_delete_immutable`,
+		`DROP TRIGGER trg_run_skill_selection_operation_update_immutable`,
+		`DROP TRIGGER trg_run_skill_selection_item_delete_immutable`,
+		`DROP TRIGGER trg_run_skill_selection_item_update_immutable`,
+		`DROP TRIGGER trg_run_skill_selection_delete_immutable`,
+		`DROP TRIGGER trg_run_skill_selection_update_immutable`,
+		`DROP TRIGGER trg_run_skill_selection_operation_insert`,
+		`DROP TRIGGER trg_run_skill_selection_item_insert`,
+		`DROP TRIGGER trg_run_skill_selection_insert`,
+		`DROP INDEX idx_run_skill_selections_mission`,
+		`DROP TABLE run_skill_selection_operations`,
+		`DROP TABLE run_skill_selection_items`,
+		`DROP TABLE run_skill_selections`,
+		`DELETE FROM schema_migrations WHERE version = 39`,
 	}
 }
 

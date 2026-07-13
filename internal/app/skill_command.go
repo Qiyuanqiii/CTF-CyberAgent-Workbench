@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"strings"
 
+	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/toolgateway"
 )
 
-func (a *App) skillCommand(_ context.Context, args []string) error {
+func (a *App) skillCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("skill subcommand is required")
 	}
@@ -67,8 +68,65 @@ func (a *App) skillCommand(_ context.Context, args []string) error {
 		fmt.Fprintf(a.out, "validated %d built-in %s manifests\n", len(registry.List("")), skills.ProtocolVersion)
 		printSkillBoundary(a)
 		return nil
+	case "select":
+		flags := newFlagSet("skill select", a.errOut)
+		tokenBudget := flags.Int("token-budget", skills.DefaultSelectionTokenBudget,
+			"conservative aggregate token budget")
+		operationKey := flags.String("operation-key", "", "stable idempotency key")
+		requestedBy := flags.String("operator", "cli_operator", "operator identity")
+		if err := flags.Parse(reorderFlags(args[1:], map[string]bool{
+			"token-budget": true, "operation-key": true, "operator": true,
+		})); err != nil {
+			return err
+		}
+		if flags.NArg() < 2 {
+			return errors.New("usage: cyberagent skill select <run-id> <name> [name...] --operation-key <stable-key> [--token-budget 4096] [--operator cli_operator]")
+		}
+		if err := a.ensureStore(); err != nil {
+			return err
+		}
+		result, err := application.NewSkillSelectionService(a.store, registry).Select(ctx,
+			application.SelectSkillsRequest{
+				RunID: flags.Arg(0), Names: flags.Args()[1:], TokenBudget: *tokenBudget,
+				OperationKey: *operationKey, RequestedBy: *requestedBy,
+			})
+		if err != nil {
+			return err
+		}
+		printSkillSelection(a, result.Selection)
+		fmt.Fprintf(a.out, "replayed: %t\n", result.Replayed)
+		printSkillBoundary(a)
+		return nil
+	case "selection":
+		if len(args) != 2 {
+			return errors.New("usage: cyberagent skill selection <run-id>")
+		}
+		if err := a.ensureStore(); err != nil {
+			return err
+		}
+		selection, err := application.NewSkillSelectionService(a.store, registry).
+			GetForRun(ctx, args[1])
+		if err != nil {
+			return err
+		}
+		printSkillSelection(a, selection)
+		printSkillBoundary(a)
+		return nil
 	default:
 		return fmt.Errorf("unknown skill subcommand %q", args[0])
+	}
+}
+
+func printSkillSelection(a *App, selection skills.Selection) {
+	fmt.Fprintf(a.out, "selection_id: %s\nrun_id: %s\nmission_id: %s\nprotocol: %s\nprofile: %s\ntoken_budget: %d\ntoken_upper_bound: %d\nitem_count: %d\nselection_fingerprint: %s\nrequested_by: %s\ncreated_at: %s\n",
+		selection.ID, selection.RunID, selection.MissionID, selection.ProtocolVersion,
+		selection.Profile, selection.TokenBudget, selection.TokenUpperBound,
+		selection.ItemCount, selection.Fingerprint, selection.RequestedBy,
+		selection.CreatedAt.Format("2006-01-02T15:04:05.000000000Z"))
+	for _, item := range selection.Items {
+		fmt.Fprintf(a.out, "skill[%d]: %s@%s sha256=%s bytes=%d token_upper_bound=%d\n",
+			item.Ordinal, item.Name, item.Version, item.ContentSHA256,
+			item.ContentBytes, item.TokenUpperBound)
 	}
 }
 

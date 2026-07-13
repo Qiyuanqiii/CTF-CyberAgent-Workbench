@@ -505,7 +505,11 @@ Go-owned `skill.v1` 第一纵向切片不增加 schema、Store 写入、Provider
 
 定向测试覆盖严格 JSON unknown/duplicate/trailing、非法 UTF-8、Profile/工具提权、排序与重复、路径逃逸、Windows 路径、根目录/内容 symlink、非普通文件、字节/token/hash 漂移、内部状态漂移、防御性副本、CLI Profile 过滤、稳定 exit code 和零运行数据。审计未发现未解决的高/中风险问题，并修复三类低风险边界：显式拒绝 Go JSON 默认容忍的非法 UTF-8 与重复字段，检查 Registry 根路径 symlink，并按名称稳定执行 Registry 自检。`internal/skills` 语句覆盖率为 86.3%；uncached 全仓测试、全仓 race、`go vet`、零告警 `staticcheck`、`go mod verify/tidy -diff`、`govulncheck`、OpenAPI/TypeScript 漂移检查、strict TypeScript、15 项 Vitest、Vite production build、npm audit、凭据/运行产物扫描和真实二进制 CLI smoke 全部通过，Go/npm 已知可达漏洞为 0。
 
-唯一推荐下一切片：继续 P7，定义不可变 `skill_selection.v1`，为一个 Run/Profile 固定 name/version/content hash，执行总保守 token 预算并持久化确定性来源；该选择仍不得授予工具权限，也暂不把 Skill 内容注入 Provider prompt，直至后续脱敏与上下文组装独立审计完成。
+P7 第二纵向切片新增 schema v39 与不可变 `skill_selection.v1`。操作者只能在 `created` Run 上选择 1-8 个与 Mission Profile 兼容的内嵌 Skill；Go 按名称排序并固定 version/content SHA-256/字节数/token 上界，SQLite 再次约束 Run/Mission/Profile、连续 ordinal、总额、唯一 Run 选择和 update/delete 不可变。原始 operation key 只保存域分隔摘要；相同意图在两条 SQLite 连接八路并发时收敛到同一 selection，Run 启动后仍可精确重放，改意图或新选择失败关闭。重放指纹只绑定 Run、Profile、预算、名称和操作者，因此内嵌 Registry 未来升级或移除旧版本时仍能读取已固定结果；selection 自身的独立指纹继续锁定原版本与内容哈希。
+
+`skill select/selection` 是唯一写入与读取入口，模型、HTTP、Tool Gateway 和 child scheduler 均无创建能力。事件只含协议、Profile、数量、预算及 `context_injection=false`/`tool_capability_grant=false`，不含名称、正文、路径、内容哈希、工具依赖或原始 key。定向测试覆盖 Profile/预算/重复名称、低报 token、SQL 不可变、事务回滚、v38 原地升级、Run 启动后重放、Registry 漂移重放、重复 JSON 字段拒绝、CLI 稳定退出码和并发收敛；并发用例连续 20 轮通过。最终门禁通过 uncached 全仓测试、全仓 race、`go vet`、零告警 `staticcheck`、`go mod verify/tidy -diff`、零漏洞 `govulncheck`、OpenAPI/TypeScript 漂移、15 项 Vitest、生产构建、npm audit、凭据/运行产物扫描和隔离真实二进制 schema-v39 选择/重放 smoke。审计未留下高/中风险问题，并修复 CLI 校验原因被隐藏、重放依赖当前 Registry、事件重复字段歧义和历史迁移夹具漏删 v39 四项健壮性缺口。
+
+唯一推荐下一切片：继续 P7，把已持久化 selection 以只读方式接入 root Supervisor 上下文准备。每次准备都必须从内嵌 Registry 重新核对 name/version/hash/bytes，先脱敏再按独立预算确定性组装，并以 metadata-only 两阶段来源记录支持恢复；仍不授予工具权限，不开放外部 Skill 路径，也暂不向 Specialist 自动分配 Skill。
 
 Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过独立审计。
 

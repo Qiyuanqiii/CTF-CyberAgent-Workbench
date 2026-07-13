@@ -21,7 +21,7 @@ Read in this order after a long context break:
 - Overall product vision: about 97%.
 - General Agent MVP: about 99%.
 - V2 run-centric runtime: about 99%.
-- Database schema: v38.
+- Database schema: v39.
 - Main languages: Go control plane, TypeScript React/Vite read console; Rust has not started.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
@@ -40,21 +40,21 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 
 ## Latest Completed Slice
 
-The first P7 Skills vertical slice adds a Go-owned bounded `skill.v1` manifest, an immutable embedded Registry, and `skill list/show/validate`. Four metadata-only built-ins cover `code`, `review`, `learn`, and `script`. Every record pins a version, Profile set, narrow valid-tool prerequisite set, relative Markdown content path, UTF-8 byte count, conservative token upper bound, and SHA-256. The loader rejects unknown/duplicate/trailing JSON, invalid UTF-8, traversal, symbolic links, profile/tool escalation, oversized data, and checksum drift. Registry results are defensive copies.
+The second P7 Skills vertical slice adds schema v39 and a Go-owned immutable `skill_selection.v1`. An operator may select one to eight Skills only while a Run is `created`; the Registry resolves a deterministic name order and pins each version, content SHA-256, UTF-8 byte count, and conservative token upper bound. One Run has at most one selection. Go and SQLite independently enforce Mission/Profile binding, contiguous items, aggregate budget, immutable rows, and one digest-only idempotency operation. Exact replay remains valid after Run start and across Registry content/version drift, while changed intent conflicts.
 
-This slice adds no migration, Store write, Provider call, prompt injection, external Skill path, tool execution, or capability grant. CLI output says both context injection and tool capability grants are disabled, and tests prove the commands do not create `cyberagent.db`. The focused audit found no unresolved high/medium issue and fixed low-risk strict-JSON, root-symlink, and deterministic-validation gaps.
+The only write entry is operator CLI `skill select`; `skill selection` is read-only. Models, HTTP, the Tool Gateway, and child scheduling cannot select Skills. Events contain protocol/Profile/count/budgets and explicit `context_injection=false` / `tool_capability_grant=false`, never Skill names, content, paths, hashes, dependencies, or raw operation keys. No Skill content enters a Provider prompt and no tool authority is granted.
 
-Verified gates: uncached `go test ./...`, full `go test -race ./...`, `go vet`, clean `staticcheck`, `go mod verify`, empty `go mod tidy -diff`, `govulncheck` with zero reachable findings, OpenAPI/TypeScript drift checks, strict TypeScript, 15 Vitest tests, Vite production build, npm audit with zero findings, tracked credential/runtime-artifact scans, and an isolated real-binary Skill CLI smoke. The new `internal/skills` package has 86.3% statement coverage.
+The audit found no unresolved high/medium issue. It fixed four robustness gaps: actionable CLI validation reasons were hidden, replay depended on the current Registry result, duplicate event JSON fields were accepted ambiguously, and historical migration fixtures did not remove v39. Focused tests cover deterministic resolution, Profile/budget/duplicate rejection, underreported accounting, immutable SQL, metadata-only events, rollback, v38 upgrade, post-start replay, Registry-drift replay, and eight concurrent callers over two SQLite connections; the concurrency test also passed 20 repeated runs. Verified gates: uncached full tests, full-repository race detection, `go vet`, zero-warning `staticcheck`, module verification/tidy diff, `govulncheck` with zero findings, OpenAPI/TypeScript drift, 15 Vitest tests, production build, npm audit with zero findings, tracked credential/runtime scans, and an isolated real-binary schema-v39 selection/replay smoke.
 
 ## Next Slice
 
-Implement the second P7 Skills vertical slice:
+Implement the third P7 Skills vertical slice:
 
-1. Define immutable `skill_selection.v1` in Go for one Run and validated Profile.
-2. Resolve exact Skill name/version/content-hash tuples from the read-only Registry.
-3. Enforce an aggregate conservative token budget and deterministic ordering/fingerprint.
-4. Persist only bounded selection provenance for recovery and audit.
-5. Still do not inject Skill content into Provider prompts or grant tools; context assembly/redaction remains a later separately audited slice.
+1. Assemble context only from the Run's persisted selection and the immutable embedded Registry.
+2. Reverify exact name/version/content-hash/byte tuples before every prepared delivery.
+3. Redact and bound selected Skill text under a separate context budget with deterministic ordering.
+4. Persist metadata-only preparation/commit provenance without Skill text or paths in events.
+5. Start with the root Supervisor only; grant no tools and leave Specialist Skill minimization for a later slice.
 
 ## Delivery Loop
 

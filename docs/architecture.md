@@ -324,10 +324,9 @@ Context is assembled from:
 - compacted conversation summary;
 - recent messages;
 - active work items;
-- selected notes/evidence;
-- progressively loaded skills.
+- selected notes/evidence.
 
-Skills are versioned knowledge packages with metadata, applicability rules, prompt content, and optional tool requirements. Profiles such as `code`, `review`, `learn`, and `script` select baseline skills. CTF skills are added only after the generic runtime is stable.
+Skills are versioned knowledge packages with metadata, applicability rules, prompt content, and optional tool prerequisites. The embedded `skill.v1` Registry strictly pins metadata and content identity. Schema v39 adds one immutable, Profile-compatible, aggregate-budgeted `skill_selection.v1` per Run with digest-only operation replay. Selection is provenance only at this boundary: Skill text is not yet part of root or Specialist context, and prerequisites grant no tool capability. Profiles include `code`, `review`, `learn`, and `script`; CTF Skills are added only after the generic runtime is stable.
 
 ## Findings and Reports
 
@@ -350,6 +349,7 @@ model.started / model.completed / model.failed
 model.cancel_requested / model.cancel_observed
 agent.schedule_started / agent.schedule_stopped
 agent.delegation_proposed
+skill.selection_created
 readonly_fanout.planned
 readonly_fanout.execution_started / readonly_fanout.execution_recovered
 readonly_fanout.shard_started / readonly_fanout.shard_completed
@@ -381,7 +381,7 @@ The same Go adapter owns read projections for the bounded Agent graph, operator-
 
 ## Persistence
 
-SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, `v6` adds cumulative model budgets, `v7`-`v18` add resumable Supervisor, memory, approval, tool, Artifact, lease, and cancellation ledgers, `v19`-`v29` add the bounded Agent graph, inbox, Specialist runtime, context, repair, scheduling, and cancellation ledgers, `v30`-`v32` add review-gated core delegation proposal/review/application, `v33` freezes read-only Fan-out plans, `v34` adds lease-fenced Fan-out execution, `v35` adds immutable generic Finding/Evidence/Report projections, and `v36` adds frozen Artifact Evidence plus immutable operator validation. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
+SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2` adds the first run-centric tables, `v3` enforces Run/Session projection constraints, `v4` adds the idempotent legacy Task mapping, `v5` adds durable Supervisor checkpoints, `v6` adds cumulative model budgets, `v7`-`v18` add resumable Supervisor, memory, approval, tool, Artifact, lease, and cancellation ledgers, `v19`-`v29` add the bounded Agent graph, inbox, Specialist runtime, context, repair, scheduling, and cancellation ledgers, `v30`-`v32` add review-gated core delegation proposal/review/application, `v33` freezes read-only Fan-out plans, `v34` adds lease-fenced Fan-out execution, `v35` adds immutable generic Finding/Evidence/Report projections, `v36`-`v37` add frozen validation and remediation lifecycle facts, `v38` adds explicit operator Specialist scheduling, and `v39` adds immutable Run Skill selections. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data.
 
 ```text
 missions

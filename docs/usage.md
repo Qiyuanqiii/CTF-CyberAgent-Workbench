@@ -34,6 +34,21 @@ Session messages, assistant policy decisions, ToolRun changes, and FileEdit chan
 
 Root actions use `continue`, `finish`, or `wait`. `continue` advances to another idle turn. `finish` requires a summary and atomically completes the Run. `wait` requires a reason, atomically pauses the Run, and resumes at the next turn after `run resume`. Unknown fields, trailing data, Markdown fences, invalid combinations, and responses over 64 KiB fail the current turn without writing user/assistant messages. Assistant prose by itself cannot mutate Run state.
 
+## Skills
+
+```powershell
+cyberagent skill list
+cyberagent skill list --profile review
+cyberagent skill show review
+cyberagent skill validate
+cyberagent skill select <run-id> review --operation-key <stable-key> --token-budget 4096
+cyberagent skill selection <run-id>
+```
+
+The embedded read-only `skill.v1` Registry exposes bounded metadata for `code`, `review`, `learn`, and `script`. Schema v39 `skill select` is operator-only and must create the Run's single immutable selection before `run start`. It accepts one to eight names compatible with the Mission Profile, deterministically pins each version/content hash/byte count/token upper bound, and rejects an aggregate above `--token-budget` (maximum 8192). Operation keys must be stable normalized 16-256-byte values; SQLite stores only a domain-separated digest. Exact replay returns the original selection even after the Run starts or the current Registry later changes, while changed intent conflicts. `skill selection` reads the pinned tuples.
+
+Selection does not load Skill text into a Provider request and does not authorize a declared tool dependency. There is no HTTP, model-tool, Tool Gateway, or child-scheduler selection path; no external Skill directory is accepted. Run events contain only protocol, Profile, count, budget, and explicit closed-boundary booleans, not Skill names, content, paths, hashes, dependencies, or raw operation keys.
+
 ## Headless NDJSON
 
 `cyberagent headless events <run-id>` exports the same redacted, append-only SQLite Run events used by CLI, SSE, and Web. The protocol is `headless.v1`; stdout contains only newline-delimited JSON. Each durable event is one `kind: "run.event"` record, followed by exactly one `kind: "stream.end"` record for every normal snapshot, terminal outcome, event bound, cancellation, or deadline. Human-readable diagnostics remain on stderr.
