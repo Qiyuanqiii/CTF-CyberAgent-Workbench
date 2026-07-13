@@ -175,6 +175,9 @@ function RunOverview({ detail }: { detail: RunDetailView }) {
         <dl className="detail-grid">
           <KeyValue label="Mission" value={detail.mission.id} />
           <KeyValue label="Workspace" value={detail.mission.workspace_id} />
+          <KeyValue label="Surface" value={detail.mode.surface} />
+          <KeyValue label="Execution phase" value={detail.mode.phase} />
+          <KeyValue label="Mode revision" value={formatNumber(detail.mode.revision)} />
           <KeyValue label="Network" value={detail.mission.scope.network_mode} />
           <KeyValue label="Allowed targets" value={detail.mission.scope.allowed_targets?.join(", ")} />
           <KeyValue label="Interactive" value={detail.run.config.interactive ? "yes" : "no"} />
@@ -184,7 +187,7 @@ function RunOverview({ detail }: { detail: RunDetailView }) {
       <section className="detail-section">
         <h2>执行状态</h2>
         <dl className="detail-grid">
-          <KeyValue label="Phase" value={checkpoint?.phase} />
+          <KeyValue label="Supervisor phase" value={checkpoint?.phase} />
           <KeyValue label="Attempt" value={checkpoint?.attempt_id} />
           <KeyValue label="Repair phase" value={checkpoint?.repair_phase} />
           <KeyValue label="Last error" value={checkpoint?.last_error} />

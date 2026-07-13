@@ -56,7 +56,8 @@ func TestRunServicePersistsLifecycleAndOrderedEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantTypes := []string{
-		events.RunCreatedEvent, events.SessionAttachedEvent, events.AgentRegisteredEvent,
+		events.RunCreatedEvent, events.SessionAttachedEvent, events.RunModeSelectedEvent,
+		events.AgentRegisteredEvent,
 		events.RunStatusChangedEvent, events.RunStatusChangedEvent, events.RunStatusChangedEvent,
 		events.AgentStatusChangedEvent,
 	}
@@ -107,8 +108,9 @@ func TestRunServiceReusesOneActiveSessionOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 3 || items[0].Type != events.RunCreatedEvent ||
-		items[1].Type != events.SessionAttachedEvent || items[2].Type != events.AgentRegisteredEvent ||
+	if len(items) != 4 || items[0].Type != events.RunCreatedEvent ||
+		items[1].Type != events.SessionAttachedEvent || items[2].Type != events.RunModeSelectedEvent ||
+		items[3].Type != events.AgentRegisteredEvent ||
 		!strings.Contains(items[1].PayloadJSON, `"created":false`) {
 		t.Fatalf("unexpected initial timeline: %#v", items)
 	}

@@ -15,13 +15,14 @@ Read in this order after a long context break:
 5. `docs/TASK_BOOK.md`
 6. `docs/adr/0001-go-control-plane.md`
 7. `docs/adr/0002-run-centric-runtime.md`
+8. `docs/adr/0003-run-execution-modes.md`
 
 ## Current Baseline
 
 - Overall product vision: about 97%.
 - General Agent MVP: about 99%.
 - V2 run-centric runtime: about 99%.
-- Database schema: v40.
+- Database schema: v41.
 - Main languages: Go control plane, TypeScript React/Vite read console; Rust has not started.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
@@ -40,23 +41,27 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 
 ## Latest Completed Slice
 
-The third P7 Skills vertical slice adds schema v40 and root-only `skill_context.v1`. Every Supervisor turn loads the Run's persisted `skill_selection.v1`, then the immutable embedded Registry rechecks exact name/version/content-hash/byte/token tuples and Profile before exposing any text. Delivery is redacted, stable-name ordered, and bounded by the selection's independent token budget. The four built-in workflow guides are now useful version `1.1.0` content instead of stale metadata placeholders. A hard-bounded embedded history retains at most eight versions per Skill: new selection sees only current entries, while old `1.0.0` selections resume against their exact original body.
+Schema v41 establishes Go-owned `run_mode.v1` before the Plan/Delivery Skill itself. Every Run receives an append-only mode snapshot with two orthogonal axes: execution surface `code|cyber` and execution phase `plan|deliver`. Scope, Profile, policy version, and surface are immutable for the lifetime of the Run. Phase changes require an explicit operator operation key and are accepted only while the Run is `created` or `paused` with no active execution lease. Legacy v40 rows and omitted create fields backfill/default to `code/deliver`.
 
-Preparation is persisted before the model call and committed in the same SQLite transaction as the first `model.started`. Replay through another Store connection converges on the same preparation; reconstructed context drift conflicts, missing preparation fails model start closed, and a failed model-start event rolls the commit back. The two v40 tables and `skill.context_prepared/committed` events contain aggregate provenance only. Skill text exists only in the in-memory Provider request; text, paths, Skill names, versions, content hashes, and declared tool dependencies never enter the v40 ledger or events.
+Run creation, script-process Run creation, and legacy Task adaptation now persist the initial snapshot and `run.mode_selected` event in their existing transaction. Phase replay is digest-keyed and converges across Store connections; changed intent conflicts, transition records are immutable, and events expose metadata rather than scope targets or raw keys. The Store recomputes operation fingerprints and independently checks lifecycle and active leases, so application-only validation cannot be bypassed.
 
-Skill guidance is subordinate to the root system policy and does not alter the offered tool list. Models, HTTP, the Tool Gateway, and child scheduling still cannot select Skills; Specialist contexts receive none. A missing or mismatched Registry fails before Provider invocation. Focused tests cover deterministic current and archived assembly, redaction, tampering and Registry drift, SQL immutability, atomic commit/rollback, cross-Store replay, v39 upgrade, prompt delivery, metadata-only persistence, no tool grant, and fail-closed Registry loss. Full repository gates and CI are recorded in `docs/PROGRESS_BOOK.md` for the slice.
+RunSupervisor loads the authoritative snapshot inside its turn transaction and places a Go-generated, bounded mode contract before selected Skill guidance. Plan phase permits reasoning and the existing create-only WorkItem/Note tools, but rejects both model and operator completion. A model `finish` uses the existing one-repair path and must converge to `continue` or `wait`. Persistence rechecks the current phase during finalization to close a mode-change time-of-check/time-of-use window. Code/Cyber changes require a new Run; mode is never a capability grant.
 
-The first Linux CI run exposed one unrelated pre-existing test timing assumption: API-process startup metadata had a fixed four-second polling deadline and could remain empty on a busy two-core runner. The shared test helper now allows a bounded 15-second startup window, fails immediately if the process exits, and reports stdout/stderr distinctly. All three API startup tests passed ten repeated runs; the generated-token test passed three race-enabled repetitions. Production API behavior and shutdown deadlines are unchanged.
+CLI adds `run create --surface/--phase`, `run mode`, and replay-safe `run phase`. Run list/show, Run-first TUI, HTTP/OpenAPI, generated TypeScript DTOs, and the React Run overview project the same revision. This slice intentionally adds no HTTP mutation, model-selected mode, Shell, network, file-write, Sandbox execution, or extra child authority.
+
+The slice audit found no unresolved high- or medium-severity issue. Hardening during review replaced migration IDs derived from unbounded legacy Run strings, made lease checks use Store/SQLite time rather than caller timestamps, blocked phase changes while an execution lease is active, enforced Plan completion denial in both Supervisor completion transactions and a SQLite trigger, rejected unredacted mode metadata at the Store boundary, recomputed operation fingerprints at persistence, included the complete mode tuple in script-process idempotency, and clamped phase-transition time against clock rollback.
+
+Release verification passed full `go test ./...`, full `go test -race ./...`, `go vet`, clean `staticcheck`, module verification/tidy diff, zero-finding `govulncheck`, deterministic OpenAPI-to-TypeScript regeneration, strict TypeScript, 15 Vitest cases, Vite production build, zero-finding npm audit, credential-pattern scanning, and an isolated real-binary `cyber/plan -> deliver -> step -> TUI` smoke. No real Provider key, host command, network target, or Sandbox execution was used.
 
 ## Next Slice
 
-Implement the fourth P7 Skills vertical slice as a bounded Plan/Delivery workflow inspired by strong coding-agent product patterns without copying proprietary implementation:
+Build the fourth P7 Skills vertical slice on schema v41 as an explicit, bounded Plan/Delivery workflow inspired by strong coding-agent product patterns without copying proprietary implementation:
 
-1. Add one embedded cross-Profile planning Skill with three concise operator-selectable directions, a strict bounded plan shape, and no new tool authority.
-2. Project accepted modules into existing WorkItems and durable handoff Notes instead of introducing a second task engine.
-3. Advance one slice at a time; after each slice require focused verification, a diff/security audit, and a compact handoff update.
-4. After each larger module, require broader functional and robustness gates before completion.
-5. Keep Go authoritative for workflow state and budgets; Skill text remains guidance, and Specialist Skill minimization follows as a separate audited slice.
+1. Add one embedded cross-Profile planning Skill with three concise operator-selectable directions and a strict bounded plan document.
+2. Persist operator choice and project accepted modules into existing WorkItems and durable handoff Notes rather than creating a second task engine.
+3. Advance one slice at a time in `deliver`; require focused verification, diff/security audit, and compact handoff state after each slice.
+4. Require broader functional and robustness gates after each larger module before allowing completion.
+5. Keep Go authoritative for workflow state, phase transitions, budgets, and completion. Skill text remains guidance, and Specialist Skill minimization follows as a separate audited slice.
 
 ## Delivery Loop
 

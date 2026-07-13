@@ -177,6 +177,67 @@ func TestRunSupervisorInjectsPersistedSkillContextWithoutGrantingTools(t *testin
 	}
 }
 
+func TestRunSupervisorEnforcesPlanModeAndRepairsFinishToWait(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "supervisor-plan-mode.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	provider := &lifecycleProvider{responses: []string{
+		rootActionResponse(domain.RootActionFinish, "implemented", "done", ""),
+		rootActionResponse(domain.RootActionWait, "plan ready", "", "operator review"),
+	}}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	runs := application.NewRunService(st)
+	_, run, err := runs.Create(ctx, application.CreateRunRequest{
+		Goal: "plan an authorized cyber review", Profile: "review", Surface: "cyber",
+		Phase: "plan", ModelRoute: provider.Name() + "/model",
+		Budget: domain.Budget{MaxTurns: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runs.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	supervisor := application.NewRunSupervisor(st, router, policy.NewDefaultChecker())
+	result, err := supervisor.Step(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Action.Kind != domain.RootActionWait || result.ProtocolRepairs != 1 ||
+		result.RunStatus != domain.RunPaused || provider.calls != 2 {
+		t.Fatalf("plan finish was not repaired to wait: %#v calls=%d", result, provider.calls)
+	}
+	request := provider.requests[0]
+	if request.Metadata["mode_protocol"] != domain.RunModeProtocolVersion ||
+		request.Metadata["mode_policy"] != domain.RunModePolicyVersion ||
+		request.Metadata["mode_surface"] != "cyber" ||
+		request.Metadata["mode_phase"] != "plan" ||
+		request.Metadata["mode_revision"] != "1" ||
+		request.Metadata["mode_network"] != "disabled" ||
+		request.Metadata["mode_target_count"] != "0" {
+		t.Fatalf("unexpected mode request metadata: %#v", request.Metadata)
+	}
+	var modeContext string
+	for _, message := range request.Messages {
+		if message.Role == "system" && strings.Contains(message.Content, "Go-enforced Run mode snapshot") {
+			modeContext = message.Content
+		}
+	}
+	if !strings.Contains(modeContext, "surface=cyber phase=plan") ||
+		!strings.Contains(modeContext, "Never return finish") ||
+		!strings.Contains(modeContext, "never grants capability") {
+		t.Fatalf("missing closed plan mode context: %q", modeContext)
+	}
+	if _, err := supervisor.Finalize(ctx, run.ID, application.LifecycleOutcomeCompleted,
+		"must not complete"); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("plan completion error = %v", err)
+	}
+}
+
 func TestRunSupervisorFailsBeforeProviderWhenSelectedSkillRegistryIsUnavailable(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "missing-skill-registry.db"))
 	if err != nil {

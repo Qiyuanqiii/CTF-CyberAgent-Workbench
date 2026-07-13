@@ -14,6 +14,7 @@ export type NoteView = components["schemas"]["NoteView"];
 export type Page = components["schemas"]["Page"];
 export type RunDetailView = components["schemas"]["RunDetailView"];
 export type RunEventStreamView = components["schemas"]["RunEventStreamView"];
+export type RunModeView = components["schemas"]["RunModeView"];
 export type RunView = components["schemas"]["RunView"];
 export type SessionDetailView = components["schemas"]["SessionDetailView"];
 export type SessionView = components["schemas"]["SessionView"];

@@ -58,6 +58,7 @@ func (s ScriptRunSession) Validate() error {
 type ScriptRunStoreRequest struct {
 	Mission       domain.Mission
 	Run           domain.Run
+	Mode          domain.RunModeSnapshot
 	Session       ScriptRunSession
 	CreateSession bool
 	InitialEvents []events.Event
@@ -75,6 +76,7 @@ type ScriptRunCreateRequest struct {
 	OperationKey  string
 	Mission       domain.Mission
 	Run           domain.Run
+	Mode          domain.RunModeSnapshot
 	Session       ScriptRunSession
 	CreateSession bool
 	InitialEvents []events.Event
@@ -129,7 +131,8 @@ func (g *Gateway) CreateScriptProcessRun(ctx context.Context, request ScriptRunC
 	}
 	process := newScriptProcess(call, proposal, decision, scriptprocess.OperationKeyDigest(request.OperationKey), requestFingerprint)
 	stored, err := g.scriptRunStore.CreateScriptProcessRun(ctx, ScriptRunStoreRequest{
-		Mission: request.Mission, Run: request.Run, Session: request.Session, CreateSession: request.CreateSession,
+		Mission: request.Mission, Run: request.Run, Mode: request.Mode,
+		Session: request.Session, CreateSession: request.CreateSession,
 		InitialEvents: append([]events.Event(nil), request.InitialEvents...), Process: process,
 	})
 	if err != nil {
@@ -230,13 +233,18 @@ func validateScriptRunIdentity(request ScriptRunCreateRequest) error {
 	if err := request.Run.Validate(); err != nil {
 		return err
 	}
+	if err := request.Mode.Validate(); err != nil {
+		return err
+	}
 	if err := request.Session.Validate(); err != nil {
 		return err
 	}
 	if request.Run.Status != domain.RunCreated || request.Run.MissionID != request.Mission.ID ||
 		request.Run.SessionID != request.Session.ID || request.Mission.WorkspaceID != request.Session.WorkspaceID ||
 		request.Call.RunID != request.Run.ID || request.Call.SessionID != request.Session.ID ||
-		request.Call.WorkspaceID != request.Mission.WorkspaceID {
+		request.Call.WorkspaceID != request.Mission.WorkspaceID ||
+		request.Mode.RunID != request.Run.ID || request.Mode.MissionID != request.Mission.ID ||
+		request.Mode.Revision != 1 {
 		return errors.New("script Run Mission, Run, Session, Workspace, and ToolCall identities do not match")
 	}
 	if len(request.InitialEvents) == 0 {
@@ -251,19 +259,28 @@ func scriptRunRequestFingerprint(request ScriptRunCreateRequest) (string, error)
 		return "", err
 	}
 	intent := struct {
-		Goal          string         `json:"goal"`
-		Profile       domain.Profile `json:"profile"`
-		WorkspaceID   string         `json:"workspace_id"`
-		ModelRoute    string         `json:"model_route"`
-		Interactive   bool           `json:"interactive"`
-		Budget        domain.Budget  `json:"budget"`
-		Existing      bool           `json:"existing_session"`
-		ExistingID    string         `json:"existing_session_id,omitempty"`
-		RequestedBy   string         `json:"requested_by"`
-		TypedProposal string         `json:"typed_proposal"`
+		Goal          string                  `json:"goal"`
+		Profile       domain.Profile          `json:"profile"`
+		ModeProtocol  string                  `json:"mode_protocol"`
+		Surface       domain.ExecutionSurface `json:"surface"`
+		Phase         domain.ExecutionPhase   `json:"phase"`
+		ModePolicy    string                  `json:"mode_policy"`
+		ModeScope     domain.Scope            `json:"mode_scope"`
+		WorkspaceID   string                  `json:"workspace_id"`
+		ModelRoute    string                  `json:"model_route"`
+		Interactive   bool                    `json:"interactive"`
+		Budget        domain.Budget           `json:"budget"`
+		Existing      bool                    `json:"existing_session"`
+		ExistingID    string                  `json:"existing_session_id,omitempty"`
+		RequestedBy   string                  `json:"requested_by"`
+		TypedProposal string                  `json:"typed_proposal"`
 	}{
-		Goal: request.Mission.Goal, Profile: request.Mission.Profile, WorkspaceID: request.Mission.WorkspaceID,
-		ModelRoute: request.Run.Config.ModelRoute, Interactive: request.Run.Config.Interactive, Budget: request.Run.Budget,
+		Goal: request.Mission.Goal, Profile: request.Mission.Profile,
+		ModeProtocol: request.Mode.ProtocolVersion, Surface: request.Mode.Surface,
+		Phase: request.Mode.Phase, ModePolicy: request.Mode.PolicyVersion,
+		ModeScope:   request.Mode.Scope,
+		WorkspaceID: request.Mission.WorkspaceID,
+		ModelRoute:  request.Run.Config.ModelRoute, Interactive: request.Run.Config.Interactive, Budget: request.Run.Budget,
 		Existing: !request.CreateSession, RequestedBy: request.Call.RequestedBy, TypedProposal: proposal,
 	}
 	if !request.CreateSession {

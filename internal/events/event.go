@@ -13,6 +13,8 @@ const EnvelopeVersion = "v1"
 
 const (
 	RunCreatedEvent                          = "run.created"
+	RunModeSelectedEvent                     = "run.mode_selected"
+	RunPhaseChangedEvent                     = "run.phase_changed"
 	RunStatusChangedEvent                    = "run.status_changed"
 	RunExecutionLeaseAcquiredEvent           = "run.execution_lease_acquired"
 	RunExecutionLeaseTakenOverEvent          = "run.execution_lease_taken_over"

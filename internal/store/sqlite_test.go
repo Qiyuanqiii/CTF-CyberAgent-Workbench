@@ -984,7 +984,7 @@ func removeSchemaV39ForTestStatements() []string {
 }
 
 func removeSchemaV40ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV41ForTestStatements(), []string{
 		`DROP TRIGGER trg_root_skill_context_commit_delete_immutable`,
 		`DROP TRIGGER trg_root_skill_context_commit_update_immutable`,
 		`DROP TRIGGER trg_root_skill_context_preparation_delete_immutable`,
@@ -995,6 +995,22 @@ func removeSchemaV40ForTestStatements() []string {
 		`DROP TABLE root_skill_context_commits`,
 		`DROP TABLE root_skill_context_preparations`,
 		`DELETE FROM schema_migrations WHERE version = 40`,
+	}...)
+}
+
+func removeSchemaV41ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_run_mode_plan_completion_guard`,
+		`DROP TRIGGER trg_run_mode_operation_delete_immutable`,
+		`DROP TRIGGER trg_run_mode_operation_update_immutable`,
+		`DROP TRIGGER trg_run_mode_snapshot_delete_immutable`,
+		`DROP TRIGGER trg_run_mode_snapshot_update_immutable`,
+		`DROP TRIGGER trg_run_mode_operation_insert`,
+		`DROP TRIGGER trg_run_mode_snapshot_insert`,
+		`DROP TABLE run_mode_operations`,
+		`DROP INDEX idx_run_mode_snapshots_run_revision`,
+		`DROP TABLE run_mode_snapshots`,
+		`DELETE FROM schema_migrations WHERE version = 41`,
 	}
 }
 
@@ -1145,8 +1161,9 @@ func TestSQLiteStoreRejectsIllegalRunTransitionAtPersistenceBoundary(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 3 || items[0].Type != events.RunCreatedEvent ||
-		items[1].Type != events.SessionAttachedEvent || items[2].Type != events.AgentRegisteredEvent {
+	if len(items) != 4 || items[0].Type != events.RunCreatedEvent ||
+		items[1].Type != events.SessionAttachedEvent || items[2].Type != events.RunModeSelectedEvent ||
+		items[3].Type != events.AgentRegisteredEvent {
 		t.Fatalf("illegal transition appended an event: %#v", items)
 	}
 }
@@ -1226,6 +1243,7 @@ func TestSQLiteStoreProjectsRunActivityAtomically(t *testing.T) {
 	wantTypes := []string{
 		events.RunCreatedEvent,
 		events.SessionAttachedEvent,
+		events.RunModeSelectedEvent,
 		events.AgentRegisteredEvent,
 		events.SessionMessageEvent,
 		events.PolicyDecisionEvent,

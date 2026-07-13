@@ -4066,6 +4066,9 @@
           "mission": {
             "$ref": "#/components/schemas/MissionView"
           },
+          "mode": {
+            "$ref": "#/components/schemas/RunModeView"
+          },
           "run": {
             "$ref": "#/components/schemas/RunView"
           },
@@ -4076,6 +4079,7 @@
         "required": [
           "run",
           "mission",
+          "mode",
           "tool_usage"
         ],
         "type": "object"
@@ -4168,6 +4172,81 @@
           "acquired_at",
           "renewed_at",
           "expires_at"
+        ],
+        "type": "object"
+      },
+      "RunModeView": {
+        "additionalProperties": false,
+        "properties": {
+          "capability_grant": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "plan",
+              "deliver"
+            ],
+            "type": "string"
+          },
+          "policy_version": {
+            "enum": [
+              "mode_policy.v1"
+            ],
+            "type": "string"
+          },
+          "profile": {
+            "enum": [
+              "code",
+              "review",
+              "learn",
+              "script"
+            ],
+            "type": "string"
+          },
+          "protocol_version": {
+            "enum": [
+              "run_mode.v1"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requested_by": {
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/ScopeView"
+          },
+          "surface": {
+            "enum": [
+              "code",
+              "cyber"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "revision",
+          "surface",
+          "phase",
+          "profile",
+          "scope",
+          "policy_version",
+          "requested_by",
+          "reason",
+          "created_at",
+          "capability_grant"
         ],
         "type": "object"
       },

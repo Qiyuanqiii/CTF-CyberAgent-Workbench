@@ -930,6 +930,7 @@ export interface components {
             checkpoint?: components["schemas"]["SupervisorCheckpointView"];
             execution_lease?: components["schemas"]["RunExecutionLeaseView"];
             mission: components["schemas"]["MissionView"];
+            mode: components["schemas"]["RunModeView"];
             run: components["schemas"]["RunView"];
             tool_usage: components["schemas"]["ToolUsageView"];
         };
@@ -958,6 +959,26 @@ export interface components {
             renewed_at: string;
             /** @enum {string} */
             status: "active" | "released";
+        };
+        RunModeView: {
+            capability_grant: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** @enum {string} */
+            phase: "plan" | "deliver";
+            /** @enum {string} */
+            policy_version: "mode_policy.v1";
+            /** @enum {string} */
+            profile: "code" | "review" | "learn" | "script";
+            /** @enum {string} */
+            protocol_version: "run_mode.v1";
+            reason: string;
+            requested_by: string;
+            /** Format: int64 */
+            revision: number;
+            scope: components["schemas"]["ScopeView"];
+            /** @enum {string} */
+            surface: "code" | "cyber";
         };
         RunView: {
             budget: components["schemas"]["BudgetView"];

@@ -59,6 +59,48 @@ func TestCLIHelpListsRunGraphAndLease(t *testing.T) {
 	}
 }
 
+func TestRunModeCLISelectsShowsAndChangesPhase(t *testing.T) {
+	t.Setenv("CYBERAGENT_HOME", t.TempDir())
+	created, stderr, code := executeTestCommand(t, "run", "create",
+		"plan cyber work", "--profile", "review", "--surface", "cyber",
+		"--phase", "plan", "--max-turns", "3")
+	if code != 0 || stderr != "" || !strings.Contains(created, "surface: cyber") ||
+		!strings.Contains(created, "phase: plan") ||
+		!strings.Contains(created, "mode_revision: 1") {
+		t.Fatalf("unexpected mode create output=%q stderr=%q code=%d", created, stderr, code)
+	}
+	runID := runIDPattern.FindString(created)
+	if runID == "" {
+		t.Fatalf("run id missing: %s", created)
+	}
+	shown, stderr, code := executeTestCommand(t, "run", "mode", runID)
+	if code != 0 || stderr != "" || !strings.Contains(shown, "protocol: run_mode.v1") ||
+		!strings.Contains(shown, "surface: cyber") || !strings.Contains(shown, "phase: plan") ||
+		!strings.Contains(shown, "capability_grant: false") {
+		t.Fatalf("unexpected mode output=%q stderr=%q code=%d", shown, stderr, code)
+	}
+	changed, stderr, code := executeTestCommand(t, "run", "phase", runID, "deliver",
+		"--operation-key", "cli-phase-change-0001", "--reason", "plan approved")
+	if code != 0 || stderr != "" || !strings.Contains(changed, "phase: deliver") ||
+		!strings.Contains(changed, "revision: 2") || !strings.Contains(changed, "replayed: false") ||
+		!strings.Contains(changed, "capability_grant: false") {
+		t.Fatalf("unexpected phase output=%q stderr=%q code=%d", changed, stderr, code)
+	}
+	replayed, stderr, code := executeTestCommand(t, "run", "phase", runID, "deliver",
+		"--operation-key", "cli-phase-change-0001", "--reason", "plan approved")
+	if code != 0 || stderr != "" || !strings.Contains(replayed, "replayed: true") {
+		t.Fatalf("unexpected phase replay=%q stderr=%q code=%d", replayed, stderr, code)
+	}
+	if _, stderr, code := executeTestCommand(t, "run", "start", runID); code != 0 {
+		t.Fatalf("run start failed: %s", stderr)
+	}
+	_, stderr, code = executeTestCommand(t, "run", "phase", runID, "plan",
+		"--operation-key", "cli-phase-change-0002")
+	if code != 4 || !strings.Contains(stderr, "created or paused") {
+		t.Fatalf("running phase change stderr=%q code=%d", stderr, code)
+	}
+}
+
 func TestReportCheckRejectsOutputFormatBeforeLookup(t *testing.T) {
 	t.Setenv("CYBERAGENT_HOME", t.TempDir())
 	_, stderr, code := executeTestCommand(t, "report", "check",

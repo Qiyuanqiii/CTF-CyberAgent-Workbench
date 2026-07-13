@@ -85,6 +85,11 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunE
 	if err != nil {
 		return domain.SupervisorTurn{}, err
 	}
+	mode, err := getCurrentRunModeSnapshot(ctx, tx, run.ID)
+	if err != nil {
+		return domain.SupervisorTurn{}, apperror.Wrap(apperror.CodeFailedPrecondition,
+			"run mode snapshot is required before supervisor execution", err)
+	}
 	executionRun := run
 	if root, found, err := getRootAgentTx(ctx, tx, run.ID); err != nil {
 		return domain.SupervisorTurn{}, err
@@ -147,7 +152,7 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunE
 		if err := tx.Commit(); err != nil {
 			return domain.SupervisorTurn{}, err
 		}
-		return domain.SupervisorTurn{Run: executionRun, Mission: mission, Agent: agentNode,
+		return domain.SupervisorTurn{Run: executionRun, Mission: mission, Mode: mode, Agent: agentNode,
 			Checkpoint: checkpoint, Recovered: true}, nil
 	}
 	if checkpoint.NextTurn > executionRun.Budget.MaxTurns {
@@ -204,7 +209,8 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunE
 	if err := tx.Commit(); err != nil {
 		return domain.SupervisorTurn{}, err
 	}
-	return domain.SupervisorTurn{Run: executionRun, Mission: mission, Agent: agentNode, Checkpoint: checkpoint}, nil
+	return domain.SupervisorTurn{Run: executionRun, Mission: mission, Mode: mode,
+		Agent: agentNode, Checkpoint: checkpoint}, nil
 }
 
 func (s *SQLiteStore) BindSupervisorTurnInput(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string) (domain.SupervisorCheckpoint, error) {
@@ -1087,6 +1093,9 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}
 	if action.Kind == domain.RootActionFinish {
+		if err := requireRunModeAllowsCompletionTx(ctx, tx, run.ID); err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+		}
 		if err := requireNoActiveWorkItemsForFinishTx(ctx, tx, run.ID); err != nil {
 			return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 		}
@@ -1227,6 +1236,19 @@ func requireNoActiveWorkItemsForFinishTx(ctx context.Context, tx *sql.Tx, runID 
 	if active > 0 {
 		return apperror.New(apperror.CodeFailedPrecondition,
 			fmt.Sprintf("root lifecycle finish conflicts with %d active work item(s)", active))
+	}
+	return nil
+}
+
+func requireRunModeAllowsCompletionTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	mode, err := getCurrentRunModeSnapshot(ctx, tx, runID)
+	if err != nil {
+		return apperror.Wrap(apperror.CodeFailedPrecondition,
+			"run mode snapshot is required before completion", err)
+	}
+	if mode.Phase == domain.ExecutionPhasePlan {
+		return apperror.New(apperror.CodeFailedPrecondition,
+			"plan-phase Run cannot be completed at the persistence boundary")
 	}
 	return nil
 }
@@ -1443,6 +1465,11 @@ func (s *SQLiteStore) FinalizeSupervisorRun(ctx context.Context, lease domain.Ru
 	if run.Terminal() {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeConflict,
 			fmt.Sprintf("run %s is already terminal as %s", run.ID, run.Status))
+	}
+	if target == domain.RunCompleted {
+		if err := requireRunModeAllowsCompletionTx(ctx, tx, run.ID); err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, err
+		}
 	}
 	if checkpoint.Phase == domain.SupervisorTurnStarted {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeFailedPrecondition, "cannot finalize while a supervisor turn is started")

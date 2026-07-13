@@ -43,6 +43,7 @@ type Store interface {
 	SchemaVersion(ctx context.Context) (int, error)
 	GetMission(ctx context.Context, id string) (domain.Mission, error)
 	GetRun(ctx context.Context, id string) (domain.Run, error)
+	GetRunMode(ctx context.Context, runID string) (domain.RunModeSnapshot, error)
 	GetRunBySession(ctx context.Context, sessionID string) (domain.Run, bool, error)
 	ListRuns(ctx context.Context, filter domain.RunFilter) ([]domain.Run, error)
 	ListRunEventsPage(ctx context.Context, runID string, offset int, limit int) ([]events.Event, error)

@@ -42,6 +42,7 @@ func (s *ScriptProcessService) Create(ctx context.Context, request CreateScriptP
 	}
 	return s.gateway.CreateScriptProcessRun(ctx, toolgateway.ScriptRunCreateRequest{
 		OperationKey: request.OperationKey, Mission: prepared.Mission, Run: prepared.Run,
+		Mode: prepared.Mode,
 		Session: toolgateway.ScriptRunSession{
 			ID: prepared.Session.ID, WorkspaceID: prepared.Session.WorkspaceID, Title: prepared.Session.Title,
 			Route: prepared.Session.Route, Status: prepared.Session.Status,

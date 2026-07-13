@@ -3,12 +3,14 @@
 ## Missions and Runs
 
 ```powershell
-cyberagent run create "review this workspace" --workspace demo --profile review
+cyberagent run create "review this workspace" --workspace demo --profile review --surface code --phase plan
 cyberagent run create "explain this code" --profile learn --max-turns 40 --max-tokens 20000 --timeout 20m
 cyberagent run adapt-task <legacy-task-id>
 cyberagent run list
 cyberagent run list --status paused
 cyberagent run show <run-id>
+cyberagent run mode <run-id>
+cyberagent run phase <run-id> deliver --operation-key <stable-key> --reason "plan accepted"
 cyberagent run events <run-id>
 cyberagent headless events <run-id> --max-events 1000
 cyberagent headless events <run-id> --after-sequence <n> --follow --timeout 30m
@@ -28,11 +30,17 @@ cyberagent run cancel <run-id>
 
 A Mission is the stable goal and authorization scope. A Run is one resumable execution attempt. Each new Run creates a dedicated active Session unless `--session <id>` selects an unattached active Session. Session creation or attachment, Run creation, and their initial events commit together in SQLite.
 
+Schema v41 gives each Run one immutable `run_mode.v1` snapshot with two independent axes. `--surface code|cyber` selects the work domain and cannot change inside that Run. `--phase plan|deliver` selects whether the Supervisor is preparing a bounded plan or delivering it. Omitting both preserves the compatibility default `code/deliver`. Neither axis grants tools, network, Shell, file mutation, approval, or child-Agent authority; those remain separate Go-owned Policy and Scope decisions.
+
+`run mode` prints the current snapshot and revision. `run phase` is an explicit operator transition that requires a stable 16-256-byte operation key. It is accepted only for `created` or `paused` Runs with no active execution lease; the Store rechecks these conditions transactionally. Exact replay returns the existing revision, changed intent conflicts, and the raw key is never persisted. Surface, Profile, Scope, protocol, and policy version remain fixed for every revision. To move from Code to Cyber or vice versa, create a new Run under the intended authorization scope.
+
 Session messages, assistant policy decisions, ToolRun changes, and FileEdit changes are projected into `run events` transactionally. Activity carrying a workspace different from the Run scope is rejected. `run start` advances the lifecycle from `created` through `preparing` to `running`; it does not invoke a model by itself.
 
-`run step` asks the RunSupervisor to execute exactly one root Agent planning turn. It writes a `turn_started` checkpoint before the model call, permits only the bounded create-only WorkItem/Note tool loop, and ultimately requires one strict `root_lifecycle.v1` JSON action. The Supervisor validates and interprets the action, then atomically stores the user-facing message, policy decision, model usage, lifecycle events, cumulative token/model-time counters, and next checkpoint. Raw protocol JSON is not written to Session history. `run checkpoint` displays the durable phase, protocol-repair phase/reason, next turn, token counters, and execution milliseconds. A process restart resumes an unfinished started turn or pending tool batch; a committed turn is never appended twice. Turn or token budget exhaustion returns exit code 8, while the persisted execution-time boundary returns a deadline error.
+`run step` asks the RunSupervisor to execute exactly one root Agent turn. It writes a `turn_started` checkpoint before the model call, loads the persisted execution-mode snapshot, permits only the bounded create-only WorkItem/Note tool loop, and ultimately requires one strict `root_lifecycle.v1` JSON action. The Supervisor validates and interprets the action, then atomically stores the user-facing message, policy decision, model usage, lifecycle events, cumulative token/model-time counters, and next checkpoint. Raw protocol JSON is not written to Session history. `run checkpoint` displays the durable Supervisor phase, protocol-repair phase/reason, next turn, token counters, and execution milliseconds. A process restart resumes an unfinished started turn or pending tool batch; a committed turn is never appended twice. Turn or token budget exhaustion returns exit code 8, while the persisted execution-time boundary returns a deadline error.
 
 Root actions use `continue`, `finish`, or `wait`. `continue` advances to another idle turn. `finish` requires a summary and atomically completes the Run. `wait` requires a reason, atomically pauses the Run, and resumes at the next turn after `run resume`. Unknown fields, trailing data, Markdown fences, invalid combinations, and responses over 64 KiB fail the current turn without writing user/assistant messages. Assistant prose by itself cannot mutate Run state.
+
+In `plan` phase, `finish` is deliberately invalid: the model receives one bounded lifecycle repair and must return `continue` or `wait`, while explicit operator completion is also rejected. After the plan is accepted, pause the Run if needed and use `run phase <id> deliver`; the following turn receives the new durable mode revision. The current root tools remain proposal/create-only, so Plan mode cannot silently execute Shell, files, processes, network calls, or Specialist schedules.
 
 ## Skills
 

@@ -103,6 +103,7 @@ type SessionToolManager interface {
 
 type RunStateStore interface {
 	GetRunBySession(ctx context.Context, sessionID string) (domain.Run, bool, error)
+	GetRunMode(ctx context.Context, runID string) (domain.RunModeSnapshot, error)
 	ListRunEventsAfterSequence(ctx context.Context, runID string,
 		afterSequence int64, limit int) ([]events.Event, error)
 	LatestRunEventSequence(ctx context.Context, runID string) (int64, error)
@@ -137,6 +138,7 @@ type workspaceItem struct {
 type runContext struct {
 	Found              bool
 	Run                domain.Run
+	Mode               domain.RunModeSnapshot
 	WorkItems          []domain.WorkItem
 	Notes              []domain.Note
 	ToolRounds         []domain.SupervisorToolRound
@@ -386,8 +388,9 @@ func (m *Model) Snapshot() string {
 
 	headerText := fmt.Sprintf("CyberAgent Workbench  session=%s  route=%s", m.session.ID, m.session.Route)
 	if m.runContext.Found {
-		headerText = fmt.Sprintf("CyberAgent Workbench  run=%s  status=%s  session=%s  route=%s",
-			m.runContext.Run.ID, m.runContext.Run.Status, m.session.ID, m.session.Route)
+		headerText = fmt.Sprintf("CyberAgent Workbench  run=%s  status=%s  mode=%s/%s  session=%s  route=%s",
+			m.runContext.Run.ID, m.runContext.Run.Status, m.runContext.Mode.Surface,
+			m.runContext.Mode.Phase, m.session.ID, m.session.Route)
 	}
 	header := headerStyle.Width(width).Render(truncate(headerText, max(20, width-2)))
 	messages := panelStyle.Width(messageWidth).Height(contentHeight).Render(m.renderMessages(messageWidth-2, contentHeight-2))
@@ -1244,6 +1247,13 @@ func loadRunContext(ctx context.Context, runStateStore RunStateStore,
 	if err != nil || !found {
 		return runContext{}, err
 	}
+	mode, err := runStateStore.GetRunMode(ctx, run.ID)
+	if err != nil {
+		return runContext{}, err
+	}
+	if mode.RunID != run.ID || mode.MissionID != run.MissionID {
+		return runContext{}, errors.New("TUI Run mode snapshot is cross-scope")
+	}
 	workItems, err := runStateStore.ListWorkItems(ctx, domain.WorkItemFilter{
 		RunID: run.ID, Limit: maxTUIRunItems,
 	})
@@ -1298,7 +1308,7 @@ func loadRunContext(ctx context.Context, runStateStore RunStateStore,
 	if err != nil {
 		return runContext{}, err
 	}
-	return runContext{Found: true, Run: run, WorkItems: workItems, Notes: notes,
+	return runContext{Found: true, Run: run, Mode: mode, WorkItems: workItems, Notes: notes,
 		ToolRounds: rounds, Grants: grants, Events: eventList, EventSequence: eventSequence,
 		Agents: agents, FindingReports: reports, FileEdits: edits,
 		FileEditsTruncated: editsTruncated}, nil

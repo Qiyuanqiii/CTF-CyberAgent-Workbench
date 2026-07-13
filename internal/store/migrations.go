@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 40
+const LatestSchemaVersion = 41
 
 type migration struct {
 	Version    int
@@ -4770,6 +4770,139 @@ var rootSkillContextStatements = []string{
 	`CREATE TRIGGER trg_root_skill_context_commit_delete_immutable
 		BEFORE DELETE ON root_skill_context_commits BEGIN
 			SELECT RAISE(ABORT, 'root Skill context commit cannot be deleted');
+		END;`,
+}
+
+var runModeStatements = []string{
+	`CREATE TABLE run_mode_snapshots (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		mission_id TEXT NOT NULL,
+		revision INTEGER NOT NULL,
+		protocol_version TEXT NOT NULL,
+		surface TEXT NOT NULL,
+		phase TEXT NOT NULL,
+		profile TEXT NOT NULL,
+		scope_json TEXT NOT NULL,
+		policy_version TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		reason TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE RESTRICT,
+		UNIQUE(run_id, revision),
+		CHECK(revision > 0),
+		CHECK(protocol_version = 'run_mode.v1'),
+		CHECK(surface IN ('code', 'cyber')),
+		CHECK(phase IN ('plan', 'deliver')),
+		CHECK(profile IN ('code', 'review', 'learn', 'script')),
+		CHECK(json_valid(scope_json) AND length(scope_json) BETWEEN 2 AND 1048576),
+		CHECK(policy_version = 'mode_policy.v1'),
+		CHECK(id = trim(id) AND length(id) BETWEEN 1 AND 256 AND instr(id, char(0)) = 0),
+		CHECK(run_id = trim(run_id) AND length(run_id) BETWEEN 1 AND 256 AND instr(run_id, char(0)) = 0),
+		CHECK(mission_id = trim(mission_id) AND length(mission_id) BETWEEN 1 AND 256
+			AND instr(mission_id, char(0)) = 0),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0),
+		CHECK(reason = trim(reason) AND length(reason) BETWEEN 1 AND 1024
+			AND instr(reason, char(0)) = 0)
+	);`,
+	`CREATE INDEX idx_run_mode_snapshots_run_revision
+		ON run_mode_snapshots(run_id, revision DESC);`,
+	`CREATE TABLE run_mode_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		snapshot_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(snapshot_id) REFERENCES run_mode_snapshots(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64
+			AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64
+			AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`INSERT INTO run_mode_snapshots
+		(id, run_id, mission_id, revision, protocol_version, surface, phase, profile,
+		scope_json, policy_version, requested_by, reason, created_at)
+		SELECT printf('run-mode-v41-%016x', run.rowid), run.id, run.mission_id, 1, 'run_mode.v1',
+			'code', 'deliver', mission.profile, mission.scope_json, 'mode_policy.v1',
+			'schema_v41', 'legacy compatibility default', run.created_at
+		FROM runs run JOIN missions mission ON mission.id = run.mission_id;`,
+	`CREATE TRIGGER trg_run_mode_snapshot_insert
+		BEFORE INSERT ON run_mode_snapshots
+		WHEN NOT EXISTS (
+			SELECT 1 FROM runs run
+			JOIN missions mission ON mission.id = run.mission_id
+			WHERE run.id = NEW.run_id AND run.mission_id = NEW.mission_id
+				AND mission.profile = NEW.profile AND mission.scope_json = NEW.scope_json
+				AND julianday(NEW.created_at) >= julianday(run.created_at)
+				AND (
+					(NEW.revision = 1 AND run.status = 'created' AND NOT EXISTS (
+						SELECT 1 FROM run_mode_snapshots existing WHERE existing.run_id = NEW.run_id
+					))
+					OR
+					(NEW.revision > 1 AND run.status IN ('created', 'paused')
+					AND NOT EXISTS (
+						SELECT 1 FROM run_execution_leases lease
+						WHERE lease.run_id = NEW.run_id AND lease.status = 'active'
+							AND julianday(lease.expires_at) > julianday('now')
+					) AND EXISTS (
+						SELECT 1 FROM run_mode_snapshots previous
+						WHERE previous.run_id = NEW.run_id AND previous.revision = NEW.revision - 1
+							AND previous.protocol_version = NEW.protocol_version
+							AND previous.surface = NEW.surface AND previous.phase != NEW.phase
+							AND previous.profile = NEW.profile AND previous.scope_json = NEW.scope_json
+							AND previous.policy_version = NEW.policy_version
+							AND julianday(NEW.created_at) >= julianday(previous.created_at)
+					))
+				)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Run mode snapshot binding or transition is invalid');
+		END;`,
+	`CREATE TRIGGER trg_run_mode_operation_insert
+		BEFORE INSERT ON run_mode_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM run_mode_snapshots snapshot
+			WHERE snapshot.id = NEW.snapshot_id AND snapshot.run_id = NEW.run_id
+				AND snapshot.requested_by = NEW.requested_by
+				AND snapshot.created_at = NEW.created_at AND snapshot.revision > 1
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Run mode operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_run_mode_snapshot_update_immutable
+		BEFORE UPDATE ON run_mode_snapshots BEGIN
+			SELECT RAISE(ABORT, 'Run mode snapshot cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_run_mode_snapshot_delete_immutable
+		BEFORE DELETE ON run_mode_snapshots BEGIN
+			SELECT RAISE(ABORT, 'Run mode snapshot cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_run_mode_operation_update_immutable
+		BEFORE UPDATE ON run_mode_operations BEGIN
+			SELECT RAISE(ABORT, 'Run mode operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_run_mode_operation_delete_immutable
+		BEFORE DELETE ON run_mode_operations BEGIN
+			SELECT RAISE(ABORT, 'Run mode operation cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_run_mode_plan_completion_guard
+		BEFORE UPDATE OF status ON runs
+		WHEN NEW.status = 'completed' AND OLD.status != 'completed'
+			AND COALESCE((
+				SELECT phase FROM run_mode_snapshots snapshot
+				WHERE snapshot.run_id = NEW.id
+				ORDER BY snapshot.revision DESC LIMIT 1
+			), '') != 'deliver'
+		BEGIN
+			SELECT RAISE(ABORT, 'Plan-phase Run cannot be completed');
 		END;`,
 }
 

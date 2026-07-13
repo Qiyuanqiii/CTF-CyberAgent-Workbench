@@ -1,8 +1,8 @@
 # 本地 HTTP API / Local HTTP API
 
-CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`。它主要用于检查 SQLite 中的持久化 Agent 状态，并通过可恢复 SSE 投影 Run events；唯一控制操作是经过独立授权、审计优先的活动模型调用取消。API 不执行工具，也不替代 Policy、Approval 或 Tool Gateway。
+CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`。它主要用于检查 SQLite 中的持久化 Agent 状态（包括 schema v41 Run 模式快照），并通过可恢复 SSE 投影 Run events；唯一控制操作是经过独立授权、审计优先的活动模型调用取消。API 不执行工具、不切换执行阶段，也不替代 Policy、Approval 或 Tool Gateway。
 
-CyberAgent Workbench exposes a Go-controlled local `api.v1`. It primarily inspects durable Agent state in SQLite and projects persisted Run events through resumable SSE. Its only control operation is separately authorized, audit-first cancellation of an active model call. The API cannot execute tools and does not replace Policy, Approval, or the Tool Gateway.
+CyberAgent Workbench exposes a Go-controlled local `api.v1`. It primarily inspects durable Agent state in SQLite, including the schema v41 Run-mode snapshot, and projects persisted Run events through resumable SSE. Its only control operation is separately authorized, audit-first cancellation of an active model call. The API cannot execute tools or change execution phase and does not replace Policy, Approval, or the Tool Gateway.
 
 ## 启动 / Start
 
@@ -84,7 +84,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/runs/<run-id>/agents
 | `GET` | `/api/v1/health` | Health and SQLite schema version |
 | `GET` | `/api/v1/openapi.json` | Raw deterministic OpenAPI 3.1 JSON document |
 | `GET` | `/api/v1/runs` | Runs; `status`, `mission_id`, pagination |
-| `GET` | `/api/v1/runs/{run_id}` | Run, Mission, checkpoint metadata, tool usage, token-free execution-lease summary |
+| `GET` | `/api/v1/runs/{run_id}` | Run, Mission, immutable execution-mode snapshot, checkpoint metadata, tool usage, token-free execution-lease summary |
 | `GET` | `/api/v1/runs/{run_id}/events` | Ordered Run events; pagination |
 | `GET` | `/api/v1/runs/{run_id}/events/stream` | Bounded SSE projection; opaque `cursor` or `Last-Event-ID` resume |
 | `GET` | `/api/v1/runs/{run_id}/agent-graph` | Root/Specialist nodes, budgets, lifecycle, and redacted completion summaries |

@@ -196,6 +196,10 @@ func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *te
 	var runDetail RunDetailView
 	decodeData(t, runDetailResponse, &runDetail)
 	if runDetail.Run.ID != fixture.run.ID || runDetail.Mission.Goal == "" || runDetail.Checkpoint == nil ||
+		runDetail.Mode.ProtocolVersion != domain.RunModeProtocolVersion ||
+		runDetail.Mode.Surface != string(domain.ExecutionSurfaceCode) ||
+		runDetail.Mode.Phase != string(domain.ExecutionPhaseDeliver) ||
+		runDetail.Mode.Revision != 1 || runDetail.Mode.CapabilityGrant ||
 		runDetail.Checkpoint.Phase != string(domain.SupervisorTurnStarted) || runDetail.ToolUsage.Consumed != 1 ||
 		runDetail.Lease == nil || !runDetail.Lease.Active || runDetail.Lease.Generation != 1 ||
 		runDetail.Lease.OwnerID != "http-api-test-worker" {

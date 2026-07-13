@@ -32,6 +32,10 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runList(ctx, service, args[1:])
 	case "show":
 		return a.runShow(ctx, service, args[1:])
+	case "mode":
+		return a.runMode(ctx, service, args[1:])
+	case "phase":
+		return a.runPhase(ctx, service, args[1:])
 	case "events":
 		return a.runEvents(ctx, service, args[1:])
 	case "step":
@@ -748,6 +752,8 @@ func (a *App) runCreate(ctx context.Context, service *application.RunService, ar
 	fs := newFlagSet("run create", a.errOut)
 	workspaceName := fs.String("workspace", "", "workspace name")
 	profile := fs.String("profile", string(domain.ProfileCode), "mission profile")
+	surface := fs.String("surface", string(domain.ExecutionSurfaceCode), "execution surface: code or cyber")
+	phase := fs.String("phase", string(domain.ExecutionPhaseDeliver), "execution phase: plan or deliver")
 	route := fs.String("route", "", "model route")
 	sessionID := fs.String("session", "", "existing session id")
 	interactive := fs.Bool("interactive", false, "mark run as interactive")
@@ -759,6 +765,8 @@ func (a *App) runCreate(ctx context.Context, service *application.RunService, ar
 	if err := fs.Parse(reorderFlags(args, map[string]bool{
 		"workspace":      true,
 		"profile":        true,
+		"surface":        true,
+		"phase":          true,
 		"route":          true,
 		"session":        true,
 		"interactive":    false,
@@ -771,7 +779,7 @@ func (a *App) runCreate(ctx context.Context, service *application.RunService, ar
 		return err
 	}
 	if fs.NArg() == 0 {
-		return errors.New(`usage: cyberagent run create "goal" [--workspace <name>] [--profile code|review|learn|script]`)
+		return errors.New(`usage: cyberagent run create "goal" [--workspace <name>] [--profile code|review|learn|script] [--surface code|cyber] [--phase plan|deliver]`)
 	}
 	workspaceID := ""
 	if strings.TrimSpace(*workspaceName) != "" {
@@ -796,6 +804,8 @@ func (a *App) runCreate(ctx context.Context, service *application.RunService, ar
 	mission, run, err := service.Create(ctx, application.CreateRunRequest{
 		Goal:        strings.Join(fs.Args(), " "),
 		Profile:     *profile,
+		Surface:     *surface,
+		Phase:       *phase,
 		WorkspaceID: workspaceID,
 		SessionID:   *sessionID,
 		ModelRoute:  *route,
@@ -811,8 +821,13 @@ func (a *App) runCreate(ctx context.Context, service *application.RunService, ar
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(a.out, "run %s created\nmission: %s\nsession: %s\nstatus: %s\nprofile: %s\nworkspace: %s\nroute: %s\n",
-		run.ID, mission.ID, run.SessionID, run.Status, mission.Profile, mission.WorkspaceID, run.Config.ModelRoute)
+	mode, err := service.Mode(ctx, run.ID)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "run %s created\nmission: %s\nsession: %s\nstatus: %s\nprofile: %s\nsurface: %s\nphase: %s\nmode_revision: %d\nworkspace: %s\nroute: %s\n",
+		run.ID, mission.ID, run.SessionID, run.Status, mission.Profile, mode.Surface,
+		mode.Phase, mode.Revision, mission.WorkspaceID, run.Config.ModelRoute)
 	return nil
 }
 
@@ -840,7 +855,13 @@ func (a *App) runList(ctx context.Context, service *application.RunService, args
 		return nil
 	}
 	for _, run := range runs {
-		fmt.Fprintf(a.out, "%s\t%s\t%s\t%s\t%s\n", run.ID, run.Status, run.MissionID, run.Config.ModelRoute, run.UpdatedAt.Format(time.RFC3339))
+		mode, err := service.Mode(ctx, run.ID)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(a.out, "%s\t%s\t%s/%s\t%s\t%s\t%s\n", run.ID, run.Status,
+			mode.Surface, mode.Phase, run.MissionID, run.Config.ModelRoute,
+			run.UpdatedAt.Format(time.RFC3339))
 	}
 	return nil
 }
@@ -857,10 +878,15 @@ func (a *App) runShow(ctx context.Context, service *application.RunService, args
 	if err != nil {
 		return err
 	}
+	mode, err := service.Mode(ctx, run.ID)
+	if err != nil {
+		return err
+	}
 	scope, _ := json.Marshal(mission.Scope)
 	budget, _ := json.Marshal(run.Budget)
-	fmt.Fprintf(a.out, "id: %s\nmission: %s\nstatus: %s\ngoal: %s\nprofile: %s\nworkspace: %s\nsession: %s\nroute: %s\ninteractive: %t\nscope: %s\nbudget: %s\ncreated_at: %s\nupdated_at: %s\n",
-		run.ID, mission.ID, run.Status, mission.Goal, mission.Profile, mission.WorkspaceID, run.SessionID,
+	fmt.Fprintf(a.out, "id: %s\nmission: %s\nstatus: %s\ngoal: %s\nprofile: %s\nsurface: %s\nphase: %s\nmode_revision: %d\nmode_policy: %s\nworkspace: %s\nsession: %s\nroute: %s\ninteractive: %t\nscope: %s\nbudget: %s\ncreated_at: %s\nupdated_at: %s\n",
+		run.ID, mission.ID, run.Status, mission.Goal, mission.Profile, mode.Surface,
+		mode.Phase, mode.Revision, mode.PolicyVersion, mission.WorkspaceID, run.SessionID,
 		run.Config.ModelRoute, run.Config.Interactive, scope, budget, run.CreatedAt.Format(time.RFC3339), run.UpdatedAt.Format(time.RFC3339))
 	if run.StartedAt != nil {
 		fmt.Fprintf(a.out, "started_at: %s\n", run.StartedAt.Format(time.RFC3339))
@@ -868,6 +894,52 @@ func (a *App) runShow(ctx context.Context, service *application.RunService, args
 	if run.FinishedAt != nil {
 		fmt.Fprintf(a.out, "finished_at: %s\n", run.FinishedAt.Format(time.RFC3339))
 	}
+	return nil
+}
+
+func (a *App) runMode(ctx context.Context, service *application.RunService, args []string) error {
+	fs := newFlagSet("run mode", a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return errors.New("usage: cyberagent run mode <run-id>")
+	}
+	mode, err := service.Mode(ctx, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "run: %s\nmission: %s\nprotocol: %s\nrevision: %d\nsurface: %s\nphase: %s\nprofile: %s\npolicy: %s\nnetwork_mode: %s\nallowed_target_count: %d\nrequested_by: %s\nreason: %s\ncreated_at: %s\ncapability_grant: false\n",
+		mode.RunID, mode.MissionID, mode.ProtocolVersion, mode.Revision, mode.Surface,
+		mode.Phase, mode.Profile, mode.PolicyVersion, mode.Scope.NetworkMode,
+		len(mode.Scope.AllowedTargets), mode.RequestedBy, mode.Reason,
+		mode.CreatedAt.Format(time.RFC3339Nano))
+	return nil
+}
+
+func (a *App) runPhase(ctx context.Context, service *application.RunService, args []string) error {
+	fs := newFlagSet("run phase", a.errOut)
+	operationKey := fs.String("operation-key", "", "stable phase transition operation key")
+	operator := fs.String("operator", "cli_operator", "operator identity")
+	reason := fs.String("reason", "", "redacted transition reason")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"operation-key": true, "operator": true, "reason": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 || strings.TrimSpace(*operationKey) == "" {
+		return errors.New("usage: cyberagent run phase <run-id> plan|deliver --operation-key <key> [--operator <id>] [--reason <text>]")
+	}
+	result, err := service.ChangePhase(ctx, application.ChangeRunPhaseRequest{
+		RunID: fs.Arg(0), Phase: fs.Arg(1), OperationKey: *operationKey,
+		RequestedBy: *operator, Reason: *reason,
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "run: %s\nsurface: %s\nphase: %s\nrevision: %d\npolicy: %s\nrequested_by: %s\nreplayed: %t\ncapability_grant: false\n",
+		result.Mode.RunID, result.Mode.Surface, result.Mode.Phase, result.Mode.Revision,
+		result.Mode.PolicyVersion, result.Mode.RequestedBy, result.Replayed)
 	return nil
 }
 

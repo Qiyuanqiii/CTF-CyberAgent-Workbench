@@ -66,6 +66,20 @@ type RunView struct {
 	UpdatedAt  time.Time     `json:"updated_at"`
 }
 
+type RunModeView struct {
+	ProtocolVersion string    `json:"protocol_version"`
+	Revision        int64     `json:"revision"`
+	Surface         string    `json:"surface"`
+	Phase           string    `json:"phase"`
+	Profile         string    `json:"profile"`
+	Scope           ScopeView `json:"scope"`
+	PolicyVersion   string    `json:"policy_version"`
+	RequestedBy     string    `json:"requested_by"`
+	Reason          string    `json:"reason"`
+	CreatedAt       time.Time `json:"created_at"`
+	CapabilityGrant bool      `json:"capability_grant"`
+}
+
 type SupervisorCheckpointView struct {
 	RunID           string    `json:"run_id"`
 	NextTurn        int       `json:"next_turn"`
@@ -102,6 +116,7 @@ type RunExecutionLeaseView struct {
 type RunDetailView struct {
 	Run        RunView                   `json:"run"`
 	Mission    MissionView               `json:"mission"`
+	Mode       RunModeView               `json:"mode"`
 	Checkpoint *SupervisorCheckpointView `json:"checkpoint,omitempty"`
 	Lease      *RunExecutionLeaseView    `json:"execution_lease,omitempty"`
 	ToolUsage  ToolUsageView             `json:"tool_usage"`
@@ -242,6 +257,19 @@ func runView(value domain.Run) RunView {
 			TimeoutSeconds: value.Budget.TimeoutSeconds},
 		StartedAt: value.StartedAt, FinishedAt: value.FinishedAt,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
+}
+
+func runModeView(value domain.RunModeSnapshot) RunModeView {
+	return RunModeView{
+		ProtocolVersion: value.ProtocolVersion, Revision: value.Revision,
+		Surface: string(value.Surface), Phase: string(value.Phase),
+		Profile: string(value.Profile),
+		Scope: ScopeView{WorkspaceID: value.Scope.WorkspaceID,
+			NetworkMode:    value.Scope.NetworkMode,
+			AllowedTargets: append([]string{}, value.Scope.AllowedTargets...)},
+		PolicyVersion: value.PolicyVersion, RequestedBy: value.RequestedBy,
+		Reason: value.Reason, CreatedAt: value.CreatedAt, CapabilityGrant: false,
 	}
 }
 

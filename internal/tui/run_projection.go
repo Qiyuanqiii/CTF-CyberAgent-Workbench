@@ -24,6 +24,9 @@ type RunProjection struct {
 	MissionID          string
 	SessionID          string
 	Status             domain.RunStatus
+	Surface            domain.ExecutionSurface
+	Phase              domain.ExecutionPhase
+	ModeRevision       int64
 	EventSequence      int64
 	AgentCount         int
 	FindingReportCount int
@@ -41,6 +44,8 @@ func (m *Model) CurrentRunProjection() (RunProjection, bool) {
 	return RunProjection{
 		RunID: m.runContext.Run.ID, MissionID: m.runContext.Run.MissionID,
 		SessionID: m.runContext.Run.SessionID, Status: m.runContext.Run.Status,
+		Surface: m.runContext.Mode.Surface, Phase: m.runContext.Mode.Phase,
+		ModeRevision:  m.runContext.Mode.Revision,
 		EventSequence: m.runContext.EventSequence, AgentCount: len(m.runContext.Agents),
 		FindingReportCount: len(m.runContext.FindingReports), FindingCount: findingCount,
 	}, true

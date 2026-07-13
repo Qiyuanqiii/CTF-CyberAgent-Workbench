@@ -241,6 +241,9 @@ func assertLifecycleSurfaceContract(t *testing.T, st *store.SQLiteStore,
 	if !slices.Equal(cliSequences, httpSequences) ||
 		!slices.Equal(cliSequences, headlessSequences) ||
 		string(tuiProjection.Status) != detailEnvelope.Data.Run.Status ||
+		string(tuiProjection.Surface) != detailEnvelope.Data.Mode.Surface ||
+		string(tuiProjection.Phase) != detailEnvelope.Data.Mode.Phase ||
+		tuiProjection.ModeRevision != detailEnvelope.Data.Mode.Revision ||
 		detailEnvelope.Data.Run.Status != headlessEnd.Status ||
 		tuiProjection.EventSequence != cliTail ||
 		cliTail != headlessEnd.LastSequence ||

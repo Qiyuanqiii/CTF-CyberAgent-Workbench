@@ -26,7 +26,10 @@ func (s *SQLiteStore) FindTaskRunLink(ctx context.Context, taskID string) (agent
 	return link, true, nil
 }
 
-func (s *SQLiteStore) CreateTaskMissionRun(ctx context.Context, source agent.Task, mission domain.Mission, run domain.Run, linkedSession session.Session, initialEvents []events.Event) (agent.TaskRunLink, bool, error) {
+func (s *SQLiteStore) CreateTaskMissionRun(ctx context.Context, source agent.Task,
+	mission domain.Mission, run domain.Run, mode domain.RunModeSnapshot,
+	linkedSession session.Session, initialEvents []events.Event,
+) (agent.TaskRunLink, bool, error) {
 	if strings.TrimSpace(source.ID) == "" {
 		return agent.TaskRunLink{}, false, errors.New("source task id is required")
 	}
@@ -45,7 +48,7 @@ func (s *SQLiteStore) CreateTaskMissionRun(ctx context.Context, source agent.Tas
 	if err := tx.QueryRowContext(ctx, `SELECT id FROM tasks WHERE id = ?`, source.ID).Scan(&storedID); err != nil {
 		return agent.TaskRunLink{}, false, err
 	}
-	if err := createMissionRunTx(ctx, tx, mission, run, linkedSession, true, initialEvents); err != nil {
+	if err := createMissionRunTx(ctx, tx, mission, run, mode, linkedSession, true, initialEvents); err != nil {
 		_ = tx.Rollback()
 		if existing, ok, findErr := s.FindTaskRunLink(ctx, source.ID); findErr == nil && ok {
 			return existing, false, nil

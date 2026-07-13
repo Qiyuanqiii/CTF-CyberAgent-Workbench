@@ -71,7 +71,7 @@ func (s *SQLiteStore) CreateScriptProcessRun(ctx context.Context, request toolga
 		return toolgateway.ScriptRunStoreResult{Mission: mission, Run: run, Process: existing, Replayed: true}, nil
 	}
 
-	if err := createMissionRunTx(ctx, tx, request.Mission, request.Run, linkedSession,
+	if err := createMissionRunTx(ctx, tx, request.Mission, request.Run, request.Mode, linkedSession,
 		request.CreateSession, request.InitialEvents); err != nil {
 		return toolgateway.ScriptRunStoreResult{}, err
 	}

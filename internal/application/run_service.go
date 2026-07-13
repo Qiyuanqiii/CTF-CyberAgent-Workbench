@@ -14,12 +14,19 @@ import (
 )
 
 type RunStore interface {
-	CreateMissionRun(ctx context.Context, mission domain.Mission, run domain.Run, linkedSession session.Session, createSession bool, initialEvents []events.Event) error
+	CreateMissionRun(ctx context.Context, mission domain.Mission, run domain.Run,
+		mode domain.RunModeSnapshot, linkedSession session.Session, createSession bool,
+		initialEvents []events.Event) error
 	GetMission(ctx context.Context, id string) (domain.Mission, error)
 	GetRun(ctx context.Context, id string) (domain.Run, error)
+	GetRunMode(ctx context.Context, runID string) (domain.RunModeSnapshot, error)
+	GetRunModeSnapshot(ctx context.Context, id string) (domain.RunModeSnapshot, error)
+	GetRunModeOperation(ctx context.Context, keyDigest string) (domain.RunModeOperation, bool, error)
 	GetSession(ctx context.Context, id string) (session.Session, error)
 	ListRuns(ctx context.Context, filter domain.RunFilter) ([]domain.Run, error)
 	TransitionRun(ctx context.Context, run domain.Run, expected domain.RunStatus, event events.Event) error
+	TransitionRunPhase(ctx context.Context, snapshot domain.RunModeSnapshot,
+		operation domain.RunModeOperation, event events.Event) (domain.RunModeSnapshot, bool, error)
 	ListRunEvents(ctx context.Context, runID string) ([]events.Event, error)
 }
 
@@ -30,6 +37,8 @@ type RunService struct {
 type CreateRunRequest struct {
 	Goal        string
 	Profile     string
+	Surface     string
+	Phase       string
 	WorkspaceID string
 	SessionID   string
 	ModelRoute  string
@@ -44,6 +53,7 @@ func NewRunService(store RunStore) *RunService {
 type preparedRun struct {
 	Mission       domain.Mission
 	Run           domain.Run
+	Mode          domain.RunModeSnapshot
 	Session       session.Session
 	CreateSession bool
 	InitialEvents []events.Event
@@ -54,7 +64,7 @@ func (s *RunService) Create(ctx context.Context, req CreateRunRequest) (domain.M
 	if err != nil {
 		return domain.Mission{}, domain.Run{}, err
 	}
-	if err := s.store.CreateMissionRun(ctx, prepared.Mission, prepared.Run, prepared.Session,
+	if err := s.store.CreateMissionRun(ctx, prepared.Mission, prepared.Run, prepared.Mode, prepared.Session,
 		prepared.CreateSession, prepared.InitialEvents); err != nil {
 		return domain.Mission{}, domain.Run{}, err
 	}
@@ -74,6 +84,22 @@ func (s *RunService) prepare(ctx context.Context, req CreateRunRequest) (prepare
 		profileValue = string(domain.ProfileCode)
 	}
 	profile, err := domain.ParseProfile(profileValue)
+	if err != nil {
+		return preparedRun{}, err
+	}
+	surfaceValue := strings.TrimSpace(req.Surface)
+	if surfaceValue == "" {
+		surfaceValue = string(domain.ExecutionSurfaceCode)
+	}
+	surface, err := domain.ParseExecutionSurface(surfaceValue)
+	if err != nil {
+		return preparedRun{}, err
+	}
+	phaseValue := strings.TrimSpace(req.Phase)
+	if phaseValue == "" {
+		phaseValue = string(domain.ExecutionPhaseDeliver)
+	}
+	phase, err := domain.ParseExecutionPhase(phaseValue)
 	if err != nil {
 		return preparedRun{}, err
 	}
@@ -151,9 +177,16 @@ func (s *RunService) prepare(ctx context.Context, req CreateRunRequest) (prepare
 	if err := run.Validate(); err != nil {
 		return preparedRun{}, err
 	}
+	mode, err := domain.NewInitialRunModeSnapshot(idgen.New("run-mode"), run, mission,
+		surface, phase, "run_service", "initial Run mode", now)
+	if err != nil {
+		return preparedRun{}, err
+	}
 	createdEvent, err := events.New(run.ID, mission.ID, events.RunCreatedEvent, "run_service", run.ID, map[string]any{
 		"status":       run.Status,
 		"profile":      mission.Profile,
+		"surface":      mode.Surface,
+		"phase":        mode.Phase,
 		"network_mode": mission.Scope.NetworkMode,
 		"session_id":   run.SessionID,
 	})
@@ -169,7 +202,7 @@ func (s *RunService) prepare(ctx context.Context, req CreateRunRequest) (prepare
 		return preparedRun{}, err
 	}
 	return preparedRun{
-		Mission: mission, Run: run, Session: linkedSession, CreateSession: createSession,
+		Mission: mission, Run: run, Mode: mode, Session: linkedSession, CreateSession: createSession,
 		InitialEvents: []events.Event{createdEvent, attachedEvent},
 	}, nil
 }

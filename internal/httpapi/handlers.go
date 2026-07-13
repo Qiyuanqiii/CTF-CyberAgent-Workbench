@@ -191,11 +191,16 @@ func (a *API) run(request *http.Request, runID string) (any, *Page, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	mode, err := a.store.GetRunMode(request.Context(), run.ID)
+	if err != nil {
+		return nil, nil, err
+	}
 	usage, err := a.store.GetToolCallUsage(request.Context(), run.ID)
 	if err != nil {
 		return nil, nil, err
 	}
-	detail := RunDetailView{Run: runView(run), Mission: missionView(mission), ToolUsage: toolUsageView(usage)}
+	detail := RunDetailView{Run: runView(run), Mission: missionView(mission),
+		Mode: runModeView(mode), ToolUsage: toolUsageView(usage)}
 	checkpoint, found, err := a.store.GetSupervisorCheckpoint(request.Context(), run.ID)
 	if err != nil {
 		return nil, nil, err

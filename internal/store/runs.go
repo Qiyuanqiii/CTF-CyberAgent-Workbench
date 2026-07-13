@@ -21,19 +21,25 @@ const (
 	maxStoreJSONNodes        = 100000
 )
 
-func (s *SQLiteStore) CreateMissionRun(ctx context.Context, mission domain.Mission, run domain.Run, linkedSession session.Session, createSession bool, initialEvents []events.Event) error {
+func (s *SQLiteStore) CreateMissionRun(ctx context.Context, mission domain.Mission, run domain.Run,
+	mode domain.RunModeSnapshot, linkedSession session.Session, createSession bool,
+	initialEvents []events.Event,
+) error {
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := createMissionRunTx(ctx, tx, mission, run, linkedSession, createSession, initialEvents); err != nil {
+	if err := createMissionRunTx(ctx, tx, mission, run, mode, linkedSession, createSession, initialEvents); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func createMissionRunTx(ctx context.Context, tx *sql.Tx, mission domain.Mission, run domain.Run, linkedSession session.Session, createSession bool, initialEvents []events.Event) error {
+func createMissionRunTx(ctx context.Context, tx *sql.Tx, mission domain.Mission, run domain.Run,
+	mode domain.RunModeSnapshot, linkedSession session.Session, createSession bool,
+	initialEvents []events.Event,
+) error {
 	mission.Goal = redact.String(mission.Goal)
 	linkedSession.Title = redact.String(linkedSession.Title)
 	if err := mission.Validate(); err != nil {
@@ -111,10 +117,16 @@ func createMissionRunTx(ctx context.Context, tx *sql.Tx, mission domain.Mission,
 		configJSON, budgetJSON, nullableTS(run.StartedAt), nullableTS(run.FinishedAt), ts(run.CreatedAt), ts(run.UpdatedAt)); err != nil {
 		return err
 	}
+	if err := insertInitialRunModeSnapshotTx(ctx, tx, mode, run, mission); err != nil {
+		return err
+	}
 	for _, event := range initialEvents {
 		if _, err := insertRunEventTx(ctx, tx, event); err != nil {
 			return err
 		}
+	}
+	if err := appendInitialRunModeEventTx(ctx, tx, mode); err != nil {
+		return err
 	}
 	if _, _, _, err := syncRootAgentTx(ctx, tx, run, mission, rootAgentProjection{
 		Status: domain.AgentReady,

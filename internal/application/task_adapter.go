@@ -17,7 +17,9 @@ import (
 type TaskAdapterStore interface {
 	GetTask(ctx context.Context, id string) (agent.Task, error)
 	FindTaskRunLink(ctx context.Context, taskID string) (agent.TaskRunLink, bool, error)
-	CreateTaskMissionRun(ctx context.Context, source agent.Task, mission domain.Mission, run domain.Run, linkedSession session.Session, initialEvents []events.Event) (agent.TaskRunLink, bool, error)
+	CreateTaskMissionRun(ctx context.Context, source agent.Task, mission domain.Mission,
+		run domain.Run, mode domain.RunModeSnapshot, linkedSession session.Session,
+		initialEvents []events.Event) (agent.TaskRunLink, bool, error)
 	GetMission(ctx context.Context, id string) (domain.Mission, error)
 	GetRun(ctx context.Context, id string) (domain.Run, error)
 }
@@ -90,11 +92,18 @@ func (a *TaskAdapter) Adapt(ctx context.Context, taskID string) (AdaptTaskResult
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
+	mode, err := domain.NewInitialRunModeSnapshot(idgen.New("run-mode"), run, mission,
+		domain.ExecutionSurfaceCode, domain.ExecutionPhaseDeliver,
+		"legacy_task_adapter", "legacy task compatibility default", now)
+	if err != nil {
+		return AdaptTaskResult{}, err
+	}
 	initialEvents, err := legacyTaskEvents(source, mission, run, linkedSession)
 	if err != nil {
 		return AdaptTaskResult{}, err
 	}
-	link, created, err := a.store.CreateTaskMissionRun(ctx, source, mission, run, linkedSession, initialEvents)
+	link, created, err := a.store.CreateTaskMissionRun(ctx, source, mission, run, mode,
+		linkedSession, initialEvents)
 	if err != nil {
 		return AdaptTaskResult{}, err
 	}
