@@ -20,7 +20,7 @@ V2 的 99% 在 P0/P1 基础上完成了可恢复 Supervisor、预算、严格生
 
 P8 已推进到 schema v37：v35 将完成的 Fan-out execution 确定性投影为通用 `draft` Finding、不可变 `model_assertion` Evidence 和 `finding_report.v1` Report；v36 增加同 Run 冻结 Artifact Evidence、一次性 operator `validated/rejected` 决定和复核命令；v37 再以独立事实完成 `validated -> accepted -> fixed`，要求接受后新建且不可复用的 remediation Artifact Evidence。SARIF 只输出 `validated/accepted` 未解决项，默认 validated/high CI 门禁同样阻断二者，fixed/rejected 不再阻断。验证、接受和修复始终是三个不同阶段。
 
-金额预算、HTTP 或模型自主 child 调度和真实 Sandbox 执行尚未实现；schema v48 的严格 Sandbox Manifest、schema v49 的精确审批/重新提交/禁用候选、schema v50 的禁用态 Artifact 绑定、独立 fencing、取消与清理恢复、schema v51 的禁用态后端/输出预检，以及 schema v52 的仅模拟后端证据与内存输出事务已经落地。operator-only 显式 child schedule/continue、no-tool child turn、最多两个 child 的有界并发、一次 child repair、Coordinator、Run 工具预算、跨进程执行互斥，以及 root/child 精确跨进程主动取消均已落地。
+金额预算、HTTP 或模型自主 child 调度和真实 Sandbox 执行尚未实现；schema v48 的严格 Sandbox Manifest、schema v49 的精确审批/重新提交/禁用候选、schema v50 的禁用态 Artifact 绑定、独立 fencing、取消与清理恢复、schema v51 的禁用态后端/输出预检、schema v52 的仅模拟后端证据与内存输出事务，以及 schema v53 的固定本机端点只读 Docker 观测已经落地。operator-only 显式 child schedule/continue、no-tool child turn、最多两个 child 的有界并发、一次 child repair、Coordinator、Run 工具预算、跨进程执行互斥，以及 root/child 精确跨进程主动取消均已落地。
 
 P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作面与 `plan|deliver` 阶段；schema v42 增加严格三方向 `plan_delivery.v1` 提案与操作者幂等选择；schema v43 将操作者指令与非可信证据分离；schema v44 固化逐切片验证、审计和交接门禁；schema v45-v46 提供安全 turn 边界的 exactly-once 操作者队列、pending-only 取消和显式 drain；schema v47 再从父 Run 固定选择中为每个 Specialist Attempt 派生最多一项、Code/Cyber 分离、metadata-only 可恢复的 Skill 指导。模式、提案、选择、文档、审计声明、排队、取消和 Skill 指导本身都不授予工具、网络、Shell、写文件或子 Agent 能力。
 
@@ -178,7 +178,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 
 ## P6：真实 Sandbox
 
-状态：进行中；schema v48 Manifest、v49 审批候选、v50 禁用生命周期、v51 禁用后端/输出预检和 v52 仅模拟证据/输出事务已完成，真实执行未开放
+状态：进行中；schema v48 Manifest、v49 审批候选、v50 禁用生命周期、v51 禁用后端/输出预检、v52 仅模拟证据/输出事务和 v53 固定端点只读 Docker 观测已完成，真实执行未开放
 
 - [x] 定义严格 `sandbox_manifest.v1`、Mount、NetworkScope、ResourceLimit、环境、输入/输出、超时与取消宽限，并提供 Noop 校验和 CLI 检查。
 - [x] schema v48 持久化 metadata-only preparation/validation/operation，精确绑定 Run/Mission/Workspace/Scope/Policy/可选审批；摘要幂等重放与跨 Store 并发收敛。
@@ -194,11 +194,16 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] schema v52 增加严格 `sandbox_output_fixture.v1`、MIME/总字节/普通文件/symlink/特殊文件/脱敏检查与原子 `FakeArtifactSink`；注入失败或取消回滚为零，生产 `run_artifacts` 不发生写入。
 - [x] `run sandbox evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show` 接入同一 Go 服务，并在两个新边界重验完整 v48-v51 权限链、预算、lease 与输入 Artifact；数据库、事件和 CLI 不保留夹具正文、路径、命令、Manifest、密钥、容器 ID 或私有 lease。
 - [x] 证明 v52 同意图跨 Store 并发收敛、异意图冲突、取消恢复、假事务回滚、SQL 不可变、v51 原地升级、事件/CLI 隐私和每个 evidence 最多 8 次模拟；模拟结果不能升级为生产验证。
-- [ ] 引入 Docker Go client，实现 per-run 容器生命周期。
+- [x] schema v53 增加最小 `DockerReadOnlyTransport`，Linux 只连接固定 `/var/run/docker.sock` 并只允许 `/_ping`、`/version`、`/info` 和精确镜像摘要 inspect 四类 GET；Windows 明确记录 `transport_unsupported`，不读取 `DOCKER_HOST`、不调用 Docker CLI，也不暴露 create/start/run/exec/pull/remove。
+- [x] `run sandbox observe|observations|observation-show` 要求显式 `--confirm-readonly-probe`，绑定同一 v52 evidence、output simulation 和完整 Manifest，再在 Go/SQLite 重验 v48-v52 权限链；三类结果均保持零生产验证、零后端/执行/Artifact 授权。
+- [x] 证明 v53 完整/daemon 不可用/镜像不可用状态、重复 JSON/重定向/非固定端点拒绝、context 取消、无 mutation 方法、同意图不重探、跨 Store 收敛、取消后拒绝、SQL 不可变、v52 原地升级、事件/CLI 隐私和每个 simulation 最多 8 次观测；private mount 明确保持 `not_observable_read_only`。
+- [x] v53 最终本地发布门禁通过普通/race、静态分析、依赖/漏洞、前端、仓库扫描、diff 与真实二进制完整链路 smoke；修复并发语义收敛与 HTTP 内层白名单两项低风险问题，未确认探测不落库，Windows 只记录受限 unsupported 结果，生产 Artifact 保持为零。
+- [ ] 定义确定性 Docker container-spec 编译器和 fake write transaction，在任何真实 daemon 写调用前固定 mount/network/secret/resource/kill/orphan/output 约束。
+- [ ] 在独立发布门禁后引入最小 Go Docker 执行 transport，实现 per-run 容器生命周期；不得把 v53 只读 transport 扩展成隐式写接口。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
 - [ ] 网络默认关闭，后续仅允许显式 allowlist。
-- [ ] 支持真实执行、stdin、超时/kill、日志和原子 Output Artifact 导出；v51 只固定要求，v52 只验证假事务，两者都没有启用生产能力。
-- [ ] 将 v50 幂等清理扩展为真实容器 orphan 检测/回收，并用独立生产证据逐项验证 v51 检查；v52 的 `simulated_pass` 不计入生产验证。
+- [ ] 支持真实执行、stdin、超时/kill、日志和原子 Output Artifact 导出；v51 只固定要求，v52 只验证假事务，v53 只读取元数据，三者都没有启用生产能力。
+- [ ] 将 v50 幂等清理扩展为真实容器 orphan 检测/回收，并用独立生产证据逐项验证 v51 检查；v52 的 `simulated_pass` 与 v53 的 `production_observed` 都不计入生产控制验证。
 - [x] 保留 Noop/Local 作为测试与开发接口；Local 当前明确禁用，不能作为旁路执行后端。
 
 验收标准：容器内不能越界读取宿主目录；取消能终止进程；重启后能识别并处理残留 Sandbox。

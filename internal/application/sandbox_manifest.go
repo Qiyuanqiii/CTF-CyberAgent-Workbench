@@ -83,6 +83,11 @@ type SandboxManifestStore interface {
 		operation sandbox.OutputSimulationOperation) (sandbox.OutputSimulation, bool, error)
 	GetSandboxOutputSimulation(ctx context.Context, id string) (sandbox.OutputSimulation, error)
 	ListSandboxOutputSimulations(ctx context.Context, runID string, limit int) ([]sandbox.OutputSimulation, error)
+	GetDockerObservationOperation(ctx context.Context, keyDigest string) (sandbox.DockerObservationOperation, bool, error)
+	CreateDockerObservation(ctx context.Context, observation sandbox.DockerObservation,
+		operation sandbox.DockerObservationOperation) (sandbox.DockerObservation, bool, error)
+	GetDockerObservation(ctx context.Context, id string) (sandbox.DockerObservation, error)
+	ListDockerObservations(ctx context.Context, runID string, limit int) ([]sandbox.DockerObservation, error)
 }
 
 type SandboxManifestService struct {
@@ -91,6 +96,7 @@ type SandboxManifestService struct {
 	inspector      sandbox.BackendInspector
 	evidenceClient sandbox.BackendEvidenceClient
 	outputHarness  sandbox.OutputSimulationHarness
+	dockerObserver sandbox.DockerProductionObserver
 }
 
 type PrepareSandboxManifestRequest struct {
@@ -108,6 +114,8 @@ func NewSandboxManifestService(store SandboxManifestStore,
 		store: store, checker: checker, inspector: sandbox.NewDisabledBackendInspector(),
 		evidenceClient: sandbox.NewSimulationBackendClient(),
 		outputHarness:  sandbox.NewInMemoryOutputHarness(),
+		dockerObserver: sandbox.NewReadOnlyDockerProductionObserver(
+			sandbox.NewLocalDockerReadOnlyTransport()),
 	}
 }
 

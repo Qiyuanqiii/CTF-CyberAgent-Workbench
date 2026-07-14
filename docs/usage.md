@@ -339,9 +339,24 @@ cyberagent run sandbox evidence-show <evidence-id>
 cyberagent run sandbox output-simulate <evidence-id> --manifest configs/sandbox-docker-simulation.example.json --fixture configs/sandbox-output-fixture.example.json --operation-key sandbox-output-simulation-001
 cyberagent run sandbox output-simulations <run-id>
 cyberagent run sandbox output-simulation-show <simulation-id>
+cyberagent run sandbox observe <evidence-id> --simulation <simulation-id> --manifest configs/sandbox-docker-simulation.example.json --operation-key sandbox-docker-observe-001 --confirm-readonly-probe
+cyberagent run sandbox observations <run-id>
+cyberagent run sandbox observation-show <observation-id>
 ```
 
 `evidence` never contacts a daemon. It binds a canonical OCI image digest and separate simulated daemon/mount/network/secret/container/resource/termination/orphan/output fingerprints to the 16 v51 checks, but reports `trust_class=simulation_only`, `production_verified=0`, and `verified_checks=0`. `output-simulate` strictly validates and redacts fixture content, stages all slots, and commits only to an in-memory fake sink. A failure or cancellation rolls the fake transaction back to zero, and no production Artifact is created. The Store and Application revalidate the complete v48-v51 chain at both boundaries. CLI and events omit fixture bodies, locator fingerprints, raw paths, commands, Manifest content, container IDs, operation digests, and private leases. These commands test protocol behavior only; they cannot create or start a Docker container and cannot authorize real execution.
+
+Schema v53 `observe` is the only command in this chain that may contact a real daemon, and it requires the exact `--confirm-readonly-probe` flag. Before the probe, it resupplies the complete Manifest and binds the same v52 evidence and output simulation. Linux connects only to `/var/run/docker.sock`; Windows currently records `transport_unsupported`. `DOCKER_HOST`, arbitrary TCP endpoints, caller-selected sockets, redirects, proxying, the Docker CLI, image pulls, and every container mutation are excluded. The transport can issue only `GET /_ping`, `GET /version`, `GET /info`, and exact-digest image inspection.
+
+An observation records `observation_complete`, `daemon_unavailable`, or `image_unavailable`. A complete observation may report `production_observed=true`, which means only that bounded daemon and image metadata were read. It does not mean `production_verified`, `backend_available`, `backend_enabled`, `execution_authorized`, or `artifact_commit_authorized`; all remain false. Private-mount support is printed as `not_observable_read_only` because these GETs cannot prove it. Raw daemon ID/name/root, socket, RepoDigests, Manifest, commands, operation keys, and private leases are neither persisted nor printed. Repeating the same operation returns the existing row without probing again, and one output simulation accepts at most eight observations.
+
+An optional real-daemon test is available only when an exact image is already present; it never pulls or creates anything:
+
+```powershell
+$env:CYBERAGENT_DOCKER_READONLY_INTEGRATION = "1"
+$env:CYBERAGENT_DOCKER_READONLY_IMAGE_DIGEST = "sha256:<already-present-digest>"
+go test ./internal/sandbox -run TestLocalDockerReadOnlyObservationIntegration -count=1 -v
+```
 
 ## Workspaces
 

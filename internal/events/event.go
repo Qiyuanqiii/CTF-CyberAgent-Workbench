@@ -109,6 +109,7 @@ const (
 	SandboxPreflightRecordedEvent            = "sandbox.preflight_recorded"
 	SandboxBackendEvidenceRecordedEvent      = "sandbox.backend_evidence_recorded"
 	SandboxOutputSimulationRecordedEvent     = "sandbox.output_simulation_recorded"
+	SandboxDockerObservationRecordedEvent    = "sandbox.docker_observation_recorded"
 	AgentProtocolRepairRequestedEvent        = "agent.protocol_repair_requested"
 	AgentProtocolRepairStartedEvent          = "agent.protocol_repair_started"
 	AgentProtocolRepairCompletedEvent        = "agent.protocol_repair_completed"

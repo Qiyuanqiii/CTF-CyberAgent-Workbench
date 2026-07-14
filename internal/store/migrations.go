@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 52
+const LatestSchemaVersion = 53
 
 type migration struct {
 	Version    int
@@ -7850,6 +7850,413 @@ var sandboxBackendEvidenceStatements = []string{
 	`CREATE TRIGGER trg_sandbox_output_simulation_operation_delete_immutable
 		BEFORE DELETE ON sandbox_output_simulation_operations BEGIN
 			SELECT RAISE(ABORT, 'sandbox output simulation operation cannot be deleted');
+		END;`,
+}
+
+var sandboxDockerObservationStatements = []string{
+	`CREATE TABLE sandbox_docker_observations (
+		id TEXT PRIMARY KEY,
+		evidence_id TEXT NOT NULL,
+		output_simulation_id TEXT NOT NULL,
+		preflight_id TEXT NOT NULL,
+		execution_id TEXT NOT NULL,
+		candidate_id TEXT NOT NULL,
+		preparation_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		mission_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		manifest_fingerprint TEXT NOT NULL,
+		authorization_fingerprint TEXT NOT NULL,
+		policy_fingerprint TEXT NOT NULL,
+		mount_binding_fingerprint TEXT NOT NULL,
+		input_artifact_digest TEXT NOT NULL,
+		threat_model_fingerprint TEXT NOT NULL,
+		output_plan_fingerprint TEXT NOT NULL,
+		protocol_version TEXT NOT NULL,
+		source TEXT NOT NULL,
+		trust_class TEXT NOT NULL,
+		status TEXT NOT NULL,
+		endpoint_class TEXT NOT NULL,
+		endpoint_fingerprint TEXT NOT NULL,
+		binding_fingerprint TEXT NOT NULL,
+		image_digest TEXT NOT NULL,
+		failure_code TEXT NOT NULL,
+		daemon_reachable INTEGER NOT NULL,
+		image_inspected INTEGER NOT NULL,
+		observation_complete INTEGER NOT NULL,
+		production_observed INTEGER NOT NULL,
+		production_verified INTEGER NOT NULL,
+		backend_available INTEGER NOT NULL,
+		backend_enabled INTEGER NOT NULL,
+		execution_authorized INTEGER NOT NULL,
+		artifact_commit_authorized INTEGER NOT NULL,
+		api_version TEXT NOT NULL,
+		min_api_version TEXT NOT NULL,
+		engine_version TEXT NOT NULL,
+		os_type TEXT NOT NULL,
+		architecture TEXT NOT NULL,
+		rootless INTEGER NOT NULL,
+		user_namespace_enabled INTEGER NOT NULL,
+		private_mount_state TEXT NOT NULL,
+		cgroup_version TEXT NOT NULL,
+		ncpu INTEGER NOT NULL,
+		memory_bytes INTEGER NOT NULL,
+		pids_limit_supported INTEGER NOT NULL,
+		image_os_type TEXT NOT NULL,
+		image_architecture TEXT NOT NULL,
+		image_size_bytes INTEGER NOT NULL,
+		image_user_state TEXT NOT NULL,
+		daemon_identity_fingerprint TEXT NOT NULL,
+		capability_fingerprint TEXT NOT NULL,
+		image_fingerprint TEXT NOT NULL,
+		observation_fingerprint TEXT NOT NULL,
+		item_count INTEGER NOT NULL,
+		observed_count INTEGER NOT NULL,
+		verified_count INTEGER NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(evidence_id) REFERENCES sandbox_backend_evidence(id) ON DELETE RESTRICT,
+		FOREIGN KEY(output_simulation_id) REFERENCES sandbox_output_simulations(id) ON DELETE RESTRICT,
+		FOREIGN KEY(preflight_id) REFERENCES sandbox_disabled_preflights(id) ON DELETE RESTRICT,
+		FOREIGN KEY(execution_id) REFERENCES sandbox_disabled_executions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(candidate_id) REFERENCES sandbox_execution_candidates(id) ON DELETE RESTRICT,
+		FOREIGN KEY(preparation_id) REFERENCES sandbox_manifest_preparations(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+		CHECK(protocol_version = 'sandbox_docker_observation.v1'
+			AND source = 'docker_engine_api_read_only'
+			AND trust_class = 'production_observation'),
+		CHECK(status IN ('observation_complete', 'daemon_unavailable', 'image_unavailable')),
+		CHECK(endpoint_class IN ('local_unix', 'local_npipe')),
+		CHECK(failure_code IN ('none', 'connection_failed', 'transport_unsupported',
+			'image_not_found')),
+		CHECK(daemon_reachable IN (0, 1) AND image_inspected IN (0, 1)
+			AND observation_complete IN (0, 1) AND production_observed IN (0, 1)
+			AND production_verified = 0 AND backend_available = 0 AND backend_enabled = 0
+			AND execution_authorized = 0 AND artifact_commit_authorized = 0
+			AND rootless IN (0, 1) AND user_namespace_enabled IN (0, 1)
+			AND pids_limit_supported IN (0, 1)),
+		CHECK(item_count = 6 AND verified_count = 0 AND observed_count BETWEEN 0 AND 6),
+		CHECK(private_mount_state IN ('unknown', 'not_observable_read_only')),
+		CHECK(image_user_state IN ('unknown', 'explicit_non_root', 'root_or_empty')),
+		CHECK(ncpu BETWEEN 0 AND 1000000 AND memory_bytes >= 0 AND image_size_bytes >= 0),
+		CHECK(length(image_digest) = 71 AND substr(image_digest, 1, 7) = 'sha256:'
+			AND substr(image_digest, 8) = lower(substr(image_digest, 8))
+			AND substr(image_digest, 8) NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(endpoint_fingerprint) = 64
+			AND endpoint_fingerprint = lower(endpoint_fingerprint)
+			AND endpoint_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(binding_fingerprint) = 64
+			AND binding_fingerprint = lower(binding_fingerprint)
+			AND binding_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(observation_fingerprint) = 64
+			AND observation_fingerprint = lower(observation_fingerprint)
+			AND observation_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(manifest_fingerprint) = 64
+			AND manifest_fingerprint = lower(manifest_fingerprint)
+			AND manifest_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(authorization_fingerprint) = 64
+			AND authorization_fingerprint = lower(authorization_fingerprint)
+			AND authorization_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(policy_fingerprint) = 64 AND policy_fingerprint = lower(policy_fingerprint)
+			AND policy_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(mount_binding_fingerprint) = 64
+			AND mount_binding_fingerprint = lower(mount_binding_fingerprint)
+			AND mount_binding_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(input_artifact_digest) = 64
+			AND input_artifact_digest = lower(input_artifact_digest)
+			AND input_artifact_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(threat_model_fingerprint) = 64
+			AND threat_model_fingerprint = lower(threat_model_fingerprint)
+			AND threat_model_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(output_plan_fingerprint) = 64
+			AND output_plan_fingerprint = lower(output_plan_fingerprint)
+			AND output_plan_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK((daemon_identity_fingerprint = '' AND capability_fingerprint = '') OR
+			(length(daemon_identity_fingerprint) = 64
+				AND daemon_identity_fingerprint = lower(daemon_identity_fingerprint)
+				AND daemon_identity_fingerprint NOT GLOB '*[^0-9a-f]*'
+				AND length(capability_fingerprint) = 64
+				AND capability_fingerprint = lower(capability_fingerprint)
+				AND capability_fingerprint NOT GLOB '*[^0-9a-f]*')),
+		CHECK(image_fingerprint = '' OR (length(image_fingerprint) = 64
+			AND image_fingerprint = lower(image_fingerprint)
+			AND image_fingerprint NOT GLOB '*[^0-9a-f]*')),
+		CHECK(length(api_version) <= 16 AND length(min_api_version) <= 16
+			AND length(engine_version) <= 128 AND length(os_type) <= 32
+			AND length(architecture) <= 64 AND length(cgroup_version) <= 32
+			AND length(image_os_type) <= 32 AND length(image_architecture) <= 64
+			AND instr(api_version, char(0)) = 0 AND instr(min_api_version, char(0)) = 0
+			AND instr(engine_version, char(0)) = 0 AND instr(os_type, char(0)) = 0
+			AND instr(architecture, char(0)) = 0 AND instr(cgroup_version, char(0)) = 0
+			AND instr(image_os_type, char(0)) = 0 AND instr(image_architecture, char(0)) = 0),
+		CHECK((status = 'daemon_unavailable' AND daemon_reachable = 0
+			AND image_inspected = 0 AND observation_complete = 0 AND production_observed = 0
+			AND failure_code IN ('connection_failed', 'transport_unsupported')
+			AND api_version = '' AND min_api_version = '' AND engine_version = ''
+			AND os_type = '' AND architecture = '' AND rootless = 0
+			AND user_namespace_enabled = 0 AND private_mount_state = 'unknown'
+			AND cgroup_version = '' AND ncpu = 0 AND memory_bytes = 0
+			AND pids_limit_supported = 0 AND image_os_type = ''
+			AND image_architecture = '' AND image_size_bytes = 0
+			AND image_user_state = 'unknown' AND daemon_identity_fingerprint = ''
+			AND capability_fingerprint = '' AND image_fingerprint = '' AND observed_count = 0)
+			OR (status = 'image_unavailable' AND daemon_reachable = 1
+				AND image_inspected = 0 AND observation_complete = 0 AND production_observed = 0
+				AND failure_code = 'image_not_found' AND api_version <> ''
+				AND min_api_version <> '' AND engine_version <> '' AND os_type <> ''
+				AND architecture <> '' AND private_mount_state = 'not_observable_read_only'
+				AND daemon_identity_fingerprint <> '' AND capability_fingerprint <> ''
+				AND image_os_type = '' AND image_architecture = '' AND image_size_bytes = 0
+				AND image_user_state = 'unknown' AND image_fingerprint = '' AND observed_count = 4)
+			OR (status = 'observation_complete' AND daemon_reachable = 1
+				AND image_inspected = 1 AND observation_complete = 1 AND production_observed = 1
+				AND failure_code = 'none' AND api_version <> '' AND min_api_version <> ''
+				AND engine_version <> '' AND os_type <> '' AND architecture <> ''
+				AND private_mount_state = 'not_observable_read_only'
+				AND daemon_identity_fingerprint <> '' AND capability_fingerprint <> ''
+				AND image_os_type <> '' AND image_architecture <> ''
+				AND image_user_state IN ('explicit_non_root', 'root_or_empty')
+				AND image_fingerprint <> '' AND observed_count = 5)),
+		CHECK(id = trim(id) AND length(id) BETWEEN 1 AND 256 AND instr(id, char(0)) = 0),
+		CHECK(evidence_id = trim(evidence_id) AND length(evidence_id) BETWEEN 1 AND 256
+			AND instr(evidence_id, char(0)) = 0),
+		CHECK(output_simulation_id = trim(output_simulation_id)
+			AND length(output_simulation_id) BETWEEN 1 AND 256
+			AND instr(output_simulation_id, char(0)) = 0),
+		CHECK(preflight_id = trim(preflight_id) AND length(preflight_id) BETWEEN 1 AND 256
+			AND instr(preflight_id, char(0)) = 0),
+		CHECK(execution_id = trim(execution_id) AND length(execution_id) BETWEEN 1 AND 256
+			AND instr(execution_id, char(0)) = 0),
+		CHECK(candidate_id = trim(candidate_id) AND length(candidate_id) BETWEEN 1 AND 256
+			AND instr(candidate_id, char(0)) = 0),
+		CHECK(preparation_id = trim(preparation_id) AND length(preparation_id) BETWEEN 1 AND 256
+			AND instr(preparation_id, char(0)) = 0),
+		CHECK(run_id = trim(run_id) AND length(run_id) BETWEEN 1 AND 256 AND instr(run_id, char(0)) = 0),
+		CHECK(mission_id = trim(mission_id) AND length(mission_id) BETWEEN 1 AND 256
+			AND instr(mission_id, char(0)) = 0),
+		CHECK(workspace_id = trim(workspace_id) AND length(workspace_id) BETWEEN 1 AND 256
+			AND instr(workspace_id, char(0)) = 0),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE INDEX idx_sandbox_docker_observations_run_created
+		ON sandbox_docker_observations(run_id, created_at, id);`,
+	`CREATE TABLE sandbox_docker_observation_items (
+		observation_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		name TEXT NOT NULL,
+		state TEXT NOT NULL,
+		evidence_digest TEXT NOT NULL,
+		observed INTEGER NOT NULL,
+		verified INTEGER NOT NULL,
+		PRIMARY KEY(observation_id, ordinal),
+		UNIQUE(observation_id, name),
+		FOREIGN KEY(observation_id) REFERENCES sandbox_docker_observations(id) ON DELETE RESTRICT,
+		CHECK(ordinal BETWEEN 1 AND 6),
+		CHECK((ordinal = 1 AND name = 'daemon_identity')
+			OR (ordinal = 2 AND name = 'api_capabilities')
+			OR (ordinal = 3 AND name = 'rootless_security')
+			OR (ordinal = 4 AND name = 'private_mount_support')
+			OR (ordinal = 5 AND name = 'platform_limits')
+			OR (ordinal = 6 AND name = 'image_inspection')),
+		CHECK(state IN ('observed', 'unavailable', 'not_found', 'not_observable_read_only')),
+		CHECK(observed IN (0, 1) AND verified = 0),
+		CHECK((state = 'observed' AND observed = 1) OR (state <> 'observed' AND observed = 0)),
+		CHECK(length(evidence_digest) = 64 AND evidence_digest = lower(evidence_digest)
+			AND evidence_digest NOT GLOB '*[^0-9a-f]*')
+	) WITHOUT ROWID;`,
+	`CREATE TABLE sandbox_docker_observation_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		observation_id TEXT NOT NULL UNIQUE,
+		evidence_id TEXT NOT NULL,
+		output_simulation_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(observation_id) REFERENCES sandbox_docker_observations(id) ON DELETE RESTRICT,
+		FOREIGN KEY(evidence_id) REFERENCES sandbox_backend_evidence(id) ON DELETE RESTRICT,
+		FOREIGN KEY(output_simulation_id) REFERENCES sandbox_output_simulations(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64
+			AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64
+			AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(observation_id = trim(observation_id) AND length(observation_id) BETWEEN 1 AND 256
+			AND instr(observation_id, char(0)) = 0),
+		CHECK(evidence_id = trim(evidence_id) AND length(evidence_id) BETWEEN 1 AND 256
+			AND instr(evidence_id, char(0)) = 0),
+		CHECK(output_simulation_id = trim(output_simulation_id)
+			AND length(output_simulation_id) BETWEEN 1 AND 256
+			AND instr(output_simulation_id, char(0)) = 0),
+		CHECK(run_id = trim(run_id) AND length(run_id) BETWEEN 1 AND 256 AND instr(run_id, char(0)) = 0),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	) WITHOUT ROWID;`,
+	`CREATE TRIGGER trg_sandbox_docker_observation_insert
+		BEFORE INSERT ON sandbox_docker_observations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_backend_evidence evidence
+			JOIN sandbox_output_simulations simulation ON simulation.id = NEW.output_simulation_id
+			JOIN sandbox_disabled_preflights preflight ON preflight.id = evidence.preflight_id
+			JOIN sandbox_disabled_executions execution ON execution.id = evidence.execution_id
+			JOIN sandbox_execution_candidates candidate ON candidate.id = evidence.candidate_id
+			JOIN sandbox_manifest_preparations preparation ON preparation.id = evidence.preparation_id
+			JOIN sandbox_execution_leases sandbox_lease ON sandbox_lease.execution_id = execution.id
+			JOIN runs run ON run.id = evidence.run_id
+			JOIN missions mission ON mission.id = evidence.mission_id
+			WHERE evidence.id = NEW.evidence_id AND simulation.evidence_id = evidence.id
+				AND evidence.preflight_id = NEW.preflight_id
+				AND evidence.execution_id = NEW.execution_id
+				AND evidence.candidate_id = NEW.candidate_id
+				AND evidence.preparation_id = NEW.preparation_id
+				AND evidence.run_id = NEW.run_id AND evidence.mission_id = NEW.mission_id
+				AND evidence.workspace_id = NEW.workspace_id
+				AND simulation.preflight_id = NEW.preflight_id
+				AND simulation.execution_id = NEW.execution_id
+				AND simulation.run_id = NEW.run_id AND simulation.mission_id = NEW.mission_id
+				AND simulation.workspace_id = NEW.workspace_id
+				AND evidence.manifest_fingerprint = NEW.manifest_fingerprint
+				AND evidence.authorization_fingerprint = NEW.authorization_fingerprint
+				AND evidence.policy_fingerprint = NEW.policy_fingerprint
+				AND evidence.mount_binding_fingerprint = NEW.mount_binding_fingerprint
+				AND evidence.input_artifact_digest = NEW.input_artifact_digest
+				AND evidence.threat_model_fingerprint = NEW.threat_model_fingerprint
+				AND evidence.output_plan_fingerprint = NEW.output_plan_fingerprint
+				AND simulation.output_plan_fingerprint = NEW.output_plan_fingerprint
+				AND evidence.image_digest = NEW.image_digest
+				AND evidence.requested_by = NEW.requested_by
+				AND simulation.requested_by = NEW.requested_by
+				AND evidence.source = 'in_memory_fake' AND evidence.trust_class = 'simulation_only'
+				AND evidence.status = 'simulation_complete' AND evidence.production_verified = 0
+				AND evidence.backend_available = 0 AND evidence.backend_enabled = 0
+				AND evidence.execution_authorized = 0 AND evidence.artifact_commit_authorized = 0
+				AND simulation.status = 'simulation_committed' AND simulation.simulation_only = 1
+				AND simulation.production_artifact_count = 0
+				AND simulation.artifact_commit_authorized = 0
+				AND simulation.backend_enabled = 0 AND simulation.execution_authorized = 0
+				AND preflight.backend = 'docker' AND preparation.backend = 'docker'
+				AND preflight.manifest_fingerprint = NEW.manifest_fingerprint
+				AND preflight.authorization_fingerprint = NEW.authorization_fingerprint
+				AND preflight.policy_fingerprint = NEW.policy_fingerprint
+				AND preflight.mount_binding_fingerprint = NEW.mount_binding_fingerprint
+				AND preflight.input_artifact_digest = NEW.input_artifact_digest
+				AND preflight.threat_model_fingerprint = NEW.threat_model_fingerprint
+				AND preflight.output_plan_fingerprint = NEW.output_plan_fingerprint
+				AND preflight.requested_by = NEW.requested_by
+				AND preflight.backend_available = 0 AND preflight.backend_enabled = 0
+				AND preflight.execution_authorized = 0 AND preflight.artifact_commit_authorized = 0
+				AND execution.backend_enabled = 0 AND execution.execution_authorized = 0
+				AND execution.backend_started = 0 AND candidate.backend_enabled = 0
+				AND candidate.execution_authorized = 0 AND sandbox_lease.status = 'released'
+				AND run.mission_id = NEW.mission_id AND mission.workspace_id = NEW.workspace_id
+				AND run.status IN ('created', 'preparing', 'running', 'waiting_approval', 'paused')
+				AND NOT EXISTS (SELECT 1 FROM sandbox_execution_cancellations cancellation
+					WHERE cancellation.execution_id = execution.id)
+				AND NOT EXISTS (SELECT 1 FROM sandbox_cleanup_results cleanup
+					WHERE cleanup.execution_id = execution.id)
+				AND NOT EXISTS (SELECT 1 FROM run_execution_leases run_lease
+					WHERE run_lease.run_id = NEW.run_id AND run_lease.status = 'active'
+						AND julianday(run_lease.expires_at) > julianday('now'))
+				AND candidate.tokens_used =
+					COALESCE((SELECT SUM(node.tokens_used) FROM agent_nodes node
+						WHERE node.run_id = NEW.run_id), 0) +
+					COALESCE((SELECT SUM(CASE WHEN call.usage_recorded = 1 THEN call.total_tokens
+						ELSE call.reserved_total_tokens END) FROM readonly_fanout_model_calls call
+						WHERE call.run_id = NEW.run_id), 0)
+				AND candidate.execution_millis_used =
+					COALESCE((SELECT checkpoint.execution_millis FROM run_supervisor_checkpoints checkpoint
+						WHERE checkpoint.run_id = NEW.run_id), 0) +
+					COALESCE((SELECT SUM(call.elapsed_millis) FROM specialist_model_calls call
+						WHERE call.run_id = NEW.run_id), 0) +
+					COALESCE((SELECT SUM(CASE WHEN call.elapsed_recorded = 1 THEN call.elapsed_millis
+						ELSE call.reserved_millis END) FROM readonly_fanout_model_calls call
+						WHERE call.run_id = NEW.run_id), 0)
+				AND candidate.tool_calls_used = COALESCE((SELECT usage.consumed FROM run_tool_usage usage
+					WHERE usage.run_id = NEW.run_id), 0)
+				AND (COALESCE(CAST(json_extract(run.budget_json, '$.max_tokens') AS INTEGER), 0) = 0
+					OR candidate.tokens_used < CAST(json_extract(run.budget_json, '$.max_tokens') AS INTEGER))
+				AND (COALESCE(CAST(json_extract(run.budget_json, '$.timeout_seconds') AS INTEGER), 0) = 0
+					OR candidate.execution_millis_used < CAST(json_extract(run.budget_json, '$.timeout_seconds') AS INTEGER) * 1000)
+				AND (COALESCE(CAST(json_extract(run.budget_json, '$.max_tool_calls') AS INTEGER), 0) = 0
+					OR candidate.tool_calls_used < CAST(json_extract(run.budget_json, '$.max_tool_calls') AS INTEGER))
+				AND (SELECT COUNT(*) FROM sandbox_execution_inputs input
+					JOIN run_artifacts artifact ON artifact.id = input.artifact_id
+					WHERE input.execution_id = execution.id AND artifact.run_id = execution.run_id
+						AND artifact.session_id = run.session_id
+						AND artifact.workspace_id = execution.workspace_id
+						AND artifact.sha256 = input.sha256 AND artifact.size_bytes = input.size_bytes
+						AND artifact.mime = input.mime AND artifact.stream = input.stream
+						AND artifact.source_id = input.source_id AND artifact.redacted = input.redacted)
+					= execution.input_artifact_count
+				AND COALESCE((SELECT SUM(input.size_bytes) FROM sandbox_execution_inputs input
+					WHERE input.execution_id = execution.id), 0) = execution.input_artifact_bytes
+				AND (SELECT COUNT(*) FROM sandbox_docker_observations existing
+					WHERE existing.output_simulation_id = NEW.output_simulation_id) < 8
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Docker observation authority binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_docker_observation_item_insert
+		BEFORE INSERT ON sandbox_docker_observation_items
+		WHEN NOT EXISTS (SELECT 1 FROM sandbox_docker_observations observation
+			WHERE observation.id = NEW.observation_id
+				AND ((observation.status = 'daemon_unavailable' AND NEW.state = 'unavailable')
+					OR (observation.status = 'image_unavailable'
+						AND ((NEW.ordinal IN (1, 2, 3, 5) AND NEW.state = 'observed')
+							OR (NEW.ordinal = 4 AND NEW.state = 'not_observable_read_only')
+							OR (NEW.ordinal = 6 AND NEW.state = 'not_found')))
+					OR (observation.status = 'observation_complete'
+						AND ((NEW.ordinal IN (1, 2, 3, 5, 6) AND NEW.state = 'observed')
+							OR (NEW.ordinal = 4 AND NEW.state = 'not_observable_read_only')))))
+		BEGIN
+			SELECT RAISE(ABORT, 'Docker observation item binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_docker_observation_operation_insert
+		BEFORE INSERT ON sandbox_docker_observation_operations
+		WHEN NOT EXISTS (SELECT 1 FROM sandbox_docker_observations observation
+			WHERE observation.id = NEW.observation_id AND observation.evidence_id = NEW.evidence_id
+				AND observation.output_simulation_id = NEW.output_simulation_id
+				AND observation.run_id = NEW.run_id AND observation.requested_by = NEW.requested_by
+				AND observation.created_at = NEW.created_at
+				AND (SELECT COUNT(*) FROM sandbox_docker_observation_items item
+					WHERE item.observation_id = observation.id) = observation.item_count
+				AND (SELECT COALESCE(SUM(item.observed), 0)
+					FROM sandbox_docker_observation_items item
+					WHERE item.observation_id = observation.id) = observation.observed_count
+				AND (SELECT COALESCE(SUM(item.verified), 0)
+					FROM sandbox_docker_observation_items item
+					WHERE item.observation_id = observation.id) = 0)
+		BEGIN
+			SELECT RAISE(ABORT, 'Docker observation operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_docker_observation_update_immutable
+		BEFORE UPDATE ON sandbox_docker_observations BEGIN
+			SELECT RAISE(ABORT, 'Docker observation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_docker_observation_delete_immutable
+		BEFORE DELETE ON sandbox_docker_observations BEGIN
+			SELECT RAISE(ABORT, 'Docker observation cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_docker_observation_item_update_immutable
+		BEFORE UPDATE ON sandbox_docker_observation_items BEGIN
+			SELECT RAISE(ABORT, 'Docker observation item cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_docker_observation_item_delete_immutable
+		BEFORE DELETE ON sandbox_docker_observation_items BEGIN
+			SELECT RAISE(ABORT, 'Docker observation item cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_docker_observation_operation_update_immutable
+		BEFORE UPDATE ON sandbox_docker_observation_operations BEGIN
+			SELECT RAISE(ABORT, 'Docker observation operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_docker_observation_operation_delete_immutable
+		BEFORE DELETE ON sandbox_docker_observation_operations BEGIN
+			SELECT RAISE(ABORT, 'Docker observation operation cannot be deleted');
 		END;`,
 }
 

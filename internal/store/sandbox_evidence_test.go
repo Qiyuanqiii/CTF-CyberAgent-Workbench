@@ -319,7 +319,7 @@ func createDockerPreflightStoreFixture(t *testing.T, ctx context.Context, st *SQ
 }
 
 func removeSchemaV52ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV53ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_output_simulation_operation_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_output_simulation_operation_update_immutable`,
 		`DROP TRIGGER trg_sandbox_output_simulation_item_delete_immutable`,
@@ -347,5 +347,24 @@ func removeSchemaV52ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_backend_evidence_run_created`,
 		`DROP TABLE sandbox_backend_evidence`,
 		`DELETE FROM schema_migrations WHERE version = 52`,
+	}...)
+}
+
+func removeSchemaV53ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_docker_observation_operation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_observation_operation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_observation_item_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_observation_item_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_observation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_observation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_observation_operation_insert`,
+		`DROP TRIGGER trg_sandbox_docker_observation_item_insert`,
+		`DROP TRIGGER trg_sandbox_docker_observation_insert`,
+		`DROP TABLE sandbox_docker_observation_operations`,
+		`DROP TABLE sandbox_docker_observation_items`,
+		`DROP INDEX idx_sandbox_docker_observations_run_created`,
+		`DROP TABLE sandbox_docker_observations`,
+		`DELETE FROM schema_migrations WHERE version = 53`,
 	}
 }

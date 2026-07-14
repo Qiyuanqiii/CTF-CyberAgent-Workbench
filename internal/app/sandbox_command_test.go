@@ -17,6 +17,7 @@ var sandboxExecutionIDPattern = regexp.MustCompile(`sandbox-execution-[0-9]{14}-
 var sandboxPreflightIDPattern = regexp.MustCompile(`sandbox-preflight-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxEvidenceIDPattern = regexp.MustCompile(`sandbox-evidence-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxOutputSimulationIDPattern = regexp.MustCompile(`sandbox-output-sim-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxDockerObservationIDPattern = regexp.MustCompile(`sandbox-docker-observation-[0-9]{14}-[a-f0-9]{12}`)
 
 func TestSandboxCLIValidatesPreparesListsAndShowsMetadataOnly(t *testing.T) {
 	t.Setenv("CYBERAGENT_HOME", t.TempDir())
@@ -311,6 +312,62 @@ func TestSandboxCLISimulatesBackendEvidenceAndAtomicOutputWithoutExecution(t *te
 	if code != 0 || stderr != "" || !strings.Contains(shown, "simulation_only: true") ||
 		strings.Contains(shown, "sk-123456") || strings.Contains(shown, "locator_fingerprint") {
 		t.Fatalf("output simulation show leaked data output=%s stderr=%s code=%d", shown, stderr, code)
+	}
+	if _, stderr, code := executeTestCommand(t, "run", "sandbox", "observe", evidenceID,
+		"--simulation", simulationID, "--manifest", manifestPath,
+		"--operation-key", "sandbox-docker-observe"); code != 4 ||
+		!strings.Contains(stderr, "requires --confirm-readonly-probe") {
+		t.Fatalf("Docker observation skipped explicit confirmation: stderr=%s code=%d", stderr, code)
+	}
+	emptyObservations, stderr, code := executeTestCommand(t, "run", "sandbox", "observations", runID)
+	if code != 0 || stderr != "" || !strings.Contains(emptyObservations,
+		"no read-only Docker observations") {
+		t.Fatalf("unconfirmed probe left an observation: output=%s stderr=%s code=%d",
+			emptyObservations, stderr, code)
+	}
+	observed, stderr, code := executeTestCommand(t, "run", "sandbox", "observe", evidenceID,
+		"--simulation", simulationID, "--manifest", manifestPath,
+		"--operation-key", "sandbox-docker-observe", "--confirm-readonly-probe")
+	if code != 0 || stderr != "" ||
+		(!strings.Contains(observed, "status: daemon_unavailable") &&
+			!strings.Contains(observed, "status: image_unavailable") &&
+			!strings.Contains(observed, "status: observation_complete")) ||
+		!strings.Contains(observed, "source: docker_engine_api_read_only") ||
+		!strings.Contains(observed, "production_verified: false") ||
+		!strings.Contains(observed, "backend_enabled: false") ||
+		!strings.Contains(observed, "execution_authorized: false") ||
+		strings.Contains(observed, "/var/run/docker.sock") ||
+		strings.Contains(observed, "DockerRootDir") || strings.Contains(observed, "container_id") {
+		t.Fatalf("unexpected read-only Docker observation output=%s stderr=%s code=%d",
+			observed, stderr, code)
+	}
+	observationID := sandboxDockerObservationIDPattern.FindString(observed)
+	if observationID == "" {
+		t.Fatalf("missing Docker observation id: %s", observed)
+	}
+	observedReplay, stderr, code := executeTestCommand(t, "run", "sandbox", "observe", evidenceID,
+		"--simulation", simulationID, "--manifest", manifestPath,
+		"--operation-key", "sandbox-docker-observe", "--confirm-readonly-probe")
+	if code != 0 || stderr != "" || !strings.Contains(observedReplay,
+		"observation: "+observationID) || !strings.Contains(observedReplay, "replayed: true") {
+		t.Fatalf("Docker observation replay failed output=%s stderr=%s code=%d",
+			observedReplay, stderr, code)
+	}
+	observationList, stderr, code := executeTestCommand(t, "run", "sandbox", "observations", runID)
+	if code != 0 || stderr != "" || !strings.Contains(observationList, observationID) ||
+		!strings.Contains(observationList, "production_verified=false") ||
+		!strings.Contains(observationList, "execution_authorized=false") {
+		t.Fatalf("Docker observation list failed output=%s stderr=%s code=%d",
+			observationList, stderr, code)
+	}
+	observationShown, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"observation-show", observationID)
+	if code != 0 || stderr != "" || !strings.Contains(observationShown, "verified_items: 0") ||
+		!strings.Contains(observationShown, "private_mount_state:") ||
+		strings.Contains(observationShown, "/var/run/docker.sock") ||
+		strings.Contains(observationShown, "private-build-host") {
+		t.Fatalf("Docker observation show leaked data output=%s stderr=%s code=%d",
+			observationShown, stderr, code)
 	}
 }
 

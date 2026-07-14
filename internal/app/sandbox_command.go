@@ -68,7 +68,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|cancel|cleanup|executions|execution-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	switch args[0] {
@@ -470,6 +470,79 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		}
 		printSandboxOutputSimulation(a, value)
 		return nil
+	case "observe":
+		fs := newFlagSet("run sandbox observe", a.errOut)
+		simulationID := fs.String("simulation", "", "exact v52 output simulation identity")
+		manifestPath := fs.String("manifest", "", "resupplied Docker sandbox manifest JSON file")
+		operationKey := fs.String("operation-key", "", "stable Docker observation operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		confirmed := fs.Bool("confirm-readonly-probe", false,
+			"confirm fixed-endpoint read-only Docker Engine API observation")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"simulation": true, "manifest": true, "operation-key": true,
+			"operator": true, "confirm-readonly-probe": false,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*simulationID) == "" ||
+			strings.TrimSpace(*manifestPath) == "" || strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox observe <evidence-id> --simulation <simulation-id> --manifest <manifest.json> --operation-key <key> --confirm-readonly-probe [--operator <id>]")
+		}
+		if !*confirmed {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"read-only Docker observation requires --confirm-readonly-probe")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		value, err := service.ObserveDockerBackend(ctx, application.ObserveDockerBackendRequest{
+			EvidenceID: fs.Arg(0), OutputSimulationID: *simulationID, Manifest: manifest,
+			OperationKey: *operationKey, RequestedBy: *operator,
+		})
+		if err != nil {
+			return err
+		}
+		printSandboxDockerObservation(a, value)
+		return nil
+	case "observations":
+		fs := newFlagSet("run sandbox observations", a.errOut)
+		limit := fs.Int("limit", 100, "maximum read-only Docker observations")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox observations <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDockerObservations(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no read-only Docker observations")
+			return nil
+		}
+		for _, value := range values {
+			fmt.Fprintf(a.out, "%s\tevidence=%s\tsimulation=%s\tstatus=%s\tfailure=%s\tobserved=%t\tproduction_verified=false\tbackend_enabled=false\texecution_authorized=false\tcreated_at=%s\n",
+				value.ID, value.EvidenceID, value.OutputSimulationID, value.Report.Status,
+				value.Report.FailureCode, value.Report.ProductionObserved,
+				value.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "observation-show":
+		fs := newFlagSet("run sandbox observation-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox observation-show <observation-id>")
+		}
+		value, err := service.GetDockerObservation(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxDockerObservation(a, value)
+		return nil
 	case "cancel":
 		fs := newFlagSet("run sandbox cancel", a.errOut)
 		operationKey := fs.String("operation-key", "", "stable cancellation operation key")
@@ -610,6 +683,36 @@ func printSandboxOutputSimulation(a *App, value sandbox.OutputSimulation) {
 		fmt.Fprintf(a.out, "%d\tkind=%s\tmime=%s\tsha256=%s\tsize_bytes=%d\tredacted=%t\n",
 			descriptor.Ordinal, descriptor.Kind, descriptor.MIME, descriptor.SHA256,
 			descriptor.SizeBytes, descriptor.Redacted)
+	}
+}
+
+func printSandboxDockerObservation(a *App, value sandbox.DockerObservation) {
+	report := value.Report
+	observed := 0
+	for _, item := range report.Items {
+		if item.Observed {
+			observed++
+		}
+	}
+	fmt.Fprintf(a.out, "observation: %s\nevidence: %s\noutput_simulation: %s\npreflight: %s\nexecution: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nsource: %s\ntrust_class: %s\nstatus: %s\nendpoint_class: %s\nendpoint_fingerprint: %s\nbinding_fingerprint: %s\nimage_digest: %s\nfailure_code: %s\ndaemon_reachable: %t\nimage_inspected: %t\nobservation_complete: %t\nproduction_observed: %t\nproduction_verified: false\nobserved_items: %d\nverified_items: 0\napi_version: %s\nmin_api_version: %s\nengine_version: %s\nos_type: %s\narchitecture: %s\nrootless: %t\nuser_namespace_enabled: %t\nprivate_mount_state: %s\ncgroup_version: %s\nncpu: %d\nmemory_bytes: %d\npids_limit_supported: %t\nimage_os_type: %s\nimage_architecture: %s\nimage_size_bytes: %d\nimage_user_state: %s\ndaemon_identity_fingerprint: %s\ncapability_fingerprint: %s\nimage_fingerprint: %s\nobservation_fingerprint: %s\nbackend_available: false\nbackend_enabled: false\nexecution_authorized: false\nartifact_commit_authorized: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\n",
+		value.ID, value.EvidenceID, value.OutputSimulationID, value.PreflightID,
+		value.ExecutionID, value.RunID, value.MissionID, value.WorkspaceID,
+		report.ProtocolVersion, report.Source, report.TrustClass, report.Status,
+		report.EndpointClass, report.EndpointFingerprint, report.BindingFingerprint,
+		report.ImageDigest, report.FailureCode, report.DaemonReachable,
+		report.ImageInspected, report.ObservationComplete, report.ProductionObserved,
+		observed, report.APIVersion, report.MinAPIVersion, report.EngineVersion,
+		report.OSType, report.Architecture, report.Rootless,
+		report.UserNamespaceEnabled, report.PrivateMountState, report.CgroupVersion,
+		report.NCPU, report.MemoryBytes, report.PidsLimitSupported, report.ImageOSType,
+		report.ImageArchitecture, report.ImageSizeBytes, report.ImageUserState,
+		report.DaemonIdentityFingerprint, report.CapabilityFingerprint,
+		report.ImageFingerprint, report.ObservationFingerprint, value.RequestedBy,
+		value.CreatedAt.Format(timeFormatRFC3339Nano), value.Replayed)
+	fmt.Fprintln(a.out, "items:")
+	for _, item := range report.Items {
+		fmt.Fprintf(a.out, "%d\t%s\tstate=%s\tobserved=%t\tverified=false\tevidence_digest=%s\n",
+			item.Ordinal, item.Name, item.State, item.Observed, item.EvidenceDigest)
 	}
 }
 
