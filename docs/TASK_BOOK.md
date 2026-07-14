@@ -198,7 +198,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] `run sandbox observe|observations|observation-show` 要求显式 `--confirm-readonly-probe`，绑定同一 v52 evidence、output simulation 和完整 Manifest，再在 Go/SQLite 重验 v48-v52 权限链；三类结果均保持零生产验证、零后端/执行/Artifact 授权。
 - [x] 证明 v53 完整/daemon 不可用/镜像不可用状态、重复 JSON/重定向/非固定端点拒绝、context 取消、无 mutation 方法、同意图不重探、跨 Store 收敛、取消后拒绝、SQL 不可变、v52 原地升级、事件/CLI 隐私和每个 simulation 最多 8 次观测；private mount 明确保持 `not_observable_read_only`。
 - [x] v53 最终本地发布门禁通过普通/race、静态分析、依赖/漏洞、前端、仓库扫描、diff 与真实二进制完整链路 smoke；修复并发语义收敛与 HTTP 内层白名单两项低风险问题，未确认探测不落库，Windows 只记录受限 unsupported 结果，生产 Artifact 保持为零。
-- [x] 修复 Linux CI 暴露的 CLI 单测环境耦合：测试仅进程内注入确定性 unavailable observer，生产 CLI 默认固定端点与 opt-in 真实 daemon 集成测试保持不变。
+- [x] 修复 Linux CI 暴露的 CLI 单测环境耦合：测试仅进程内注入确定性 unavailable observer，生产 CLI 默认固定端点与 opt-in 真实 daemon 集成测试保持不变；GitHub Actions run `29368979988` 已通过修复提交 `fe7b070`。
 - [ ] 定义确定性 Docker container-spec 编译器和 fake write transaction，在任何真实 daemon 写调用前固定 mount/network/secret/resource/kill/orphan/output 约束。
 - [ ] 在独立发布门禁后引入最小 Go Docker 执行 transport，实现 per-run 容器生命周期；不得把 v53 只读 transport 扩展成隐式写接口。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
