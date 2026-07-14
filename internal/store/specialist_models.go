@@ -178,6 +178,10 @@ func (s *SQLiteStore) RecordSpecialistModelStarted(ctx context.Context,
 		if err := requireSpecialistModelIdentity(existing, modelAttempt); err != nil {
 			return false, err
 		}
+		if err := commitSpecialistSkillContextTx(ctx, tx, run, attempt, child,
+			modelAttempt.Number); err != nil {
+			return false, err
+		}
 		if err := tx.Commit(); err != nil {
 			return false, err
 		}
@@ -216,6 +220,10 @@ func (s *SQLiteStore) RecordSpecialistModelStarted(ctx context.Context,
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'started', ?)`, attempt.ID, attempt.RunID,
 		attempt.AgentID, modelAttempt.Number, modelAttempt.TransportNumber(), modelAttempt.MaxAttempts,
 		modelAttempt.ProtocolRepair, modelAttempt.Provider, modelAttempt.Model, ts(now)); err != nil {
+		return false, err
+	}
+	if err := commitSpecialistSkillContextTx(ctx, tx, run, attempt, child,
+		modelAttempt.Number); err != nil {
 		return false, err
 	}
 	if err := resolveSupersededSpecialistModelCancellationsTx(ctx, tx,

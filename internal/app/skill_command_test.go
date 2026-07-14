@@ -15,7 +15,7 @@ func TestSkillCLIListsShowsAndValidatesBuiltinsWithoutRuntimeState(t *testing.T)
 	if code != 0 || stderr != "" || !strings.Contains(listed, "code@1.1.0") ||
 		!strings.Contains(listed, "learn@1.1.0") || !strings.Contains(listed, "review@1.1.0") ||
 		!strings.Contains(listed, "plan-delivery@1.1.0") ||
-		!strings.Contains(listed, "script@1.1.0") || !strings.Contains(listed, "context_injection: root_selected_only") ||
+		!strings.Contains(listed, "script@1.1.0") || !strings.Contains(listed, "context_injection: root_selected_and_specialist_minimized") ||
 		!strings.Contains(listed, "tool_capability_grant: disabled") {
 		t.Fatalf("unexpected skill list: code=%d stderr=%q output=%q", code, stderr, listed)
 	}

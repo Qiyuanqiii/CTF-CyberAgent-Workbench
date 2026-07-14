@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 46
+const LatestSchemaVersion = 47
 
 type migration struct {
 	Version    int
@@ -6069,6 +6069,156 @@ var operatorSteeringControlStatements = []string{
 							AND operation.message_id = OLD.id AND operation.run_id = OLD.run_id))))
 		BEGIN
 			SELECT RAISE(ABORT, 'operator steering content is immutable and status is monotonic');
+		END;`,
+}
+
+var specialistSkillContextStatements = []string{
+	`CREATE TABLE specialist_skill_context_preparations (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		mission_id TEXT NOT NULL,
+		agent_id TEXT NOT NULL,
+		parent_agent_id TEXT NOT NULL,
+		agent_attempt_id TEXT NOT NULL UNIQUE,
+		turn_number INTEGER NOT NULL,
+		parent_selection_id TEXT NOT NULL,
+		protocol_version TEXT NOT NULL,
+		parent_selection_fingerprint TEXT NOT NULL,
+		mode_snapshot_id TEXT NOT NULL,
+		mode_revision INTEGER NOT NULL,
+		surface TEXT NOT NULL,
+		profile TEXT NOT NULL,
+		assignment_fingerprint TEXT NOT NULL,
+		context_fingerprint TEXT NOT NULL,
+		item_count INTEGER NOT NULL,
+		token_budget INTEGER NOT NULL,
+		token_upper_bound INTEGER NOT NULL,
+		redaction_count INTEGER NOT NULL,
+		prepared_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id, agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id, parent_agent_id) REFERENCES agent_nodes(run_id, id) ON DELETE RESTRICT,
+		FOREIGN KEY(agent_attempt_id) REFERENCES agent_attempts(id) ON DELETE RESTRICT,
+		FOREIGN KEY(parent_selection_id) REFERENCES run_skill_selections(id) ON DELETE RESTRICT,
+		FOREIGN KEY(mode_snapshot_id) REFERENCES run_mode_snapshots(id) ON DELETE RESTRICT,
+		CHECK(protocol_version = 'specialist_skill_context.v1'),
+		CHECK(surface IN ('code', 'cyber')),
+		CHECK(profile IN ('code', 'review', 'learn', 'script')),
+		CHECK(turn_number > 0 AND mode_revision > 0),
+		CHECK(item_count BETWEEN 0 AND 1),
+		CHECK(token_budget BETWEEN 1 AND 2048),
+		CHECK(token_upper_bound BETWEEN 0 AND token_budget),
+		CHECK(redaction_count BETWEEN 0 AND token_budget),
+		CHECK((item_count = 0 AND token_upper_bound = 0 AND redaction_count = 0)
+			OR (item_count = 1 AND token_upper_bound > 0)),
+		CHECK(length(parent_selection_fingerprint) = 64
+			AND parent_selection_fingerprint = lower(parent_selection_fingerprint)
+			AND parent_selection_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(assignment_fingerprint) = 64
+			AND assignment_fingerprint = lower(assignment_fingerprint)
+			AND assignment_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(context_fingerprint) = 64
+			AND context_fingerprint = lower(context_fingerprint)
+			AND context_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(id = trim(id) AND length(id) BETWEEN 1 AND 256 AND instr(id, char(0)) = 0),
+		CHECK(run_id = trim(run_id) AND length(run_id) BETWEEN 1 AND 256 AND instr(run_id, char(0)) = 0),
+		CHECK(mission_id = trim(mission_id) AND length(mission_id) BETWEEN 1 AND 256
+			AND instr(mission_id, char(0)) = 0),
+		CHECK(agent_id = trim(agent_id) AND length(agent_id) BETWEEN 1 AND 256
+			AND instr(agent_id, char(0)) = 0),
+		CHECK(parent_agent_id = trim(parent_agent_id) AND length(parent_agent_id) BETWEEN 1 AND 256
+			AND instr(parent_agent_id, char(0)) = 0),
+		CHECK(agent_attempt_id = trim(agent_attempt_id)
+			AND length(agent_attempt_id) BETWEEN 1 AND 256 AND instr(agent_attempt_id, char(0)) = 0),
+		CHECK(parent_selection_id = trim(parent_selection_id)
+			AND length(parent_selection_id) BETWEEN 1 AND 256 AND instr(parent_selection_id, char(0)) = 0),
+		CHECK(mode_snapshot_id = trim(mode_snapshot_id)
+			AND length(mode_snapshot_id) BETWEEN 1 AND 256 AND instr(mode_snapshot_id, char(0)) = 0)
+	);`,
+	`CREATE INDEX idx_specialist_skill_context_run_agent_turn
+		ON specialist_skill_context_preparations(run_id, agent_id, turn_number, prepared_at);`,
+	`CREATE TABLE specialist_skill_context_commits (
+		preparation_id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		agent_attempt_id TEXT NOT NULL UNIQUE,
+		model_attempt INTEGER NOT NULL,
+		committed_at TEXT NOT NULL,
+		FOREIGN KEY(preparation_id) REFERENCES specialist_skill_context_preparations(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(agent_attempt_id) REFERENCES agent_attempts(id) ON DELETE RESTRICT,
+		CHECK(model_attempt > 0),
+		CHECK(run_id = trim(run_id) AND length(run_id) BETWEEN 1 AND 256 AND instr(run_id, char(0)) = 0),
+		CHECK(agent_attempt_id = trim(agent_attempt_id)
+			AND length(agent_attempt_id) BETWEEN 1 AND 256 AND instr(agent_attempt_id, char(0)) = 0)
+	);`,
+	`CREATE TRIGGER trg_specialist_skill_context_preparation_insert
+		BEFORE INSERT ON specialist_skill_context_preparations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM runs run
+			JOIN missions mission ON mission.id = run.mission_id
+			JOIN agent_attempts attempt ON attempt.id = NEW.agent_attempt_id
+			JOIN agent_nodes child ON child.run_id = run.id AND child.id = NEW.agent_id
+			JOIN agent_nodes parent ON parent.run_id = run.id AND parent.id = NEW.parent_agent_id
+			JOIN run_skill_selections selection ON selection.id = NEW.parent_selection_id
+			JOIN run_mode_snapshots mode ON mode.id = NEW.mode_snapshot_id
+			WHERE run.id = NEW.run_id AND run.mission_id = NEW.mission_id
+				AND run.status = 'running' AND mission.profile = NEW.profile
+				AND attempt.run_id = run.id AND attempt.agent_id = child.id
+				AND attempt.parent_agent_id = parent.id AND attempt.status = 'running'
+				AND attempt.turn_number = NEW.turn_number
+				AND child.role = 'specialist' AND child.status = 'running'
+				AND child.parent_id = parent.id AND child.active_attempt_id = attempt.id
+				AND child.profile = NEW.profile AND parent.role = 'root'
+				AND EXISTS (SELECT 1 FROM json_each(child.skills_json) skill
+					WHERE skill.type = 'text' AND skill.value = 'model.chat')
+				AND parent.status IN ('ready', 'running', 'waiting')
+				AND selection.run_id = run.id AND selection.mission_id = mission.id
+				AND selection.profile = NEW.profile
+				AND selection.selection_fingerprint = NEW.parent_selection_fingerprint
+				AND NEW.item_count <= selection.item_count
+				AND NEW.token_upper_bound <= selection.token_upper_bound
+				AND mode.run_id = run.id AND mode.mission_id = mission.id
+				AND mode.revision = NEW.mode_revision AND mode.surface = NEW.surface
+				AND mode.profile = NEW.profile
+				AND NOT EXISTS (SELECT 1 FROM run_mode_snapshots later
+					WHERE later.run_id = run.id AND later.revision > mode.revision)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist Skill context preparation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_specialist_skill_context_commit_insert
+		BEFORE INSERT ON specialist_skill_context_commits
+		WHEN NOT EXISTS (
+			SELECT 1 FROM specialist_skill_context_preparations preparation
+			JOIN agent_attempts attempt ON attempt.id = preparation.agent_attempt_id
+			JOIN specialist_model_calls model_call
+				ON model_call.agent_attempt_id = attempt.id
+				AND model_call.model_attempt_number = NEW.model_attempt
+			WHERE preparation.id = NEW.preparation_id
+				AND preparation.run_id = NEW.run_id
+				AND preparation.agent_attempt_id = NEW.agent_attempt_id
+				AND attempt.status = 'running' AND model_call.status = 'started'
+				AND julianday(NEW.committed_at) >= julianday(preparation.prepared_at)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'Specialist Skill context commit binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_specialist_skill_context_preparation_update_immutable
+		BEFORE UPDATE ON specialist_skill_context_preparations BEGIN
+			SELECT RAISE(ABORT, 'Specialist Skill context preparation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_specialist_skill_context_preparation_delete_immutable
+		BEFORE DELETE ON specialist_skill_context_preparations BEGIN
+			SELECT RAISE(ABORT, 'Specialist Skill context preparation cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_specialist_skill_context_commit_update_immutable
+		BEFORE UPDATE ON specialist_skill_context_commits BEGIN
+			SELECT RAISE(ABORT, 'Specialist Skill context commit cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_specialist_skill_context_commit_delete_immutable
+		BEFORE DELETE ON specialist_skill_context_commits BEGIN
+			SELECT RAISE(ABORT, 'Specialist Skill context commit cannot be deleted');
 		END;`,
 }
 

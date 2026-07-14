@@ -150,6 +150,6 @@ func joinToolDependencies(dependencies []toolgateway.ToolName) string {
 }
 
 func printSkillBoundary(a *App) {
-	fmt.Fprintln(a.out, "context_injection: root_selected_only")
+	fmt.Fprintln(a.out, "context_injection: root_selected_and_specialist_minimized")
 	fmt.Fprintln(a.out, "tool_capability_grant: disabled")
 }

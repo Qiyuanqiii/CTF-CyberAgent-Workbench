@@ -1184,7 +1184,7 @@ func removeSchemaV45ForTestStatements() []string {
 }
 
 func removeSchemaV46ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV47ForTestStatements(), []string{
 		`DROP TRIGGER trg_operator_steering_update_monotonic`,
 		`DROP TRIGGER trg_operator_steering_cancellation_operation_delete_immutable`,
 		`DROP TRIGGER trg_operator_steering_cancellation_operation_update_immutable`,
@@ -1206,6 +1206,21 @@ func removeSchemaV46ForTestStatements() []string {
 				SELECT RAISE(ABORT, 'operator steering content is immutable and status is monotonic');
 			END`,
 		`DELETE FROM schema_migrations WHERE version = 46`,
+	}...)
+}
+
+func removeSchemaV47ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_specialist_skill_context_commit_delete_immutable`,
+		`DROP TRIGGER trg_specialist_skill_context_commit_update_immutable`,
+		`DROP TRIGGER trg_specialist_skill_context_preparation_delete_immutable`,
+		`DROP TRIGGER trg_specialist_skill_context_preparation_update_immutable`,
+		`DROP TRIGGER trg_specialist_skill_context_commit_insert`,
+		`DROP TRIGGER trg_specialist_skill_context_preparation_insert`,
+		`DROP TABLE specialist_skill_context_commits`,
+		`DROP INDEX idx_specialist_skill_context_run_agent_turn`,
+		`DROP TABLE specialist_skill_context_preparations`,
+		`DELETE FROM schema_migrations WHERE version = 47`,
 	}
 }
 

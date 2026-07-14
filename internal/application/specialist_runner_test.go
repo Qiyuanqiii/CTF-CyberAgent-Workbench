@@ -19,6 +19,7 @@ import (
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/session"
+	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/store"
 )
 
@@ -53,10 +54,27 @@ func TestSpecialistRunnerExecutesInternalNoToolContinuation(t *testing.T) {
 		provider.requests[0].MaxTokens != 32 {
 		t.Fatalf("Specialist provider request escaped its no-tool budget: %#v", provider.requests)
 	}
+	if result.SkillItems != 1 || result.SkillTokens <= 0 ||
+		result.SkillBudget != skills.DefaultSpecialistContextTokenBudget ||
+		result.SkillRecovered || provider.requests[0].Metadata["skill_items"] != "1" {
+		t.Fatalf("minimal Specialist Skill context was not delivered: %#v request=%#v",
+			result, provider.requests[0])
+	}
+	var codeSkill, planSkill bool
+	for _, message := range provider.requests[0].Messages {
+		codeSkill = codeSkill || strings.Contains(message.Content, "Code workflow")
+		planSkill = planSkill || strings.Contains(message.Content, "Plan/Delivery workflow")
+	}
+	if !codeSkill || planSkill {
+		t.Fatalf("Specialist Skill minimization drifted: code=%t plan=%t messages=%#v",
+			codeSkill, planSkill, provider.requests[0].Messages)
+	}
 	assertSpecialistEventCounts(t, st, run.ID, map[string]int{
 		events.ModelStartedEvent: 1, events.ModelCompletedEvent: 1,
 		events.PolicyDecisionEvent: 1, events.AgentAttemptUsageRecordedEvent: 1,
-		events.AgentTurnCompletedEvent: 1,
+		events.AgentTurnCompletedEvent:              1,
+		events.SpecialistSkillContextPreparedEvent:  1,
+		events.SpecialistSkillContextCommittedEvent: 1,
 	})
 }
 
@@ -666,6 +684,17 @@ func newSpecialistRunnerFixture(t testing.TB, provider llm.Provider, budget doma
 		ModelRoute: provider.Name() + "/model", Budget: budget,
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := skills.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.NewSkillSelectionService(st, registry).Select(ctx,
+		application.SelectSkillsRequest{
+			RunID: run.ID, Names: []string{"code", "plan-delivery"},
+			OperationKey: "specialist-runner-skills-0001", RequestedBy: "operator",
+		}); err != nil {
 		t.Fatal(err)
 	}
 	run, err = service.Start(ctx, run.ID)

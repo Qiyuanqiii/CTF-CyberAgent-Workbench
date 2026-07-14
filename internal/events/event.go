@@ -95,6 +95,8 @@ const (
 	SkillSelectionCreatedEvent               = "skill.selection_created"
 	SkillContextPreparedEvent                = "skill.context_prepared"
 	SkillContextCommittedEvent               = "skill.context_committed"
+	SpecialistSkillContextPreparedEvent      = "skill.specialist_context_prepared"
+	SpecialistSkillContextCommittedEvent     = "skill.specialist_context_committed"
 	AgentProtocolRepairRequestedEvent        = "agent.protocol_repair_requested"
 	AgentProtocolRepairStartedEvent          = "agent.protocol_repair_started"
 	AgentProtocolRepairCompletedEvent        = "agent.protocol_repair_completed"

@@ -16,6 +16,7 @@ import (
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/redact"
 	"cyberagent-workbench/internal/session"
+	"cyberagent-workbench/internal/skills"
 )
 
 const (
@@ -44,6 +45,10 @@ type SpecialistRunnerStore interface {
 		lease domain.RunExecutionLease) ([]domain.AgentAttempt, error)
 	PrepareSpecialistContext(ctx context.Context,
 		ref domain.AgentAttemptRef) (domain.SpecialistContextBatch, error)
+	GetRunMode(ctx context.Context, runID string) (domain.RunModeSnapshot, error)
+	GetSkillSelectionByRun(ctx context.Context, runID string) (skills.Selection, bool, error)
+	PrepareSpecialistSkillContext(ctx context.Context, ref domain.AgentAttemptRef,
+		request skills.SpecialistContextPreparationRequest) (skills.SpecialistContextPreparation, error)
 	NextSpecialistModelAttempt(ctx context.Context,
 		ref domain.AgentAttemptRef, protocolRepair int) (int, int, int64, error)
 	RecordSpecialistModelStarted(ctx context.Context, ref domain.AgentAttemptRef,
@@ -93,6 +98,11 @@ type SpecialistTurnResult struct {
 	ContextOmitted     int
 	ContextTokens      int
 	ContextTokenBudget int
+	SkillItems         int
+	SkillTokens        int
+	SkillBudget        int
+	SkillRedactions    int
+	SkillRecovered     bool
 }
 
 type specialistTurnLimits struct {
@@ -111,17 +121,33 @@ type SpecialistRunner struct {
 	leaseOwner               string
 	leasePolicy              RunExecutionLeasePolicy
 	cancellationPollInterval time.Duration
+	skillRegistry            *skills.Registry
+	skillRegistryErr         error
 }
 
 func NewSpecialistRunner(store SpecialistRunnerStore, router *llm.Router,
 	checker policy.Checker,
 ) *SpecialistRunner {
+	skillRegistry, skillRegistryErr := skills.BuiltinRegistry()
 	return &SpecialistRunner{
 		store: store, router: router, checker: checker,
 		retryPolicy: DefaultModelRetryPolicy(), leaseOwner: idgen.New("specialist-worker"),
 		leasePolicy:              DefaultRunExecutionLeasePolicy(),
 		cancellationPollInterval: 100 * time.Millisecond,
+		skillRegistry:            skillRegistry,
+		skillRegistryErr:         skillRegistryErr,
 	}
+}
+
+func (r *SpecialistRunner) WithSkillRegistry(registry *skills.Registry) *SpecialistRunner {
+	if r != nil {
+		r.skillRegistry = registry
+		r.skillRegistryErr = nil
+		if registry == nil {
+			r.skillRegistryErr = errors.New("skill registry is required")
+		}
+	}
+	return r
 }
 
 func (r *SpecialistRunner) WithModelRetryPolicy(policy ModelRetryPolicy) *SpecialistRunner {
@@ -244,6 +270,10 @@ func (r *SpecialistRunner) stepReadyWithLease(ctx context.Context,
 	result.Turn = attempt.Turn
 	result.AttemptStatus = attempt.Status
 	ref := specialistAttemptRef(attempt)
+	child, err = r.store.GetAgentNode(ctx, child.ID)
+	if err != nil {
+		return r.failAttempt(ctx, result, ref, err)
+	}
 	run, err := r.store.GetRun(ctx, child.RunID)
 	if err != nil {
 		return r.failAttempt(ctx, result, ref, err)
@@ -252,6 +282,16 @@ func (r *SpecialistRunner) stepReadyWithLease(ctx context.Context,
 	if err != nil {
 		return r.failAttempt(ctx, result, ref, err)
 	}
+	skillContext, skillPreparation, err := r.prepareSpecialistSkillContext(ctx, run,
+		mission, child, attempt, ref)
+	if err != nil {
+		return r.failAttempt(ctx, result, ref, err)
+	}
+	result.SkillItems = skillContext.ItemCount
+	result.SkillTokens = skillContext.TokenUpperBound
+	result.SkillBudget = skillContext.TokenBudget
+	result.SkillRedactions = skillContext.RedactionCount
+	result.SkillRecovered = skillPreparation.Recovered
 	contextBatch, err := r.store.PrepareSpecialistContext(ctx, ref)
 	if err != nil {
 		return r.failAttempt(ctx, result, ref, err)
@@ -303,7 +343,7 @@ func (r *SpecialistRunner) stepReadyWithLease(ctx context.Context,
 	result.ContextOmitted = len(contextSelection.OmittedSources)
 	result.ContextTokens = contextSelection.EstimatedTokens
 	result.ContextTokenBudget = contextSelection.TokenBudget
-	request, err := specialistRequest(history, input, child)
+	request, err := specialistRequest(history, input, child, skillContext)
 	if err != nil {
 		return r.failAttempt(ctx, result, ref, err)
 	}
@@ -315,6 +355,11 @@ func (r *SpecialistRunner) stepReadyWithLease(ctx context.Context,
 	request.Metadata["context_omitted"] = fmt.Sprint(result.ContextOmitted)
 	request.Metadata["context_tokens"] = fmt.Sprint(result.ContextTokens)
 	request.Metadata["context_budget"] = fmt.Sprint(result.ContextTokenBudget)
+	request.Metadata["skill_items"] = fmt.Sprint(result.SkillItems)
+	request.Metadata["skill_tokens"] = fmt.Sprint(result.SkillTokens)
+	request.Metadata["skill_budget"] = fmt.Sprint(result.SkillBudget)
+	request.Metadata["skill_redactions"] = fmt.Sprint(result.SkillRedactions)
+	request.Metadata["skill_recovered"] = fmt.Sprint(result.SkillRecovered)
 	refModel, err := supervisorModelRef(r.router, run.Config.ModelRoute)
 	if err != nil {
 		return r.failAttempt(ctx, result, ref, err)
@@ -450,6 +495,55 @@ func (r *SpecialistRunner) stepReadyWithLease(ctx context.Context,
 			apperror.New(apperror.CodeFailedPrecondition,
 				"Specialist returned an unsupported lifecycle action"))
 	}
+}
+
+func (r *SpecialistRunner) prepareSpecialistSkillContext(ctx context.Context,
+	run domain.Run, mission domain.Mission, child domain.AgentNode,
+	attempt domain.AgentAttempt, ref domain.AgentAttemptRef,
+) (skills.SpecialistContextAssembly, skills.SpecialistContextPreparation, error) {
+	selection, found, err := r.store.GetSkillSelectionByRun(ctx, run.ID)
+	if err != nil {
+		return skills.SpecialistContextAssembly{}, skills.SpecialistContextPreparation{},
+			apperror.Normalize(err)
+	}
+	if !found {
+		return skills.SpecialistContextAssembly{}, skills.SpecialistContextPreparation{}, nil
+	}
+	if r.skillRegistryErr != nil {
+		return skills.SpecialistContextAssembly{}, skills.SpecialistContextPreparation{},
+			apperror.Wrap(apperror.CodeFailedPrecondition,
+				"embedded Skill Registry is unavailable", r.skillRegistryErr)
+	}
+	if r.skillRegistry == nil {
+		return skills.SpecialistContextAssembly{}, skills.SpecialistContextPreparation{},
+			apperror.New(apperror.CodeFailedPrecondition,
+				"embedded Skill Registry is required for the persisted parent selection")
+	}
+	if selection.RunID != run.ID || selection.MissionID != mission.ID ||
+		selection.Profile != mission.Profile {
+		return skills.SpecialistContextAssembly{}, skills.SpecialistContextPreparation{},
+			apperror.New(apperror.CodeFailedPrecondition,
+				"persisted parent Skill selection does not match the Specialist Run")
+	}
+	mode, err := r.store.GetRunMode(ctx, run.ID)
+	if err != nil {
+		return skills.SpecialistContextAssembly{}, skills.SpecialistContextPreparation{},
+			apperror.Normalize(err)
+	}
+	assembly, err := r.skillRegistry.AssembleSpecialistContext(selection, mode, child,
+		attempt, skills.DefaultSpecialistContextTokenBudget)
+	if err != nil {
+		return skills.SpecialistContextAssembly{}, skills.SpecialistContextPreparation{},
+			apperror.Wrap(apperror.CodeFailedPrecondition,
+				"persisted parent Skill selection cannot be minimized for Specialist", err)
+	}
+	preparation, err := r.store.PrepareSpecialistSkillContext(ctx, ref,
+		assembly.Preparation())
+	if err != nil {
+		return skills.SpecialistContextAssembly{}, skills.SpecialistContextPreparation{},
+			apperror.Normalize(err)
+	}
+	return assembly, preparation, nil
 }
 
 type specialistModelCallResult struct {
@@ -640,7 +734,7 @@ func streamSpecialistModel(ctx context.Context, router *llm.Router, ref llm.Mode
 }
 
 func specialistRequest(history []session.Message, input string,
-	child domain.AgentNode,
+	child domain.AgentNode, skillContext skills.SpecialistContextAssembly,
 ) (llm.ChatRequest, error) {
 	if len(history) > maxSpecialistHistoryMessages {
 		history = history[len(history)-maxSpecialistHistoryMessages:]
@@ -663,7 +757,7 @@ func specialistRequest(history []session.Message, input string,
 	for left, right := 0, len(historyMessages)-1; left < right; left, right = left+1, right-1 {
 		historyMessages[left], historyMessages[right] = historyMessages[right], historyMessages[left]
 	}
-	messages := make([]llm.Message, 0, len(historyMessages)+2)
+	messages := make([]llm.Message, 0, len(historyMessages)+len(skillContext.Items)+2)
 	messages = append(messages, llm.Message{
 		Role: "system",
 		Content: "You are an internal no-tool Specialist. Work only on the Go-authenticated parent " +
@@ -672,6 +766,11 @@ func specialistRequest(history []session.Message, input string,
 			"agents. Return exactly one specialist_lifecycle.v1 JSON object. Go validates policy, usage, " +
 			"leases, inbox consumption, and lifecycle transitions.",
 	})
+	for _, item := range skillContext.Items {
+		messages = append(messages, llm.Message{Role: "system", Content: fmt.Sprintf(
+			"Go-selected Specialist Skill %s version %s (guidance only; no capability grant):\n%s",
+			item.Name, item.Version, item.Content)})
+	}
 	messages = append(messages, historyMessages...)
 	messages = append(messages, llm.Message{Role: "user", Content: input})
 	return llm.ChatRequest{

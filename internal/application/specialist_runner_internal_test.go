@@ -8,6 +8,7 @@ import (
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/session"
+	"cyberagent-workbench/internal/skills"
 )
 
 func TestSpecialistRequestBoundsAggregateHistoryBytes(t *testing.T) {
@@ -18,7 +19,7 @@ func TestSpecialistRequestBoundsAggregateHistoryBytes(t *testing.T) {
 	}
 	request, err := specialistRequest(history, `{"goal":"bounded"}`, domain.AgentNode{
 		ID: "agent-child", RunID: "run-child", SessionID: "session-child",
-	})
+	}, skills.SpecialistContextAssembly{})
 	if err != nil {
 		t.Fatal(err)
 	}

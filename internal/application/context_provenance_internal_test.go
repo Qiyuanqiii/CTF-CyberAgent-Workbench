@@ -31,7 +31,7 @@ func TestSpecialistHistoryKeepsWorkspaceInjectionOutOfSystemAndAssistantRoles(t 
 		session.NewEvidenceMessage("session-child", session.SourceWorkspaceFile, "README.md", injection),
 	}, `{"goal":"explain setup"}`, domain.AgentNode{
 		ID: "agent-child", RunID: "run-child", SessionID: "session-child",
-	})
+	}, skills.SpecialistContextAssembly{})
 	if err != nil {
 		t.Fatal(err)
 	}

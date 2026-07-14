@@ -268,6 +268,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 44, Name: "immutable Delivery checkpoint gates", Statements: deliveryCheckpointStatements},
 		{Version: 45, Name: "durable operator steering queue", Statements: operatorSteeringStatements},
 		{Version: 46, Name: "operator steering queue controls", Statements: operatorSteeringControlStatements},
+		{Version: 47, Name: "minimal Specialist Skill context", Statements: specialistSkillContextStatements},
 	})
 }
 
