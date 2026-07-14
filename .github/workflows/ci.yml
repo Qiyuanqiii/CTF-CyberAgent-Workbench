@@ -27,7 +27,9 @@ jobs:
       - run: go vet ./...
       - uses: golang/govulncheck-action@v1
         with:
+          cache: false
           go-package: ./...
+          repo-checkout: false
 
   web:
     name: TypeScript console
