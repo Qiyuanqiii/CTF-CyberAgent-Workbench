@@ -15,6 +15,7 @@ import (
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/approval"
+	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/policy"
@@ -50,6 +51,23 @@ type SandboxManifestStore interface {
 		operation sandbox.CandidateOperation) (sandbox.ValidatedExecutionCandidate, bool, error)
 	GetSandboxExecutionCandidate(ctx context.Context, id string) (sandbox.ValidatedExecutionCandidate, error)
 	ListSandboxExecutionCandidates(ctx context.Context, runID string, limit int) ([]sandbox.ValidatedExecutionCandidate, error)
+	GetRunArtifact(ctx context.Context, id string) (artifact.Blob, error)
+	GetSandboxExecutionOperation(ctx context.Context, keyDigest string) (sandbox.ExecutionOperation, bool, error)
+	CreateSandboxDisabledExecution(ctx context.Context, execution sandbox.DisabledExecution,
+		inputs []sandbox.InputArtifactBinding, operation sandbox.ExecutionOperation,
+		ownerID string, ttl time.Duration) (sandbox.Lifecycle, bool, error)
+	GetSandboxDisabledExecution(ctx context.Context, id string) (sandbox.Lifecycle, error)
+	ListSandboxDisabledExecutions(ctx context.Context, runID string, limit int) ([]sandbox.Lifecycle, error)
+	AcquireSandboxExecutionLease(ctx context.Context, executionID, ownerID, leaseID string,
+		ttl time.Duration) (sandbox.LeaseAcquisition, error)
+	ReleaseSandboxExecutionLease(ctx context.Context, expected sandbox.ExecutionLease) (sandbox.ExecutionLease, bool, error)
+	GetSandboxExecutionLease(ctx context.Context, executionID string) (sandbox.ExecutionLease, bool, error)
+	GetSandboxCancellationOperation(ctx context.Context, keyDigest string) (sandbox.CancellationOperation, bool, error)
+	CreateSandboxCancellation(ctx context.Context, request sandbox.CancellationRequest,
+		operation sandbox.CancellationOperation) (sandbox.CancellationRequest, bool, error)
+	GetSandboxCleanupOperation(ctx context.Context, keyDigest string) (sandbox.CleanupOperation, bool, error)
+	CompleteSandboxCleanup(ctx context.Context, result sandbox.CleanupResult,
+		operation sandbox.CleanupOperation, expectedLease sandbox.ExecutionLease) (sandbox.CleanupResult, bool, error)
 }
 
 type SandboxManifestService struct {

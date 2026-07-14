@@ -304,6 +304,11 @@ cyberagent run sandbox review <preparation-id> --decision approve --operation-ke
 cyberagent run sandbox candidate <preparation-id> --manifest configs/sandbox-manifest.example.json --approval <approval-id> --operation-key sandbox-candidate-001
 cyberagent run sandbox candidates <run-id>
 cyberagent run sandbox candidate-show <candidate-id>
+cyberagent run sandbox begin <candidate-id> --manifest configs/sandbox-manifest.example.json --operation-key sandbox-begin-001
+cyberagent run sandbox executions <run-id>
+cyberagent run sandbox execution-show <execution-id>
+cyberagent run sandbox cancel <execution-id> --operation-key sandbox-cancel-001
+cyberagent run sandbox cleanup <execution-id> --operation-key sandbox-cleanup-001
 ```
 
 `sandbox validate` performs strict duplicate-aware `sandbox_manifest.v1` decoding and deterministic Noop validation without opening the runtime database. `run sandbox prepare` requires a Run whose Mission has a persisted Workspace, then binds the normalized Manifest fingerprint to that exact Run/Mission/Workspace root, Mission Scope, current Policy result, optional exact approval, requester, and a Go-generated cancellation identity. Operation keys are normalized 16-256 byte client identities; SQLite stores only their domain-separated digest.
@@ -313,6 +318,10 @@ The preparation and validation ledgers contain counts, limits, fingerprints, sta
 Schema v49 uses the shared approval ledger rather than a Sandbox-specific bypass. `request` derives one pending approval from the preparation's exact authorization fingerprint, and `review` records an immutable operator decision. `candidate` must resupply and renormalize the complete Manifest. It rejects fingerprint, Workspace root, Mission Scope, Policy, or approval drift; resolves every mount source through Go `os.Root`; and rechecks aggregate token/model-time usage, tool-call budget, and the absence of an active Run execution lease in the candidate write transaction. Operation keys are digest-only and cross-process retries converge.
 
 Schema v49 is still not an execution API. Candidate rows and events contain only bounded metadata and fix `backend_enabled=false` plus `execution_authorized=false`; Local and Docker remain fail-closed and no host/container process starts. Future execution must revalidate again and pass separate cancellation, cleanup, network, secret-materialization, host-path isolation, and Artifact export audits.
+
+Schema v50 adds a disabled lifecycle, not process execution. `begin` resupplies the complete Manifest and rechecks the candidate, Run/Mission/Workspace/Scope, current Policy and approval, mount binding, aggregate budgets, Run lease, and every input Artifact. Inputs must belong to the exact Run/Session/Workspace, pass content SHA-256 verification, retain their order/source/MIME/stream metadata, and total at most 16 MiB. The output plan stores only stdout/stderr flags, output-path count, maximum bytes, and a fingerprint; raw paths are not retained.
+
+The lifecycle owns a separate generation-fenced lease. Generation one only prepares the disabled record and is released immediately. `cancel` appends an immutable request, while `cleanup` may run after the parent Run is terminal and acquires a successor generation. The current cleanup outcome is always `backend_disabled`: no backend started, no orphan existed, all inputs were reverified, and zero output Artifacts were captured. CLI detail intentionally omits the lease ID and owner as well as Manifest, command, path, and Artifact content. Reusing the same operation key and intent is safe; changed intent conflicts.
 
 ## Workspaces
 

@@ -1244,7 +1244,7 @@ func removeSchemaV48ForTestStatements() []string {
 }
 
 func removeSchemaV49ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV50ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_execution_candidate_operation_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_execution_candidate_operation_update_immutable`,
 		`DROP TRIGGER trg_sandbox_execution_candidate_delete_immutable`,
@@ -1255,6 +1255,45 @@ func removeSchemaV49ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_execution_candidates_run_validated`,
 		`DROP TABLE sandbox_execution_candidates`,
 		`DELETE FROM schema_migrations WHERE version = 49`,
+	}...)
+}
+
+func removeSchemaV50ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_cleanup_operation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_cleanup_operation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_cleanup_result_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_cleanup_result_update_immutable`,
+		`DROP TRIGGER trg_sandbox_execution_cancellation_operation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_execution_cancellation_operation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_execution_cancellation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_execution_cancellation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_execution_operation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_execution_operation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_execution_input_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_execution_input_update_immutable`,
+		`DROP TRIGGER trg_sandbox_disabled_execution_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_disabled_execution_update_immutable`,
+		`DROP TRIGGER trg_sandbox_cleanup_operation_insert`,
+		`DROP TRIGGER trg_sandbox_cleanup_result_insert`,
+		`DROP TRIGGER trg_sandbox_execution_cancellation_operation_insert`,
+		`DROP TRIGGER trg_sandbox_execution_cancellation_insert`,
+		`DROP TRIGGER trg_sandbox_execution_operation_insert`,
+		`DROP TRIGGER trg_sandbox_execution_lease_update`,
+		`DROP TRIGGER trg_sandbox_execution_lease_insert`,
+		`DROP TRIGGER trg_sandbox_execution_input_insert`,
+		`DROP TRIGGER trg_sandbox_disabled_execution_insert`,
+		`DROP TABLE sandbox_cleanup_operations`,
+		`DROP TABLE sandbox_cleanup_results`,
+		`DROP TABLE sandbox_execution_cancellation_operations`,
+		`DROP TABLE sandbox_execution_cancellations`,
+		`DROP TABLE sandbox_execution_operations`,
+		`DROP INDEX idx_sandbox_execution_leases_status_expires`,
+		`DROP TABLE sandbox_execution_leases`,
+		`DROP TABLE sandbox_execution_inputs`,
+		`DROP INDEX idx_sandbox_disabled_executions_run_created`,
+		`DROP TABLE sandbox_disabled_executions`,
+		`DELETE FROM schema_migrations WHERE version = 50`,
 	}
 }
 

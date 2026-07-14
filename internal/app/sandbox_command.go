@@ -68,7 +68,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	switch args[0] {
@@ -242,8 +242,136 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		}
 		printSandboxExecutionCandidate(a, value)
 		return nil
+	case "begin":
+		fs := newFlagSet("run sandbox begin", a.errOut)
+		manifestPath := fs.String("manifest", "", "resupplied sandbox manifest JSON file")
+		operationKey := fs.String("operation-key", "", "stable lifecycle creation operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"manifest": true, "operation-key": true, "operator": true,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" ||
+			strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox begin <candidate-id> --manifest <manifest.json> --operation-key <key> [--operator <id>]")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		value, err := service.BeginDisabledExecution(ctx, application.BeginSandboxExecutionRequest{
+			CandidateID: fs.Arg(0), Manifest: manifest,
+			OperationKey: *operationKey, RequestedBy: *operator,
+		})
+		if err != nil {
+			return err
+		}
+		printSandboxLifecycle(a, value)
+		return nil
+	case "cancel":
+		fs := newFlagSet("run sandbox cancel", a.errOut)
+		operationKey := fs.String("operation-key", "", "stable cancellation operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"operation-key": true, "operator": true,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox cancel <execution-id> --operation-key <key> [--operator <id>]")
+		}
+		value, err := service.CancelDisabledExecution(ctx, application.CancelSandboxExecutionRequest{
+			ExecutionID: fs.Arg(0), OperationKey: *operationKey, RequestedBy: *operator,
+		})
+		if err != nil {
+			return err
+		}
+		printSandboxLifecycle(a, value)
+		return nil
+	case "cleanup":
+		fs := newFlagSet("run sandbox cleanup", a.errOut)
+		operationKey := fs.String("operation-key", "", "stable cleanup operation key")
+		operator := fs.String("operator", "cli_operator", "reconciler identity")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"operation-key": true, "operator": true,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox cleanup <execution-id> --operation-key <key> [--operator <id>]")
+		}
+		value, err := service.CleanupDisabledExecution(ctx, application.CleanupSandboxExecutionRequest{
+			ExecutionID: fs.Arg(0), OperationKey: *operationKey, ReconciledBy: *operator,
+		})
+		if err != nil {
+			return err
+		}
+		printSandboxLifecycle(a, value)
+		return nil
+	case "executions":
+		fs := newFlagSet("run sandbox executions", a.errOut)
+		limit := fs.Int("limit", 100, "maximum sandbox executions")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox executions <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDisabledExecutions(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no sandbox executions")
+			return nil
+		}
+		for _, value := range values {
+			fmt.Fprintf(a.out, "%s\tcandidate=%s\tstatus=%s\tlease_generation=%d\tlease_status=%s\tbackend_enabled=false\texecution_authorized=false\tbackend_started=false\tcreated_at=%s\n",
+				value.Execution.ID, value.Execution.CandidateID, value.Status,
+				value.Lease.Generation, value.Lease.Status,
+				value.Execution.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "execution-show":
+		fs := newFlagSet("run sandbox execution-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox execution-show <execution-id>")
+		}
+		value, err := service.GetDisabledExecution(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxLifecycle(a, value)
+		return nil
 	default:
 		return fmt.Errorf("unknown run sandbox subcommand %q", args[0])
+	}
+}
+
+func printSandboxLifecycle(a *App, value sandbox.Lifecycle) {
+	execution := value.Execution
+	fmt.Fprintf(a.out, "execution: %s\ncandidate: %s\npreparation: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nstatus: %s\nmanifest_fingerprint: %s\nauthorization_fingerprint: %s\npolicy_fingerprint: %s\nmount_binding_fingerprint: %s\ninput_artifacts: %d\ninput_artifact_bytes: %d\ninput_artifact_digest: %s\ncapture_stdout: %t\ncapture_stderr: %t\noutput_paths: %d\nmax_output_bytes: %d\noutput_plan_fingerprint: %s\nlease_generation: %d\nlease_status: %s\ncancellation_requested: %t\ncleanup_complete: %t\nbackend_enabled: false\nexecution_authorized: false\nbackend_started: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\n",
+		execution.ID, execution.CandidateID, execution.PreparationID, execution.RunID,
+		execution.MissionID, execution.WorkspaceID, execution.ProtocolVersion, value.Status,
+		execution.ManifestFingerprint, execution.AuthorizationFingerprint,
+		execution.PolicyFingerprint, execution.MountBindingFingerprint,
+		execution.InputArtifactCount, execution.InputArtifactBytes,
+		execution.InputArtifactDigest, execution.OutputPlan.CaptureStdout,
+		execution.OutputPlan.CaptureStderr, execution.OutputPlan.OutputPathCount,
+		execution.OutputPlan.MaxOutputBytes, execution.OutputPlan.Fingerprint,
+		value.Lease.Generation, value.Lease.Status, value.Cancellation != nil,
+		value.Cleanup != nil, execution.RequestedBy,
+		execution.CreatedAt.Format(timeFormatRFC3339Nano), value.Replayed)
+	if value.Cleanup != nil {
+		fmt.Fprintf(a.out, "cleanup_protocol: %s\ncleanup_outcome: %s\ncleanup_lease_generation: %d\ncancellation_observed: %t\ninput_artifacts_verified: %t\noutput_artifacts: %d\norphan_detected: false\norphan_reaped: false\ncleaned_at: %s\n",
+			value.Cleanup.ProtocolVersion, value.Cleanup.Outcome,
+			value.Cleanup.LeaseGeneration, value.Cleanup.CancellationObserved,
+			value.Cleanup.InputArtifactsVerified, value.Cleanup.OutputArtifactCount,
+			value.Cleanup.CompletedAt.Format(timeFormatRFC3339Nano))
 	}
 }
 

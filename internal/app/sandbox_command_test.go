@@ -11,6 +11,7 @@ import (
 
 var sandboxPreparationIDPattern = regexp.MustCompile(`sandbox-manifest-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxCandidateIDPattern = regexp.MustCompile(`sandbox-candidate-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxExecutionIDPattern = regexp.MustCompile(`sandbox-execution-[0-9]{14}-[a-f0-9]{12}`)
 
 func TestSandboxCLIValidatesPreparesListsAndShowsMetadataOnly(t *testing.T) {
 	t.Setenv("CYBERAGENT_HOME", t.TempDir())
@@ -89,6 +90,48 @@ func TestSandboxCLIValidatesPreparesListsAndShowsMetadataOnly(t *testing.T) {
 	if code != 0 || stderr != "" || !strings.Contains(candidateShown, "mount_binding_fingerprint:") ||
 		!strings.Contains(candidateShown, "backend_enabled: false") {
 		t.Fatalf("sandbox CLI candidate show failed output=%s stderr=%s code=%d", candidateShown, stderr, code)
+	}
+	begun, stderr, code := executeTestCommand(t, "run", "sandbox", "begin", candidateID,
+		"--manifest", manifestPath, "--operation-key", "sandbox-cli-begin-operation")
+	if code != 0 || stderr != "" || !strings.Contains(begun, "status: prepared") ||
+		!strings.Contains(begun, "lease_status: released") ||
+		!strings.Contains(begun, "backend_started: false") || strings.Contains(begun, "go test") ||
+		strings.Contains(begun, "lease_id") || strings.Contains(begun, "owner_id") {
+		t.Fatalf("sandbox CLI begin failed output=%s stderr=%s code=%d", begun, stderr, code)
+	}
+	executionID := sandboxExecutionIDPattern.FindString(begun)
+	if executionID == "" {
+		t.Fatalf("missing sandbox execution id: %s", begun)
+	}
+	beginReplay, stderr, code := executeTestCommand(t, "run", "sandbox", "begin", candidateID,
+		"--manifest", manifestPath, "--operation-key", "sandbox-cli-begin-operation")
+	if code != 0 || stderr != "" || !strings.Contains(beginReplay, "execution: "+executionID) ||
+		!strings.Contains(beginReplay, "replayed: true") {
+		t.Fatalf("sandbox CLI begin replay failed output=%s stderr=%s code=%d", beginReplay, stderr, code)
+	}
+	executions, stderr, code := executeTestCommand(t, "run", "sandbox", "executions", runID)
+	if code != 0 || stderr != "" || !strings.Contains(executions, executionID) ||
+		!strings.Contains(executions, "backend_started=false") {
+		t.Fatalf("sandbox CLI execution list failed output=%s stderr=%s code=%d", executions, stderr, code)
+	}
+	cancelled, stderr, code := executeTestCommand(t, "run", "sandbox", "cancel", executionID,
+		"--operation-key", "sandbox-cli-cancel-operation")
+	if code != 0 || stderr != "" || !strings.Contains(cancelled, "status: cancel_requested") ||
+		!strings.Contains(cancelled, "cancellation_requested: true") {
+		t.Fatalf("sandbox CLI cancellation failed output=%s stderr=%s code=%d", cancelled, stderr, code)
+	}
+	cleaned, stderr, code := executeTestCommand(t, "run", "sandbox", "cleanup", executionID,
+		"--operation-key", "sandbox-cli-cleanup-operation")
+	if code != 0 || stderr != "" || !strings.Contains(cleaned, "status: cleaned") ||
+		!strings.Contains(cleaned, "cleanup_outcome: backend_disabled") ||
+		!strings.Contains(cleaned, "input_artifacts_verified: true") ||
+		!strings.Contains(cleaned, "output_artifacts: 0") {
+		t.Fatalf("sandbox CLI cleanup failed output=%s stderr=%s code=%d", cleaned, stderr, code)
+	}
+	executionShown, stderr, code := executeTestCommand(t, "run", "sandbox", "execution-show", executionID)
+	if code != 0 || stderr != "" || !strings.Contains(executionShown, "cleanup_complete: true") ||
+		strings.Contains(executionShown, "lease_id") || strings.Contains(executionShown, "owner_id") {
+		t.Fatalf("sandbox CLI execution show failed output=%s stderr=%s code=%d", executionShown, stderr, code)
 	}
 	if _, stderr, code := executeTestCommand(t, "run", "sandbox", "list", runID,
 		"--limit", "-1"); code != 2 || !strings.Contains(stderr, "between 1 and 200") {

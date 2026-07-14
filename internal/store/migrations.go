@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 49
+const LatestSchemaVersion = 50
 
 type migration struct {
 	Version    int
@@ -6590,6 +6590,453 @@ var sandboxExecutionCandidateStatements = []string{
 	`CREATE TRIGGER trg_sandbox_execution_candidate_operation_delete_immutable
 		BEFORE DELETE ON sandbox_execution_candidate_operations BEGIN
 			SELECT RAISE(ABORT, 'sandbox execution candidate operation cannot be deleted');
+		END;`,
+}
+
+var sandboxLifecycleStatements = []string{
+	`CREATE TABLE sandbox_disabled_executions (
+		id TEXT PRIMARY KEY,
+		candidate_id TEXT NOT NULL UNIQUE,
+		preparation_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		mission_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		cancellation_id TEXT NOT NULL,
+		protocol_version TEXT NOT NULL,
+		manifest_fingerprint TEXT NOT NULL,
+		authorization_fingerprint TEXT NOT NULL,
+		policy_fingerprint TEXT NOT NULL,
+		mount_binding_fingerprint TEXT NOT NULL,
+		input_artifact_count INTEGER NOT NULL,
+		input_artifact_bytes INTEGER NOT NULL,
+		input_artifact_digest TEXT NOT NULL,
+		capture_stdout INTEGER NOT NULL,
+		capture_stderr INTEGER NOT NULL,
+		output_path_count INTEGER NOT NULL,
+		max_output_bytes INTEGER NOT NULL,
+		output_plan_fingerprint TEXT NOT NULL,
+		initial_lease_id TEXT NOT NULL UNIQUE,
+		initial_lease_generation INTEGER NOT NULL,
+		backend_enabled INTEGER NOT NULL,
+		execution_authorized INTEGER NOT NULL,
+		backend_started INTEGER NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(candidate_id) REFERENCES sandbox_execution_candidates(id) ON DELETE RESTRICT,
+		FOREIGN KEY(preparation_id) REFERENCES sandbox_manifest_preparations(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+		CHECK(protocol_version = 'sandbox_execution.v1'),
+		CHECK(input_artifact_count BETWEEN 0 AND 16),
+		CHECK(input_artifact_bytes BETWEEN 0 AND 16777216),
+		CHECK((input_artifact_count = 0 AND input_artifact_bytes = 0)
+			OR (input_artifact_count > 0 AND input_artifact_bytes > 0)),
+		CHECK(capture_stdout IN (0, 1) AND capture_stderr IN (0, 1)),
+		CHECK(output_path_count BETWEEN 0 AND 16),
+		CHECK(capture_stdout = 1 OR capture_stderr = 1 OR output_path_count > 0),
+		CHECK(max_output_bytes BETWEEN 1 AND 16777216),
+		CHECK(initial_lease_generation = 1),
+		CHECK(backend_enabled = 0 AND execution_authorized = 0 AND backend_started = 0),
+		CHECK(length(manifest_fingerprint) = 64 AND manifest_fingerprint = lower(manifest_fingerprint)
+			AND manifest_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(authorization_fingerprint) = 64 AND authorization_fingerprint = lower(authorization_fingerprint)
+			AND authorization_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(policy_fingerprint) = 64 AND policy_fingerprint = lower(policy_fingerprint)
+			AND policy_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(mount_binding_fingerprint) = 64 AND mount_binding_fingerprint = lower(mount_binding_fingerprint)
+			AND mount_binding_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(input_artifact_digest) = 64 AND input_artifact_digest = lower(input_artifact_digest)
+			AND input_artifact_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(output_plan_fingerprint) = 64 AND output_plan_fingerprint = lower(output_plan_fingerprint)
+			AND output_plan_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(id = trim(id) AND length(id) BETWEEN 1 AND 256 AND instr(id, char(0)) = 0),
+		CHECK(candidate_id = trim(candidate_id) AND length(candidate_id) BETWEEN 1 AND 256
+			AND instr(candidate_id, char(0)) = 0),
+		CHECK(preparation_id = trim(preparation_id) AND length(preparation_id) BETWEEN 1 AND 256
+			AND instr(preparation_id, char(0)) = 0),
+		CHECK(run_id = trim(run_id) AND length(run_id) BETWEEN 1 AND 256 AND instr(run_id, char(0)) = 0),
+		CHECK(mission_id = trim(mission_id) AND length(mission_id) BETWEEN 1 AND 256 AND instr(mission_id, char(0)) = 0),
+		CHECK(workspace_id = trim(workspace_id) AND length(workspace_id) BETWEEN 1 AND 256
+			AND instr(workspace_id, char(0)) = 0),
+		CHECK(cancellation_id = trim(cancellation_id) AND length(cancellation_id) BETWEEN 1 AND 256
+			AND instr(cancellation_id, char(0)) = 0),
+		CHECK(initial_lease_id = trim(initial_lease_id) AND length(initial_lease_id) BETWEEN 1 AND 256
+			AND instr(initial_lease_id, char(0)) = 0),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE INDEX idx_sandbox_disabled_executions_run_created
+		ON sandbox_disabled_executions(run_id, created_at, id);`,
+	`CREATE TABLE sandbox_execution_inputs (
+		execution_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		artifact_id TEXT NOT NULL,
+		sha256 TEXT NOT NULL,
+		size_bytes INTEGER NOT NULL,
+		mime TEXT NOT NULL,
+		stream TEXT NOT NULL,
+		source_id TEXT NOT NULL,
+		redacted INTEGER NOT NULL,
+		PRIMARY KEY(execution_id, ordinal),
+		UNIQUE(execution_id, artifact_id),
+		FOREIGN KEY(execution_id) REFERENCES sandbox_disabled_executions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(artifact_id) REFERENCES run_artifacts(id) ON DELETE RESTRICT,
+		CHECK(ordinal BETWEEN 1 AND 16),
+		CHECK(length(sha256) = 64 AND sha256 = lower(sha256) AND sha256 NOT GLOB '*[^0-9a-f]*'),
+		CHECK(size_bytes BETWEEN 1 AND 16777216),
+		CHECK(length(mime) BETWEEN 1 AND 256 AND instr(mime, char(0)) = 0),
+		CHECK(stream IN ('stdout', 'stderr')),
+		CHECK(redacted IN (0, 1)),
+		CHECK(artifact_id = trim(artifact_id) AND length(artifact_id) BETWEEN 1 AND 256
+			AND instr(artifact_id, char(0)) = 0),
+		CHECK(source_id = trim(source_id) AND length(source_id) BETWEEN 1 AND 256
+			AND instr(source_id, char(0)) = 0)
+	) WITHOUT ROWID;`,
+	`CREATE TABLE sandbox_execution_leases (
+		execution_id TEXT PRIMARY KEY,
+		lease_id TEXT NOT NULL UNIQUE,
+		owner_id TEXT NOT NULL,
+		generation INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		acquired_at TEXT NOT NULL,
+		renewed_at TEXT NOT NULL,
+		expires_at TEXT NOT NULL,
+		released_at TEXT,
+		FOREIGN KEY(execution_id) REFERENCES sandbox_disabled_executions(id) ON DELETE RESTRICT,
+		CHECK(generation >= 1),
+		CHECK(status IN ('active', 'released')),
+		CHECK((status = 'active' AND released_at IS NULL)
+			OR (status = 'released' AND released_at IS NOT NULL)),
+		CHECK(lease_id = trim(lease_id) AND length(lease_id) BETWEEN 1 AND 256 AND instr(lease_id, char(0)) = 0),
+		CHECK(owner_id = trim(owner_id) AND length(owner_id) BETWEEN 1 AND 256 AND instr(owner_id, char(0)) = 0),
+		CHECK(julianday(renewed_at) >= julianday(acquired_at)),
+		CHECK(julianday(expires_at) > julianday(renewed_at)),
+		CHECK(released_at IS NULL OR julianday(released_at) >= julianday(acquired_at))
+	) WITHOUT ROWID;`,
+	`CREATE INDEX idx_sandbox_execution_leases_status_expires
+		ON sandbox_execution_leases(status, expires_at);`,
+	`CREATE TABLE sandbox_execution_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		execution_id TEXT NOT NULL UNIQUE,
+		candidate_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(execution_id) REFERENCES sandbox_disabled_executions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(candidate_id) REFERENCES sandbox_execution_candidates(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64 AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64 AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	) WITHOUT ROWID;`,
+	`CREATE TABLE sandbox_execution_cancellations (
+		id TEXT PRIMARY KEY,
+		execution_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		cancellation_id TEXT NOT NULL,
+		protocol_version TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		requested_at TEXT NOT NULL,
+		FOREIGN KEY(execution_id) REFERENCES sandbox_disabled_executions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(protocol_version = 'sandbox_execution_cancel.v1'),
+		CHECK(id = trim(id) AND length(id) BETWEEN 1 AND 256 AND instr(id, char(0)) = 0),
+		CHECK(cancellation_id = trim(cancellation_id) AND length(cancellation_id) BETWEEN 1 AND 256
+			AND instr(cancellation_id, char(0)) = 0),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE TABLE sandbox_execution_cancellation_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		request_id TEXT NOT NULL UNIQUE,
+		execution_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(request_id) REFERENCES sandbox_execution_cancellations(id) ON DELETE RESTRICT,
+		FOREIGN KEY(execution_id) REFERENCES sandbox_disabled_executions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64 AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64 AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*')
+	) WITHOUT ROWID;`,
+	`CREATE TABLE sandbox_cleanup_results (
+		id TEXT PRIMARY KEY,
+		execution_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		protocol_version TEXT NOT NULL,
+		lease_id TEXT NOT NULL,
+		lease_generation INTEGER NOT NULL,
+		cancellation_observed INTEGER NOT NULL,
+		backend_started INTEGER NOT NULL,
+		orphan_detected INTEGER NOT NULL,
+		orphan_reaped INTEGER NOT NULL,
+		input_artifacts_verified INTEGER NOT NULL,
+		output_artifact_count INTEGER NOT NULL,
+		cleanup_complete INTEGER NOT NULL,
+		outcome TEXT NOT NULL,
+		reconciled_by TEXT NOT NULL,
+		completed_at TEXT NOT NULL,
+		FOREIGN KEY(execution_id) REFERENCES sandbox_disabled_executions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(protocol_version = 'sandbox_cleanup.v1'),
+		CHECK(lease_generation >= 1),
+		CHECK(cancellation_observed IN (0, 1)),
+		CHECK(backend_started = 0 AND orphan_detected = 0 AND orphan_reaped = 0),
+		CHECK(input_artifacts_verified = 1 AND output_artifact_count = 0),
+		CHECK(cleanup_complete = 1 AND outcome = 'backend_disabled'),
+		CHECK(id = trim(id) AND length(id) BETWEEN 1 AND 256 AND instr(id, char(0)) = 0),
+		CHECK(lease_id = trim(lease_id) AND length(lease_id) BETWEEN 1 AND 256 AND instr(lease_id, char(0)) = 0),
+		CHECK(reconciled_by = trim(reconciled_by) AND length(reconciled_by) BETWEEN 1 AND 256
+			AND instr(reconciled_by, char(0)) = 0)
+	);`,
+	`CREATE TABLE sandbox_cleanup_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		cleanup_id TEXT NOT NULL UNIQUE,
+		execution_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		reconciled_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(cleanup_id) REFERENCES sandbox_cleanup_results(id) ON DELETE RESTRICT,
+		FOREIGN KEY(execution_id) REFERENCES sandbox_disabled_executions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64 AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64 AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*')
+	) WITHOUT ROWID;`,
+	`CREATE TRIGGER trg_sandbox_disabled_execution_insert
+		BEFORE INSERT ON sandbox_disabled_executions
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_execution_candidates candidate
+			JOIN sandbox_manifest_preparations preparation ON preparation.id = candidate.preparation_id
+			JOIN runs run ON run.id = candidate.run_id
+			JOIN missions mission ON mission.id = candidate.mission_id
+			WHERE candidate.id = NEW.candidate_id AND candidate.preparation_id = NEW.preparation_id
+				AND candidate.run_id = NEW.run_id AND candidate.mission_id = NEW.mission_id
+				AND candidate.workspace_id = NEW.workspace_id
+				AND preparation.cancellation_id = NEW.cancellation_id
+				AND candidate.manifest_fingerprint = NEW.manifest_fingerprint
+				AND candidate.authorization_fingerprint = NEW.authorization_fingerprint
+				AND candidate.policy_fingerprint = NEW.policy_fingerprint
+				AND candidate.mount_binding_fingerprint = NEW.mount_binding_fingerprint
+				AND candidate.requested_by = NEW.requested_by
+				AND candidate.backend_enabled = 0 AND candidate.execution_authorized = 0
+				AND preparation.input_artifact_count = NEW.input_artifact_count
+				AND preparation.max_output_bytes = NEW.max_output_bytes
+				AND preparation.output_count = NEW.capture_stdout + NEW.capture_stderr + NEW.output_path_count
+				AND run.mission_id = NEW.mission_id AND mission.workspace_id = NEW.workspace_id
+				AND run.status IN ('created', 'preparing', 'running', 'waiting_approval', 'paused')
+				AND julianday(NEW.created_at) >= julianday(candidate.validated_at)
+				AND NOT EXISTS (SELECT 1 FROM run_execution_leases lease
+					WHERE lease.run_id = NEW.run_id AND lease.status = 'active'
+						AND julianday(lease.expires_at) > julianday('now'))
+				AND candidate.tokens_used =
+					COALESCE((SELECT SUM(node.tokens_used) FROM agent_nodes node WHERE node.run_id = NEW.run_id), 0) +
+					COALESCE((SELECT SUM(CASE WHEN call.usage_recorded = 1 THEN call.total_tokens
+						ELSE call.reserved_total_tokens END) FROM readonly_fanout_model_calls call
+						WHERE call.run_id = NEW.run_id), 0)
+				AND candidate.execution_millis_used =
+					COALESCE((SELECT checkpoint.execution_millis FROM run_supervisor_checkpoints checkpoint
+						WHERE checkpoint.run_id = NEW.run_id), 0) +
+					COALESCE((SELECT SUM(call.elapsed_millis) FROM specialist_model_calls call
+						WHERE call.run_id = NEW.run_id), 0) +
+					COALESCE((SELECT SUM(CASE WHEN call.elapsed_recorded = 1 THEN call.elapsed_millis
+						ELSE call.reserved_millis END) FROM readonly_fanout_model_calls call
+						WHERE call.run_id = NEW.run_id), 0)
+				AND candidate.tool_calls_used = COALESCE((SELECT usage.consumed FROM run_tool_usage usage
+					WHERE usage.run_id = NEW.run_id), 0)
+				AND (COALESCE(CAST(json_extract(run.budget_json, '$.max_tokens') AS INTEGER), 0) = 0
+					OR candidate.tokens_used < CAST(json_extract(run.budget_json, '$.max_tokens') AS INTEGER))
+				AND (COALESCE(CAST(json_extract(run.budget_json, '$.timeout_seconds') AS INTEGER), 0) = 0
+					OR candidate.execution_millis_used < CAST(json_extract(run.budget_json, '$.timeout_seconds') AS INTEGER) * 1000)
+				AND (COALESCE(CAST(json_extract(run.budget_json, '$.max_tool_calls') AS INTEGER), 0) = 0
+					OR candidate.tool_calls_used < CAST(json_extract(run.budget_json, '$.max_tool_calls') AS INTEGER))
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox disabled execution binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_input_insert
+		BEFORE INSERT ON sandbox_execution_inputs
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_disabled_executions execution
+			JOIN runs run ON run.id = execution.run_id
+			JOIN run_artifacts artifact ON artifact.id = NEW.artifact_id
+			WHERE execution.id = NEW.execution_id AND artifact.run_id = execution.run_id
+				AND artifact.session_id = run.session_id AND artifact.workspace_id = execution.workspace_id
+				AND artifact.sha256 = NEW.sha256 AND artifact.size_bytes = NEW.size_bytes
+				AND artifact.mime = NEW.mime AND artifact.stream = NEW.stream
+				AND artifact.source_id = NEW.source_id AND artifact.redacted = NEW.redacted
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox execution input Artifact binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_lease_insert
+		BEFORE INSERT ON sandbox_execution_leases
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_disabled_executions execution
+			WHERE execution.id = NEW.execution_id AND execution.initial_lease_id = NEW.lease_id
+				AND execution.initial_lease_generation = NEW.generation
+				AND NEW.status = 'active' AND NEW.acquired_at = execution.created_at
+				AND NEW.renewed_at = NEW.acquired_at
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox initial execution lease binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_lease_update
+		BEFORE UPDATE ON sandbox_execution_leases
+		WHEN NEW.execution_id <> OLD.execution_id
+			OR NEW.generation < OLD.generation OR NEW.generation > OLD.generation + 1
+			OR (NEW.generation = OLD.generation AND NEW.lease_id <> OLD.lease_id)
+			OR (NEW.generation = OLD.generation AND NEW.owner_id <> OLD.owner_id)
+			OR (NEW.generation = OLD.generation AND NEW.acquired_at <> OLD.acquired_at)
+			OR (NEW.generation = OLD.generation AND OLD.status = 'released' AND NEW.status <> 'released')
+			OR (NEW.generation = OLD.generation AND OLD.status = 'active' AND NEW.status NOT IN ('active', 'released'))
+			OR (NEW.generation = OLD.generation + 1 AND (
+				NEW.status <> 'active' OR NEW.released_at IS NOT NULL
+				OR NOT (OLD.status = 'released' OR julianday(OLD.expires_at) <= julianday('now'))))
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox execution lease transition is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_operation_insert
+		BEFORE INSERT ON sandbox_execution_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_disabled_executions execution
+			JOIN sandbox_execution_leases lease ON lease.execution_id = execution.id
+			WHERE execution.id = NEW.execution_id AND execution.candidate_id = NEW.candidate_id
+				AND execution.run_id = NEW.run_id AND execution.requested_by = NEW.requested_by
+				AND execution.created_at = NEW.created_at
+				AND lease.lease_id = execution.initial_lease_id
+				AND lease.generation = execution.initial_lease_generation
+				AND (SELECT COUNT(*) FROM sandbox_execution_inputs input
+					WHERE input.execution_id = execution.id) = execution.input_artifact_count
+				AND COALESCE((SELECT SUM(input.size_bytes) FROM sandbox_execution_inputs input
+					WHERE input.execution_id = execution.id), 0) = execution.input_artifact_bytes
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox execution operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_cancellation_insert
+		BEFORE INSERT ON sandbox_execution_cancellations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_disabled_executions execution
+			WHERE execution.id = NEW.execution_id AND execution.run_id = NEW.run_id
+				AND execution.cancellation_id = NEW.cancellation_id
+				AND julianday(NEW.requested_at) >= julianday(execution.created_at)
+				AND NOT EXISTS (SELECT 1 FROM sandbox_cleanup_results cleanup
+					WHERE cleanup.execution_id = execution.id)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox cancellation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_cancellation_operation_insert
+		BEFORE INSERT ON sandbox_execution_cancellation_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_execution_cancellations cancellation
+			WHERE cancellation.id = NEW.request_id AND cancellation.execution_id = NEW.execution_id
+				AND cancellation.run_id = NEW.run_id AND cancellation.requested_by = NEW.requested_by
+				AND cancellation.requested_at = NEW.created_at
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox cancellation operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_cleanup_result_insert
+		BEFORE INSERT ON sandbox_cleanup_results
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_disabled_executions execution
+			JOIN sandbox_execution_leases lease ON lease.execution_id = execution.id
+			WHERE execution.id = NEW.execution_id AND execution.run_id = NEW.run_id
+				AND lease.lease_id = NEW.lease_id AND lease.generation = NEW.lease_generation
+				AND lease.status = 'active' AND julianday(lease.expires_at) > julianday('now')
+				AND julianday(NEW.completed_at) >= julianday(execution.created_at)
+				AND NEW.cancellation_observed = CASE WHEN EXISTS (
+					SELECT 1 FROM sandbox_execution_cancellations cancellation
+					WHERE cancellation.execution_id = execution.id) THEN 1 ELSE 0 END
+				AND (SELECT COUNT(*) FROM sandbox_execution_inputs input
+					JOIN run_artifacts artifact ON artifact.id = input.artifact_id
+					WHERE input.execution_id = execution.id AND artifact.run_id = execution.run_id
+						AND artifact.sha256 = input.sha256 AND artifact.size_bytes = input.size_bytes
+						AND artifact.mime = input.mime AND artifact.stream = input.stream
+						AND artifact.source_id = input.source_id AND artifact.redacted = input.redacted)
+					= execution.input_artifact_count
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox cleanup result binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_cleanup_operation_insert
+		BEFORE INSERT ON sandbox_cleanup_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_cleanup_results cleanup
+			WHERE cleanup.id = NEW.cleanup_id AND cleanup.execution_id = NEW.execution_id
+				AND cleanup.run_id = NEW.run_id AND cleanup.reconciled_by = NEW.reconciled_by
+				AND cleanup.completed_at = NEW.created_at
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox cleanup operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_disabled_execution_update_immutable
+		BEFORE UPDATE ON sandbox_disabled_executions BEGIN
+			SELECT RAISE(ABORT, 'sandbox disabled execution cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_disabled_execution_delete_immutable
+		BEFORE DELETE ON sandbox_disabled_executions BEGIN
+			SELECT RAISE(ABORT, 'sandbox disabled execution cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_input_update_immutable
+		BEFORE UPDATE ON sandbox_execution_inputs BEGIN
+			SELECT RAISE(ABORT, 'sandbox execution input cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_input_delete_immutable
+		BEFORE DELETE ON sandbox_execution_inputs BEGIN
+			SELECT RAISE(ABORT, 'sandbox execution input cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_operation_update_immutable
+		BEFORE UPDATE ON sandbox_execution_operations BEGIN
+			SELECT RAISE(ABORT, 'sandbox execution operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_operation_delete_immutable
+		BEFORE DELETE ON sandbox_execution_operations BEGIN
+			SELECT RAISE(ABORT, 'sandbox execution operation cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_cancellation_update_immutable
+		BEFORE UPDATE ON sandbox_execution_cancellations BEGIN
+			SELECT RAISE(ABORT, 'sandbox cancellation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_cancellation_delete_immutable
+		BEFORE DELETE ON sandbox_execution_cancellations BEGIN
+			SELECT RAISE(ABORT, 'sandbox cancellation cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_cancellation_operation_update_immutable
+		BEFORE UPDATE ON sandbox_execution_cancellation_operations BEGIN
+			SELECT RAISE(ABORT, 'sandbox cancellation operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_cancellation_operation_delete_immutable
+		BEFORE DELETE ON sandbox_execution_cancellation_operations BEGIN
+			SELECT RAISE(ABORT, 'sandbox cancellation operation cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_cleanup_result_update_immutable
+		BEFORE UPDATE ON sandbox_cleanup_results BEGIN
+			SELECT RAISE(ABORT, 'sandbox cleanup result cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_cleanup_result_delete_immutable
+		BEFORE DELETE ON sandbox_cleanup_results BEGIN
+			SELECT RAISE(ABORT, 'sandbox cleanup result cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_cleanup_operation_update_immutable
+		BEFORE UPDATE ON sandbox_cleanup_operations BEGIN
+			SELECT RAISE(ABORT, 'sandbox cleanup operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_cleanup_operation_delete_immutable
+		BEFORE DELETE ON sandbox_cleanup_operations BEGIN
+			SELECT RAISE(ABORT, 'sandbox cleanup operation cannot be deleted');
 		END;`,
 }
 

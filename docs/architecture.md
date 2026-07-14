@@ -300,6 +300,10 @@ Candidate validation receives the full Manifest again and recomputes every v48 b
 
 `sandbox_execution_candidate.v1` records only that these checks passed at one point. It always has `backend_enabled=false` and `execution_authorized=false`; no Runner is called. See [ADR 0009](adr/0009-sandbox-approval-candidate.md).
 
+Schema v50 adds a disabled lifecycle above that candidate. `sandbox_execution.v1` is immutable and one-to-one with its v49 candidate. Creation resupplies the complete Manifest and rechecks every prior binding, then pins each input Artifact by exact Run/Session/Workspace, ordinal, identity, content digest, size, MIME, stream, source, and redaction state under a 16 MiB aggregate limit. The output plan retains only capture flags, path count, byte limit, and a digest. Neither raw output paths nor Artifact content enter the lifecycle ledger.
+
+Sandbox ownership is deliberately separate from the Run execution lease. A generation-fenced `sandbox_execution_leases` row permits cleanup after the Run becomes terminal and prevents a stale worker from releasing or committing over a successor. The private lease/cleanup rows necessarily retain opaque lease and worker identities for fencing, while events and CLI projections omit both. The initial generation can only prepare the disabled root and is released immediately. Immutable cancellation and cleanup operations converge under digest-only idempotency keys. Cleanup revalidates all inputs while holding the active Sandbox lease; v50 accepts only `backend_disabled`, with no started backend, orphan, or output Artifact. See [ADR 0010](adr/0010-disabled-sandbox-lifecycle.md).
+
 - local sources are copied or mounted read-only by explicit manifest entries;
 - writable outputs use dedicated run directories;
 - network access starts disabled or scope-limited;
@@ -307,7 +311,7 @@ Candidate validation receives the full Manifest again and recomputes every v48 b
 - teardown is idempotent and records cleanup failures;
 - the Docker client is introduced only with the real backend.
 
-`LocalSandbox` remains development-only and must use the same approval/event pipeline. It is never treated as an isolation boundary. None of the target-model bullets are execution claims for schemas v48-v49; Docker lifecycle, cancellation, cleanup, network enforcement, secret materialization, and Artifact export remain separately gated work. See [ADR 0008](adr/0008-sandbox-manifest-boundary.md) and [ADR 0009](adr/0009-sandbox-approval-candidate.md).
+`LocalSandbox` remains development-only and must use the same approval/event pipeline. It is never treated as an isolation boundary. None of the target-model bullets are execution claims for schemas v48-v50; Docker container identity, mount/network enforcement, secret materialization, timeout/kill, real orphan reconciliation, and output Artifact export remain separately gated work. See [ADR 0008](adr/0008-sandbox-manifest-boundary.md), [ADR 0009](adr/0009-sandbox-approval-candidate.md), and [ADR 0010](adr/0010-disabled-sandbox-lifecycle.md).
 
 ## Scope and Safety
 
@@ -455,6 +459,19 @@ finding_artifact_evidence
 finding_artifact_evidence_operations
 finding_validation_decisions
 finding_validation_operations
+sandbox_manifest_preparations
+sandbox_manifest_validations
+sandbox_manifest_operations
+sandbox_execution_candidates
+sandbox_execution_candidate_operations
+sandbox_disabled_executions
+sandbox_execution_inputs
+sandbox_execution_leases
+sandbox_execution_operations
+sandbox_execution_cancellations
+sandbox_execution_cancellation_operations
+sandbox_cleanup_results
+sandbox_cleanup_operations
 agent_graph_snapshots
 ```
 
