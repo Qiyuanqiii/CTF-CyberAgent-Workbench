@@ -578,6 +578,8 @@ schema v47 新增不可变 `specialist_skill_context_preparations/commits`。八
 
 本切片审计未发现未解决的高/中风险问题。收口新增未准备启动拒绝、注入事件失败原子回滚、准备/提交 UPDATE/DELETE 拒绝、事件字段白名单、schema metadata-only、事件顺序、v46 原地升级、Cyber 空集合和 Script-only、正文篡改与缺少 `model.chat` 测试。真实二进制 smoke 还发现并修正 `skill validate` 仍显示 root-only 的旧能力声明。最终本地门禁通过 uncached 全仓普通测试、全仓 race、vet、零告警 staticcheck、模块校验、零可达漏洞 govulncheck、OpenAPI 无漂移、8 个 Vitest 文件 17 项测试、Vite production build、零漏洞 npm audit、凭据/运行产物扫描和隔离 schema-v47 smoke。GitHub Actions run `29321708904` 对提交 `d7e269b` 复核成功：Go control plane 1 分 51 秒，TypeScript console 20 秒。
 
+v47 发布后的远端 CI 复核暴露并修正两项既有并发假设。`ed1a2f1` 让阶段切换重放在其他 worker 已到达目标 phase 时再次读取持久化 operation，避免把成功并发提交误报为重复切换；`fa6dfbd` 将 Provider 取消测试改为等待真实调用入口，并规定已有 durable `model.started` 的 root 模型调用至少计费 1ms，关闭 `999/1000ms` deadline 可重复进入的预算边界。为保持 schema-v47 升级兼容，旧 Specialist 严格重放账本的 `0ms` 解释未被暗中改变。定向普通测试 100 轮、race 30 轮、全仓普通/race、vet、staticcheck、模块校验和 govulncheck 均通过；GitHub Actions run `29325171043` 对 `fa6dfbd` 一次通过，Go 2 分 53 秒、TypeScript 18 秒，无未解决高/中风险问题。
+
 唯一推荐下一切片：转入 P6 的 Go-owned Sandbox Manifest v1。先固化 Manifest/Mount/NetworkScope/ResourceLimit/command/argv/input/output/timeout/cancellation 的有界协议、Run/Workspace/Policy/审批绑定、metadata-only validation/preparation 和幂等恢复；Noop 只做确定性验证，Local/Docker 继续 fail closed，不在该切片启动任何宿主机或容器进程。该协议随后作为 Go -> Docker 与 Go -> Rust JSON 工具边界，Rust analyzer 和 CTF 求解仍后置。
 
 Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过独立审计。
