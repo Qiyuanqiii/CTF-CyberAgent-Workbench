@@ -623,6 +623,10 @@ func (s *SQLiteStore) RecordSupervisorModelCompleted(ctx context.Context, checkp
 	if err := attempt.ValidateCompleted(); err != nil {
 		return domain.SupervisorCheckpoint{}, apperror.Wrap(apperror.CodeInvalidArgument, "invalid completed model attempt", err)
 	}
+	elapsedMillis, err := supervisorModelElapsedMillis(attempt.Elapsed)
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
 	if _, _, _, err := supervisorUsage(response.Usage); err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
@@ -641,7 +645,7 @@ func (s *SQLiteStore) RecordSupervisorModelCompleted(ctx context.Context, checkp
 		"max_attempts": attempt.MaxAttempts, "protocol_repair": attempt.ProtocolRepair,
 		"tool_round": attempt.ToolRound,
 		"provider":   attempt.Provider, "model": attempt.Model, "outcome": attempt.Outcome,
-		"elapsed_millis": attempt.Elapsed.Milliseconds(), "usage": response.Usage,
+		"elapsed_millis": elapsedMillis, "usage": response.Usage,
 		"stream_events": attempt.StreamEvents, "stream_bytes": attempt.StreamBytes,
 		"tool_call_count": len(toolCalls),
 	}
@@ -654,13 +658,17 @@ func (s *SQLiteStore) RecordSupervisorModelFailed(ctx context.Context, checkpoin
 	if err := attempt.ValidateFailed(); err != nil {
 		return domain.SupervisorCheckpoint{}, apperror.Wrap(apperror.CodeInvalidArgument, "invalid failed model attempt", err)
 	}
+	elapsedMillis, err := supervisorModelElapsedMillis(attempt.Elapsed)
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, err
+	}
 	payload := map[string]any{
 		"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
 		"model_attempt": attempt.Number, "transport_attempt": attempt.TransportNumber(),
 		"max_attempts": attempt.MaxAttempts, "protocol_repair": attempt.ProtocolRepair,
 		"tool_round": attempt.ToolRound,
 		"provider":   attempt.Provider, "model": attempt.Model, "outcome": attempt.Outcome,
-		"error": attempt.ErrorText, "elapsed_millis": attempt.Elapsed.Milliseconds(),
+		"error": attempt.ErrorText, "elapsed_millis": elapsedMillis,
 		"retry_after_millis": attempt.RetryAfter.Milliseconds(), "retry_planned": attempt.RetryPlanned,
 		"stream_events": attempt.StreamEvents, "stream_bytes": attempt.StreamBytes,
 	}
@@ -679,6 +687,10 @@ func (s *SQLiteStore) RecordSupervisorProtocolFailure(ctx context.Context, check
 	attempt.RetryPlanned = false
 	if err := attempt.ValidateFailed(); err != nil {
 		return domain.SupervisorCheckpoint{}, apperror.Wrap(apperror.CodeInvalidArgument, "invalid protocol failure attempt", err)
+	}
+	elapsedMillis, err := supervisorModelElapsedMillis(attempt.Elapsed)
+	if err != nil {
+		return domain.SupervisorCheckpoint{}, err
 	}
 	if _, _, _, err := supervisorUsage(response.Usage); err != nil {
 		return domain.SupervisorCheckpoint{}, err
@@ -700,7 +712,7 @@ func (s *SQLiteStore) RecordSupervisorProtocolFailure(ctx context.Context, check
 		"max_attempts": attempt.MaxAttempts, "protocol_repair": attempt.ProtocolRepair,
 		"tool_round": attempt.ToolRound,
 		"provider":   attempt.Provider, "model": attempt.Model, "outcome": attempt.Outcome,
-		"error": attempt.ErrorText, "elapsed_millis": attempt.Elapsed.Milliseconds(),
+		"error": attempt.ErrorText, "elapsed_millis": elapsedMillis,
 		"retry_after_millis": 0, "retry_planned": false, "usage": response.Usage,
 		"stream_events": attempt.StreamEvents, "stream_bytes": attempt.StreamBytes,
 	}
@@ -799,7 +811,7 @@ func (s *SQLiteStore) recordSupervisorModelTerminal(ctx context.Context, checkpo
 		return domain.SupervisorCheckpoint{}, apperror.New(apperror.CodeInvalidArgument,
 			"supervisor tool calls require a successful primary model response")
 	}
-	elapsedMillis, err := supervisorElapsedMillis(attempt.Elapsed)
+	elapsedMillis, err := supervisorModelElapsedMillis(attempt.Elapsed)
 	if err != nil {
 		return domain.SupervisorCheckpoint{}, err
 	}
@@ -1841,6 +1853,17 @@ func supervisorElapsedMillis(elapsed time.Duration) (int64, error) {
 	}
 	millis := elapsed.Milliseconds()
 	if elapsed > 0 && millis == 0 {
+		millis = 1
+	}
+	return millis, nil
+}
+
+func supervisorModelElapsedMillis(elapsed time.Duration) (int64, error) {
+	millis, err := supervisorElapsedMillis(elapsed)
+	if err != nil {
+		return 0, err
+	}
+	if millis == 0 {
 		millis = 1
 	}
 	return millis, nil

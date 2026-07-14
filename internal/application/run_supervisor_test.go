@@ -1218,16 +1218,41 @@ func TestRunSupervisorCancellationDuringBackoffResumesNextModelAttempt(t *testin
 }
 
 func TestRunSupervisorAuditsCancellationDuringProviderCall(t *testing.T) {
-	_, st, run, supervisor := newRetrySupervisor(t, blockingProvider{})
-	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	provider := blockingProvider{started: make(chan struct{}, 1)}
+	_, st, run, supervisor := newRetrySupervisor(t, provider)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	result, err := supervisor.StepWithInput(ctx, run.ID, "cancel active provider")
-	if apperror.CodeOf(err) != apperror.CodeDeadlineExceeded {
+	type stepOutcome struct {
+		result application.LifecycleResult
+		err    error
+	}
+	done := make(chan stepOutcome, 1)
+	go func() {
+		result, err := supervisor.StepWithInput(ctx, run.ID, "cancel active provider")
+		done <- stepOutcome{result: result, err: err}
+	}()
+	select {
+	case <-provider.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("provider call did not start")
+	}
+	cancel()
+	var outcome stepOutcome
+	select {
+	case outcome = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancelled provider call did not return")
+	}
+	result, err := outcome.result, outcome.err
+	if apperror.CodeOf(err) != apperror.CodeCancelled {
 		t.Fatalf("provider cancellation code=%s err=%v", apperror.CodeOf(err), err)
 	}
-	if result.Checkpoint.Phase != domain.SupervisorTurnStarted || result.Checkpoint.PendingInput != "cancel active provider" || result.Checkpoint.ExecutionMillis <= 0 {
-		t.Fatalf("provider cancellation was not durably checkpointed: %#v", result)
+	if result.ModelOutcome != llm.OutcomeCancelled {
+		t.Fatalf("provider cancellation outcome=%q result=%#v", result.ModelOutcome, result)
+	}
+	checkpoint, ok, err := st.GetSupervisorCheckpoint(context.Background(), run.ID)
+	if err != nil || !ok || checkpoint.Phase != domain.SupervisorTurnStarted || checkpoint.PendingInput != "cancel active provider" {
+		t.Fatalf("provider cancellation checkpoint ok=%t checkpoint=%#v err=%v", ok, checkpoint, err)
 	}
 	items, err := st.ListRunEvents(context.Background(), run.ID)
 	if err != nil {
@@ -2204,7 +2229,9 @@ func (*fixedUsageProvider) SupportsTools(string) bool    { return false }
 func (*fixedUsageProvider) SupportsVision(string) bool   { return false }
 func (*fixedUsageProvider) SupportsJSONMode(string) bool { return false }
 
-type blockingProvider struct{}
+type blockingProvider struct {
+	started chan struct{}
+}
 
 func (blockingProvider) Name() string { return "blocking-test" }
 
@@ -2212,7 +2239,13 @@ func (blockingProvider) ListModels(context.Context) ([]llm.ModelInfo, error) {
 	return []llm.ModelInfo{{ID: "model", Provider: "blocking-test"}}, nil
 }
 
-func (blockingProvider) Chat(ctx context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+func (p blockingProvider) Chat(ctx context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	if p.started != nil {
+		select {
+		case p.started <- struct{}{}:
+		default:
+		}
+	}
 	<-ctx.Done()
 	return nil, ctx.Err()
 }
