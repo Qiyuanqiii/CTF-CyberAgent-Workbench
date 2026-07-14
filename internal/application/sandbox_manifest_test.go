@@ -6,12 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"cyberagent-workbench/internal/apperror"
+	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/sandbox"
 	"cyberagent-workbench/internal/store"
+	"cyberagent-workbench/internal/toolbudget"
 	"cyberagent-workbench/internal/tools"
 )
 
@@ -147,7 +150,171 @@ func TestSandboxManifestServiceConservativelyRequiresApprovalForHighRiskPolicy(t
 	}
 }
 
+func TestSandboxExecutionCandidateRequiresExactApprovedResuppliedIntent(t *testing.T) {
+	ctx := context.Background()
+	st, run, _ := newSandboxManifestTestRuntime(t, ctx)
+	service := NewSandboxManifestService(st, policy.NewDefaultChecker())
+	manifest := sandboxManifestTestFixture()
+	manifest.Mounts[0].Access = sandbox.MountReadWrite
+	prepared, err := service.Prepare(ctx, PrepareSandboxManifestRequest{
+		RunID: run.ID, Manifest: manifest, OperationKey: "sandbox-candidate-prepare",
+		RequestedBy: "candidate_operator",
+	})
+	if err != nil || prepared.Validation.ApprovalStatus != sandbox.ApprovalRequired {
+		t.Fatalf("approval-required sandbox preparation failed: %#v err=%v", prepared, err)
+	}
+	request := ValidateSandboxExecutionCandidateRequest{
+		PreparationID: prepared.Preparation.ID, Manifest: manifest,
+		OperationKey: "sandbox-candidate-validate", RequestedBy: "candidate_operator",
+	}
+	if _, err := service.ValidateExecutionCandidate(ctx, request); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("candidate without approval was not rejected: %v", err)
+	}
+	record, err := service.RequestApproval(ctx, prepared.Preparation.ID, "candidate_operator")
+	if err != nil || record.Status != approval.StatusPending ||
+		record.RequestFingerprint != prepared.Preparation.AuthorizationFingerprint {
+		t.Fatalf("sandbox approval request is invalid: %#v err=%v", record, err)
+	}
+	replayedRequest, err := service.RequestApproval(ctx, prepared.Preparation.ID, "candidate_operator")
+	if err != nil || replayedRequest.ID != record.ID {
+		t.Fatalf("sandbox approval request did not converge: %#v err=%v", replayedRequest, err)
+	}
+	request.ApprovalID = record.ID
+	if _, err := service.ValidateExecutionCandidate(ctx, request); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("pending approval authorized a candidate: %v", err)
+	}
+	decision, err := service.ReviewApproval(ctx, prepared.Preparation.ID, approval.ActionApprove,
+		"sandbox-approval-review", "security_operator", "")
+	if err != nil || decision.Approval.Status != approval.StatusApproved {
+		t.Fatalf("sandbox approval review failed: %#v err=%v", decision, err)
+	}
+	validated, err := service.ValidateExecutionCandidate(ctx, request)
+	if err != nil || validated.Replayed || validated.Candidate.ExecutionAuthorized ||
+		validated.Candidate.BackendEnabled || !validated.Candidate.BudgetChecked ||
+		!validated.Candidate.LeaseQuiescent || validated.Candidate.ApprovalStatus != sandbox.ApprovalApproved {
+		t.Fatalf("sandbox execution candidate is invalid: %#v err=%v", validated, err)
+	}
+	replayed, err := service.ValidateExecutionCandidate(ctx, request)
+	if err != nil || !replayed.Replayed || replayed.Candidate.ID != validated.Candidate.ID {
+		t.Fatalf("sandbox execution candidate replay did not converge: %#v err=%v", replayed, err)
+	}
+	changed := request
+	changed.Manifest.Command.Arguments = []string{"test", "./internal/..."}
+	if _, err := service.ValidateExecutionCandidate(ctx, changed); apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("changed Manifest reused candidate operation key: %v", err)
+	}
+	if _, err := NewRunService(st).Cancel(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	terminalReplay, err := service.ValidateExecutionCandidate(ctx, request)
+	if err != nil || !terminalReplay.Replayed || terminalReplay.Candidate.ID != validated.Candidate.ID {
+		t.Fatalf("terminal candidate replay failed: %#v err=%v", terminalReplay, err)
+	}
+	request.OperationKey = "sandbox-candidate-after-terminal"
+	if _, err := service.ValidateExecutionCandidate(ctx, request); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("terminal Run created a fresh candidate: %v", err)
+	}
+}
+
+func TestSandboxExecutionCandidateRejectsApprovalDenialAndPolicyDrift(t *testing.T) {
+	ctx := context.Background()
+	st, run, _ := newSandboxManifestTestRuntime(t, ctx)
+	service := NewSandboxManifestService(st, sandboxHighRiskChecker{})
+	manifest := sandboxManifestTestFixture()
+	prepared, err := service.Prepare(ctx, PrepareSandboxManifestRequest{
+		RunID: run.ID, Manifest: manifest, OperationKey: "sandbox-drift-prepare",
+		RequestedBy: "candidate_operator",
+	})
+	if err != nil || !prepared.Validation.NeedsApproval {
+		t.Fatalf("high-risk preparation failed: %#v err=%v", prepared, err)
+	}
+	record, err := service.RequestApproval(ctx, prepared.Preparation.ID, "candidate_operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ReviewApproval(ctx, prepared.Preparation.ID, approval.ActionDeny,
+		"sandbox-deny-review", "security_operator", "scope not justified"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ValidateExecutionCandidate(ctx, ValidateSandboxExecutionCandidateRequest{
+		PreparationID: prepared.Preparation.ID, Manifest: manifest, ApprovalID: record.ID,
+		OperationKey: "sandbox-denied-candidate", RequestedBy: "candidate_operator",
+	}); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("denied approval authorized a candidate: %v", err)
+	}
+	drifted := NewSandboxManifestService(st, policy.NewDefaultChecker())
+	if _, err := drifted.ValidateExecutionCandidate(ctx, ValidateSandboxExecutionCandidateRequest{
+		PreparationID: prepared.Preparation.ID, Manifest: manifest, ApprovalID: record.ID,
+		OperationKey: "sandbox-policy-drift", RequestedBy: "candidate_operator",
+	}); apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("changed Policy decision reused the original preparation: %v", err)
+	}
+}
+
+func TestSandboxExecutionCandidateRechecksLeaseAndToolBudget(t *testing.T) {
+	ctx := context.Background()
+	st, run, _ := newSandboxManifestTestRuntime(t, ctx)
+	service := NewSandboxManifestService(st, policy.NewDefaultChecker())
+	manifest := sandboxManifestTestFixture()
+	prepared, err := service.Prepare(ctx, PrepareSandboxManifestRequest{
+		RunID: run.ID, Manifest: manifest, OperationKey: "sandbox-lease-prepare",
+		RequestedBy: "candidate_operator",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
+		RunID: run.ID, OwnerID: "candidate_test_worker", TTL: time.Minute,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := ValidateSandboxExecutionCandidateRequest{
+		PreparationID: prepared.Preparation.ID, Manifest: manifest,
+		OperationKey: "sandbox-lease-candidate", RequestedBy: "candidate_operator",
+	}
+	if _, err := service.ValidateExecutionCandidate(ctx, request); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("active Run lease did not block candidate validation: %v", err)
+	}
+	if _, _, err := st.ReleaseRunExecutionLease(ctx, lease.Lease); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ValidateExecutionCandidate(ctx, request); err != nil {
+		t.Fatalf("released Run lease still blocked candidate validation: %v", err)
+	}
+
+	budgetStore, budgetRun, _ := newSandboxManifestTestRuntimeWithBudget(t, ctx,
+		domain.Budget{MaxTurns: 4, MaxToolCalls: 1})
+	budgetService := NewSandboxManifestService(budgetStore, policy.NewDefaultChecker())
+	budgetPrepared, err := budgetService.Prepare(ctx, PrepareSandboxManifestRequest{
+		RunID: budgetRun.ID, Manifest: manifest, OperationKey: "sandbox-budget-prepare",
+		RequestedBy: "candidate_operator",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := budgetStore.ChargeToolCall(ctx, toolbudget.ChargeRequest{
+		RunID: budgetRun.ID, SessionID: budgetRun.SessionID, WorkspaceID: "ws-sandbox",
+		ToolName: "workspace_read", ActionClass: "workspace_read", RequestedBy: "candidate_test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := budgetService.ValidateExecutionCandidate(ctx, ValidateSandboxExecutionCandidateRequest{
+		PreparationID: budgetPrepared.Preparation.ID, Manifest: manifest,
+		OperationKey: "sandbox-budget-candidate", RequestedBy: "candidate_operator",
+	}); apperror.CodeOf(err) != apperror.CodeResourceExhausted {
+		t.Fatalf("exhausted tool budget did not block candidate validation: %v", err)
+	}
+}
+
 func newSandboxManifestTestRuntime(t *testing.T, ctx context.Context,
+) (*store.SQLiteStore, domain.Run, string) {
+	return newSandboxManifestTestRuntimeWithBudget(t, ctx,
+		domain.Budget{MaxTurns: 4, MaxToolCalls: 4})
+}
+
+func newSandboxManifestTestRuntimeWithBudget(t *testing.T, ctx context.Context,
+	budget domain.Budget,
 ) (*store.SQLiteStore, domain.Run, string) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
@@ -163,7 +330,7 @@ func newSandboxManifestTestRuntime(t *testing.T, ctx context.Context,
 	}
 	_, run, err := NewRunService(st).Create(ctx, CreateRunRequest{
 		Goal: "validate a bounded sandbox manifest", Profile: "code",
-		WorkspaceID: "ws-sandbox", Budget: domain.Budget{MaxTurns: 4, MaxToolCalls: 4},
+		WorkspaceID: "ws-sandbox", Budget: budget,
 	})
 	if err != nil {
 		t.Fatal(err)

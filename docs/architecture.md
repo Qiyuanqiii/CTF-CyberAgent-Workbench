@@ -294,6 +294,12 @@ SQLite stores immutable preparation, validation, and digest-keyed operation meta
 
 The target model remains one isolated environment per Run, shared only by Agents in that Run through the Go coordinator. A future execution step must resupply the Manifest, reproduce its fingerprint, re-resolve mount sources under the Workspace root, and recheck Policy, Scope, approval, budget, and execution lease before it can even become a candidate.
 
+Schema v49 implements that candidate boundary without enabling a backend. Sandbox approval requests use the existing `tool_approvals` table and bind the preparation ID, Run Session, Workspace, `sandbox.manifest/sandbox_execute`, and authorization fingerprint. Operator review is explicit; pending or denied records cannot pass candidate validation. Approval never overrides permanent Policy denial.
+
+Candidate validation receives the full Manifest again and recomputes every v48 binding. Go `os.Root` opens each mount source relative to the resolved Workspace root and rejects escaping symlinks or non-file/non-directory objects. The application then snapshots aggregate root/Specialist/Fan-out usage and tool-call usage. Candidate insertion takes the Run write lock, recomputes those counters, rejects an active execution lease, and commits an immutable digest-keyed fact only when nothing changed. SQL triggers enforce the same approval, budget, lease, and disabled-backend invariants against direct writes. Raw Manifest, executable, argv, paths, Workspace root, environment values, secret references, and network targets remain transient.
+
+`sandbox_execution_candidate.v1` records only that these checks passed at one point. It always has `backend_enabled=false` and `execution_authorized=false`; no Runner is called. See [ADR 0009](adr/0009-sandbox-approval-candidate.md).
+
 - local sources are copied or mounted read-only by explicit manifest entries;
 - writable outputs use dedicated run directories;
 - network access starts disabled or scope-limited;
@@ -301,7 +307,7 @@ The target model remains one isolated environment per Run, shared only by Agents
 - teardown is idempotent and records cleanup failures;
 - the Docker client is introduced only with the real backend.
 
-`LocalSandbox` remains development-only and must use the same approval/event pipeline. It is never treated as an isolation boundary. None of the target-model bullets are execution claims for schema v48; Docker lifecycle, cancellation, cleanup, network enforcement, secret materialization, and Artifact export remain separately gated work. See [ADR 0008](adr/0008-sandbox-manifest-boundary.md).
+`LocalSandbox` remains development-only and must use the same approval/event pipeline. It is never treated as an isolation boundary. None of the target-model bullets are execution claims for schemas v48-v49; Docker lifecycle, cancellation, cleanup, network enforcement, secret materialization, and Artifact export remain separately gated work. See [ADR 0008](adr/0008-sandbox-manifest-boundary.md) and [ADR 0009](adr/0009-sandbox-approval-candidate.md).
 
 ## Scope and Safety
 

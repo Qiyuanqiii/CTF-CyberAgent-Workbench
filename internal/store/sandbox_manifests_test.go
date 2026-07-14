@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/policy"
@@ -46,6 +47,14 @@ func TestSandboxManifestLedgerBindsApprovalAndRemainsImmutable(t *testing.T) {
 	if err != nil || bound.Validation.ApprovalStatus != sandbox.ApprovalApproved ||
 		bound.Validation.ExecutionAuthorized || bound.Validation.BackendEnabled {
 		t.Fatalf("exact approval binding widened execution authority: %#v err=%v", bound, err)
+	}
+	if _, err := service.ValidateExecutionCandidate(ctx,
+		application.ValidateSandboxExecutionCandidateRequest{
+			PreparationID: bound.Preparation.ID, Manifest: manifest,
+			ApprovalID: "approval-sandbox-exact", OperationKey: "sandbox-bound-v48-candidate",
+			RequestedBy: "store_test",
+		}); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("v48 externally bound approval became a v49 execution candidate: %v", err)
 	}
 	if _, err := st.db.ExecContext(ctx, `UPDATE sandbox_manifest_preparations
 		SET backend = 'docker' WHERE id = ?`, bound.Preparation.ID); err == nil {
@@ -195,8 +204,8 @@ func TestSchemaV47UpgradeAddsSandboxManifestLedgerWithoutLosingRun(t *testing.T)
 		t.Fatalf("schema v47 Run was not preserved: %#v err=%v", loaded, err)
 	}
 	version, err := st.SchemaVersion(ctx)
-	if err != nil || version != 48 {
-		t.Fatalf("schema v47 did not upgrade to v48: version=%d err=%v", version, err)
+	if err != nil || version != LatestSchemaVersion {
+		t.Fatalf("schema v47 did not upgrade to v49: version=%d err=%v", version, err)
 	}
 	var table string
 	if err := st.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master

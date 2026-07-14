@@ -11,6 +11,7 @@ import (
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
+	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/sandbox"
 )
 
@@ -67,7 +68,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	switch args[0] {
@@ -136,9 +137,126 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		}
 		printSandboxManifestIntent(a, value)
 		return nil
+	case "request":
+		fs := newFlagSet("run sandbox request", a.errOut)
+		operator := fs.String("operator", "cli_operator", "approval requester identity")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"operator": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox request <preparation-id> [--operator <id>]")
+		}
+		record, err := service.RequestApproval(ctx, fs.Arg(0), *operator)
+		if err != nil {
+			return err
+		}
+		printApproval(a.out, record)
+		return nil
+	case "review":
+		fs := newFlagSet("run sandbox review", a.errOut)
+		decision := fs.String("decision", "", "approve or deny")
+		operationKey := fs.String("operation-key", "", "stable approval review operation key")
+		reviewer := fs.String("reviewer", "cli_operator", "reviewer identity")
+		reason := fs.String("reason", "", "required denial reason")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"decision": true, "operation-key": true, "reviewer": true, "reason": true,
+		})); err != nil {
+			return err
+		}
+		action := approval.Action(strings.TrimSpace(*decision))
+		if fs.NArg() != 1 || strings.TrimSpace(*operationKey) == "" ||
+			(action != approval.ActionApprove && action != approval.ActionDeny) {
+			return errors.New("usage: cyberagent run sandbox review <preparation-id> --decision approve|deny --operation-key <key> [--reviewer <id>] [--reason <text>]")
+		}
+		result, err := service.ReviewApproval(ctx, fs.Arg(0), action, *operationKey,
+			*reviewer, *reason)
+		if err != nil {
+			return err
+		}
+		printApproval(a.out, result.Approval)
+		fmt.Fprintf(a.out, "replayed: %t\n", result.Replayed)
+		return nil
+	case "candidate":
+		fs := newFlagSet("run sandbox candidate", a.errOut)
+		manifestPath := fs.String("manifest", "", "resupplied sandbox manifest JSON file")
+		operationKey := fs.String("operation-key", "", "stable candidate validation operation key")
+		approvalID := fs.String("approval", "", "exact approved sandbox approval identity")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"manifest": true, "operation-key": true, "approval": true, "operator": true,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" ||
+			strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox candidate <preparation-id> --manifest <manifest.json> --operation-key <key> [--approval <id>] [--operator <id>]")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		result, err := service.ValidateExecutionCandidate(ctx,
+			application.ValidateSandboxExecutionCandidateRequest{
+				PreparationID: fs.Arg(0), Manifest: manifest, ApprovalID: *approvalID,
+				OperationKey: *operationKey, RequestedBy: *operator,
+			})
+		if err != nil {
+			return err
+		}
+		printSandboxExecutionCandidate(a, result)
+		return nil
+	case "candidates":
+		fs := newFlagSet("run sandbox candidates", a.errOut)
+		limit := fs.Int("limit", 100, "maximum sandbox execution candidates")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox candidates <run-id> [--limit <n>]")
+		}
+		values, err := service.ListExecutionCandidates(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no sandbox execution candidates")
+			return nil
+		}
+		for _, value := range values {
+			fmt.Fprintf(a.out, "%s\tpreparation=%s\tapproval=%s\tbackend_enabled=false\texecution_authorized=false\tvalidated_at=%s\n",
+				value.Candidate.ID, value.Candidate.PreparationID, value.Candidate.ApprovalStatus,
+				value.Candidate.ValidatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "candidate-show":
+		fs := newFlagSet("run sandbox candidate-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox candidate-show <candidate-id>")
+		}
+		value, err := service.GetExecutionCandidate(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxExecutionCandidate(a, value)
+		return nil
 	default:
 		return fmt.Errorf("unknown run sandbox subcommand %q", args[0])
 	}
+}
+
+func printSandboxExecutionCandidate(a *App, value sandbox.ValidatedExecutionCandidate) {
+	candidate := value.Candidate
+	fmt.Fprintf(a.out, "candidate: %s\npreparation: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nmanifest_fingerprint: %s\nauthorization_fingerprint: %s\nmount_binding_fingerprint: %s\napproval: %s\napproval_status: %s\nmounts: %d\nregular_file_mounts: %d\ndirectory_mounts: %d\ntokens_used: %d\nexecution_millis_used: %d\ntool_calls_used: %d\nbudget_checked: true\nlease_quiescent: true\nbackend_enabled: false\nexecution_authorized: false\nrequested_by: %s\nvalidated_at: %s\nreplayed: %t\n",
+		candidate.ID, candidate.PreparationID, candidate.RunID, candidate.MissionID,
+		candidate.WorkspaceID, candidate.ProtocolVersion, candidate.ManifestFingerprint,
+		candidate.AuthorizationFingerprint, candidate.MountBindingFingerprint,
+		candidate.ApprovalID, candidate.ApprovalStatus, candidate.MountCount,
+		candidate.RegularFileMountCount, candidate.DirectoryMountCount,
+		candidate.TokensUsed, candidate.ExecutionMillisUsed, candidate.ToolCallsUsed,
+		candidate.RequestedBy, candidate.ValidatedAt.Format(timeFormatRFC3339Nano), value.Replayed)
 }
 
 const timeFormatRFC3339Nano = "2006-01-02T15:04:05.999999999Z07:00"

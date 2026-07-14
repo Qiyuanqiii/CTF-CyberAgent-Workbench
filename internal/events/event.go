@@ -99,6 +99,7 @@ const (
 	SpecialistSkillContextCommittedEvent     = "skill.specialist_context_committed"
 	SandboxManifestPreparedEvent             = "sandbox.manifest_prepared"
 	SandboxManifestValidatedEvent            = "sandbox.manifest_validated"
+	SandboxExecutionCandidateValidatedEvent  = "sandbox.execution_candidate_validated"
 	AgentProtocolRepairRequestedEvent        = "agent.protocol_repair_requested"
 	AgentProtocolRepairStartedEvent          = "agent.protocol_repair_started"
 	AgentProtocolRepairCompletedEvent        = "agent.protocol_repair_completed"

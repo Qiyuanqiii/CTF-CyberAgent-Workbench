@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"cyberagent-workbench/internal/approval"
+	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/idgen"
@@ -294,6 +295,29 @@ func validateApprovalProposalSourceTx(ctx context.Context, tx *sql.Tx, proposal 
 			proposal.ActionClass != "process" || proposal.Mode != expectedMode || proposal.Status != expectedStatus ||
 			proposal.RequestFingerprint != approvalFingerprint {
 			return errors.New("approval request does not match the stored script process proposal")
+		}
+	case "sandbox.manifest":
+		var sessionID, workspaceID, authorizationFingerprint, runStatus string
+		var boundApprovalID, validationApprovalStatus string
+		var policyAllowed, needsApproval int
+		if err := tx.QueryRowContext(ctx, `SELECT run.session_id, preparation.workspace_id,
+			preparation.authorization_fingerprint, run.status, validation.policy_allowed,
+			validation.needs_approval, validation.approval_id, validation.approval_status
+			FROM sandbox_manifest_preparations preparation
+			JOIN sandbox_manifest_validations validation ON validation.preparation_id = preparation.id
+			JOIN runs run ON run.id = preparation.run_id WHERE preparation.id = ?`, proposal.ProposalID).
+			Scan(&sessionID, &workspaceID, &authorizationFingerprint, &runStatus,
+				&policyAllowed, &needsApproval, &boundApprovalID, &validationApprovalStatus); err != nil {
+			return err
+		}
+		if proposal.SessionID != sessionID || proposal.WorkspaceID != workspaceID ||
+			proposal.ActionClass != "sandbox_execute" || proposal.Mode != "per_call" ||
+			proposal.Status != approval.StatusPending || proposal.RequestFingerprint != authorizationFingerprint ||
+			policyAllowed != 1 || needsApproval != 1 || boundApprovalID != "" ||
+			validationApprovalStatus != "required" ||
+			runStatus == string(domain.RunCompleted) || runStatus == string(domain.RunFailed) ||
+			runStatus == string(domain.RunCancelled) {
+			return errors.New("approval request does not match the stored sandbox Manifest preparation")
 		}
 	default:
 		return fmt.Errorf("unsupported approval tool %q", proposal.ToolName)

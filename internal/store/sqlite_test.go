@@ -1225,7 +1225,7 @@ func removeSchemaV47ForTestStatements() []string {
 }
 
 func removeSchemaV48ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV49ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_manifest_operation_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_manifest_operation_update_immutable`,
 		`DROP TRIGGER trg_sandbox_manifest_validation_delete_immutable`,
@@ -1240,6 +1240,21 @@ func removeSchemaV48ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_manifest_preparations_run_prepared`,
 		`DROP TABLE sandbox_manifest_preparations`,
 		`DELETE FROM schema_migrations WHERE version = 48`,
+	}...)
+}
+
+func removeSchemaV49ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_execution_candidate_operation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_execution_candidate_operation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_execution_candidate_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_execution_candidate_update_immutable`,
+		`DROP TRIGGER trg_sandbox_execution_candidate_operation_insert`,
+		`DROP TRIGGER trg_sandbox_execution_candidate_insert`,
+		`DROP TABLE sandbox_execution_candidate_operations`,
+		`DROP INDEX idx_sandbox_execution_candidates_run_validated`,
+		`DROP TABLE sandbox_execution_candidates`,
+		`DELETE FROM schema_migrations WHERE version = 49`,
 	}
 }
 

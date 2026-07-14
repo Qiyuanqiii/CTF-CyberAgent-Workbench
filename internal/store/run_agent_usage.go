@@ -27,7 +27,19 @@ func (s *SQLiteStore) GetRunAgentUsage(ctx context.Context,
 		return domain.RunAgentUsage{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	usage, err := getRunAgentUsageTx(ctx, tx, runID)
+	if err != nil {
+		return domain.RunAgentUsage{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.RunAgentUsage{}, err
+	}
+	return usage, nil
+}
 
+func getRunAgentUsageTx(ctx context.Context, tx *sql.Tx,
+	runID string,
+) (domain.RunAgentUsage, error) {
 	var runCount int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE id = ?`, runID).
 		Scan(&runCount); err != nil {
@@ -50,7 +62,7 @@ func (s *SQLiteStore) GetRunAgentUsage(ctx context.Context,
 	}
 
 	var checkpointTokens, rootExecutionMillis int64
-	err = tx.QueryRowContext(ctx, `SELECT total_tokens, execution_millis
+	err := tx.QueryRowContext(ctx, `SELECT total_tokens, execution_millis
 		FROM run_supervisor_checkpoints WHERE run_id = ?`, runID).
 		Scan(&checkpointTokens, &rootExecutionMillis)
 	switch {
@@ -122,9 +134,6 @@ func (s *SQLiteStore) GetRunAgentUsage(ctx context.Context,
 	if err := usage.Validate(); err != nil {
 		return domain.RunAgentUsage{}, apperror.Wrap(apperror.CodeConflict,
 			"Run Agent usage is invalid", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.RunAgentUsage{}, err
 	}
 	return usage, nil
 }

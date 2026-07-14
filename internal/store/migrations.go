@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 48
+const LatestSchemaVersion = 49
 
 type migration struct {
 	Version    int
@@ -6415,6 +6415,181 @@ var sandboxManifestStatements = []string{
 	`CREATE TRIGGER trg_sandbox_manifest_operation_delete_immutable
 		BEFORE DELETE ON sandbox_manifest_operations BEGIN
 			SELECT RAISE(ABORT, 'sandbox manifest operation cannot be deleted');
+		END;`,
+}
+
+var sandboxExecutionCandidateStatements = []string{
+	`CREATE TABLE sandbox_execution_candidates (
+		id TEXT PRIMARY KEY,
+		preparation_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		mission_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		protocol_version TEXT NOT NULL,
+		manifest_fingerprint TEXT NOT NULL,
+		authorization_fingerprint TEXT NOT NULL,
+		workspace_fingerprint TEXT NOT NULL,
+		scope_fingerprint TEXT NOT NULL,
+		policy_fingerprint TEXT NOT NULL,
+		mount_binding_fingerprint TEXT NOT NULL,
+		approval_id TEXT NOT NULL DEFAULT '',
+		approval_status TEXT NOT NULL,
+		mount_count INTEGER NOT NULL,
+		regular_file_mount_count INTEGER NOT NULL,
+		directory_mount_count INTEGER NOT NULL,
+		tokens_used INTEGER NOT NULL,
+		execution_millis_used INTEGER NOT NULL,
+		tool_calls_used INTEGER NOT NULL,
+		budget_checked INTEGER NOT NULL,
+		lease_quiescent INTEGER NOT NULL,
+		backend_enabled INTEGER NOT NULL,
+		execution_authorized INTEGER NOT NULL,
+		requested_by TEXT NOT NULL,
+		validated_at TEXT NOT NULL,
+		FOREIGN KEY(preparation_id) REFERENCES sandbox_manifest_preparations(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+		CHECK(protocol_version = 'sandbox_execution_candidate.v1'),
+		CHECK(approval_status IN ('not_required', 'approved')),
+		CHECK((approval_id = '' AND approval_status = 'not_required') OR
+			(length(approval_id) BETWEEN 1 AND 256 AND approval_status = 'approved')),
+		CHECK(mount_count BETWEEN 1 AND 32),
+		CHECK(regular_file_mount_count >= 0 AND directory_mount_count >= 0 AND
+			regular_file_mount_count + directory_mount_count = mount_count),
+		CHECK(tokens_used >= 0 AND execution_millis_used >= 0 AND tool_calls_used >= 0),
+		CHECK(budget_checked = 1 AND lease_quiescent = 1),
+		CHECK(backend_enabled = 0 AND execution_authorized = 0),
+		CHECK(length(manifest_fingerprint) = 64 AND manifest_fingerprint = lower(manifest_fingerprint)
+			AND manifest_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(authorization_fingerprint) = 64 AND authorization_fingerprint = lower(authorization_fingerprint)
+			AND authorization_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(workspace_fingerprint) = 64 AND workspace_fingerprint = lower(workspace_fingerprint)
+			AND workspace_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(scope_fingerprint) = 64 AND scope_fingerprint = lower(scope_fingerprint)
+			AND scope_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(policy_fingerprint) = 64 AND policy_fingerprint = lower(policy_fingerprint)
+			AND policy_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(mount_binding_fingerprint) = 64 AND mount_binding_fingerprint = lower(mount_binding_fingerprint)
+			AND mount_binding_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(id = trim(id) AND length(id) BETWEEN 1 AND 256 AND instr(id, char(0)) = 0),
+		CHECK(preparation_id = trim(preparation_id) AND length(preparation_id) BETWEEN 1 AND 256
+			AND instr(preparation_id, char(0)) = 0),
+		CHECK(run_id = trim(run_id) AND length(run_id) BETWEEN 1 AND 256 AND instr(run_id, char(0)) = 0),
+		CHECK(mission_id = trim(mission_id) AND length(mission_id) BETWEEN 1 AND 256 AND instr(mission_id, char(0)) = 0),
+		CHECK(workspace_id = trim(workspace_id) AND length(workspace_id) BETWEEN 1 AND 256
+			AND instr(workspace_id, char(0)) = 0),
+		CHECK(approval_id = trim(approval_id) AND instr(approval_id, char(0)) = 0),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE INDEX idx_sandbox_execution_candidates_run_validated
+		ON sandbox_execution_candidates(run_id, validated_at, id);`,
+	`CREATE TABLE sandbox_execution_candidate_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		candidate_id TEXT NOT NULL UNIQUE,
+		preparation_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(candidate_id) REFERENCES sandbox_execution_candidates(id) ON DELETE RESTRICT,
+		FOREIGN KEY(preparation_id) REFERENCES sandbox_manifest_preparations(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64 AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64 AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(run_id = trim(run_id) AND length(run_id) BETWEEN 1 AND 256 AND instr(run_id, char(0)) = 0),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	) WITHOUT ROWID;`,
+	`CREATE TRIGGER trg_sandbox_execution_candidate_insert
+		BEFORE INSERT ON sandbox_execution_candidates
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_manifest_preparations preparation
+			JOIN sandbox_manifest_validations validation ON validation.preparation_id = preparation.id
+			JOIN runs run ON run.id = preparation.run_id
+			JOIN missions mission ON mission.id = preparation.mission_id
+			WHERE preparation.id = NEW.preparation_id AND preparation.run_id = NEW.run_id
+				AND preparation.mission_id = NEW.mission_id AND preparation.workspace_id = NEW.workspace_id
+				AND run.mission_id = NEW.mission_id AND mission.workspace_id = NEW.workspace_id
+				AND run.status IN ('created', 'preparing', 'running', 'waiting_approval', 'paused')
+				AND validation.policy_allowed = 1
+				AND preparation.manifest_fingerprint = NEW.manifest_fingerprint
+				AND preparation.authorization_fingerprint = NEW.authorization_fingerprint
+				AND preparation.workspace_fingerprint = NEW.workspace_fingerprint
+				AND preparation.scope_fingerprint = NEW.scope_fingerprint
+				AND preparation.mount_count = NEW.mount_count
+				AND validation.policy_fingerprint = NEW.policy_fingerprint
+				AND julianday(NEW.validated_at) >= julianday(preparation.prepared_at)
+				AND ((validation.needs_approval = 0 AND validation.approval_id = ''
+						AND validation.approval_status = 'not_required' AND NEW.approval_id = ''
+						AND NEW.approval_status = 'not_required')
+					OR (validation.needs_approval = 1 AND validation.approval_id = ''
+						AND validation.approval_status = 'required' AND NEW.approval_status = 'approved'
+						AND EXISTS (SELECT 1 FROM tool_approvals approval
+							WHERE approval.id = NEW.approval_id AND approval.proposal_id = NEW.preparation_id
+								AND approval.run_id = NEW.run_id AND approval.session_id = run.session_id
+								AND approval.workspace_id = NEW.workspace_id
+								AND approval.tool_name = 'sandbox.manifest'
+								AND approval.action_class = 'sandbox_execute'
+								AND approval.mode = 'per_call' AND approval.status = 'approved'
+								AND approval.request_fingerprint = NEW.authorization_fingerprint)))
+				AND NOT EXISTS (SELECT 1 FROM run_execution_leases lease
+					WHERE lease.run_id = NEW.run_id AND lease.status = 'active'
+						AND julianday(lease.expires_at) > julianday('now'))
+				AND NEW.tokens_used =
+					COALESCE((SELECT SUM(node.tokens_used) FROM agent_nodes node WHERE node.run_id = NEW.run_id), 0) +
+					COALESCE((SELECT SUM(CASE WHEN call.usage_recorded = 1 THEN call.total_tokens
+						ELSE call.reserved_total_tokens END) FROM readonly_fanout_model_calls call
+						WHERE call.run_id = NEW.run_id), 0)
+				AND NEW.execution_millis_used =
+					COALESCE((SELECT checkpoint.execution_millis FROM run_supervisor_checkpoints checkpoint
+						WHERE checkpoint.run_id = NEW.run_id), 0) +
+					COALESCE((SELECT SUM(call.elapsed_millis) FROM specialist_model_calls call
+						WHERE call.run_id = NEW.run_id), 0) +
+					COALESCE((SELECT SUM(CASE WHEN call.elapsed_recorded = 1 THEN call.elapsed_millis
+						ELSE call.reserved_millis END) FROM readonly_fanout_model_calls call
+						WHERE call.run_id = NEW.run_id), 0)
+				AND NEW.tool_calls_used = COALESCE((SELECT usage.consumed FROM run_tool_usage usage
+					WHERE usage.run_id = NEW.run_id), 0)
+				AND (COALESCE(CAST(json_extract(run.budget_json, '$.max_tokens') AS INTEGER), 0) = 0
+					OR NEW.tokens_used < CAST(json_extract(run.budget_json, '$.max_tokens') AS INTEGER))
+				AND (COALESCE(CAST(json_extract(run.budget_json, '$.timeout_seconds') AS INTEGER), 0) = 0
+					OR NEW.execution_millis_used < CAST(json_extract(run.budget_json, '$.timeout_seconds') AS INTEGER) * 1000)
+				AND (COALESCE(CAST(json_extract(run.budget_json, '$.max_tool_calls') AS INTEGER), 0) = 0
+					OR NEW.tool_calls_used < CAST(json_extract(run.budget_json, '$.max_tool_calls') AS INTEGER))
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox execution candidate binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_candidate_operation_insert
+		BEFORE INSERT ON sandbox_execution_candidate_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_execution_candidates candidate
+			WHERE candidate.id = NEW.candidate_id AND candidate.preparation_id = NEW.preparation_id
+				AND candidate.run_id = NEW.run_id AND candidate.requested_by = NEW.requested_by
+				AND candidate.validated_at = NEW.created_at
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox execution candidate operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_candidate_update_immutable
+		BEFORE UPDATE ON sandbox_execution_candidates BEGIN
+			SELECT RAISE(ABORT, 'sandbox execution candidate cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_candidate_delete_immutable
+		BEFORE DELETE ON sandbox_execution_candidates BEGIN
+			SELECT RAISE(ABORT, 'sandbox execution candidate cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_candidate_operation_update_immutable
+		BEFORE UPDATE ON sandbox_execution_candidate_operations BEGIN
+			SELECT RAISE(ABORT, 'sandbox execution candidate operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_execution_candidate_operation_delete_immutable
+		BEFORE DELETE ON sandbox_execution_candidate_operations BEGIN
+			SELECT RAISE(ABORT, 'sandbox execution candidate operation cannot be deleted');
 		END;`,
 }
 

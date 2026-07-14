@@ -21,18 +21,21 @@ Read in this order after a long context break:
 11. `docs/adr/0006-operator-steering-controls.md`
 12. `docs/adr/0007-specialist-skill-context.md`
 13. `docs/adr/0008-sandbox-manifest-boundary.md`
+14. `docs/adr/0009-sandbox-approval-candidate.md`
 
 ## Current Baseline
 
-- Overall product vision: about 97%.
-- General Agent MVP: about 99%.
-- V2 run-centric runtime: about 99%.
-- Database schema: v48.
+- Architecture completion: about 97%; the V2 run-centric control plane is about 99% complete.
+- Product usability: about 45-50% for the complete Code + Cyber product.
+- Generic coding-agent workflow usability: about 40%.
+- Cyber autonomous-workflow usability: about 20%.
+- These are engineering estimates based on tested roadmap slices, not performance benchmarks. Do not reuse the retired single-axis "overall product vision" percentage.
+- Database schema: v49.
 - Main languages: Go control plane, TypeScript React/Vite read console; Rust has not started.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
 
-Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, parent-selected minimal Specialist Skill context, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, safe-boundary operator steering with pending-only cancellation and explicit drain, a strict metadata-only Sandbox Manifest preparation boundary, loopback read API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite read console.
+Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, parent-selected minimal Specialist Skill context, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, safe-boundary operator steering with pending-only cancellation and explicit drain, strict metadata-only Sandbox Manifest preparation plus approval-bound disabled candidates, loopback read API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite read console.
 
 ## Security Invariants
 
@@ -43,27 +46,27 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 - Dangerous cyber commands remain permanently denied; approval cannot override permanent Policy denial.
 - External files, repository text, logs, web/mail, tool output, and memory are untrusted evidence with `instruction_authorized=false`; they never become system/assistant authority through persistence or compaction.
 - Shell and ScriptProcess approval paths are dry-run only. Real Local/Docker command execution is disabled.
-- `sandbox_manifest.v1` is descriptive input, never an execution permit. Schema v48 fixes both `backend_enabled` and `execution_authorized` to false even when an exact approval is approved.
+- `sandbox_manifest.v1` and `sandbox_execution_candidate.v1` are validation facts, never execution permits. Schemas v48-v49 fix both `backend_enabled` and `execution_authorized` to false even after exact operator approval.
 - The Web UI is read-first. Its bearer remains in memory and never belongs in URLs or browser storage.
 - Provider keys are read from process environment only and must never enter Git, SQLite, events, or logs.
 
 ## Latest Completed Slice
 
-Schema v48 adds the Go-owned `sandbox_manifest.v1` preparation boundary. The strict JSON protocol hard-bounds backend description, executable/ordered argv, workspace-relative mounts, sandbox working directory, exact network targets, CPU/memory/PID/output resources, literal or secret-reference environment bindings, input Artifact identities, output capture/paths, timeout, and cancellation grace. It rejects unknown or duplicate fields, trailing data, invalid UTF-8, traversal, overlapping mounts, wildcard targets, non-canonical CIDRs, literal secret variables, credential-shaped argv, and values outside protocol limits.
+Schema v49 completes the first Sandbox approval and revalidation loop on top of v48. `run sandbox request` derives a pending record in the shared `tool_approvals` ledger from one preparation's exact authorization fingerprint; `review` records an immutable operator approve/deny fact. Policy denial remains final. A candidate must resupply the full Manifest, normalize it again, and exactly rematch the preparation, non-terminal Run, Mission, persisted Workspace root, normalized Scope, current Policy result, and approved per-call record when required.
 
-Go normalizes the Manifest and binds its fingerprint to one non-terminal Run, Mission, persisted Workspace root, normalized Mission Scope, Policy decision, optional exact approval, requester, and generated cancellation identity. Manifest network access can only narrow the Mission allowlist. Docker/Local intent, write mounts, network, or secret references require approval if Policy permits them; permanent denial cannot be overridden. SQLite stores immutable preparation, validation, and digest-only operation rows plus metadata-only events. It stores no executable, argv, path, environment value, secret reference, network target, or Manifest JSON. Same-key replay and two-store concurrency converge; changed intent conflicts.
+Mount sources are opened through Go `os.Root`, so symlinks cannot leave the trusted Workspace root; special files are rejected. Candidate creation acquires the Run write lock and rechecks root/Specialist/Fan-out token and model-time totals, tool-call usage, and execution-lease quiescence in the same SQLite transaction. SQL triggers independently enforce those bindings. Immutable candidate/operation rows and metadata-only events store fingerprints, counts, usage snapshots, and status only, never Manifest content, command/argv, paths/root, environment values, secret references, or network targets. Same-key cross-process retries converge and changed intent conflicts.
 
-This slice does not execute anything. `NoopRunner` is the only validator used by the service. Local and Docker validation/run paths fail closed, and Go types, SQLite CHECK/trigger rules, CLI, and events all hold `backend_enabled=false` and `execution_authorized=false`, including when an exact approval is approved. Focused tests cover strict parsing, credential rejection, scope widening, Policy denial persistence without raw intent, exact approval binding, immutable tables, schema v47 upgrade, SQL-level write-capability approval enforcement, no workspace side effects, and cross-store concurrency. Uncached full tests, full-repository race detection, vet, staticcheck, module verification/tidy diff, govulncheck, credential/runtime scans, OpenAPI/TypeScript drift, 17 frontend tests, production build, npm audit, isolated Manifest validation, and an isolated real schema-v48 Run/preparation/event smoke all pass. No unresolved high- or medium-severity issue is known.
+This slice still executes nothing. Every candidate fixes `backend_enabled=false` and `execution_authorized=false`; Local and Docker remain fail-closed. Focused tests cover pending/approved/denied approval states, Policy and Manifest drift, terminal replay, active lease, exhausted tool budget, symlink escape, mount-source change, immutable SQL rows, v48 upgrade, CLI lifecycle, and two-store convergence. Final uncached full tests, full-repository race detection, vet, staticcheck, module verification/tidy diff, govulncheck, OpenAPI drift, strict TypeScript, 17 Vitest cases, production build, npm audit, credential/runtime scans, and an isolated real schema-v49 CLI lifecycle all pass. No unresolved high- or medium-severity issue is known.
 
 ## Next Slice
 
-Continue P6 with an exact Sandbox approval-request and revalidation bridge, still without enabling process execution:
+Continue P6 without enabling process execution:
 
-1. Create a first-class approval request from one preparation's `authorization_fingerprint`, with no raw Manifest content in the approval ledger or events.
-2. Require callers to resupply the Manifest for every later step; normalize it again and require the exact stored fingerprint, Run, Workspace root, Scope, Policy, and approval binding.
-3. Resolve mount sources beneath the persisted Workspace root with symlink-safe Go filesystem APIs and record only bounded identity metadata. Do not mount or launch anything.
-4. Add a metadata-only execution-candidate/recovery ledger whose state still fixes `execution_authorized=false`; separately threat-model Docker client, cancellation, cleanup, output Artifact capture, and secret materialization.
-5. Do not add Docker process creation until a dedicated audit proves lease fencing, cancellation, cleanup, network default-deny, and host-path isolation. Rust analyzers and CTF solving remain deferred.
+1. Define an immutable Sandbox lifecycle/cancellation/cleanup protocol and prove lease-fenced ownership and restart recovery with a disabled backend.
+2. Validate input Artifact ownership/integrity and design bounded stdout/stderr/output-path Artifact capture without persisting raw host paths.
+3. Threat-model Docker mount propagation, network default-deny, secret materialization, container identity, timeout, kill, and orphan cleanup before importing the Docker client into the application path.
+4. Revalidate the Manifest, approval, Scope, Policy, budgets, mount sources, and lease again at any future execution boundary; a v49 candidate alone must never be consumed as authorization.
+5. Keep HTTP/React write surfaces, Rust analyzers, real Local/Docker execution, and CTF solving deferred until their dedicated audits pass.
 
 ## Local Machine Note
 

@@ -21,6 +21,7 @@ import (
 	"cyberagent-workbench/internal/redact"
 	"cyberagent-workbench/internal/runmutation"
 	"cyberagent-workbench/internal/sandbox"
+	"cyberagent-workbench/internal/toolbudget"
 	"cyberagent-workbench/internal/tools"
 )
 
@@ -39,6 +40,16 @@ type SandboxManifestStore interface {
 		validation sandbox.Validation, operation sandbox.Operation) (sandbox.PreparedIntent, bool, error)
 	GetSandboxManifestIntent(ctx context.Context, id string) (sandbox.PreparedIntent, error)
 	ListSandboxManifestIntents(ctx context.Context, runID string, limit int) ([]sandbox.PreparedIntent, error)
+	EnsureApproval(ctx context.Context, proposal approval.Proposal) (approval.Record, error)
+	DecideApproval(ctx context.Context, request approval.DecisionRequest) (approval.DecisionResult, error)
+	GetRunAgentUsage(ctx context.Context, runID string) (domain.RunAgentUsage, error)
+	GetToolCallUsage(ctx context.Context, runID string) (toolbudget.Usage, error)
+	GetRunExecutionLease(ctx context.Context, runID string) (domain.RunExecutionLease, bool, error)
+	GetSandboxExecutionCandidateOperation(ctx context.Context, keyDigest string) (sandbox.CandidateOperation, bool, error)
+	CreateSandboxExecutionCandidate(ctx context.Context, candidate sandbox.ExecutionCandidate,
+		operation sandbox.CandidateOperation) (sandbox.ValidatedExecutionCandidate, bool, error)
+	GetSandboxExecutionCandidate(ctx context.Context, id string) (sandbox.ValidatedExecutionCandidate, error)
+	ListSandboxExecutionCandidates(ctx context.Context, runID string, limit int) ([]sandbox.ValidatedExecutionCandidate, error)
 }
 
 type SandboxManifestService struct {

@@ -10,6 +10,7 @@ import (
 )
 
 var sandboxPreparationIDPattern = regexp.MustCompile(`sandbox-manifest-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxCandidateIDPattern = regexp.MustCompile(`sandbox-candidate-[0-9]{14}-[a-f0-9]{12}`)
 
 func TestSandboxCLIValidatesPreparesListsAndShowsMetadataOnly(t *testing.T) {
 	t.Setenv("CYBERAGENT_HOME", t.TempDir())
@@ -68,6 +69,27 @@ func TestSandboxCLIValidatesPreparesListsAndShowsMetadataOnly(t *testing.T) {
 		!strings.Contains(shown, "backend_enabled: false") || strings.Contains(shown, `"arguments"`) {
 		t.Fatalf("sandbox CLI show failed output=%s stderr=%s code=%d", shown, stderr, code)
 	}
+	candidate, stderr, code := executeTestCommand(t, "run", "sandbox", "candidate", preparationID,
+		"--manifest", manifestPath, "--operation-key", "sandbox-cli-candidate-one")
+	if code != 0 || stderr != "" || !strings.Contains(candidate, "budget_checked: true") ||
+		!strings.Contains(candidate, "lease_quiescent: true") ||
+		!strings.Contains(candidate, "execution_authorized: false") {
+		t.Fatalf("sandbox CLI candidate failed output=%s stderr=%s code=%d", candidate, stderr, code)
+	}
+	candidateID := sandboxCandidateIDPattern.FindString(candidate)
+	if candidateID == "" {
+		t.Fatalf("missing sandbox candidate id: %s", candidate)
+	}
+	candidates, stderr, code := executeTestCommand(t, "run", "sandbox", "candidates", runID)
+	if code != 0 || stderr != "" || !strings.Contains(candidates, candidateID) ||
+		!strings.Contains(candidates, "execution_authorized=false") {
+		t.Fatalf("sandbox CLI candidate list failed output=%s stderr=%s code=%d", candidates, stderr, code)
+	}
+	candidateShown, stderr, code := executeTestCommand(t, "run", "sandbox", "candidate-show", candidateID)
+	if code != 0 || stderr != "" || !strings.Contains(candidateShown, "mount_binding_fingerprint:") ||
+		!strings.Contains(candidateShown, "backend_enabled: false") {
+		t.Fatalf("sandbox CLI candidate show failed output=%s stderr=%s code=%d", candidateShown, stderr, code)
+	}
 	if _, stderr, code := executeTestCommand(t, "run", "sandbox", "list", runID,
 		"--limit", "-1"); code != 2 || !strings.Contains(stderr, "between 1 and 200") {
 		t.Fatalf("sandbox CLI accepted a negative list limit: code=%d stderr=%s", code, stderr)
@@ -90,5 +112,59 @@ func TestSandboxCLIRejectsAmbiguousManifest(t *testing.T) {
 	if _, stderr, code := executeTestCommand(t, "sandbox", "validate", path); code != 2 ||
 		!strings.Contains(stderr, "duplicate field") {
 		t.Fatalf("ambiguous sandbox manifest returned code=%d stderr=%s", code, stderr)
+	}
+}
+
+func TestSandboxCLIApprovalRequestReviewAndDisabledCandidate(t *testing.T) {
+	t.Setenv("CYBERAGENT_HOME", t.TempDir())
+	manifest := defaultSandboxManifestTemplate()
+	manifest.Mounts[0].Access = "read_write"
+	encoded, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(t.TempDir(), "sandbox-write-manifest.json")
+	if err := os.WriteFile(manifestPath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, code := executeTestCommand(t, "workspace", "init", "sandbox-approval-demo"); code != 0 {
+		t.Fatalf("workspace init failed: %s", stderr)
+	}
+	created, stderr, code := executeTestCommand(t, "run", "create", "sandbox approval lifecycle",
+		"--workspace", "sandbox-approval-demo", "--profile", "code")
+	if code != 0 {
+		t.Fatalf("run create failed: %s", stderr)
+	}
+	runID := runIDPattern.FindString(created)
+	prepared, stderr, code := executeTestCommand(t, "run", "sandbox", "prepare", runID,
+		"--manifest", manifestPath, "--operation-key", "sandbox-cli-approval-prepare")
+	if code != 0 || stderr != "" || !strings.Contains(prepared, "approval_status: required") {
+		t.Fatalf("approval preparation failed output=%s stderr=%s code=%d", prepared, stderr, code)
+	}
+	preparationID := sandboxPreparationIDPattern.FindString(prepared)
+	requested, stderr, code := executeTestCommand(t, "run", "sandbox", "request", preparationID,
+		"--operator", "sandbox_cli_operator")
+	if code != 0 || stderr != "" || !strings.Contains(requested, "status: pending") ||
+		!strings.Contains(requested, "tool: sandbox.manifest") {
+		t.Fatalf("approval request failed output=%s stderr=%s code=%d", requested, stderr, code)
+	}
+	approvalID := approvalIDPattern.FindString(requested)
+	if approvalID == "" {
+		t.Fatalf("approval request did not return an id: %s", requested)
+	}
+	reviewed, stderr, code := executeTestCommand(t, "run", "sandbox", "review", preparationID,
+		"--decision", "approve", "--operation-key", "sandbox-cli-approval-review",
+		"--reviewer", "sandbox_security_operator")
+	if code != 0 || stderr != "" || !strings.Contains(reviewed, "status: approved") {
+		t.Fatalf("approval review failed output=%s stderr=%s code=%d", reviewed, stderr, code)
+	}
+	candidate, stderr, code := executeTestCommand(t, "run", "sandbox", "candidate", preparationID,
+		"--manifest", manifestPath, "--approval", approvalID,
+		"--operation-key", "sandbox-cli-approved-candidate",
+		"--operator", "sandbox_cli_operator")
+	if code != 0 || stderr != "" || !strings.Contains(candidate, "approval_status: approved") ||
+		!strings.Contains(candidate, "backend_enabled: false") ||
+		!strings.Contains(candidate, "execution_authorized: false") {
+		t.Fatalf("approved disabled candidate failed output=%s stderr=%s code=%d", candidate, stderr, code)
 	}
 }
