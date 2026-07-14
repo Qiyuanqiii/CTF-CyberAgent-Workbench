@@ -23,6 +23,7 @@ Read in this order after a long context break:
 13. `docs/adr/0008-sandbox-manifest-boundary.md`
 14. `docs/adr/0009-sandbox-approval-candidate.md`
 15. `docs/adr/0010-disabled-sandbox-lifecycle.md`
+16. `docs/adr/0011-disabled-sandbox-preflight.md`
 
 ## Current Baseline
 
@@ -31,13 +32,13 @@ Read in this order after a long context break:
 - Generic coding-agent workflow usability: about 40%.
 - Cyber autonomous-workflow usability: about 20%.
 - These are engineering estimates based on tested roadmap slices, not performance benchmarks. Do not reuse the retired single-axis "overall product vision" percentage.
-- Database schema: v50.
-- `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v50` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
+- Database schema: v51.
+- `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v51` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
 - Main languages: Go control plane, TypeScript React/Vite read console; Rust has not started.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
 
-Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, parent-selected minimal Specialist Skill context, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, safe-boundary operator steering with pending-only cancellation and explicit drain, strict metadata-only Sandbox Manifest preparation, approval-bound disabled candidates, and a disabled Artifact-bound Sandbox lifecycle with independent fencing/cancellation/cleanup recovery, loopback read API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite read console.
+Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, parent-selected minimal Specialist Skill context, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, safe-boundary operator steering with pending-only cancellation and explicit drain, strict metadata-only Sandbox Manifest preparation, approval-bound disabled candidates, a disabled Artifact-bound Sandbox lifecycle with independent fencing/cancellation/cleanup recovery, and a required-but-unverified backend/output preflight, loopback read API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite read console.
 
 ## Security Invariants
 
@@ -48,35 +49,36 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 - Dangerous cyber commands remain permanently denied; approval cannot override permanent Policy denial.
 - External files, repository text, logs, web/mail, tool output, and memory are untrusted evidence with `instruction_authorized=false`; they never become system/assistant authority through persistence or compaction.
 - Shell and ScriptProcess approval paths are dry-run only. Real Local/Docker command execution is disabled.
-- `sandbox_manifest.v1`, `sandbox_execution_candidate.v1`, and `sandbox_execution.v1` are validation/lifecycle facts, never execution permits. Schemas v48-v50 fix `backend_enabled`, `execution_authorized`, and `backend_started` to false even after exact operator approval.
+- `sandbox_manifest.v1`, `sandbox_execution_candidate.v1`, `sandbox_execution.v1`, and `sandbox_preflight.v1` are evidence, never execution permits. Schemas v48-v51 fix backend, execution, start, export, and Artifact-commit capabilities to false even after exact operator approval.
 - Sandbox execution ownership uses a separate generation-fenced lease. The initial lease can only prepare a disabled record; cleanup can recover after Run termination, but stale generations cannot commit.
 - Input Artifacts are reverified by exact Run/Session/Workspace, digest, size, MIME, source, stream, order, and a 16 MiB aggregate cap. v50 stores no Artifact body or raw output path.
+- The v51 backend handshake is disabled, container identity is unbound, and all 16 threat-model checks remain required/unverified/not-probed. Output slots store only opaque locator fingerprints and cannot export or commit Artifacts.
 - The Web UI is read-first. Its bearer remains in memory and never belongs in URLs or browser storage.
 - Provider keys are read from process environment only and must never enter Git, SQLite, events, or logs.
 
 ## Latest Completed Slice
 
-Schema v50 adds a disabled Sandbox lifecycle on top of the v48 Manifest and v49 approval/candidate facts. `run sandbox begin` must resupply the complete Manifest and revalidate the candidate, non-terminal Run, Mission, Workspace root, Scope, current Policy, exact approval, `os.Root` mount binding, aggregate model/tool budgets, and Run execution-lease quiescence. It then creates an immutable `sandbox_execution.v1` root whose backend, authorization, and started flags are all false.
+Schema v51 adds a disabled Sandbox backend/output preflight on top of the v48 Manifest, v49 approval/candidate, and v50 lifecycle facts. `run sandbox preflight` must resupply the complete Manifest and revalidate all prior bindings, the non-terminal Run, Mission, Workspace root, Scope, current Policy, exact approval, `os.Root` mount binding, cumulative model/tool budgets, Run-lease quiescence, released Sandbox lease, and every input Artifact.
 
-Every Manifest input Artifact is loaded and hash-verified, then pinned by exact Run/Session/Workspace, ordinal, ID, SHA-256, byte size, MIME, stream, source, and redaction state. Aggregate input is capped at 16 MiB. The output capture plan stores only stdout/stderr flags, output-path count, byte ceiling, and a fingerprint; it never stores output paths. SQLite triggers independently bind the v49 candidate, v48 preparation counts, current usage, quiescent Run, input rows, and initial lease.
+The preflight freezes exactly 16 backend threat checks covering host paths, mount propagation, read-only roots/inputs, dedicated output, default-deny/exact-allowlist networking, ephemeral secrets, non-root identity, CPU/memory/PID/time/kill bounds, orphan recovery, output file types, and atomic Artifact commit. `DisabledBackendInspector` reports unavailable; every check remains required, unverified, and not probed; container identity is unbound. The output plan stores only ordered kinds and opaque locator fingerprints, fixes all-or-nothing/aggregate-limit/MIME/redaction/regular-file/link/special-file/restart policies, and authorizes neither export nor Artifact commit.
 
-Sandbox ownership now has an independent generation-fenced lease. The generation-one preparation lease is released without starting a backend. Later cleanup can acquire a successor even after the Run is terminal; expired-worker takeover increments the generation, and stale workers cannot release or commit. Cancellation and cleanup facts plus their digest-only operations are immutable and replayable. The only cleanup result is `backend_disabled`: no backend started, no orphan existed or was reaped, inputs were reverified, output Artifact count is zero, and cleanup is complete.
+SQLite stores immutable preflight/check/slot/operation rows and independently rechecks the v48-v50 chain, live usage, leases, cancellation/cleanup absence, and input rows. Same-key retries converge across Stores; changed intent or a second operation for one execution conflicts. Events and CLI omit raw locators, paths, commands, Manifest content, container identities, operation digests, and private lease/owner data.
 
-Focused protocol, Application, Store, migration, fencing, cross-Run Artifact, terminal cleanup, immutability, event-privacy, and CLI tests pass. The uncached full Go suite, full-repository race suite, `go vet`, zero-warning `staticcheck`, module verification/tidy diff, `govulncheck`, frontend tests/typecheck/OpenAPI drift check/production build, npm audit, credential/runtime-artifact/Runner-call scans, diff checks, and an isolated real-binary lifecycle smoke also pass. GitHub Actions run `29353239789` passed commit `ff4846a` with Go in 2m6s and TypeScript in 25s. No unresolved high- or medium-severity issue was found, and no real Provider, Shell, Local, Docker, network, or CTF execution was enabled.
+Focused protocol, Application, Store, migration, concurrency, event-privacy, and CLI tests pass. The uncached full ordinary/race suites, `go vet`, zero-warning `staticcheck`, module verification/tidy diff, `govulncheck`, 17 frontend tests, strict TypeScript, OpenAPI drift check, production build, npm audit, credential/runtime/Runner scans, diff checks, and an isolated real-binary preflight smoke also pass. Reachable Go/npm vulnerabilities are zero. GitHub CI is pending the release push; no high- or medium-severity issue is known, and no real Provider, Shell, Local, Docker, network, or CTF execution was enabled.
 
 ## Next Slice
 
 Continue P6 without enabling process execution:
 
-1. Threat-model Docker mount propagation, network default-deny, secret materialization, container identity, timeout, kill, and orphan cleanup before importing the Docker client into the application path.
-2. Define the real bounded stdout/stderr and output-file Artifact capture transaction, including truncation, MIME, symlink/special-file rejection, partial failure, and restart behavior; do not store raw host paths.
-3. Add a backend capability handshake and container identity record while keeping `backend_enabled=false` until a separate operator-visible audit accepts every invariant.
-4. Revalidate the Manifest and all v48-v50 bindings at any future execution boundary; no preparation, approval, candidate, or disabled lifecycle record is authorization by itself.
+1. Add a schema-v52 backend-evidence protocol and fake-client harness; no Docker create/start call may be reachable.
+2. Bind image digest, daemon capabilities, mount/network/secret/container-identity/resource/timeout/kill/orphan evidence independently rather than collapsing them into one availability bit.
+3. Model staged stdout/stderr/file validation and one atomic Artifact commit against an in-memory fake, including crash/restart and partial-failure tests, while retaining no raw host path.
+4. Revalidate the Manifest and all v48-v51 bindings at every future boundary; no preparation, approval, candidate, lifecycle, or preflight record is authorization by itself.
 5. Keep HTTP/React mutation, Rust analyzers, real Local/Docker execution, and CTF solving deferred until their dedicated audits pass.
 
 ## Local Machine Note
 
-The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so startup correctly fails closed with `migration 30 checksum or name mismatch`. The v50 slice did not modify migrations 1-49, and fresh/upgrade fixtures plus isolated `CYBERAGENT_HOME` runs pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically.
+The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so startup correctly fails closed with `migration 30 checksum or name mismatch`. The v51 slice did not modify migrations 1-50, and fresh/upgrade fixtures plus isolated `CYBERAGENT_HOME` runs pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically.
 
 ## Delivery Loop
 

@@ -12,6 +12,7 @@ import (
 var sandboxPreparationIDPattern = regexp.MustCompile(`sandbox-manifest-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxCandidateIDPattern = regexp.MustCompile(`sandbox-candidate-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxExecutionIDPattern = regexp.MustCompile(`sandbox-execution-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxPreflightIDPattern = regexp.MustCompile(`sandbox-preflight-[0-9]{14}-[a-f0-9]{12}`)
 
 func TestSandboxCLIValidatesPreparesListsAndShowsMetadataOnly(t *testing.T) {
 	t.Setenv("CYBERAGENT_HOME", t.TempDir())
@@ -113,6 +114,39 @@ func TestSandboxCLIValidatesPreparesListsAndShowsMetadataOnly(t *testing.T) {
 	if code != 0 || stderr != "" || !strings.Contains(executions, executionID) ||
 		!strings.Contains(executions, "backend_started=false") {
 		t.Fatalf("sandbox CLI execution list failed output=%s stderr=%s code=%d", executions, stderr, code)
+	}
+	preflight, stderr, code := executeTestCommand(t, "run", "sandbox", "preflight", executionID,
+		"--manifest", manifestPath, "--operation-key", "sandbox-cli-preflight-operation")
+	if code != 0 || stderr != "" || !strings.Contains(preflight, "status: backend_disabled") ||
+		!strings.Contains(preflight, "required_checks: 16") ||
+		!strings.Contains(preflight, "verified_checks: 0") ||
+		!strings.Contains(preflight, "partial_failure_policy: all_or_nothing") ||
+		!strings.Contains(preflight, "artifact_commit_authorized: false") ||
+		strings.Contains(preflight, "locator_fingerprint") ||
+		strings.Contains(preflight, "container_identity_fingerprint") ||
+		strings.Contains(preflight, "go test") {
+		t.Fatalf("unexpected sandbox preflight output=%s stderr=%s code=%d", preflight, stderr, code)
+	}
+	preflightID := sandboxPreflightIDPattern.FindString(preflight)
+	if preflightID == "" {
+		t.Fatalf("missing sandbox preflight id: %s", preflight)
+	}
+	preflightReplay, stderr, code := executeTestCommand(t, "run", "sandbox", "preflight", executionID,
+		"--manifest", manifestPath, "--operation-key", "sandbox-cli-preflight-operation")
+	if code != 0 || stderr != "" || !strings.Contains(preflightReplay, "preflight: "+preflightID) ||
+		!strings.Contains(preflightReplay, "replayed: true") {
+		t.Fatalf("sandbox preflight replay failed output=%s stderr=%s code=%d", preflightReplay, stderr, code)
+	}
+	preflights, stderr, code := executeTestCommand(t, "run", "sandbox", "preflights", runID)
+	if code != 0 || stderr != "" || !strings.Contains(preflights, preflightID) ||
+		!strings.Contains(preflights, "backend_enabled=false") {
+		t.Fatalf("sandbox preflight list failed output=%s stderr=%s code=%d", preflights, stderr, code)
+	}
+	preflightShown, stderr, code := executeTestCommand(t, "run", "sandbox", "preflight-show", preflightID)
+	if code != 0 || stderr != "" || !strings.Contains(preflightShown, "network_default_deny") ||
+		!strings.Contains(preflightShown, "kind=stdout") ||
+		strings.Contains(preflightShown, "locator_fingerprint") {
+		t.Fatalf("sandbox preflight show failed output=%s stderr=%s code=%d", preflightShown, stderr, code)
 	}
 	cancelled, stderr, code := executeTestCommand(t, "run", "sandbox", "cancel", executionID,
 		"--operation-key", "sandbox-cli-cancel-operation")

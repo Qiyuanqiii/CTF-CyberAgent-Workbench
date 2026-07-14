@@ -68,7 +68,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|cancel|cleanup|executions|execution-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	switch args[0] {
@@ -269,6 +269,71 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		}
 		printSandboxLifecycle(a, value)
 		return nil
+	case "preflight":
+		fs := newFlagSet("run sandbox preflight", a.errOut)
+		manifestPath := fs.String("manifest", "", "resupplied sandbox manifest JSON file")
+		operationKey := fs.String("operation-key", "", "stable preflight operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"manifest": true, "operation-key": true, "operator": true,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" ||
+			strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox preflight <execution-id> --manifest <manifest.json> --operation-key <key> [--operator <id>]")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		value, err := service.PrepareDisabledPreflight(ctx,
+			application.PrepareSandboxPreflightRequest{
+				ExecutionID: fs.Arg(0), Manifest: manifest,
+				OperationKey: *operationKey, RequestedBy: *operator,
+			})
+		if err != nil {
+			return err
+		}
+		printSandboxPreflight(a, value)
+		return nil
+	case "preflights":
+		fs := newFlagSet("run sandbox preflights", a.errOut)
+		limit := fs.Int("limit", 100, "maximum sandbox preflights")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox preflights <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDisabledPreflights(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no sandbox preflights")
+			return nil
+		}
+		for _, value := range values {
+			fmt.Fprintf(a.out, "%s\texecution=%s\tstatus=%s\trequired_checks=%d\tverified_checks=0\toutput_slots=%d\tbackend_enabled=false\texecution_authorized=false\tcreated_at=%s\n",
+				value.ID, value.ExecutionID, value.Status, len(value.Handshake.Checks),
+				value.OutputPlan.SlotCount, value.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "preflight-show":
+		fs := newFlagSet("run sandbox preflight-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox preflight-show <preflight-id>")
+		}
+		value, err := service.GetDisabledPreflight(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxPreflight(a, value)
+		return nil
 	case "cancel":
 		fs := newFlagSet("run sandbox cancel", a.errOut)
 		operationKey := fs.String("operation-key", "", "stable cancellation operation key")
@@ -349,6 +414,32 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		return nil
 	default:
 		return fmt.Errorf("unknown run sandbox subcommand %q", args[0])
+	}
+}
+
+func printSandboxPreflight(a *App, value sandbox.DisabledPreflight) {
+	fmt.Fprintf(a.out, "preflight: %s\nexecution: %s\ncandidate: %s\npreparation: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nbackend: %s\nstatus: %s\nmanifest_fingerprint: %s\nauthorization_fingerprint: %s\npolicy_fingerprint: %s\nmount_binding_fingerprint: %s\ninput_artifact_digest: %s\nhandshake_protocol: %s\ninspector: %s\nbackend_available: false\nrequired_checks: %d\nverified_checks: 0\ncontainer_identity_bound: false\noutput_protocol: %s\noutput_slots: %d\nmax_output_bytes: %d\npartial_failure_policy: %s\ntruncation_policy: %s\nmime_policy: %s\nfile_type_policy: %s\nrestart_policy: %s\nraw_paths_stored: false\noutput_export_enabled: false\nartifact_commit_authorized: false\nbackend_enabled: false\nexecution_authorized: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\n",
+		value.ID, value.ExecutionID, value.CandidateID, value.PreparationID, value.RunID,
+		value.MissionID, value.WorkspaceID, value.ProtocolVersion, value.Backend, value.Status,
+		value.ManifestFingerprint, value.AuthorizationFingerprint, value.PolicyFingerprint,
+		value.MountBindingFingerprint, value.InputArtifactDigest,
+		value.Handshake.ProtocolVersion, value.Handshake.InspectorName,
+		len(value.Handshake.Checks), value.OutputPlan.ProtocolVersion,
+		value.OutputPlan.SlotCount, value.OutputPlan.MaxOutputBytes,
+		value.OutputPlan.PartialFailurePolicy, value.OutputPlan.TruncationPolicy,
+		value.OutputPlan.MIMEPolicy, value.OutputPlan.FileTypePolicy,
+		value.OutputPlan.RestartPolicy, value.RequestedBy,
+		value.CreatedAt.Format(timeFormatRFC3339Nano), value.Replayed)
+	fmt.Fprintln(a.out, "checks:")
+	for _, check := range value.Handshake.Checks {
+		fmt.Fprintf(a.out, "%d\t%s\trequired=%t\tverified=%t\tevidence=%s\n",
+			check.Ordinal, check.Name, check.Required, check.Verified, check.EvidenceState)
+	}
+	fmt.Fprintln(a.out, "outputs:")
+	for _, slot := range value.OutputPlan.Slots {
+		fmt.Fprintf(a.out, "%d\tkind=%s\tregular_file_required=%t\tsymlink_rejected=%t\tspecial_file_rejected=%t\tmime_detection_required=%t\tredaction_required=%t\tartifact_commit_authorized=false\n",
+			slot.Ordinal, slot.Kind, slot.RegularFileRequired, slot.SymlinkRejected,
+			slot.SpecialFileRejected, slot.MIMEDetectionRequired, slot.RedactionRequired)
 	}
 }
 

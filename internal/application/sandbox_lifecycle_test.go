@@ -142,6 +142,15 @@ func TestSandboxDisabledLifecycleBindsInputArtifactAndRejectsCrossRunScope(t *te
 		started.Execution.InputArtifactDigest != sandbox.InputArtifactBindingsDigest(started.Inputs) {
 		t.Fatalf("input Artifact binding is incomplete: %#v err=%v", started, err)
 	}
+	preflight, err := service.PrepareDisabledPreflight(ctx, PrepareSandboxPreflightRequest{
+		ExecutionID: started.Execution.ID, Manifest: manifest,
+		OperationKey: "artifact-preflight-operation", RequestedBy: "lifecycle_operator",
+	})
+	if err != nil || preflight.InputArtifactDigest != started.Execution.InputArtifactDigest ||
+		preflight.BackendEnabled || preflight.ExecutionAuthorized ||
+		preflight.ArtifactCommitAuthorized {
+		t.Fatalf("preflight did not reverify the input Artifact: %#v err=%v", preflight, err)
+	}
 
 	_, otherRun, err := NewRunService(st).Create(ctx, CreateRunRequest{
 		Goal: "reject cross Run sandbox Artifact", Profile: "code", WorkspaceID: "ws-sandbox",

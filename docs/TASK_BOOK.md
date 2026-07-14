@@ -20,7 +20,7 @@ V2 的 99% 在 P0/P1 基础上完成了可恢复 Supervisor、预算、严格生
 
 P8 已推进到 schema v37：v35 将完成的 Fan-out execution 确定性投影为通用 `draft` Finding、不可变 `model_assertion` Evidence 和 `finding_report.v1` Report；v36 增加同 Run 冻结 Artifact Evidence、一次性 operator `validated/rejected` 决定和复核命令；v37 再以独立事实完成 `validated -> accepted -> fixed`，要求接受后新建且不可复用的 remediation Artifact Evidence。SARIF 只输出 `validated/accepted` 未解决项，默认 validated/high CI 门禁同样阻断二者，fixed/rejected 不再阻断。验证、接受和修复始终是三个不同阶段。
 
-金额预算、HTTP 或模型自主 child 调度和真实 Sandbox 执行尚未实现；schema v48 的严格 Sandbox Manifest、schema v49 的精确审批/重新提交/禁用候选，以及 schema v50 的禁用态 Artifact 绑定、独立 fencing、取消与清理恢复已经落地。operator-only 显式 child schedule/continue、no-tool child turn、最多两个 child 的有界并发、一次 child repair、Coordinator、Run 工具预算、跨进程执行互斥，以及 root/child 精确跨进程主动取消均已落地。
+金额预算、HTTP 或模型自主 child 调度和真实 Sandbox 执行尚未实现；schema v48 的严格 Sandbox Manifest、schema v49 的精确审批/重新提交/禁用候选、schema v50 的禁用态 Artifact 绑定、独立 fencing、取消与清理恢复，以及 schema v51 的禁用态后端/输出预检已经落地。operator-only 显式 child schedule/continue、no-tool child turn、最多两个 child 的有界并发、一次 child repair、Coordinator、Run 工具预算、跨进程执行互斥，以及 root/child 精确跨进程主动取消均已落地。
 
 P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作面与 `plan|deliver` 阶段；schema v42 增加严格三方向 `plan_delivery.v1` 提案与操作者幂等选择；schema v43 将操作者指令与非可信证据分离；schema v44 固化逐切片验证、审计和交接门禁；schema v45-v46 提供安全 turn 边界的 exactly-once 操作者队列、pending-only 取消和显式 drain；schema v47 再从父 Run 固定选择中为每个 Specialist Attempt 派生最多一项、Code/Cyber 分离、metadata-only 可恢复的 Skill 指导。模式、提案、选择、文档、审计声明、排队、取消和 Skill 指导本身都不授予工具、网络、Shell、写文件或子 Agent 能力。
 
@@ -178,7 +178,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 
 ## P6：真实 Sandbox
 
-状态：进行中；schema v48 Manifest、v49 审批候选与 v50 禁用生命周期/Artifact/取消/清理边界已完成，真实执行未开放
+状态：进行中；schema v48 Manifest、v49 审批候选、v50 禁用生命周期和 v51 禁用后端/输出预检已完成，真实执行未开放
 
 - [x] 定义严格 `sandbox_manifest.v1`、Mount、NetworkScope、ResourceLimit、环境、输入/输出、超时与取消宽限，并提供 Noop 校验和 CLI 检查。
 - [x] schema v48 持久化 metadata-only preparation/validation/operation，精确绑定 Run/Mission/Workspace/Scope/Policy/可选审批；摘要幂等重放与跨 Store 并发收敛。
@@ -187,11 +187,14 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] schema v50 增加不可变禁用 execution、精确输入 Artifact 快照、metadata-only 输出计划、独立 generation-fenced Sandbox lease、取消事实和终态 Run 可恢复清理；全部后端能力仍为 false。
 - [x] `run sandbox begin|cancel|cleanup|executions|execution-show` 接入同一 Go 服务；CLI 不显示 lease token/owner、Manifest、命令、路径或 Artifact 正文。
 - [x] 证明 generation takeover、旧 worker 拒绝、初始 lease 崩溃恢复、跨 Run Artifact 拒绝、输入哈希复核、不可变 SQL、v49 原地升级和幂等重放。
+- [x] schema v51 固定 16 项 Docker/后端威胁模型、禁用握手、未绑定容器身份和 metadata-only 输出导出计划；所有检查保持 required/unverified/not-probed，全部执行与 Artifact 提交能力保持 false。
+- [x] `run sandbox preflight|preflights|preflight-show` 重新提交 Manifest 并复核 v48-v50 权限链；CLI/事件不显示 locator、原始路径、命令、Manifest、容器身份、operation digest 或内部 lease。
+- [x] 证明 v51 同键跨 Store 收敛、异键/异意图冲突、取消态拒绝、SQL 不可变、v50 原地升级、事件隐私，以及 all-or-nothing/总字节/MIME/普通文件/symlink/特殊文件/重启协调策略固定。
 - [ ] 引入 Docker Go client，实现 per-run 容器生命周期。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
 - [ ] 网络默认关闭，后续仅允许显式 allowlist。
-- [ ] 支持真实执行、stdin、超时/kill、日志和原子 Output Artifact 导出；v50 仅完成禁用态计划与输入边界。
-- [ ] 将 v50 幂等清理扩展为真实容器 orphan 检测/回收；当前结果固定为 `backend_disabled`。
+- [ ] 支持真实执行、stdin、超时/kill、日志和原子 Output Artifact 导出；v51 只固定预检要求，没有验证或启用这些能力。
+- [ ] 将 v50 幂等清理扩展为真实容器 orphan 检测/回收，并让后续证据协议逐项验证 v51 检查；当前结果固定为 `backend_disabled`。
 - [x] 保留 Noop/Local 作为测试与开发接口；Local 当前明确禁用，不能作为旁路执行后端。
 
 验收标准：容器内不能越界读取宿主目录；取消能终止进程；重启后能识别并处理残留 Sandbox。

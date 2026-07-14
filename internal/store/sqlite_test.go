@@ -1259,7 +1259,7 @@ func removeSchemaV49ForTestStatements() []string {
 }
 
 func removeSchemaV50ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV51ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_cleanup_operation_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_cleanup_operation_update_immutable`,
 		`DROP TRIGGER trg_sandbox_cleanup_result_delete_immutable`,
@@ -1294,6 +1294,30 @@ func removeSchemaV50ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_disabled_executions_run_created`,
 		`DROP TABLE sandbox_disabled_executions`,
 		`DELETE FROM schema_migrations WHERE version = 50`,
+	}...)
+}
+
+func removeSchemaV51ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_preflight_operation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_preflight_operation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_output_export_slot_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_output_export_slot_update_immutable`,
+		`DROP TRIGGER trg_sandbox_backend_preflight_check_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_backend_preflight_check_update_immutable`,
+		`DROP TRIGGER trg_sandbox_disabled_preflight_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_disabled_preflight_update_immutable`,
+		`DROP TRIGGER trg_sandbox_preflight_operation_insert`,
+		`DROP TRIGGER trg_sandbox_output_export_slot_insert`,
+		`DROP TRIGGER trg_sandbox_backend_preflight_check_insert`,
+		`DROP TRIGGER trg_sandbox_disabled_preflight_insert`,
+		`DROP TABLE sandbox_preflight_operations`,
+		`DROP INDEX idx_sandbox_output_export_stream_unique`,
+		`DROP TABLE sandbox_output_export_slots`,
+		`DROP TABLE sandbox_backend_preflight_checks`,
+		`DROP INDEX idx_sandbox_disabled_preflights_run_created`,
+		`DROP TABLE sandbox_disabled_preflights`,
+		`DELETE FROM schema_migrations WHERE version = 51`,
 	}
 }
 

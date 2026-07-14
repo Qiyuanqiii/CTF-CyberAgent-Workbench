@@ -68,11 +68,17 @@ type SandboxManifestStore interface {
 	GetSandboxCleanupOperation(ctx context.Context, keyDigest string) (sandbox.CleanupOperation, bool, error)
 	CompleteSandboxCleanup(ctx context.Context, result sandbox.CleanupResult,
 		operation sandbox.CleanupOperation, expectedLease sandbox.ExecutionLease) (sandbox.CleanupResult, bool, error)
+	GetSandboxPreflightOperation(ctx context.Context, keyDigest string) (sandbox.PreflightOperation, bool, error)
+	CreateSandboxDisabledPreflight(ctx context.Context, preflight sandbox.DisabledPreflight,
+		operation sandbox.PreflightOperation) (sandbox.DisabledPreflight, bool, error)
+	GetSandboxDisabledPreflight(ctx context.Context, id string) (sandbox.DisabledPreflight, error)
+	ListSandboxDisabledPreflights(ctx context.Context, runID string, limit int) ([]sandbox.DisabledPreflight, error)
 }
 
 type SandboxManifestService struct {
-	store   SandboxManifestStore
-	checker policy.Checker
+	store     SandboxManifestStore
+	checker   policy.Checker
+	inspector sandbox.BackendInspector
 }
 
 type PrepareSandboxManifestRequest struct {
@@ -86,7 +92,9 @@ type PrepareSandboxManifestRequest struct {
 func NewSandboxManifestService(store SandboxManifestStore,
 	checker policy.Checker,
 ) *SandboxManifestService {
-	return &SandboxManifestService{store: store, checker: checker}
+	return &SandboxManifestService{
+		store: store, checker: checker, inspector: sandbox.NewDisabledBackendInspector(),
+	}
 }
 
 func (s *SandboxManifestService) Prepare(ctx context.Context,

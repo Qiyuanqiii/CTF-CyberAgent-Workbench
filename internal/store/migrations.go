@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 50
+const LatestSchemaVersion = 51
 
 type migration struct {
 	Version    int
@@ -7037,6 +7037,327 @@ var sandboxLifecycleStatements = []string{
 	`CREATE TRIGGER trg_sandbox_cleanup_operation_delete_immutable
 		BEFORE DELETE ON sandbox_cleanup_operations BEGIN
 			SELECT RAISE(ABORT, 'sandbox cleanup operation cannot be deleted');
+		END;`,
+}
+
+var sandboxPreflightStatements = []string{
+	`CREATE TABLE sandbox_disabled_preflights (
+		id TEXT PRIMARY KEY,
+		execution_id TEXT NOT NULL UNIQUE,
+		candidate_id TEXT NOT NULL,
+		preparation_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		mission_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		protocol_version TEXT NOT NULL,
+		backend TEXT NOT NULL,
+		manifest_fingerprint TEXT NOT NULL,
+		authorization_fingerprint TEXT NOT NULL,
+		policy_fingerprint TEXT NOT NULL,
+		mount_binding_fingerprint TEXT NOT NULL,
+		input_artifact_digest TEXT NOT NULL,
+		handshake_protocol TEXT NOT NULL,
+		inspector_name TEXT NOT NULL,
+		handshake_status TEXT NOT NULL,
+		backend_available INTEGER NOT NULL,
+		threat_model_fingerprint TEXT NOT NULL,
+		container_identity_protocol TEXT NOT NULL,
+		container_runtime TEXT NOT NULL,
+		container_identity_bound INTEGER NOT NULL,
+		container_identity_fingerprint TEXT NOT NULL,
+		output_protocol TEXT NOT NULL,
+		capture_stdout INTEGER NOT NULL,
+		capture_stderr INTEGER NOT NULL,
+		output_plan_fingerprint TEXT NOT NULL,
+		output_slot_count INTEGER NOT NULL,
+		max_output_bytes INTEGER NOT NULL,
+		partial_failure_policy TEXT NOT NULL,
+		truncation_policy TEXT NOT NULL,
+		mime_policy TEXT NOT NULL,
+		file_type_policy TEXT NOT NULL,
+		restart_policy TEXT NOT NULL,
+		raw_paths_stored INTEGER NOT NULL,
+		output_export_enabled INTEGER NOT NULL,
+		artifact_commit_authorized INTEGER NOT NULL,
+		backend_enabled INTEGER NOT NULL,
+		execution_authorized INTEGER NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(execution_id) REFERENCES sandbox_disabled_executions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(candidate_id) REFERENCES sandbox_execution_candidates(id) ON DELETE RESTRICT,
+		FOREIGN KEY(preparation_id) REFERENCES sandbox_manifest_preparations(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+		CHECK(protocol_version = 'sandbox_preflight.v1'),
+		CHECK(backend IN ('noop', 'local', 'docker')),
+		CHECK(handshake_protocol = 'sandbox_backend_handshake.v1'),
+		CHECK(inspector_name = 'disabled' AND handshake_status = 'backend_disabled'),
+		CHECK(backend_available = 0),
+		CHECK(container_identity_protocol = 'sandbox_container_identity.v1'),
+		CHECK(container_runtime = 'none' AND container_identity_bound = 0
+			AND container_identity_fingerprint = ''),
+		CHECK(output_protocol = 'sandbox_output_export_plan.v1'),
+		CHECK(capture_stdout IN (0, 1) AND capture_stderr IN (0, 1)),
+		CHECK(output_slot_count BETWEEN 1 AND 18),
+		CHECK(capture_stdout + capture_stderr <= output_slot_count),
+		CHECK(max_output_bytes BETWEEN 1 AND 16777216),
+		CHECK(partial_failure_policy = 'all_or_nothing'),
+		CHECK(truncation_policy = 'aggregate_hard_limit'),
+		CHECK(mime_policy = 'detect_and_validate'),
+		CHECK(file_type_policy = 'regular_file_no_symlink_or_special'),
+		CHECK(restart_policy = 'reconcile_before_retry'),
+		CHECK(raw_paths_stored = 0 AND output_export_enabled = 0
+			AND artifact_commit_authorized = 0),
+		CHECK(backend_enabled = 0 AND execution_authorized = 0),
+		CHECK(length(manifest_fingerprint) = 64 AND manifest_fingerprint = lower(manifest_fingerprint)
+			AND manifest_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(authorization_fingerprint) = 64 AND authorization_fingerprint = lower(authorization_fingerprint)
+			AND authorization_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(policy_fingerprint) = 64 AND policy_fingerprint = lower(policy_fingerprint)
+			AND policy_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(mount_binding_fingerprint) = 64 AND mount_binding_fingerprint = lower(mount_binding_fingerprint)
+			AND mount_binding_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(input_artifact_digest) = 64 AND input_artifact_digest = lower(input_artifact_digest)
+			AND input_artifact_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(threat_model_fingerprint) = 64 AND threat_model_fingerprint = lower(threat_model_fingerprint)
+			AND threat_model_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(output_plan_fingerprint) = 64 AND output_plan_fingerprint = lower(output_plan_fingerprint)
+			AND output_plan_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(id = trim(id) AND length(id) BETWEEN 1 AND 256 AND instr(id, char(0)) = 0),
+		CHECK(execution_id = trim(execution_id) AND length(execution_id) BETWEEN 1 AND 256
+			AND instr(execution_id, char(0)) = 0),
+		CHECK(candidate_id = trim(candidate_id) AND length(candidate_id) BETWEEN 1 AND 256
+			AND instr(candidate_id, char(0)) = 0),
+		CHECK(preparation_id = trim(preparation_id) AND length(preparation_id) BETWEEN 1 AND 256
+			AND instr(preparation_id, char(0)) = 0),
+		CHECK(run_id = trim(run_id) AND length(run_id) BETWEEN 1 AND 256 AND instr(run_id, char(0)) = 0),
+		CHECK(mission_id = trim(mission_id) AND length(mission_id) BETWEEN 1 AND 256
+			AND instr(mission_id, char(0)) = 0),
+		CHECK(workspace_id = trim(workspace_id) AND length(workspace_id) BETWEEN 1 AND 256
+			AND instr(workspace_id, char(0)) = 0),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE INDEX idx_sandbox_disabled_preflights_run_created
+		ON sandbox_disabled_preflights(run_id, created_at, id);`,
+	`CREATE TABLE sandbox_backend_preflight_checks (
+		preflight_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		name TEXT NOT NULL,
+		required INTEGER NOT NULL,
+		verified INTEGER NOT NULL,
+		evidence_state TEXT NOT NULL,
+		PRIMARY KEY(preflight_id, ordinal),
+		UNIQUE(preflight_id, name),
+		FOREIGN KEY(preflight_id) REFERENCES sandbox_disabled_preflights(id) ON DELETE RESTRICT,
+		CHECK(ordinal BETWEEN 1 AND 16),
+		CHECK((ordinal = 1 AND name = 'host_path_isolation')
+			OR (ordinal = 2 AND name = 'mount_propagation_private')
+			OR (ordinal = 3 AND name = 'read_only_rootfs')
+			OR (ordinal = 4 AND name = 'read_only_inputs')
+			OR (ordinal = 5 AND name = 'dedicated_writable_output')
+			OR (ordinal = 6 AND name = 'network_default_deny')
+			OR (ordinal = 7 AND name = 'exact_network_allowlist')
+			OR (ordinal = 8 AND name = 'ephemeral_secret_materialization')
+			OR (ordinal = 9 AND name = 'non_root_container_identity')
+			OR (ordinal = 10 AND name = 'cpu_memory_pid_limits')
+			OR (ordinal = 11 AND name = 'wall_clock_timeout')
+			OR (ordinal = 12 AND name = 'graceful_then_forced_kill')
+			OR (ordinal = 13 AND name = 'orphan_reconciliation')
+			OR (ordinal = 14 AND name = 'output_regular_file_only')
+			OR (ordinal = 15 AND name = 'output_symlink_special_rejection')
+			OR (ordinal = 16 AND name = 'atomic_output_artifact_commit')),
+		CHECK(required = 1 AND verified = 0 AND evidence_state = 'not_probed')
+	) WITHOUT ROWID;`,
+	`CREATE TABLE sandbox_output_export_slots (
+		preflight_id TEXT NOT NULL,
+		ordinal INTEGER NOT NULL,
+		kind TEXT NOT NULL,
+		locator_fingerprint TEXT NOT NULL,
+		regular_file_required INTEGER NOT NULL,
+		symlink_rejected INTEGER NOT NULL,
+		special_file_rejected INTEGER NOT NULL,
+		mime_detection_required INTEGER NOT NULL,
+		redaction_required INTEGER NOT NULL,
+		artifact_commit_authorized INTEGER NOT NULL,
+		PRIMARY KEY(preflight_id, ordinal),
+		UNIQUE(preflight_id, locator_fingerprint),
+		FOREIGN KEY(preflight_id) REFERENCES sandbox_disabled_preflights(id) ON DELETE RESTRICT,
+		CHECK(ordinal BETWEEN 1 AND 18),
+		CHECK(kind IN ('stdout', 'stderr', 'file')),
+		CHECK(length(locator_fingerprint) = 64 AND locator_fingerprint = lower(locator_fingerprint)
+			AND locator_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK((kind IN ('stdout', 'stderr') AND regular_file_required = 0
+			AND symlink_rejected = 0 AND special_file_rejected = 0)
+			OR (kind = 'file' AND regular_file_required = 1
+				AND symlink_rejected = 1 AND special_file_rejected = 1)),
+		CHECK(mime_detection_required = 1 AND redaction_required = 1
+			AND artifact_commit_authorized = 0)
+	) WITHOUT ROWID;`,
+	`CREATE UNIQUE INDEX idx_sandbox_output_export_stream_unique
+		ON sandbox_output_export_slots(preflight_id, kind) WHERE kind IN ('stdout', 'stderr');`,
+	`CREATE TABLE sandbox_preflight_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		preflight_id TEXT NOT NULL UNIQUE,
+		execution_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(preflight_id) REFERENCES sandbox_disabled_preflights(id) ON DELETE RESTRICT,
+		FOREIGN KEY(execution_id) REFERENCES sandbox_disabled_executions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64 AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64 AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	) WITHOUT ROWID;`,
+	`CREATE TRIGGER trg_sandbox_disabled_preflight_insert
+		BEFORE INSERT ON sandbox_disabled_preflights
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_disabled_executions execution
+			JOIN sandbox_execution_candidates candidate ON candidate.id = execution.candidate_id
+			JOIN sandbox_manifest_preparations preparation ON preparation.id = execution.preparation_id
+			JOIN sandbox_execution_leases sandbox_lease ON sandbox_lease.execution_id = execution.id
+			JOIN runs run ON run.id = execution.run_id
+			JOIN missions mission ON mission.id = execution.mission_id
+			WHERE execution.id = NEW.execution_id AND execution.candidate_id = NEW.candidate_id
+				AND execution.preparation_id = NEW.preparation_id AND execution.run_id = NEW.run_id
+				AND execution.mission_id = NEW.mission_id AND execution.workspace_id = NEW.workspace_id
+				AND preparation.backend = NEW.backend
+				AND execution.manifest_fingerprint = NEW.manifest_fingerprint
+				AND execution.authorization_fingerprint = NEW.authorization_fingerprint
+				AND execution.policy_fingerprint = NEW.policy_fingerprint
+				AND execution.mount_binding_fingerprint = NEW.mount_binding_fingerprint
+				AND execution.input_artifact_digest = NEW.input_artifact_digest
+				AND execution.capture_stdout = NEW.capture_stdout
+				AND execution.capture_stderr = NEW.capture_stderr
+				AND execution.output_path_count + execution.capture_stdout + execution.capture_stderr = NEW.output_slot_count
+				AND execution.max_output_bytes = NEW.max_output_bytes
+				AND execution.requested_by = NEW.requested_by
+				AND execution.backend_enabled = 0 AND execution.execution_authorized = 0
+				AND execution.backend_started = 0
+				AND candidate.backend_enabled = 0 AND candidate.execution_authorized = 0
+				AND sandbox_lease.status = 'released'
+				AND run.mission_id = NEW.mission_id AND mission.workspace_id = NEW.workspace_id
+				AND run.status IN ('created', 'preparing', 'running', 'waiting_approval', 'paused')
+				AND julianday(NEW.created_at) >= julianday(execution.created_at)
+				AND NOT EXISTS (SELECT 1 FROM sandbox_execution_cancellations cancellation
+					WHERE cancellation.execution_id = execution.id)
+				AND NOT EXISTS (SELECT 1 FROM sandbox_cleanup_results cleanup
+					WHERE cleanup.execution_id = execution.id)
+				AND NOT EXISTS (SELECT 1 FROM run_execution_leases run_lease
+					WHERE run_lease.run_id = NEW.run_id AND run_lease.status = 'active'
+						AND julianday(run_lease.expires_at) > julianday('now'))
+				AND candidate.tokens_used =
+					COALESCE((SELECT SUM(node.tokens_used) FROM agent_nodes node WHERE node.run_id = NEW.run_id), 0) +
+					COALESCE((SELECT SUM(CASE WHEN call.usage_recorded = 1 THEN call.total_tokens
+						ELSE call.reserved_total_tokens END) FROM readonly_fanout_model_calls call
+						WHERE call.run_id = NEW.run_id), 0)
+				AND candidate.execution_millis_used =
+					COALESCE((SELECT checkpoint.execution_millis FROM run_supervisor_checkpoints checkpoint
+						WHERE checkpoint.run_id = NEW.run_id), 0) +
+					COALESCE((SELECT SUM(call.elapsed_millis) FROM specialist_model_calls call
+						WHERE call.run_id = NEW.run_id), 0) +
+					COALESCE((SELECT SUM(CASE WHEN call.elapsed_recorded = 1 THEN call.elapsed_millis
+						ELSE call.reserved_millis END) FROM readonly_fanout_model_calls call
+						WHERE call.run_id = NEW.run_id), 0)
+				AND candidate.tool_calls_used = COALESCE((SELECT usage.consumed FROM run_tool_usage usage
+					WHERE usage.run_id = NEW.run_id), 0)
+				AND (COALESCE(CAST(json_extract(run.budget_json, '$.max_tokens') AS INTEGER), 0) = 0
+					OR candidate.tokens_used < CAST(json_extract(run.budget_json, '$.max_tokens') AS INTEGER))
+				AND (COALESCE(CAST(json_extract(run.budget_json, '$.timeout_seconds') AS INTEGER), 0) = 0
+					OR candidate.execution_millis_used < CAST(json_extract(run.budget_json, '$.timeout_seconds') AS INTEGER) * 1000)
+				AND (COALESCE(CAST(json_extract(run.budget_json, '$.max_tool_calls') AS INTEGER), 0) = 0
+					OR candidate.tool_calls_used < CAST(json_extract(run.budget_json, '$.max_tool_calls') AS INTEGER))
+				AND (SELECT COUNT(*) FROM sandbox_execution_inputs input
+					JOIN run_artifacts artifact ON artifact.id = input.artifact_id
+					WHERE input.execution_id = execution.id AND artifact.run_id = execution.run_id
+						AND artifact.session_id = run.session_id AND artifact.workspace_id = execution.workspace_id
+						AND artifact.sha256 = input.sha256 AND artifact.size_bytes = input.size_bytes
+						AND artifact.mime = input.mime AND artifact.stream = input.stream
+						AND artifact.source_id = input.source_id AND artifact.redacted = input.redacted)
+					= execution.input_artifact_count
+				AND COALESCE((SELECT SUM(input.size_bytes) FROM sandbox_execution_inputs input
+					WHERE input.execution_id = execution.id), 0) = execution.input_artifact_bytes
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox disabled preflight binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_backend_preflight_check_insert
+		BEFORE INSERT ON sandbox_backend_preflight_checks
+		WHEN NOT EXISTS (SELECT 1 FROM sandbox_disabled_preflights preflight
+			WHERE preflight.id = NEW.preflight_id AND preflight.handshake_status = 'backend_disabled')
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox backend preflight check binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_output_export_slot_insert
+		BEFORE INSERT ON sandbox_output_export_slots
+		WHEN NOT EXISTS (SELECT 1 FROM sandbox_disabled_preflights preflight
+			WHERE preflight.id = NEW.preflight_id AND preflight.output_export_enabled = 0
+				AND preflight.artifact_commit_authorized = 0)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox output export slot binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_preflight_operation_insert
+		BEFORE INSERT ON sandbox_preflight_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_disabled_preflights preflight
+			WHERE preflight.id = NEW.preflight_id AND preflight.execution_id = NEW.execution_id
+				AND preflight.run_id = NEW.run_id AND preflight.requested_by = NEW.requested_by
+				AND preflight.created_at = NEW.created_at
+				AND (SELECT COUNT(*) FROM sandbox_backend_preflight_checks check_row
+					WHERE check_row.preflight_id = preflight.id) = 16
+				AND (SELECT COUNT(*) FROM sandbox_backend_preflight_checks check_row
+					WHERE check_row.preflight_id = preflight.id AND check_row.required = 1
+						AND check_row.verified = 0 AND check_row.evidence_state = 'not_probed') = 16
+				AND (SELECT COUNT(*) FROM sandbox_output_export_slots slot
+					WHERE slot.preflight_id = preflight.id) = preflight.output_slot_count
+				AND (SELECT COUNT(*) FROM sandbox_output_export_slots slot
+					WHERE slot.preflight_id = preflight.id AND slot.kind = 'stdout') = preflight.capture_stdout
+				AND (SELECT COUNT(*) FROM sandbox_output_export_slots slot
+					WHERE slot.preflight_id = preflight.id AND slot.kind = 'stderr') = preflight.capture_stderr
+				AND (SELECT COUNT(*) FROM sandbox_output_export_slots slot
+					WHERE slot.preflight_id = preflight.id AND slot.kind = 'file') =
+					preflight.output_slot_count - preflight.capture_stdout - preflight.capture_stderr
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox preflight operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_disabled_preflight_update_immutable
+		BEFORE UPDATE ON sandbox_disabled_preflights BEGIN
+			SELECT RAISE(ABORT, 'sandbox disabled preflight cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_disabled_preflight_delete_immutable
+		BEFORE DELETE ON sandbox_disabled_preflights BEGIN
+			SELECT RAISE(ABORT, 'sandbox disabled preflight cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_backend_preflight_check_update_immutable
+		BEFORE UPDATE ON sandbox_backend_preflight_checks BEGIN
+			SELECT RAISE(ABORT, 'sandbox backend preflight check cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_backend_preflight_check_delete_immutable
+		BEFORE DELETE ON sandbox_backend_preflight_checks BEGIN
+			SELECT RAISE(ABORT, 'sandbox backend preflight check cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_output_export_slot_update_immutable
+		BEFORE UPDATE ON sandbox_output_export_slots BEGIN
+			SELECT RAISE(ABORT, 'sandbox output export slot cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_output_export_slot_delete_immutable
+		BEFORE DELETE ON sandbox_output_export_slots BEGIN
+			SELECT RAISE(ABORT, 'sandbox output export slot cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_preflight_operation_update_immutable
+		BEFORE UPDATE ON sandbox_preflight_operations BEGIN
+			SELECT RAISE(ABORT, 'sandbox preflight operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_preflight_operation_delete_immutable
+		BEFORE DELETE ON sandbox_preflight_operations BEGIN
+			SELECT RAISE(ABORT, 'sandbox preflight operation cannot be deleted');
 		END;`,
 }
 

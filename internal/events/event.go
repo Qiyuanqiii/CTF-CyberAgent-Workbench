@@ -106,6 +106,7 @@ const (
 	SandboxExecutionLeaseReleasedEvent       = "sandbox.execution_lease_released"
 	SandboxExecutionCancelRequestedEvent     = "sandbox.execution_cancel_requested"
 	SandboxExecutionCleanupCompletedEvent    = "sandbox.cleanup_completed"
+	SandboxPreflightRecordedEvent            = "sandbox.preflight_recorded"
 	AgentProtocolRepairRequestedEvent        = "agent.protocol_repair_requested"
 	AgentProtocolRepairStartedEvent          = "agent.protocol_repair_started"
 	AgentProtocolRepairCompletedEvent        = "agent.protocol_repair_completed"

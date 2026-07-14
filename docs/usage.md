@@ -307,6 +307,9 @@ cyberagent run sandbox candidate-show <candidate-id>
 cyberagent run sandbox begin <candidate-id> --manifest configs/sandbox-manifest.example.json --operation-key sandbox-begin-001
 cyberagent run sandbox executions <run-id>
 cyberagent run sandbox execution-show <execution-id>
+cyberagent run sandbox preflight <execution-id> --manifest configs/sandbox-manifest.example.json --operation-key sandbox-preflight-001
+cyberagent run sandbox preflights <run-id>
+cyberagent run sandbox preflight-show <preflight-id>
 cyberagent run sandbox cancel <execution-id> --operation-key sandbox-cancel-001
 cyberagent run sandbox cleanup <execution-id> --operation-key sandbox-cleanup-001
 ```
@@ -322,6 +325,10 @@ Schema v49 is still not an execution API. Candidate rows and events contain only
 Schema v50 adds a disabled lifecycle, not process execution. `begin` resupplies the complete Manifest and rechecks the candidate, Run/Mission/Workspace/Scope, current Policy and approval, mount binding, aggregate budgets, Run lease, and every input Artifact. Inputs must belong to the exact Run/Session/Workspace, pass content SHA-256 verification, retain their order/source/MIME/stream metadata, and total at most 16 MiB. The output plan stores only stdout/stderr flags, output-path count, maximum bytes, and a fingerprint; raw paths are not retained.
 
 The lifecycle owns a separate generation-fenced lease. Generation one only prepares the disabled record and is released immediately. `cancel` appends an immutable request, while `cleanup` may run after the parent Run is terminal and acquires a successor generation. The current cleanup outcome is always `backend_disabled`: no backend started, no orphan existed, all inputs were reverified, and zero output Artifacts were captured. CLI detail intentionally omits the lease ID and owner as well as Manifest, command, path, and Artifact content. Reusing the same operation key and intent is safe; changed intent conflicts.
+
+Schema v51 adds a separate disabled preflight after `begin` and before any future backend action. `preflight` resupplies the complete Manifest and revalidates the full v48-v50 chain, current Policy/approval/Scope, mounts, cumulative budgets, Run-lease quiescence, and exact input Artifacts. It records a fixed 16-item backend threat model, but every check remains required, unverified, and not probed. The backend handshake reports unavailable, container identity is unbound, and all backend/execution/export/Artifact-commit flags remain false.
+
+The output plan stores only opaque locator fingerprints plus `stdout`, `stderr`, or `file` kinds. File slots require regular files and reject symlinks and special files; every slot requires MIME detection and redaction. Export is all-or-nothing under one aggregate byte ceiling and must reconcile before retry. CLI detail deliberately omits locator fingerprints, raw paths, command/Manifest content, container identity, and private lease data. A successful disabled preflight proves only that the intended checks are frozen and the current authority chain still matches; it does not prove Docker availability and cannot authorize execution.
 
 ## Workspaces
 

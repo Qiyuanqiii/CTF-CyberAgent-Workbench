@@ -126,7 +126,7 @@ func TestSchemaV49UpgradeAddsDisabledSandboxLifecycleWithoutLosingCandidate(t *t
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	if version, err := st.SchemaVersion(ctx); err != nil || version != LatestSchemaVersion {
-		t.Fatalf("schema v49 did not upgrade to v50: version=%d err=%v", version, err)
+		t.Fatalf("schema v49 did not upgrade to the latest schema: version=%d err=%v", version, err)
 	}
 	loaded, err := st.GetSandboxExecutionCandidate(ctx, candidate.Candidate.ID)
 	if err != nil || loaded.Candidate.ID != candidate.Candidate.ID {
