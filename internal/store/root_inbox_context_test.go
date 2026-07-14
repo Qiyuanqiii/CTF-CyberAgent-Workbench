@@ -219,7 +219,7 @@ func TestRootInboxContextSurvivesLeaseTakeoverWithoutChangingBatch(t *testing.T)
 	message := sendRootDependencyTestMessage(t, ctx, st, fixture.Run.ID,
 		fixture.Child.ID, fixture.Root.ID, "dependency-takeover-0001")
 	firstLease, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
-		RunID: fixture.Run.ID, OwnerID: "root-inbox-worker-a", TTL: 150 * time.Millisecond,
+		RunID: fixture.Run.ID, OwnerID: "root-inbox-worker-a", TTL: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -232,7 +232,7 @@ func TestRootInboxContextSurvivesLeaseTakeoverWithoutChangingBatch(t *testing.T)
 	if err != nil || len(firstBatch.Messages) != 1 {
 		t.Fatalf("first batch failed: batch=%#v err=%v", firstBatch, err)
 	}
-	waitForLeaseExpiry(firstLease.Lease)
+	expireTestRunExecutionLease(t, ctx, st, firstLease.Lease)
 	secondLease, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
 		RunID: fixture.Run.ID, OwnerID: "root-inbox-worker-b", TTL: time.Minute,
 	})

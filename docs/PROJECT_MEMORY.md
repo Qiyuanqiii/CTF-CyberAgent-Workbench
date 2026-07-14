@@ -59,6 +59,8 @@ Mount sources are opened through Go `os.Root`, so symlinks cannot leave the trus
 
 This slice still executes nothing. Every candidate fixes `backend_enabled=false` and `execution_authorized=false`; Local and Docker remain fail-closed. Focused tests cover pending/approved/denied approval states, Policy and Manifest drift, terminal replay, active lease, exhausted tool budget, symlink escape, mount-source change, immutable SQL rows, v48 upgrade, CLI lifecycle, and two-store convergence. Final uncached full tests, full-repository race detection, vet, staticcheck, module verification/tidy diff, govulncheck, OpenAPI drift, strict TypeScript, 17 Vitest cases, production build, npm audit, credential/runtime scans, and an isolated real schema-v49 CLI lifecycle all pass. No unresolved high- or medium-severity issue is known.
 
+Post-v49 CI hardening removed two wall-clock-dependent test assumptions exposed by a slower Linux runner. Supervisor backoff recovery now waits for the durable `model.failed` boundary before explicit cancellation, and lease takeover tests use a valid deterministically expired database fixture after proving active-lease exclusion with a one-minute TTL. Do not reintroduce sub-second deadlines as synchronization. These changes are test-only and do not alter runtime, schema, lease, cancellation, or approval semantics.
+
 ## Next Slice
 
 Continue P6 without enabling process execution:

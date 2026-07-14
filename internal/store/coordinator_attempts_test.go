@@ -155,7 +155,7 @@ func TestSpecialistAttemptTakeoverFencesOldWorkerAndRecoversOnce(t *testing.T) {
 	fixture := prepareSpecialistAttemptFixtureWithoutLease(t, ctx, st,
 		"attempt takeover", 3, 64)
 	firstLease, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
-		RunID: fixture.Run.ID, OwnerID: "attempt-worker-a", TTL: 150 * time.Millisecond,
+		RunID: fixture.Run.ID, OwnerID: "attempt-worker-a", TTL: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -166,7 +166,7 @@ func TestSpecialistAttemptTakeoverFencesOldWorkerAndRecoversOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitForLeaseExpiry(firstLease.Lease)
+	expireTestRunExecutionLease(t, ctx, st, firstLease.Lease)
 	secondLease, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
 		RunID: fixture.Run.ID, OwnerID: "attempt-worker-b", TTL: time.Minute,
 	})
@@ -283,7 +283,7 @@ func TestSpecialistAttemptSQLiteTriggersRejectForgedAndStaleLeases(t *testing.T)
 	fixture := prepareSpecialistAttemptFixtureWithoutLease(t, ctx, st,
 		"attempt trigger lease", 2, 32)
 	acquired, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
-		RunID: fixture.Run.ID, OwnerID: "trigger-worker-a", TTL: 150 * time.Millisecond,
+		RunID: fixture.Run.ID, OwnerID: "trigger-worker-a", TTL: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -308,7 +308,7 @@ func TestSpecialistAttemptSQLiteTriggersRejectForgedAndStaleLeases(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitForLeaseExpiry(acquired.Lease)
+	expireTestRunExecutionLease(t, ctx, st, acquired.Lease)
 	if _, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
 		RunID: fixture.Run.ID, OwnerID: "trigger-worker-b", TTL: time.Minute,
 	}); err != nil {

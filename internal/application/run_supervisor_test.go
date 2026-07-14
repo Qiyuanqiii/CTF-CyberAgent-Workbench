@@ -1145,12 +1145,49 @@ func TestRunSupervisorCancellationDuringBackoffResumesNextModelAttempt(t *testin
 	if err != nil || replayed {
 		t.Fatalf("dependency message failed: message=%#v replayed=%t err=%v", message, replayed, err)
 	}
-	supervisor.WithModelRetryPolicy(application.ModelRetryPolicy{MaxAttempts: 3, BaseDelay: time.Second, MaxDelay: time.Second})
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	supervisor.WithModelRetryPolicy(application.ModelRetryPolicy{MaxAttempts: 3, BaseDelay: time.Minute, MaxDelay: time.Minute})
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	first, err := supervisor.StepWithInput(ctx, run.ID, "resume after cancellation")
-	if apperror.CodeOf(err) != apperror.CodeDeadlineExceeded || provider.calls != 1 {
+	type stepOutcome struct {
+		result application.LifecycleResult
+		err    error
+	}
+	done := make(chan stepOutcome, 1)
+	go func() {
+		result, stepErr := supervisor.StepWithInput(ctx, run.ID, "resume after cancellation")
+		done <- stepOutcome{result: result, err: stepErr}
+	}()
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+waitForBackoff:
+	for {
+		select {
+		case early := <-done:
+			t.Fatalf("supervisor returned before retry backoff: result=%#v err=%v", early.result, early.err)
+		case <-ticker.C:
+			items, listErr := st.ListRunEvents(context.Background(), run.ID)
+			if listErr != nil {
+				cancel()
+				<-done
+				t.Fatalf("list retry events: %v", listErr)
+			}
+			if countEventType(items, events.ModelFailedEvent) > 0 {
+				break waitForBackoff
+			}
+		case <-deadline.C:
+			cancel()
+			timedOut := <-done
+			t.Fatalf("model failure was not persisted before watchdog: result=%#v err=%v", timedOut.result, timedOut.err)
+		}
+	}
+	cancel()
+	firstOutcome := <-done
+	first, err := firstOutcome.result, firstOutcome.err
+	if apperror.CodeOf(err) != apperror.CodeCancelled || provider.calls != 1 {
 		t.Fatalf("cancelled backoff code=%s calls=%d err=%v", apperror.CodeOf(err), provider.calls, err)
 	}
 	if first.InboxMessages != 1 || first.InboxRecovered {

@@ -24,18 +24,18 @@ func TestSQLiteRunExecutionLeaseLifecycleFencesStaleSupervisor(t *testing.T) {
 	}
 
 	first, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
-		RunID: run.ID, OwnerID: "worker-a", TTL: 150 * time.Millisecond,
+		RunID: run.ID, OwnerID: "worker-a", TTL: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
-		RunID: run.ID, OwnerID: "worker-a", TTL: 150 * time.Millisecond,
+		RunID: run.ID, OwnerID: "worker-a", TTL: time.Minute,
 	}); apperror.CodeOf(err) != apperror.CodeConflict {
 		t.Fatalf("same owner entered without an explicit replay token: code=%s err=%v", apperror.CodeOf(err), err)
 	}
 	replayed, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
-		RunID: run.ID, OwnerID: "worker-a", LeaseID: first.Lease.LeaseID, TTL: 150 * time.Millisecond,
+		RunID: run.ID, OwnerID: "worker-a", LeaseID: first.Lease.LeaseID, TTL: time.Minute,
 	})
 	if err != nil || !replayed.Replayed || replayed.TookOver ||
 		replayed.Lease.LeaseID != first.Lease.LeaseID || replayed.Lease.Generation != 1 {
@@ -52,7 +52,7 @@ func TestSQLiteRunExecutionLeaseLifecycleFencesStaleSupervisor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitForLeaseExpiry(first.Lease)
+	expireTestRunExecutionLease(t, ctx, st, first.Lease)
 	second, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
 		RunID: run.ID, OwnerID: "worker-b", TTL: time.Minute,
 	})
@@ -249,12 +249,5 @@ func TestSQLiteSchemaV17RebindsLegacyPendingSupervisorCheckpoint(t *testing.T) {
 		recovered.Checkpoint.LeaseGeneration != newLease.Generation ||
 		recovered.Checkpoint.AttemptID != started.Checkpoint.AttemptID {
 		t.Fatalf("legacy checkpoint was not rebound after migration: %#v", recovered.Checkpoint)
-	}
-}
-
-func waitForLeaseExpiry(lease domain.RunExecutionLease) {
-	delay := time.Until(lease.ExpiresAt) + 50*time.Millisecond
-	if delay > 0 {
-		time.Sleep(delay)
 	}
 }

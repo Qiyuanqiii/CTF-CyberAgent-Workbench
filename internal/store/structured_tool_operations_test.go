@@ -27,12 +27,12 @@ func TestStructuredSupervisorToolRejectsStaleLeaseBeforeBudgetAndEntityWrite(t *
 		t.Fatal(err)
 	}
 	first, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
-		RunID: run.ID, OwnerID: "structured-worker-a", TTL: 150 * time.Millisecond,
+		RunID: run.ID, OwnerID: "structured-worker-a", TTL: time.Minute,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	waitForLeaseExpiry(first.Lease)
+	expireTestRunExecutionLease(t, ctx, st, first.Lease)
 	second, err := st.AcquireRunExecutionLease(ctx, domain.AcquireRunExecutionLeaseRequest{
 		RunID: run.ID, OwnerID: "structured-worker-b", TTL: time.Minute,
 	})
