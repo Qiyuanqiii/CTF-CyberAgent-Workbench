@@ -20,6 +20,8 @@ cyberagent run delivery checkpoint <final-work-id> --operation-key <stable-key> 
 cyberagent run delivery list <run-id>
 cyberagent run delivery show <checkpoint-id>
 cyberagent run steer enqueue <run-id> "review the current diff" --operation-key <stable-key>
+cyberagent run steer cancel <steering-id> --operation-key <stable-key> --reason "requirement withdrawn"
+cyberagent run steer drain <run-id> --max-steps 1
 cyberagent run steer list <run-id> --limit 100
 cyberagent run steer show <steering-id>
 cyberagent run events <run-id>
@@ -66,6 +68,12 @@ Schema v45 adds ordered operator steering for running or paused Runs. `run steer
 The Supervisor consumes only the oldest message at the next safe root-turn boundary. A failed model/tool turn leaves it pending and supersedes only that attempt's delivery; restart or lease takeover prepares it again. Session history receives the operator message and assistant response only in the same successful lifecycle transaction. If another message remains, model `finish` or `wait` is deferred to an effective `continue`, and Run completion is rejected until the queue drains. Failing or cancelling the Run cancels all outstanding steering. The queue never interrupts an active tool/model commit and grants no tool, Shell, network, write, approval, or child-Agent capability.
 
 For a Run-bound Session, an ordinary `session send` automatically uses this queue when an execution lease is active, a recoverable attempt already owns PendingInput, or the Run already has queued steering. The command reports `queued`, steering ID, and sequence instead of pretending a model reply was produced. During a busy TUI action, plain text follows the same path without clearing live progress; slash commands remain blocked. HTTP, React, and the TUI queue view expose metadata only and cannot enqueue. A paused Run remains paused after enqueue and must be resumed explicitly.
+
+Schema v46 adds local operator controls without changing queue authority. `run steer cancel` requires a stable 16-256-byte operation key and a non-empty reason of at most 2 KiB. It creates an immutable cancellation fact only while the message is pending and has no prepared delivery. Exact retry returns the same fact; changed intent conflicts. Prepared, committed, already-cancelled, or terminal-Run messages cannot receive a new operator cancellation. Editing and reordering remain unsupported. Run failure/cancellation closes remaining messages with bounded terminal facts in the lifecycle transaction.
+
+`run steer drain` processes one queued turn by default and at most 64 per invocation. It acquires the Run execution lease before explicitly resuming a paused Run. A conflicting lease leaves the Run paused. The steering-only begin path refuses to generate a Mission-goal turn or recover an unrelated failed ordinary input, and every real turn still consumes the existing token/turn/time budgets and passes Policy. Empty queues do not wake paused Runs. This is an explicit local operation, not a background worker or new execution capability.
+
+Use `session send <id> "message" --operation-key <stable-key>` when a Run-bound client needs durable retry identity. With this flag, the command always enqueues or replays steering, even when the running Run is otherwise idle, and never performs a synchronous model call. The same key and intent converge across process restart and after committed delivery; changed intent conflicts. The flag is rejected for slash commands and unbound Sessions. HTTP/OpenAPI, React, TUI, models, and child Agents have no cancel/drain or idempotent enqueue mutation.
 
 ## Skills
 
@@ -383,6 +391,7 @@ When a session has an attached workspace, the TUI side panel shows workspace ide
 cyberagent session create --workspace demo --title "Agent basics" --route learn
 cyberagent session list
 cyberagent session send <session-id> "summarize your current capabilities"
+cyberagent session send <run-session-id> "queue this exactly once" --operation-key <stable-key>
 cyberagent session send <session-id> "/help"
 cyberagent session send <session-id> "/model script"
 cyberagent session send <session-id> "/model mimo/mimo-v2.5-pro"

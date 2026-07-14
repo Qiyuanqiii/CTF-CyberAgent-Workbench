@@ -86,7 +86,7 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 
 func (a *App) runOperatorSteering(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run steer enqueue|list|show")
+		return errors.New("usage: cyberagent run steer enqueue|cancel|drain|list|show")
 	}
 	service := application.NewOperatorSteeringService(a.store)
 	switch args[0] {
@@ -114,6 +114,56 @@ func (a *App) runOperatorSteering(ctx context.Context, args []string) error {
 			result.Message.Status, result.Message.RequestedBy, result.Replayed,
 			result.Message.RunID)
 		return nil
+	case "cancel":
+		fs := newFlagSet("run steer cancel", a.errOut)
+		operationKey := fs.String("operation-key", "", "stable cancellation operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		reason := fs.String("reason", "", "operator cancellation reason")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"operation-key": true, "operator": true, "reason": true,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*operationKey) == "" ||
+			strings.TrimSpace(*reason) == "" {
+			return errors.New("usage: cyberagent run steer cancel <steering-id> --operation-key <key> --reason <text> [--operator <id>]")
+		}
+		result, err := service.Cancel(ctx, application.CancelQueuedOperatorSteeringRequest{
+			MessageID: fs.Arg(0), OperationKey: *operationKey,
+			RequestedBy: *operator, Reason: *reason,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(a.out, "cancellation: %s\nsteering: %s\nrun: %s\nsequence: %d\nstatus: %s\nkind: %s\nrequested_by: %s\nreplayed: %t\n",
+			result.Cancellation.ID, result.Message.ID, result.Message.RunID,
+			result.Message.Sequence, result.Message.Status, result.Cancellation.Kind,
+			result.Cancellation.RequestedBy, result.Replayed)
+		return nil
+	case "drain":
+		fs := newFlagSet("run steer drain", a.errOut)
+		maxSteps := fs.Int("max-steps", 1, "maximum queued turns to drain")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"max-steps": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || *maxSteps <= 0 ||
+			*maxSteps > domain.MaxPendingOperatorSteering {
+			return fmt.Errorf("usage: cyberagent run steer drain <run-id> [--max-steps <1..%d>]",
+				domain.MaxPendingOperatorSteering)
+		}
+		result, err := application.NewOperatorSteeringDrainService(a.store, a.router,
+			a.checker).WithActiveCalls(a.calls).Drain(ctx,
+			application.DrainOperatorSteeringRequest{RunID: fs.Arg(0), MaxSteps: *maxSteps})
+		fmt.Fprintf(a.out, "run: %s\nwoke: %t\nbefore_pending: %d\nbefore_prepared: %d\n",
+			result.RunID, result.Woke, result.Before.Pending, result.Before.Prepared)
+		for _, step := range result.Execution.Steps {
+			fmt.Fprintf(a.out, "turn: %d\taction=%s\tstatus=%s\ttokens=%d\n",
+				step.Turn, step.Action.Kind, step.RunStatus, step.Usage.TotalTokens)
+		}
+		fmt.Fprintf(a.out, "after_pending: %d\nafter_prepared: %d\ncommitted: %d\ncancelled: %d\nstop: %s\n",
+			result.After.Pending, result.After.Prepared, result.After.Committed,
+			result.After.Cancelled, result.Execution.StopReason)
+		return err
 	case "list":
 		fs := newFlagSet("run steer list", a.errOut)
 		limit := fs.Int("limit", 100, "maximum steering messages")

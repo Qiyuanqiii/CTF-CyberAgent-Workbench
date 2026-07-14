@@ -13,6 +13,7 @@ import (
 
 const (
 	MaxOperatorSteeringContentBytes  = 16 * 1024
+	MaxOperatorSteeringReasonBytes   = 2 * 1024
 	MaxOperatorSteeringIdentityRunes = 256
 	MaxPendingOperatorSteering       = 64
 	MaxPendingOperatorSteeringBytes  = 256 * 1024
@@ -52,6 +53,50 @@ type EnqueueOperatorSteeringRequest struct {
 	Content      string
 	OperationKey string
 	RequestedBy  string
+}
+
+type OperatorSteeringCancellationKind string
+
+const (
+	OperatorSteeringCancellationOperator    OperatorSteeringCancellationKind = "operator"
+	OperatorSteeringCancellationRunTerminal OperatorSteeringCancellationKind = "run_terminal"
+)
+
+func (k OperatorSteeringCancellationKind) Valid() bool {
+	return k == OperatorSteeringCancellationOperator ||
+		k == OperatorSteeringCancellationRunTerminal
+}
+
+type CancelOperatorSteeringRequest struct {
+	MessageID    string
+	OperationKey string
+	RequestedBy  string
+	Reason       string
+}
+
+func (r CancelOperatorSteeringRequest) Normalize() (CancelOperatorSteeringRequest, error) {
+	r.MessageID = strings.TrimSpace(r.MessageID)
+	r.RequestedBy = strings.TrimSpace(r.RequestedBy)
+	for label, value := range map[string]string{
+		"message id": r.MessageID, "requester": r.RequestedBy,
+	} {
+		if err := validateOperatorSteeringIdentity(value); err != nil {
+			return CancelOperatorSteeringRequest{},
+				fmt.Errorf("operator steering cancellation %s is invalid: %w", label, err)
+		}
+	}
+	operationKey, err := NormalizeAgentOperationKey(r.OperationKey)
+	if err != nil {
+		return CancelOperatorSteeringRequest{},
+			fmt.Errorf("operator steering cancellation operation key is invalid: %w", err)
+	}
+	r.OperationKey = operationKey
+	reason, err := NormalizeOperatorSteeringCancellationReason(r.Reason)
+	if err != nil {
+		return CancelOperatorSteeringRequest{}, err
+	}
+	r.Reason = reason
+	return r, nil
 }
 
 func (r EnqueueOperatorSteeringRequest) Normalize() (EnqueueOperatorSteeringRequest, error) {
@@ -167,6 +212,45 @@ type OperatorSteeringEnqueueResult struct {
 	Replayed bool
 }
 
+type OperatorSteeringCancellation struct {
+	ID           string
+	MessageID    string
+	RunID        string
+	Kind         OperatorSteeringCancellationKind
+	RequestedBy  string
+	Reason       string
+	ReasonSHA256 string
+	CreatedAt    time.Time
+}
+
+func (c OperatorSteeringCancellation) Validate() error {
+	for label, value := range map[string]string{
+		"id": c.ID, "message id": c.MessageID, "Run id": c.RunID,
+		"requester": c.RequestedBy,
+	} {
+		if err := validateOperatorSteeringIdentity(value); err != nil {
+			return fmt.Errorf("operator steering cancellation %s is invalid: %w", label, err)
+		}
+	}
+	reason, err := NormalizeOperatorSteeringCancellationReason(c.Reason)
+	if err != nil || reason != c.Reason {
+		return errors.New("operator steering cancellation reason is not normalized")
+	}
+	if !c.Kind.Valid() || c.CreatedAt.IsZero() {
+		return errors.New("operator steering cancellation kind and creation time are required")
+	}
+	if c.ReasonSHA256 != OperatorSteeringContentSHA256(c.Reason) {
+		return errors.New("operator steering cancellation reason digest does not match")
+	}
+	return nil
+}
+
+type OperatorSteeringCancellationResult struct {
+	Cancellation OperatorSteeringCancellation
+	Message      OperatorSteeringMessage
+	Replayed     bool
+}
+
 type OperatorSteeringQueueSummary struct {
 	RunID     string
 	Pending   int
@@ -177,17 +261,27 @@ type OperatorSteeringQueueSummary struct {
 }
 
 func NormalizeOperatorSteeringContent(value string) (string, error) {
+	return normalizeOperatorSteeringText(value, MaxOperatorSteeringContentBytes,
+		"operator steering content")
+}
+
+func NormalizeOperatorSteeringCancellationReason(value string) (string, error) {
+	return normalizeOperatorSteeringText(value, MaxOperatorSteeringReasonBytes,
+		"operator steering cancellation reason")
+}
+
+func normalizeOperatorSteeringText(value string, maxBytes int, label string) (string, error) {
 	if !utf8.ValidString(value) {
-		return "", errors.New("operator steering content must be valid UTF-8")
+		return "", fmt.Errorf("%s must be valid UTF-8", label)
 	}
 	value = strings.ReplaceAll(value, "\r\n", "\n")
 	value = strings.TrimSpace(value)
-	if value == "" || len([]byte(value)) > MaxOperatorSteeringContentBytes {
-		return "", fmt.Errorf("operator steering content must be between 1 and %d bytes", MaxOperatorSteeringContentBytes)
+	if value == "" || len([]byte(value)) > maxBytes {
+		return "", fmt.Errorf("%s must be between 1 and %d bytes", label, maxBytes)
 	}
 	for _, current := range value {
 		if current == 0 || (unicode.IsControl(current) && current != '\n' && current != '\t') {
-			return "", errors.New("operator steering content contains an unsupported control character")
+			return "", fmt.Errorf("%s contains an unsupported control character", label)
 		}
 	}
 	return value, nil

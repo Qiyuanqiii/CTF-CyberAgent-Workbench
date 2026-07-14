@@ -18,18 +18,19 @@ Read in this order after a long context break:
 8. `docs/adr/0003-run-execution-modes.md`
 9. `docs/adr/0004-plan-delivery-workflow.md`
 10. `docs/adr/0005-operator-steering-queue.md`
+11. `docs/adr/0006-operator-steering-controls.md`
 
 ## Current Baseline
 
 - Overall product vision: about 97%.
 - General Agent MVP: about 99%.
 - V2 run-centric runtime: about 99%.
-- Database schema: v45.
+- Database schema: v46.
 - Main languages: Go control plane, TypeScript React/Vite read console; Rust has not started.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
 
-Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, safe-boundary operator steering, loopback read API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite read console.
+Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, safe-boundary operator steering with pending-only cancellation and explicit drain, loopback read API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite read console.
 
 ## Security Invariants
 
@@ -44,27 +45,25 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 
 ## Latest Completed Slice
 
-Schema v45 adds a durable operator steering queue over the existing RunSupervisor and Session pipeline. `run steer enqueue` accepts a stable operation key, while an ordinary Run-bound `session send` automatically queues when the Run has an active lease, a started/failed pending attempt, or an existing queue. Input is redacted, normalized, limited to 16 KiB, ordered by a per-Run sequence, and bounded to 64 pending items/256 KiB. Raw operation keys are never stored.
+Schema v46 adds explicit controls over the schema v45 operator-steering queue without changing its delivery contract. `run steer cancel` creates one immutable cancellation fact plus a digest-only idempotency operation for an unprepared pending item. Exact retry returns the same fact, changed intent conflicts, and a prepared item cannot be cancelled. Editing and reordering remain unsupported. Failed/cancelled Runs create bounded `run_terminal` cancellation facts before closing all remaining deliveries and messages in the same transaction.
 
-At a safe root-turn boundary, `BeginSupervisorTurn` prepares only the oldest item and binds it to the exact attempt/turn. Successful lifecycle commit writes the authorized Session user message, assistant response, delivery commit, and queue state in one transaction. A failed attempt supersedes its delivery and retries the same item without early Session history. If more input remains, model `finish`/`wait` is deferred to a Go-owned `continue`; final Run completion is blocked while pending input exists. Failed/cancelled Runs cancel outstanding queue items transactionally.
+`run steer drain` is an explicit, bounded wake operation. It acquires the Run execution lease before resuming a paused Run, then uses a steering-only Supervisor begin path. It cannot create a default turn, recover an unrelated ordinary failed input, exceed the existing Run budget, or bypass Policy. A conflicting active lease leaves a paused Run paused. Ordinary Run-bound `session send --operation-key` always creates or replays durable steering and never performs a synchronous Provider call; replay works across Store/process restart and after the item commits.
 
-CLI provides enqueue/list/show, and Session/TUI input can queue without interrupting the active action. HTTP/OpenAPI, React, and TUI expose bounded status/sequence metadata only. They omit content, hashes, operator identity, Session IDs, and Session-message IDs; no public mutation or capability was added. The local CLI detail is the intentional trusted surface that can display content.
-
-The release audit found no unresolved high- or medium-severity issue. It fixed three low-risk boundaries: a paused Run with an existing queue returns the durable queued fact without a fallible post-commit auto-resume; queue events no longer expose requester identity; and `run steer list` validates that its parent Run exists instead of treating an unknown Run as an empty queue. Full Go tests, full race detection, vet, staticcheck, module verification, govulncheck, strict TypeScript, 17 Vitest tests, production build, npm audit, and an isolated real-binary queue smoke pass locally. GitHub Actions run `29310437643` passed for release commit `022b083`: Go control plane completed in 3m10s and TypeScript console in 23s. A follow-up CI audit disabled the govulncheck composite action's redundant checkout and cache restore because the job already owns both; the vulnerability scan remains enabled.
+CLI is the only new mutation surface. HTTP/OpenAPI, React, and TUI remain metadata-only and have no cancel/drain action; models and child Agents have no steering mutation path. Raw operation keys, operator cancellation reasons, and requester identity are omitted from Run events. The focused audit found no unresolved high- or medium-severity issue and fixed three low-risk behavior defects before release: terminal error text is now redacted, UTF-8 repaired, control-normalized, and truncated without being able to block a failed/cancelled Run transaction; wake now happens only after the drain owns the execution lease; and an explicitly supplied blank Session operation-key flag fails instead of degrading to a synchronous turn. One staticcheck options-conversion issue was also cleaned up. Focused tests additionally prove SQLite rejects cancellation without both the fact and operator operation ledger, drain never recovers non-steering failed input, concurrency converges, and Session history commits exactly once. Full local release gates pass; remote CI results are recorded in `docs/PROGRESS_BOOK.md` after verification.
 
 ## Next Slice
 
-Build schema v46 queue-control hardening before widening autonomy:
+Perform the independent Specialist Skill-minimization audit before widening autonomy:
 
-1. Add digest-idempotent, operator-only cancellation for `pending` steering; never edit, reorder, or cancel the currently prepared item.
-2. Define an explicit wake/drain policy for queued work on idle or paused Runs without allowing a post-commit API error to hide a successful enqueue.
-3. Add caller-supplied idempotency to ordinary Session steering so client retries across process boundaries can converge as precisely as `run steer enqueue`.
-4. Keep HTTP and React read-only; expose no queue mutation to models or child Agents.
-5. Follow with the independent Specialist Skill-minimization audit, preserving distinct Code and Cyber Skill sets. Rust analyzers remain behind the later Sandbox/process JSON protocol.
+1. Define a Go-owned Specialist Skill selection policy that derives the smallest compatible subset from the parent Run's pinned selection and the child assignment.
+2. Keep Code and Cyber Skill catalogs distinct. Cyber Specialists receive only narrowly required coding guidance, primarily safe Python analysis support.
+3. Persist metadata-only Specialist Skill provenance and recovery facts; never persist Skill bodies or let a child choose its own Skills.
+4. Reuse the current root Skill Registry/version/hash validation and separate token budget, while preserving the two-child core limit and 1/2/4/6 read-only Fan-out boundary.
+5. Keep Rust analyzers behind the later Go-controlled Sandbox/process JSON protocol; do not begin CTF solving or real command execution in this slice.
 
 ## Local Machine Note
 
-The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so startup correctly fails closed with `migration 30 checksum or name mismatch`. The v45 code did not modify migrations 1-44, and fresh/upgrade fixtures plus isolated `CYBERAGENT_HOME` runs pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically.
+The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so startup correctly fails closed with `migration 30 checksum or name mismatch`. The v46 code did not modify migrations 1-45, and fresh/upgrade fixtures plus isolated `CYBERAGENT_HOME` runs pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically.
 
 ## Delivery Loop
 

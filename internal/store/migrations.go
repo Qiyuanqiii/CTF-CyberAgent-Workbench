@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 45
+const LatestSchemaVersion = 46
 
 type migration struct {
 	Version    int
@@ -5962,6 +5962,113 @@ var operatorSteeringStatements = []string{
 				WHERE message.run_id = NEW.id AND message.status = 'pending')
 		BEGIN
 			SELECT RAISE(ABORT, 'Run has pending operator steering');
+		END;`,
+}
+
+var operatorSteeringControlStatements = []string{
+	`CREATE TABLE operator_steering_cancellations (
+		id TEXT PRIMARY KEY,
+		message_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		reason TEXT NOT NULL,
+		reason_sha256 TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(message_id) REFERENCES operator_steering_messages(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(kind IN ('operator', 'run_terminal')),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0),
+		CHECK(length(CAST(reason AS BLOB)) BETWEEN 1 AND 2048
+			AND reason = trim(reason) AND instr(reason, char(0)) = 0),
+		CHECK(length(reason_sha256) = 64 AND reason_sha256 = lower(reason_sha256)
+			AND reason_sha256 NOT GLOB '*[^0-9a-f]*')
+	);`,
+	`CREATE INDEX idx_operator_steering_cancellations_run_created
+		ON operator_steering_cancellations(run_id, created_at);`,
+	`CREATE TABLE operator_steering_cancellation_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		cancellation_id TEXT NOT NULL UNIQUE,
+		message_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(cancellation_id) REFERENCES operator_steering_cancellations(id) ON DELETE RESTRICT,
+		FOREIGN KEY(message_id) REFERENCES operator_steering_messages(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64
+			AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64
+			AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE TRIGGER trg_operator_steering_cancellation_insert
+		BEFORE INSERT ON operator_steering_cancellations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM operator_steering_messages message
+			JOIN runs run ON run.id = message.run_id
+			WHERE message.id = NEW.message_id AND message.run_id = NEW.run_id
+				AND message.status = 'pending'
+				AND ((NEW.kind = 'operator' AND run.status IN ('running', 'paused')
+					AND NOT EXISTS (SELECT 1 FROM operator_steering_deliveries delivery
+						WHERE delivery.message_id = message.id AND delivery.status = 'prepared'))
+					OR (NEW.kind = 'run_terminal' AND run.status IN ('failed', 'cancelled')))
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'operator steering cancellation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_cancellation_update_immutable
+		BEFORE UPDATE ON operator_steering_cancellations BEGIN
+			SELECT RAISE(ABORT, 'operator steering cancellations cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_cancellation_delete_immutable
+		BEFORE DELETE ON operator_steering_cancellations BEGIN
+			SELECT RAISE(ABORT, 'operator steering cancellations cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_cancellation_operation_insert
+		BEFORE INSERT ON operator_steering_cancellation_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM operator_steering_cancellations cancellation
+			WHERE cancellation.id = NEW.cancellation_id
+				AND cancellation.message_id = NEW.message_id
+				AND cancellation.run_id = NEW.run_id
+				AND cancellation.kind = 'operator'
+				AND cancellation.requested_by = NEW.requested_by
+				AND cancellation.created_at = NEW.created_at)
+		BEGIN
+			SELECT RAISE(ABORT, 'operator steering cancellation operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_cancellation_operation_update_immutable
+		BEFORE UPDATE ON operator_steering_cancellation_operations BEGIN
+			SELECT RAISE(ABORT, 'operator steering cancellation operations cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_cancellation_operation_delete_immutable
+		BEFORE DELETE ON operator_steering_cancellation_operations BEGIN
+			SELECT RAISE(ABORT, 'operator steering cancellation operations cannot be deleted');
+		END;`,
+	`DROP TRIGGER trg_operator_steering_update_monotonic;`,
+	`CREATE TRIGGER trg_operator_steering_update_monotonic
+		BEFORE UPDATE ON operator_steering_messages
+		WHEN NEW.id IS NOT OLD.id OR NEW.run_id IS NOT OLD.run_id
+			OR NEW.session_id IS NOT OLD.session_id OR NEW.sequence IS NOT OLD.sequence
+			OR NEW.content IS NOT OLD.content OR NEW.content_sha256 IS NOT OLD.content_sha256
+			OR NEW.requested_by IS NOT OLD.requested_by OR NEW.created_at IS NOT OLD.created_at
+			OR OLD.status != 'pending' OR NEW.status NOT IN ('committed', 'cancelled')
+			OR (NEW.status = 'cancelled' AND NOT EXISTS (
+				SELECT 1 FROM operator_steering_cancellations cancellation
+				WHERE cancellation.message_id = OLD.id AND cancellation.run_id = OLD.run_id
+					AND cancellation.created_at = NEW.cancelled_at
+					AND (cancellation.kind = 'run_terminal' OR EXISTS (
+						SELECT 1 FROM operator_steering_cancellation_operations operation
+						WHERE operation.cancellation_id = cancellation.id
+							AND operation.message_id = OLD.id AND operation.run_id = OLD.run_id))))
+		BEGIN
+			SELECT RAISE(ABORT, 'operator steering content is immutable and status is monotonic');
 		END;`,
 }
 

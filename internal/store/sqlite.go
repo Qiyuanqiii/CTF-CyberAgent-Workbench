@@ -267,6 +267,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 43, Name: "immutable session context provenance", Statements: contextProvenanceStatements},
 		{Version: 44, Name: "immutable Delivery checkpoint gates", Statements: deliveryCheckpointStatements},
 		{Version: 45, Name: "durable operator steering queue", Statements: operatorSteeringStatements},
+		{Version: 46, Name: "operator steering queue controls", Statements: operatorSteeringControlStatements},
 	})
 }
 

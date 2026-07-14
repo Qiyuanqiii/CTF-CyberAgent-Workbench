@@ -39,6 +39,8 @@ const maxModelCancellationPollInterval = 5 * time.Second
 
 type SupervisorStore interface {
 	BeginSupervisorTurn(ctx context.Context, lease domain.RunExecutionLease, pendingInput string) (domain.SupervisorTurn, error)
+	BeginSupervisorSteeringTurn(ctx context.Context,
+		lease domain.RunExecutionLease) (domain.SupervisorTurn, error)
 	BindSupervisorTurnInput(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string) (domain.SupervisorCheckpoint, error)
 	NextSupervisorModelAttempt(ctx context.Context, checkpoint domain.SupervisorCheckpoint,
 		protocolRepair int, toolRound int) (int, int, error)
@@ -54,6 +56,8 @@ type SupervisorStore interface {
 	FinalizeSupervisorRun(ctx context.Context, lease domain.RunExecutionLease, target domain.RunStatus, summary string) (domain.Run, domain.SupervisorCheckpoint, error)
 	GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error)
 	GetRun(ctx context.Context, id string) (domain.Run, error)
+	GetOperatorSteeringQueueSummary(ctx context.Context,
+		runID string) (domain.OperatorSteeringQueueSummary, error)
 	GetRunMode(ctx context.Context, runID string) (domain.RunModeSnapshot, error)
 	ListSessionMessages(ctx context.Context, sessionID string, includeCompacted bool) ([]session.Message, error)
 	LatestContextSummary(ctx context.Context, taskID string) (contextmgr.Summary, bool, error)
@@ -296,7 +300,25 @@ func (s *RunSupervisor) step(ctx context.Context, runID string, requestedInput s
 func (s *RunSupervisor) stepWithLease(ctx context.Context, lease domain.RunExecutionLease,
 	requestedInput string,
 ) (LifecycleResult, error) {
-	turn, err := s.store.BeginSupervisorTurn(ctx, lease, requestedInput)
+	return s.stepWithLeaseMode(ctx, lease, requestedInput, false)
+}
+
+func (s *RunSupervisor) stepSteeringWithLease(ctx context.Context,
+	lease domain.RunExecutionLease,
+) (LifecycleResult, error) {
+	return s.stepWithLeaseMode(ctx, lease, "", true)
+}
+
+func (s *RunSupervisor) stepWithLeaseMode(ctx context.Context, lease domain.RunExecutionLease,
+	requestedInput string, requireSteering bool,
+) (LifecycleResult, error) {
+	var turn domain.SupervisorTurn
+	var err error
+	if requireSteering {
+		turn, err = s.store.BeginSupervisorSteeringTurn(ctx, lease)
+	} else {
+		turn, err = s.store.BeginSupervisorTurn(ctx, lease, requestedInput)
+	}
 	if err != nil {
 		return LifecycleResult{}, apperror.Normalize(err)
 	}
@@ -690,6 +712,115 @@ func (s *RunSupervisor) Execute(ctx context.Context, runID string, maxSteps int)
 		return s.executeWithLease(leaseCtx, lease, maxSteps, &result)
 	})
 	return result, err
+}
+
+func (s *RunSupervisor) DrainOperatorSteering(ctx context.Context, runID string,
+	maxSteps int,
+) (ExecutionResult, error) {
+	if s == nil || s.store == nil || s.router == nil || s.checker == nil {
+		return ExecutionResult{}, apperror.New(apperror.CodeFailedPrecondition,
+			"run supervisor dependencies are required")
+	}
+	if maxSteps <= 0 || maxSteps > domain.MaxPendingOperatorSteering {
+		return ExecutionResult{}, apperror.New(apperror.CodeInvalidArgument,
+			fmt.Sprintf("steering drain steps must be between 1 and %d",
+				domain.MaxPendingOperatorSteering))
+	}
+	result := ExecutionResult{RunID: strings.TrimSpace(runID), Steps: make([]LifecycleResult, 0)}
+	run, err := s.store.GetRun(ctx, result.RunID)
+	if err != nil {
+		return result, apperror.Normalize(err)
+	}
+	result.RunStatus = run.Status
+	if run.Status != domain.RunRunning {
+		return result, apperror.New(apperror.CodeFailedPrecondition,
+			fmt.Sprintf("run %s is %s; steering drain requires running", run.ID, run.Status))
+	}
+	summary, err := s.store.GetOperatorSteeringQueueSummary(ctx, run.ID)
+	if err != nil {
+		return result, apperror.Normalize(err)
+	}
+	if summary.Pending+summary.Prepared == 0 {
+		result.StopReason = "queue_empty"
+		return result, nil
+	}
+	err = s.withRunExecutionLease(ctx, result.RunID, func(leaseCtx context.Context,
+		lease domain.RunExecutionLease,
+	) error {
+		return s.drainOperatorSteeringWithLease(leaseCtx, lease, maxSteps, &result)
+	})
+	return result, err
+}
+
+func (s *RunSupervisor) drainOperatorSteeringWithLease(ctx context.Context,
+	lease domain.RunExecutionLease, maxSteps int, result *ExecutionResult,
+) error {
+	for range maxSteps {
+		run, err := s.store.GetRun(ctx, result.RunID)
+		if err != nil {
+			return apperror.Normalize(err)
+		}
+		result.RunStatus = run.Status
+		if run.Terminal() {
+			result.StopReason = "run_terminal"
+			return nil
+		}
+		if run.Status == domain.RunPaused {
+			result.StopReason = "run_paused"
+			return nil
+		}
+		if run.Status == domain.RunWaitingApproval {
+			result.StopReason = "waiting_approval"
+			return nil
+		}
+		summary, err := s.store.GetOperatorSteeringQueueSummary(ctx, result.RunID)
+		if err != nil {
+			return apperror.Normalize(err)
+		}
+		if summary.Pending+summary.Prepared == 0 {
+			result.StopReason = "steering_drained"
+			return nil
+		}
+		step, err := s.stepSteeringWithLease(ctx, lease)
+		if step.Turn > 0 {
+			result.Steps = append(result.Steps, step)
+		}
+		if err != nil {
+			if apperror.CodeOf(err) == apperror.CodeFailedPrecondition {
+				after, summaryErr := s.store.GetOperatorSteeringQueueSummary(ctx, result.RunID)
+				if summaryErr == nil && after.Pending+after.Prepared == 0 {
+					result.StopReason = "steering_drained"
+					return nil
+				}
+			}
+			result.StopReason = strings.ToLower(string(apperror.CodeOf(err)))
+			return err
+		}
+		result.RunStatus = step.RunStatus
+		if step.Action.Kind == domain.RootActionFinish {
+			result.StopReason = "root_finish"
+			return nil
+		}
+		if step.Action.Kind == domain.RootActionWait {
+			result.StopReason = "root_wait"
+			return nil
+		}
+	}
+	run, err := s.store.GetRun(ctx, result.RunID)
+	if err != nil {
+		return apperror.Normalize(err)
+	}
+	result.RunStatus = run.Status
+	summary, err := s.store.GetOperatorSteeringQueueSummary(ctx, result.RunID)
+	if err != nil {
+		return apperror.Normalize(err)
+	}
+	if summary.Pending+summary.Prepared == 0 {
+		result.StopReason = "steering_drained"
+	} else {
+		result.StopReason = "step_limit"
+	}
+	return nil
 }
 
 func (s *RunSupervisor) executeWithLease(ctx context.Context, lease domain.RunExecutionLease,

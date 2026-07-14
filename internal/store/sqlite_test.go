@@ -1160,7 +1160,7 @@ func removeSchemaV44ForTestStatements() []string {
 }
 
 func removeSchemaV45ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV46ForTestStatements(), []string{
 		`DROP TRIGGER trg_operator_steering_run_completion_guard`,
 		`DROP TRIGGER trg_operator_steering_delivery_delete_immutable`,
 		`DROP TRIGGER trg_operator_steering_delivery_update_monotonic`,
@@ -1180,6 +1180,32 @@ func removeSchemaV45ForTestStatements() []string {
 		`DROP INDEX idx_operator_steering_run_status_sequence`,
 		`DROP TABLE operator_steering_messages`,
 		`DELETE FROM schema_migrations WHERE version = 45`,
+	}...)
+}
+
+func removeSchemaV46ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_operator_steering_update_monotonic`,
+		`DROP TRIGGER trg_operator_steering_cancellation_operation_delete_immutable`,
+		`DROP TRIGGER trg_operator_steering_cancellation_operation_update_immutable`,
+		`DROP TRIGGER trg_operator_steering_cancellation_operation_insert`,
+		`DROP TRIGGER trg_operator_steering_cancellation_delete_immutable`,
+		`DROP TRIGGER trg_operator_steering_cancellation_update_immutable`,
+		`DROP TRIGGER trg_operator_steering_cancellation_insert`,
+		`DROP TABLE operator_steering_cancellation_operations`,
+		`DROP INDEX idx_operator_steering_cancellations_run_created`,
+		`DROP TABLE operator_steering_cancellations`,
+		`CREATE TRIGGER trg_operator_steering_update_monotonic
+			BEFORE UPDATE ON operator_steering_messages
+			WHEN NEW.id IS NOT OLD.id OR NEW.run_id IS NOT OLD.run_id
+				OR NEW.session_id IS NOT OLD.session_id OR NEW.sequence IS NOT OLD.sequence
+				OR NEW.content IS NOT OLD.content OR NEW.content_sha256 IS NOT OLD.content_sha256
+				OR NEW.requested_by IS NOT OLD.requested_by OR NEW.created_at IS NOT OLD.created_at
+				OR OLD.status != 'pending' OR NEW.status NOT IN ('committed', 'cancelled')
+			BEGIN
+				SELECT RAISE(ABORT, 'operator steering content is immutable and status is monotonic');
+			END`,
+		`DELETE FROM schema_migrations WHERE version = 46`,
 	}
 }
 

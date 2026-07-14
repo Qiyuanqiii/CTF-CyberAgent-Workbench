@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/contextmgr"
@@ -136,6 +137,8 @@ type SendResult struct {
 	Queued           bool
 	SteeringID       string
 	SteeringSequence int64
+	SteeringStatus   string
+	SteeringReplayed bool
 }
 
 type RunChatResult struct {
@@ -148,6 +151,16 @@ type RunChatResult struct {
 	Queued           bool
 	SteeringID       string
 	SteeringSequence int64
+	SteeringStatus   string
+	SteeringReplayed bool
+}
+
+type SendOptions struct {
+	OperationKey string
+}
+
+type RunChatOptions struct {
+	OperationKey string
 }
 
 type TurnMessages struct {
@@ -157,6 +170,11 @@ type TurnMessages struct {
 
 type RunChatExecutor interface {
 	ExecuteSessionTurn(ctx context.Context, sess Session, input string) (RunChatResult, bool, error)
+}
+
+type IdempotentRunChatExecutor interface {
+	ExecuteSessionTurnWithOptions(ctx context.Context, sess Session, input string,
+		options RunChatOptions) (RunChatResult, bool, error)
 }
 
 func NewManager(store Store, router *llm.Router, checker policy.Checker) *Manager {
@@ -191,7 +209,19 @@ func (m *Manager) Create(ctx context.Context, workspaceID string, title string, 
 }
 
 func (m *Manager) Send(ctx context.Context, sessionID string, input string) (SendResult, error) {
+	return m.SendWithOptions(ctx, sessionID, input, SendOptions{})
+}
+
+func (m *Manager) SendWithOptions(ctx context.Context, sessionID string, input string,
+	options SendOptions,
+) (SendResult, error) {
 	input = strings.TrimSpace(input)
+	operationKeyProvided := options.OperationKey != ""
+	options.OperationKey = strings.TrimSpace(options.OperationKey)
+	if operationKeyProvided && options.OperationKey == "" {
+		return SendResult{}, apperror.New(apperror.CodeInvalidArgument,
+			"Session operation key cannot be blank")
+	}
 	if input == "" {
 		return SendResult{}, errors.New("message is required")
 	}
@@ -204,6 +234,10 @@ func (m *Manager) Send(ctx context.Context, sessionID string, input string) (Sen
 	}
 
 	if strings.HasPrefix(input, "/") {
+		if options.OperationKey != "" {
+			return SendResult{}, apperror.New(apperror.CodeInvalidArgument,
+				"Session operation keys apply only to queued model input, not slash commands")
+		}
 		userMsg, err := m.store.SaveSessionMessage(ctx, NewMessage(sess.ID, "user", input))
 		if err != nil {
 			return SendResult{}, err
@@ -211,7 +245,19 @@ func (m *Manager) Send(ctx context.Context, sessionID string, input string) (Sen
 		return m.handleSlash(ctx, sess, userMsg, input)
 	}
 	if m.runChat != nil {
-		runResult, handled, err := m.runChat.ExecuteSessionTurn(ctx, sess, input)
+		var runResult RunChatResult
+		var handled bool
+		if options.OperationKey != "" {
+			executor, ok := m.runChat.(IdempotentRunChatExecutor)
+			if !ok {
+				return SendResult{}, apperror.New(apperror.CodeFailedPrecondition,
+					"Run chat executor does not support durable Session retry identity")
+			}
+			runResult, handled, err = executor.ExecuteSessionTurnWithOptions(ctx, sess, input,
+				RunChatOptions(options))
+		} else {
+			runResult, handled, err = m.runChat.ExecuteSessionTurn(ctx, sess, input)
+		}
 		if err != nil {
 			return SendResult{}, err
 		}
@@ -230,8 +276,18 @@ func (m *Manager) Send(ctx context.Context, sessionID string, input string) (Sen
 				RunID: runResult.RunID, RunAction: runResult.Action, RunStatus: runResult.RunStatus,
 				Queued: runResult.Queued, SteeringID: runResult.SteeringID,
 				SteeringSequence: runResult.SteeringSequence,
+				SteeringStatus:   runResult.SteeringStatus,
+				SteeringReplayed: runResult.SteeringReplayed,
 			}, nil
 		}
+		if options.OperationKey != "" {
+			return SendResult{}, apperror.New(apperror.CodeFailedPrecondition,
+				"durable Session retry identity requires a Run-bound Session")
+		}
+	}
+	if options.OperationKey != "" {
+		return SendResult{}, apperror.New(apperror.CodeFailedPrecondition,
+			"durable Session retry identity requires a Run chat executor")
 	}
 	userMsg, err := m.store.SaveSessionMessage(ctx, NewMessage(sess.ID, "user", input))
 	if err != nil {

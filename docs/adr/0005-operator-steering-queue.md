@@ -29,4 +29,4 @@ Go owns one durable, Run-scoped operator steering queue.
 
 ## Consequences
 
-Busy Session/TUI input can be acknowledged durably without fabricating a model response. Recovery and replay are inspectable through append-only events and SQLite facts. A worker is still required to drain queued input; schema v46 will define pending-only cancellation and explicit idle/paused wake behavior without relaxing these invariants.
+Busy Session/TUI input can be acknowledged durably without fabricating a model response. Recovery and replay are inspectable through append-only events and SQLite facts. A worker is still required to drain queued input. ADR 0006 and schema v46 add pending-only cancellation, explicit lease-owned wake/drain, and Session retry identity without relaxing these invariants.

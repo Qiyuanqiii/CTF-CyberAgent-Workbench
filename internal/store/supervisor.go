@@ -42,6 +42,18 @@ func (s *SQLiteStore) GetSupervisorCheckpoint(ctx context.Context, runID string)
 func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunExecutionLease,
 	pendingInput string,
 ) (domain.SupervisorTurn, error) {
+	return s.beginSupervisorTurn(ctx, lease, pendingInput, false)
+}
+
+func (s *SQLiteStore) BeginSupervisorSteeringTurn(ctx context.Context,
+	lease domain.RunExecutionLease,
+) (domain.SupervisorTurn, error) {
+	return s.beginSupervisorTurn(ctx, lease, "", true)
+}
+
+func (s *SQLiteStore) beginSupervisorTurn(ctx context.Context, lease domain.RunExecutionLease,
+	pendingInput string, requireSteering bool,
+) (domain.SupervisorTurn, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.SupervisorTurn{}, apperror.Normalize(err)
 	}
@@ -118,6 +130,18 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunE
 			fmt.Sprintf("run %s supervisor is finalized as %s", run.ID, checkpoint.Phase))
 	}
 	if checkpoint.Phase == domain.SupervisorTurnStarted {
+		if requireSteering {
+			var prepared int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*)
+				FROM operator_steering_deliveries WHERE run_id = ? AND attempt_id = ?
+					AND status = 'prepared'`, run.ID, checkpoint.AttemptID).Scan(&prepared); err != nil {
+				return domain.SupervisorTurn{}, err
+			}
+			if prepared != 1 {
+				return domain.SupervisorTurn{}, apperror.New(apperror.CodeFailedPrecondition,
+					"active Supervisor turn is not operator steering")
+			}
+		}
 		leaseChanged := checkpoint.LeaseID != lease.LeaseID || checkpoint.LeaseGeneration != lease.Generation
 		checkpointChanged := leaseChanged
 		if leaseChanged {
@@ -209,6 +233,14 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunE
 			pendingInput = steeringMessage.Content
 			checkpoint.PendingInput = pendingInput
 		}
+	}
+	if requireSteering && !steeringFound {
+		if checkpoint.PendingInput != "" {
+			return domain.SupervisorTurn{}, apperror.New(apperror.CodeFailedPrecondition,
+				"Supervisor pending input is not queued operator steering")
+		}
+		return domain.SupervisorTurn{}, apperror.New(apperror.CodeFailedPrecondition,
+			"operator steering queue is empty")
 	}
 	if err := upsertSupervisorCheckpointTx(ctx, tx, checkpoint); err != nil {
 		return domain.SupervisorTurn{}, err
@@ -1750,11 +1782,6 @@ func transitionSupervisorRunTx(ctx context.Context, tx *sql.Tx, run *domain.Run,
 			return err
 		}
 	}
-	if target == domain.RunFailed || target == domain.RunCancelled {
-		if _, err := cancelOperatorSteeringTx(ctx, tx, *run, "run_supervisor", reason, at); err != nil {
-			return err
-		}
-	}
 	if err := run.Transition(target, at); err != nil {
 		return apperror.Wrap(apperror.CodeFailedPrecondition, err.Error(), err)
 	}
@@ -1779,6 +1806,11 @@ func transitionSupervisorRunTx(ctx context.Context, tx *sql.Tx, run *domain.Run,
 	}
 	if rows != 1 {
 		return apperror.New(apperror.CodeConflict, "run changed before supervisor lifecycle transition")
+	}
+	if target == domain.RunFailed || target == domain.RunCancelled {
+		if _, err := cancelOperatorSteeringTx(ctx, tx, *run, "run_supervisor", reason, at); err != nil {
+			return err
+		}
 	}
 	statusEvent, err := events.New(run.ID, run.MissionID, events.RunStatusChangedEvent, "run_supervisor", run.ID, map[string]any{
 		"from": expected, "to": target, "reason": redact.String(strings.TrimSpace(reason)),

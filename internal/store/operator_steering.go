@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/domain"
@@ -20,6 +22,9 @@ import (
 const operatorSteeringSelect = `SELECT id, run_id, session_id, sequence, status, content,
 	content_sha256, requested_by, session_message_id, created_at, committed_at, cancelled_at
 	FROM operator_steering_messages`
+
+const operatorSteeringCancellationSelect = `SELECT id, message_id, run_id, kind,
+	requested_by, reason, reason_sha256, created_at FROM operator_steering_cancellations`
 
 func (s *SQLiteStore) EnqueueOperatorSteering(ctx context.Context,
 	request domain.EnqueueOperatorSteeringRequest,
@@ -175,6 +180,163 @@ func (s *SQLiteStore) enqueueOperatorSteering(ctx context.Context,
 		return domain.OperatorSteeringEnqueueResult{}, false, err
 	}
 	return domain.OperatorSteeringEnqueueResult{Message: message}, true, nil
+}
+
+func (s *SQLiteStore) CancelOperatorSteering(ctx context.Context,
+	request domain.CancelOperatorSteeringRequest,
+) (domain.OperatorSteeringCancellationResult, error) {
+	normalized, err := request.Normalize()
+	if err != nil {
+		return domain.OperatorSteeringCancellationResult{},
+			apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+	}
+	normalized.Reason = redact.String(normalized.Reason)
+	normalized.Reason, err = domain.NormalizeOperatorSteeringCancellationReason(normalized.Reason)
+	if err != nil {
+		return domain.OperatorSteeringCancellationResult{},
+			apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
+	}
+	if redact.String(normalized.RequestedBy) != normalized.RequestedBy {
+		return domain.OperatorSteeringCancellationResult{},
+			apperror.New(apperror.CodeInvalidArgument,
+				"operator steering cancellation requester cannot contain sensitive material")
+	}
+	var runID string
+	if err := s.db.QueryRowContext(ctx, `SELECT run_id FROM operator_steering_messages WHERE id = ?`,
+		normalized.MessageID).Scan(&runID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.OperatorSteeringCancellationResult{},
+				apperror.New(apperror.CodeNotFound, "operator steering message was not found")
+		}
+		return domain.OperatorSteeringCancellationResult{}, err
+	}
+	reasonDigest := domain.OperatorSteeringContentSHA256(normalized.Reason)
+	keyDigest := runmutation.Fingerprint("operator_steering_cancellation_operation.v1",
+		runID, normalized.OperationKey)
+	fingerprint := runmutation.Fingerprint("operator_steering_cancellation_request.v1",
+		runID, normalized.MessageID, normalized.RequestedBy, reasonDigest)
+
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return domain.OperatorSteeringCancellationResult{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockRunForOperatorSteeringControlTx(ctx, tx, runID); err != nil {
+		return domain.OperatorSteeringCancellationResult{}, err
+	}
+	message, err := getOperatorSteeringMessageTx(ctx, tx, normalized.MessageID)
+	if err != nil {
+		return domain.OperatorSteeringCancellationResult{}, err
+	}
+	if message.RunID != runID {
+		return domain.OperatorSteeringCancellationResult{},
+			apperror.New(apperror.CodeConflict, "operator steering message Run binding changed")
+	}
+	operationFingerprint, cancellationID, found, err :=
+		getOperatorSteeringCancellationOperationTx(ctx, tx, keyDigest)
+	if err != nil {
+		return domain.OperatorSteeringCancellationResult{}, err
+	}
+	if found {
+		if operationFingerprint != fingerprint {
+			return domain.OperatorSteeringCancellationResult{},
+				apperror.New(apperror.CodeConflict,
+					"operator steering cancellation operation key was already used for different intent")
+		}
+		cancellation, err := getOperatorSteeringCancellationTx(ctx, tx, cancellationID)
+		if err != nil {
+			return domain.OperatorSteeringCancellationResult{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.OperatorSteeringCancellationResult{}, err
+		}
+		return domain.OperatorSteeringCancellationResult{
+			Cancellation: cancellation, Message: message, Replayed: true,
+		}, nil
+	}
+	run, err := scanRun(tx.QueryRowContext(ctx, `SELECT id, mission_id, session_id, status,
+		config_json, budget_json, started_at, finished_at, created_at, updated_at
+		FROM runs WHERE id = ?`, runID))
+	if err != nil {
+		return domain.OperatorSteeringCancellationResult{}, err
+	}
+	if run.Status != domain.RunRunning && run.Status != domain.RunPaused {
+		return domain.OperatorSteeringCancellationResult{},
+			apperror.New(apperror.CodeFailedPrecondition,
+				fmt.Sprintf("run %s cannot cancel operator steering while %s", run.ID, run.Status))
+	}
+	if message.Status != domain.OperatorSteeringPending {
+		return domain.OperatorSteeringCancellationResult{},
+			apperror.New(apperror.CodeFailedPrecondition,
+				fmt.Sprintf("operator steering %s is already %s", message.ID, message.Status))
+	}
+	var prepared int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM operator_steering_deliveries
+		WHERE message_id = ? AND status = 'prepared'`, message.ID).Scan(&prepared); err != nil {
+		return domain.OperatorSteeringCancellationResult{}, err
+	}
+	if prepared != 0 {
+		return domain.OperatorSteeringCancellationResult{},
+			apperror.New(apperror.CodeFailedPrecondition,
+				"prepared operator steering cannot be cancelled")
+	}
+	now := time.Now().UTC()
+	cancellation := domain.OperatorSteeringCancellation{
+		ID: idgen.New("steer-cancel"), MessageID: message.ID, RunID: run.ID,
+		Kind: domain.OperatorSteeringCancellationOperator, RequestedBy: normalized.RequestedBy,
+		Reason: normalized.Reason, ReasonSHA256: reasonDigest, CreatedAt: now,
+	}
+	if err := cancellation.Validate(); err != nil {
+		return domain.OperatorSteeringCancellationResult{},
+			apperror.Wrap(apperror.CodeInvalidArgument,
+				"invalid operator steering cancellation", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO operator_steering_cancellations
+		(id, message_id, run_id, kind, requested_by, reason, reason_sha256, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, cancellation.ID, cancellation.MessageID,
+		cancellation.RunID, cancellation.Kind, cancellation.RequestedBy, cancellation.Reason,
+		cancellation.ReasonSHA256, ts(cancellation.CreatedAt)); err != nil {
+		return domain.OperatorSteeringCancellationResult{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO operator_steering_cancellation_operations
+		(operation_key_digest, request_fingerprint, cancellation_id, message_id, run_id,
+		 requested_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, keyDigest, fingerprint,
+		cancellation.ID, cancellation.MessageID, cancellation.RunID, cancellation.RequestedBy,
+		ts(cancellation.CreatedAt)); err != nil {
+		return domain.OperatorSteeringCancellationResult{}, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE operator_steering_messages
+		SET status = 'cancelled', cancelled_at = ? WHERE id = ? AND status = 'pending'
+			AND NOT EXISTS (SELECT 1 FROM operator_steering_deliveries delivery
+				WHERE delivery.message_id = operator_steering_messages.id
+					AND delivery.status = 'prepared')`, ts(now), message.ID)
+	if err != nil {
+		return domain.OperatorSteeringCancellationResult{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows != 1 {
+		if err != nil {
+			return domain.OperatorSteeringCancellationResult{}, err
+		}
+		return domain.OperatorSteeringCancellationResult{},
+			apperror.New(apperror.CodeConflict,
+				"operator steering changed before cancellation")
+	}
+	message.Status = domain.OperatorSteeringCancelled
+	message.CancelledAt = &now
+	if err := appendSupervisorEventTx(ctx, tx, run, events.OperatorSteeringCancelledEvent,
+		"operator", cancellation.ID, map[string]any{
+			"message_id": message.ID, "sequence": message.Sequence,
+			"kind": cancellation.Kind, "status": message.Status,
+		}); err != nil {
+		return domain.OperatorSteeringCancellationResult{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.OperatorSteeringCancellationResult{}, err
+	}
+	return domain.OperatorSteeringCancellationResult{
+		Cancellation: cancellation, Message: message,
+	}, nil
 }
 
 func (s *SQLiteStore) GetOperatorSteering(ctx context.Context,
@@ -460,13 +622,54 @@ func operatorSteeringActionDeferredTx(ctx context.Context, tx *sql.Tx,
 func cancelOperatorSteeringTx(ctx context.Context, tx *sql.Tx, run domain.Run,
 	source string, reason string, at time.Time,
 ) (int, error) {
-	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM operator_steering_messages
-		WHERE run_id = ? AND status = 'pending'`, run.ID).Scan(&count); err != nil {
+	type pendingMessage struct {
+		id string
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM operator_steering_messages
+		WHERE run_id = ? AND status = 'pending' ORDER BY sequence`, run.ID)
+	if err != nil {
 		return 0, err
 	}
-	if count == 0 {
+	values := make([]pendingMessage, 0)
+	for rows.Next() {
+		var value pendingMessage
+		if err := rows.Scan(&value.id); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	if len(values) == 0 {
 		return 0, nil
+	}
+	source = strings.TrimSpace(source)
+	if source == "" {
+		source = "run_control"
+	}
+	reason, err = normalizeTerminalOperatorSteeringCancellationReason(reason)
+	if err != nil {
+		return 0, err
+	}
+	for _, value := range values {
+		cancellation := domain.OperatorSteeringCancellation{
+			ID: idgen.New("steer-cancel"), MessageID: value.id, RunID: run.ID,
+			Kind: domain.OperatorSteeringCancellationRunTerminal, RequestedBy: source,
+			Reason: reason, ReasonSHA256: domain.OperatorSteeringContentSHA256(reason),
+			CreatedAt: at,
+		}
+		if err := cancellation.Validate(); err != nil {
+			return 0, err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO operator_steering_cancellations
+			(id, message_id, run_id, kind, requested_by, reason, reason_sha256, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, cancellation.ID, cancellation.MessageID,
+			cancellation.RunID, cancellation.Kind, cancellation.RequestedBy,
+			cancellation.Reason, cancellation.ReasonSHA256, ts(cancellation.CreatedAt)); err != nil {
+			return 0, err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE operator_steering_deliveries
 		SET status = 'cancelled', terminal_at = ? WHERE run_id = ? AND status = 'prepared'`,
@@ -480,11 +683,54 @@ func cancelOperatorSteeringTx(ctx context.Context, tx *sql.Tx, run domain.Run,
 	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.OperatorSteeringCancelledEvent,
 		source, run.ID, map[string]any{
-			"count": count, "reason": redact.String(strings.TrimSpace(reason)),
+			"count": len(values), "kind": domain.OperatorSteeringCancellationRunTerminal,
 		}); err != nil {
 		return 0, err
 	}
-	return count, nil
+	return len(values), nil
+}
+
+func normalizeTerminalOperatorSteeringCancellationReason(value string) (string, error) {
+	value = strings.ToValidUTF8(value, "\uFFFD")
+	value = redact.String(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	var bounded strings.Builder
+	bounded.Grow(min(len(value), domain.MaxOperatorSteeringReasonBytes))
+	for _, current := range value {
+		if current == '\r' {
+			current = '\n'
+		} else if current == 0 ||
+			(unicode.IsControl(current) && current != '\n' && current != '\t') {
+			current = ' '
+		}
+		size := utf8.RuneLen(current)
+		if size < 0 || bounded.Len()+size > domain.MaxOperatorSteeringReasonBytes {
+			break
+		}
+		bounded.WriteRune(current)
+	}
+	value = strings.TrimSpace(bounded.String())
+	if value == "" {
+		value = "Run entered a terminal state"
+	}
+	return domain.NormalizeOperatorSteeringCancellationReason(value)
+}
+
+func lockRunForOperatorSteeringControlTx(ctx context.Context, tx *sql.Tx,
+	runID string,
+) error {
+	result, err := tx.ExecContext(ctx, `UPDATE runs SET updated_at = updated_at WHERE id = ?`, runID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return apperror.New(apperror.CodeNotFound, "operator steering Run was not found")
+	}
+	return nil
 }
 
 func lockRunningRunForSteeringTx(ctx context.Context, tx *sql.Tx, runID string) error {
@@ -532,6 +778,26 @@ func getOperatorSteeringOperationTx(ctx context.Context, tx *sql.Tx,
 	return fingerprint, messageID, err == nil, err
 }
 
+func getOperatorSteeringCancellationOperationTx(ctx context.Context, tx *sql.Tx,
+	keyDigest string,
+) (string, string, bool, error) {
+	var fingerprint, cancellationID string
+	err := tx.QueryRowContext(ctx, `SELECT request_fingerprint, cancellation_id
+		FROM operator_steering_cancellation_operations WHERE operation_key_digest = ?`,
+		keyDigest).Scan(&fingerprint, &cancellationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	return fingerprint, cancellationID, err == nil, err
+}
+
+func getOperatorSteeringCancellationTx(ctx context.Context, tx *sql.Tx,
+	id string,
+) (domain.OperatorSteeringCancellation, error) {
+	return getOperatorSteeringCancellationRow(tx.QueryRowContext(ctx,
+		operatorSteeringCancellationSelect+` WHERE id = ?`, id))
+}
+
 func getOperatorSteeringMessageTx(ctx context.Context, tx *sql.Tx,
 	id string,
 ) (domain.OperatorSteeringMessage, error) {
@@ -562,4 +828,23 @@ func getOperatorSteeringMessageRow(row operatorSteeringRow) (domain.OperatorStee
 			"invalid persisted operator steering message", err)
 	}
 	return message, nil
+}
+
+func getOperatorSteeringCancellationRow(row operatorSteeringRow) (
+	domain.OperatorSteeringCancellation, error,
+) {
+	var cancellation domain.OperatorSteeringCancellation
+	var createdAt string
+	if err := row.Scan(&cancellation.ID, &cancellation.MessageID, &cancellation.RunID,
+		&cancellation.Kind, &cancellation.RequestedBy, &cancellation.Reason,
+		&cancellation.ReasonSHA256, &createdAt); err != nil {
+		return domain.OperatorSteeringCancellation{}, err
+	}
+	cancellation.CreatedAt = parseTS(createdAt)
+	if err := cancellation.Validate(); err != nil {
+		return domain.OperatorSteeringCancellation{},
+			apperror.Wrap(apperror.CodeFailedPrecondition,
+				"invalid persisted operator steering cancellation", err)
+	}
+	return cancellation, nil
 }

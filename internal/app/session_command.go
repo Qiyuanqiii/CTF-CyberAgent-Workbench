@@ -82,13 +82,18 @@ func (a *App) sessionList(ctx context.Context, manager *session.Manager) error {
 
 func (a *App) sessionSend(ctx context.Context, manager *session.Manager, args []string) error {
 	fs := newFlagSet("session send", a.errOut)
-	if err := fs.Parse(args); err != nil {
+	operationKey := fs.String("operation-key", "", "stable durable steering retry key")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{"operation-key": true})); err != nil {
 		return err
 	}
-	if fs.NArg() < 2 {
-		return errors.New(`usage: cyberagent session send <session-id> "message"`)
+	if flagWasSet(fs, "operation-key") && strings.TrimSpace(*operationKey) == "" {
+		return errors.New("session operation key cannot be blank")
 	}
-	result, err := manager.Send(ctx, fs.Arg(0), strings.Join(fs.Args()[1:], " "))
+	if fs.NArg() < 2 {
+		return errors.New(`usage: cyberagent session send <session-id> "message" [--operation-key <key>]`)
+	}
+	result, err := manager.SendWithOptions(ctx, fs.Arg(0), strings.Join(fs.Args()[1:], " "),
+		session.SendOptions{OperationKey: *operationKey})
 	if err != nil {
 		return err
 	}
@@ -97,8 +102,9 @@ func (a *App) sessionSend(ctx context.Context, manager *session.Manager, args []
 		fmt.Fprintf(a.out, "\n[run %s: action=%s status=%s]\n", result.RunID, result.RunAction, result.RunStatus)
 	}
 	if result.Queued {
-		fmt.Fprintf(a.out, "[steering %s: sequence=%d queued=true]\n",
-			result.SteeringID, result.SteeringSequence)
+		fmt.Fprintf(a.out, "[steering %s: sequence=%d status=%s queued=true replayed=%t]\n",
+			result.SteeringID, result.SteeringSequence, result.SteeringStatus,
+			result.SteeringReplayed)
 	}
 	if result.Compacted {
 		fmt.Fprintf(a.out, "\n[context compacted: summary=%d]\n", result.SummaryID)

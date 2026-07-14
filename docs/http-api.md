@@ -1,8 +1,8 @@
 # 本地 HTTP API / Local HTTP API
 
-CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`。它主要用于检查 SQLite 中的持久化 Agent 状态（包括 schema v41 Run 模式、schema v42 Plan/Delivery、schema v44 Delivery 门禁与 schema v45 操作者引导队列的只读状态），并通过可恢复 SSE 投影 Run events；唯一控制操作是经过独立授权、审计优先的活动模型调用取消。API 不选择 Plan 方向、不写入 Delivery 检查点、不操作引导队列、不执行工具、不切换执行阶段，也不替代 Policy、Approval 或 Tool Gateway。
+CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`。它主要用于检查 SQLite 中的持久化 Agent 状态（包括 schema v41 Run 模式、schema v42 Plan/Delivery、schema v44 Delivery 门禁、schema v45 操作者引导队列与 schema v46 队列控制后的只读状态），并通过可恢复 SSE 投影 Run events；唯一控制操作是经过独立授权、审计优先的活动模型调用取消。API 不选择 Plan 方向、不写入 Delivery 检查点、不入队、取消或 drain 引导队列、不执行工具、不切换执行阶段，也不替代 Policy、Approval 或 Tool Gateway。
 
-CyberAgent Workbench exposes a Go-controlled local `api.v1`. It primarily inspects durable Agent state in SQLite, including schema v41 Run modes, schema v42 Plan/Delivery state, schema v44 Delivery gates, and schema v45 operator-steering queue metadata, and projects persisted Run events through resumable SSE. Its only control operation is separately authorized, audit-first cancellation of an active model call. The API cannot select a Plan direction, write a Delivery checkpoint, mutate steering, execute tools, or change execution phase and does not replace Policy, Approval, or the Tool Gateway.
+CyberAgent Workbench exposes a Go-controlled local `api.v1`. It primarily inspects durable Agent state in SQLite, including schema v41 Run modes, schema v42 Plan/Delivery state, schema v44 Delivery gates, schema v45 operator-steering metadata, and read-only state after schema v46 queue controls, and projects persisted Run events through resumable SSE. Its only control operation is separately authorized, audit-first cancellation of an active model call. The API cannot select a Plan direction, write a Delivery checkpoint, enqueue, cancel, or drain steering, execute tools, or change execution phase and does not replace Policy, Approval, or the Tool Gateway.
 
 ## 启动 / Start
 

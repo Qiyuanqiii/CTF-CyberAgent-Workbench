@@ -40,6 +40,12 @@ func (e *SessionRunChatExecutor) WithActiveCalls(registry *ActiveCallRegistry) *
 }
 
 func (e *SessionRunChatExecutor) ExecuteSessionTurn(ctx context.Context, sess session.Session, input string) (session.RunChatResult, bool, error) {
+	return e.ExecuteSessionTurnWithOptions(ctx, sess, input, session.RunChatOptions{})
+}
+
+func (e *SessionRunChatExecutor) ExecuteSessionTurnWithOptions(ctx context.Context,
+	sess session.Session, input string, options session.RunChatOptions,
+) (session.RunChatResult, bool, error) {
 	if e == nil || e.store == nil || e.runs == nil || e.supervisor == nil {
 		return session.RunChatResult{}, false, apperror.New(apperror.CodeFailedPrecondition, "session run chat dependencies are required")
 	}
@@ -50,6 +56,18 @@ func (e *SessionRunChatExecutor) ExecuteSessionTurn(ctx context.Context, sess se
 	if run.SessionID != sess.ID {
 		return session.RunChatResult{}, true, apperror.New(apperror.CodeConflict, "run and session binding changed")
 	}
+	options.OperationKey = strings.TrimSpace(options.OperationKey)
+	if options.OperationKey != "" {
+		queued, queueErr := e.store.EnqueueOperatorSteering(ctx,
+			domain.EnqueueOperatorSteeringRequest{
+				RunID: run.ID, SessionID: sess.ID, Content: input,
+				OperationKey: options.OperationKey, RequestedBy: "session_operator",
+			})
+		if queueErr != nil {
+			return session.RunChatResult{}, true, apperror.Normalize(queueErr)
+		}
+		return queuedSessionRunChatResult(run, queued.Message, queued.Replayed), true, nil
+	}
 	steeringRequest := domain.EnqueueOperatorSteeringRequest{
 		RunID: run.ID, SessionID: sess.ID, Content: input,
 		OperationKey: idgen.New("session-steering"), RequestedBy: "session_operator",
@@ -59,7 +77,7 @@ func (e *SessionRunChatExecutor) ExecuteSessionTurn(ctx context.Context, sess se
 		if queueErr != nil || !busy {
 			return session.RunChatResult{}, busy, apperror.Normalize(queueErr)
 		}
-		return queuedSessionRunChatResult(current, queued.Message), true, nil
+		return queuedSessionRunChatResult(current, queued.Message, queued.Replayed), true, nil
 	}
 	switch run.Status {
 	case domain.RunCreated, domain.RunPreparing:
@@ -98,11 +116,16 @@ func (e *SessionRunChatExecutor) ExecuteSessionTurn(ctx context.Context, sess se
 }
 
 func queuedSessionRunChatResult(run domain.Run,
-	message domain.OperatorSteeringMessage,
+	message domain.OperatorSteeringMessage, replayed bool,
 ) session.RunChatResult {
+	text := "Operator guidance queued for the next safe root-turn boundary."
+	if replayed {
+		text = "Operator guidance already has a durable steering record."
+	}
 	return session.RunChatResult{
-		RunID: run.ID, Text: "Operator guidance queued for the next safe root-turn boundary.",
+		RunID: run.ID, Text: text,
 		Action: "queued", RunStatus: string(run.Status), Queued: true,
 		SteeringID: message.ID, SteeringSequence: message.Sequence,
+		SteeringStatus: string(message.Status), SteeringReplayed: replayed,
 	}
 }
