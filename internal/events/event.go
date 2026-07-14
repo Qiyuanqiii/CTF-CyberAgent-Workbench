@@ -107,6 +107,8 @@ const (
 	SandboxExecutionCancelRequestedEvent     = "sandbox.execution_cancel_requested"
 	SandboxExecutionCleanupCompletedEvent    = "sandbox.cleanup_completed"
 	SandboxPreflightRecordedEvent            = "sandbox.preflight_recorded"
+	SandboxBackendEvidenceRecordedEvent      = "sandbox.backend_evidence_recorded"
+	SandboxOutputSimulationRecordedEvent     = "sandbox.output_simulation_recorded"
 	AgentProtocolRepairRequestedEvent        = "agent.protocol_repair_requested"
 	AgentProtocolRepairStartedEvent          = "agent.protocol_repair_started"
 	AgentProtocolRepairCompletedEvent        = "agent.protocol_repair_completed"

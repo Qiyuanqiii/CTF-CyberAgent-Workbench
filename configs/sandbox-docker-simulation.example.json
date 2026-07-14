@@ -1,0 +1,36 @@
+{
+  "protocol_version": "sandbox_manifest.v1",
+  "backend": "docker",
+  "command": {
+    "executable": "go",
+    "arguments": [
+      "test",
+      "./..."
+    ],
+    "working_directory": "/workspace"
+  },
+  "mounts": [
+    {
+      "source": ".",
+      "target": "/workspace",
+      "access": "read_only"
+    }
+  ],
+  "network": {
+    "mode": "disabled"
+  },
+  "resources": {
+    "cpu_quota_millis": 1000,
+    "memory_bytes": 268435456,
+    "pids": 64,
+    "max_output_bytes": 4194304
+  },
+  "output": {
+    "capture_stdout": true,
+    "capture_stderr": true
+  },
+  "timeout_seconds": 300,
+  "cancellation": {
+    "grace_period_millis": 2000
+  }
+}

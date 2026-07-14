@@ -330,6 +330,19 @@ Schema v51 adds a separate disabled preflight after `begin` and before any futur
 
 The output plan stores only opaque locator fingerprints plus `stdout`, `stderr`, or `file` kinds. File slots require regular files and reject symlinks and special files; every slot requires MIME detection and redaction. Export is all-or-nothing under one aggregate byte ceiling and must reconcile before retry. CLI detail deliberately omits locator fingerprints, raw paths, command/Manifest content, container identity, and private lease data. A successful disabled preflight proves only that the intended checks are frozen and the current authority chain still matches; it does not prove Docker availability and cannot authorize execution.
 
+Schema v52 provides a simulation-only continuation for protocol testing. Start the complete `prepare -> request -> review -> candidate -> begin -> preflight` chain with `configs/sandbox-docker-simulation.example.json`, then use the resulting preflight ID:
+
+```powershell
+cyberagent run sandbox evidence <preflight-id> --manifest configs/sandbox-docker-simulation.example.json --image-digest sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee --operation-key sandbox-evidence-001
+cyberagent run sandbox evidences <run-id>
+cyberagent run sandbox evidence-show <evidence-id>
+cyberagent run sandbox output-simulate <evidence-id> --manifest configs/sandbox-docker-simulation.example.json --fixture configs/sandbox-output-fixture.example.json --operation-key sandbox-output-simulation-001
+cyberagent run sandbox output-simulations <run-id>
+cyberagent run sandbox output-simulation-show <simulation-id>
+```
+
+`evidence` never contacts a daemon. It binds a canonical OCI image digest and separate simulated daemon/mount/network/secret/container/resource/termination/orphan/output fingerprints to the 16 v51 checks, but reports `trust_class=simulation_only`, `production_verified=0`, and `verified_checks=0`. `output-simulate` strictly validates and redacts fixture content, stages all slots, and commits only to an in-memory fake sink. A failure or cancellation rolls the fake transaction back to zero, and no production Artifact is created. The Store and Application revalidate the complete v48-v51 chain at both boundaries. CLI and events omit fixture bodies, locator fingerprints, raw paths, commands, Manifest content, container IDs, operation digests, and private leases. These commands test protocol behavior only; they cannot create or start a Docker container and cannot authorize real execution.
+
 ## Workspaces
 
 ```powershell

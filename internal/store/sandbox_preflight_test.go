@@ -164,7 +164,7 @@ func TestSchemaV50UpgradeAddsSandboxPreflightWithoutLosingLifecycle(t *testing.T
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	if version, err := st.SchemaVersion(ctx); err != nil || version != LatestSchemaVersion {
-		t.Fatalf("schema v50 did not upgrade to v51: version=%d err=%v", version, err)
+		t.Fatalf("schema v50 did not upgrade to latest: version=%d err=%v", version, err)
 	}
 	loaded, err := st.GetSandboxDisabledExecution(ctx, lifecycle.Execution.ID)
 	if err != nil || loaded.Execution.ID != lifecycle.Execution.ID {

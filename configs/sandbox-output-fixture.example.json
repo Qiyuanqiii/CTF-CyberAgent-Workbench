@@ -1,0 +1,15 @@
+{
+  "protocol_version": "sandbox_output_fixture.v1",
+  "outputs": [
+    {
+      "kind": "stdout",
+      "file_type": "stream",
+      "content": "simulation completed\n"
+    },
+    {
+      "kind": "stderr",
+      "file_type": "stream",
+      "content": "simulation diagnostic\n"
+    }
+  ]
+}

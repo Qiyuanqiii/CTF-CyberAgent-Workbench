@@ -73,12 +73,24 @@ type SandboxManifestStore interface {
 		operation sandbox.PreflightOperation) (sandbox.DisabledPreflight, bool, error)
 	GetSandboxDisabledPreflight(ctx context.Context, id string) (sandbox.DisabledPreflight, error)
 	ListSandboxDisabledPreflights(ctx context.Context, runID string, limit int) ([]sandbox.DisabledPreflight, error)
+	GetSandboxBackendEvidenceOperation(ctx context.Context, keyDigest string) (sandbox.BackendEvidenceOperation, bool, error)
+	CreateSandboxBackendEvidence(ctx context.Context, evidence sandbox.BackendEvidence,
+		operation sandbox.BackendEvidenceOperation) (sandbox.BackendEvidence, bool, error)
+	GetSandboxBackendEvidence(ctx context.Context, id string) (sandbox.BackendEvidence, error)
+	ListSandboxBackendEvidence(ctx context.Context, runID string, limit int) ([]sandbox.BackendEvidence, error)
+	GetSandboxOutputSimulationOperation(ctx context.Context, keyDigest string) (sandbox.OutputSimulationOperation, bool, error)
+	CreateSandboxOutputSimulation(ctx context.Context, simulation sandbox.OutputSimulation,
+		operation sandbox.OutputSimulationOperation) (sandbox.OutputSimulation, bool, error)
+	GetSandboxOutputSimulation(ctx context.Context, id string) (sandbox.OutputSimulation, error)
+	ListSandboxOutputSimulations(ctx context.Context, runID string, limit int) ([]sandbox.OutputSimulation, error)
 }
 
 type SandboxManifestService struct {
-	store     SandboxManifestStore
-	checker   policy.Checker
-	inspector sandbox.BackendInspector
+	store          SandboxManifestStore
+	checker        policy.Checker
+	inspector      sandbox.BackendInspector
+	evidenceClient sandbox.BackendEvidenceClient
+	outputHarness  sandbox.OutputSimulationHarness
 }
 
 type PrepareSandboxManifestRequest struct {
@@ -94,6 +106,8 @@ func NewSandboxManifestService(store SandboxManifestStore,
 ) *SandboxManifestService {
 	return &SandboxManifestService{
 		store: store, checker: checker, inspector: sandbox.NewDisabledBackendInspector(),
+		evidenceClient: sandbox.NewSimulationBackendClient(),
+		outputHarness:  sandbox.NewInMemoryOutputHarness(),
 	}
 }
 

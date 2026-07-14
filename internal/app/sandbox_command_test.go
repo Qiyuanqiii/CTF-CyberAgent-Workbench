@@ -7,12 +7,16 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"cyberagent-workbench/internal/sandbox"
 )
 
 var sandboxPreparationIDPattern = regexp.MustCompile(`sandbox-manifest-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxCandidateIDPattern = regexp.MustCompile(`sandbox-candidate-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxExecutionIDPattern = regexp.MustCompile(`sandbox-execution-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxPreflightIDPattern = regexp.MustCompile(`sandbox-preflight-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxEvidenceIDPattern = regexp.MustCompile(`sandbox-evidence-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxOutputSimulationIDPattern = regexp.MustCompile(`sandbox-output-sim-[0-9]{14}-[a-f0-9]{12}`)
 
 func TestSandboxCLIValidatesPreparesListsAndShowsMetadataOnly(t *testing.T) {
 	t.Setenv("CYBERAGENT_HOME", t.TempDir())
@@ -189,6 +193,124 @@ func TestSandboxCLIRejectsAmbiguousManifest(t *testing.T) {
 	if _, stderr, code := executeTestCommand(t, "sandbox", "validate", path); code != 2 ||
 		!strings.Contains(stderr, "duplicate field") {
 		t.Fatalf("ambiguous sandbox manifest returned code=%d stderr=%s", code, stderr)
+	}
+}
+
+func TestSandboxCLISimulatesBackendEvidenceAndAtomicOutputWithoutExecution(t *testing.T) {
+	t.Setenv("CYBERAGENT_HOME", t.TempDir())
+	manifest := defaultSandboxManifestTemplate()
+	manifest.Backend = sandbox.BackendDocker
+	encoded, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(t.TempDir(), "sandbox-docker-manifest.json")
+	if err := os.WriteFile(manifestPath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixturePath := filepath.Join(t.TempDir(), "sandbox-output-fixture.json")
+	fixture := `{"protocol_version":"sandbox_output_fixture.v1","outputs":[{"kind":"stdout","file_type":"stream","content":"ok\\n"},{"kind":"stderr","file_type":"stream","content":"API_KEY=sk-123456789012345678901234567890\\n"}]}`
+	if err := os.WriteFile(fixturePath, []byte(fixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, code := executeTestCommand(t, "workspace", "init", "sandbox-evidence-demo"); code != 0 {
+		t.Fatalf("workspace init failed: %s", stderr)
+	}
+	created, stderr, code := executeTestCommand(t, "run", "create", "sandbox evidence simulation",
+		"--workspace", "sandbox-evidence-demo", "--profile", "code")
+	if code != 0 {
+		t.Fatalf("run create failed: %s", stderr)
+	}
+	runID := runIDPattern.FindString(created)
+	prepared, stderr, code := executeTestCommand(t, "run", "sandbox", "prepare", runID,
+		"--manifest", manifestPath, "--operation-key", "sandbox-evidence-cli-prepare")
+	if code != 0 || !strings.Contains(prepared, "approval_status: required") {
+		t.Fatalf("Docker preparation failed output=%s stderr=%s code=%d", prepared, stderr, code)
+	}
+	preparationID := sandboxPreparationIDPattern.FindString(prepared)
+	requested, stderr, code := executeTestCommand(t, "run", "sandbox", "request", preparationID)
+	if code != 0 {
+		t.Fatalf("Sandbox approval request failed: %s", stderr)
+	}
+	approvalID := approvalIDPattern.FindString(requested)
+	if approvalID == "" {
+		t.Fatalf("missing approval id: %s", requested)
+	}
+	if _, stderr, code := executeTestCommand(t, "run", "sandbox", "review", preparationID,
+		"--decision", "approve", "--operation-key", "sandbox-evidence-cli-review"); code != 0 {
+		t.Fatalf("Sandbox approval review failed: %s", stderr)
+	}
+	candidate, stderr, code := executeTestCommand(t, "run", "sandbox", "candidate", preparationID,
+		"--manifest", manifestPath, "--approval", approvalID,
+		"--operation-key", "sandbox-evidence-cli-candidate")
+	if code != 0 {
+		t.Fatalf("Sandbox candidate failed: %s", stderr)
+	}
+	candidateID := sandboxCandidateIDPattern.FindString(candidate)
+	begun, stderr, code := executeTestCommand(t, "run", "sandbox", "begin", candidateID,
+		"--manifest", manifestPath, "--operation-key", "sandbox-evidence-cli-begin")
+	if code != 0 {
+		t.Fatalf("Sandbox begin failed: %s", stderr)
+	}
+	executionID := sandboxExecutionIDPattern.FindString(begun)
+	preflight, stderr, code := executeTestCommand(t, "run", "sandbox", "preflight", executionID,
+		"--manifest", manifestPath, "--operation-key", "sandbox-evidence-cli-preflight")
+	if code != 0 {
+		t.Fatalf("Sandbox preflight failed: %s", stderr)
+	}
+	preflightID := sandboxPreflightIDPattern.FindString(preflight)
+	imageDigest := "sha256:" + strings.Repeat("e", 64)
+	evidence, stderr, code := executeTestCommand(t, "run", "sandbox", "evidence", preflightID,
+		"--manifest", manifestPath, "--image-digest", imageDigest,
+		"--operation-key", "sandbox-evidence-cli-record")
+	if code != 0 || stderr != "" || !strings.Contains(evidence, "trust_class: simulation_only") ||
+		!strings.Contains(evidence, "simulated_satisfied: 16") ||
+		!strings.Contains(evidence, "production_verified: 0") ||
+		!strings.Contains(evidence, "verified_checks: 0") ||
+		!strings.Contains(evidence, "backend_enabled: false") ||
+		strings.Contains(evidence, "\ncontainer_id:") || strings.Contains(evidence, "go test") {
+		t.Fatalf("unexpected evidence output=%s stderr=%s code=%d", evidence, stderr, code)
+	}
+	evidenceID := sandboxEvidenceIDPattern.FindString(evidence)
+	if evidenceID == "" {
+		t.Fatalf("missing evidence id: %s", evidence)
+	}
+	evidenceReplay, stderr, code := executeTestCommand(t, "run", "sandbox", "evidence", preflightID,
+		"--manifest", manifestPath, "--image-digest", imageDigest,
+		"--operation-key", "sandbox-evidence-cli-record")
+	if code != 0 || stderr != "" || !strings.Contains(evidenceReplay, "evidence: "+evidenceID) ||
+		!strings.Contains(evidenceReplay, "replayed: true") {
+		t.Fatalf("evidence replay failed output=%s stderr=%s code=%d", evidenceReplay, stderr, code)
+	}
+	simulated, stderr, code := executeTestCommand(t, "run", "sandbox", "output-simulate", evidenceID,
+		"--manifest", manifestPath, "--fixture", fixturePath,
+		"--operation-key", "sandbox-evidence-cli-output")
+	if code != 0 || stderr != "" || !strings.Contains(simulated, "status: simulation_committed") ||
+		!strings.Contains(simulated, "fake_artifacts: 2") ||
+		!strings.Contains(simulated, "production_artifacts: 0") ||
+		!strings.Contains(simulated, "artifact_commit_authorized: false") ||
+		!strings.Contains(simulated, "redacted=true") || strings.Contains(simulated, "sk-123456") ||
+		strings.Contains(simulated, "locator_fingerprint") || strings.Contains(simulated, "content") {
+		t.Fatalf("unexpected output simulation=%s stderr=%s code=%d", simulated, stderr, code)
+	}
+	simulationID := sandboxOutputSimulationIDPattern.FindString(simulated)
+	if simulationID == "" {
+		t.Fatalf("missing output simulation id: %s", simulated)
+	}
+	listed, stderr, code := executeTestCommand(t, "run", "sandbox", "evidences", runID)
+	if code != 0 || stderr != "" || !strings.Contains(listed, evidenceID) ||
+		!strings.Contains(listed, "production_verified=0") {
+		t.Fatalf("evidence list failed output=%s stderr=%s code=%d", listed, stderr, code)
+	}
+	outputList, stderr, code := executeTestCommand(t, "run", "sandbox", "output-simulations", runID)
+	if code != 0 || stderr != "" || !strings.Contains(outputList, simulationID) ||
+		!strings.Contains(outputList, "production_artifacts=0") {
+		t.Fatalf("output simulation list failed output=%s stderr=%s code=%d", outputList, stderr, code)
+	}
+	shown, stderr, code := executeTestCommand(t, "run", "sandbox", "output-simulation-show", simulationID)
+	if code != 0 || stderr != "" || !strings.Contains(shown, "simulation_only: true") ||
+		strings.Contains(shown, "sk-123456") || strings.Contains(shown, "locator_fingerprint") {
+		t.Fatalf("output simulation show leaked data output=%s stderr=%s code=%d", shown, stderr, code)
 	}
 }
 

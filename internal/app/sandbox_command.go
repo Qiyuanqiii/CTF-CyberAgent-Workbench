@@ -68,7 +68,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|cancel|cleanup|executions|execution-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	switch args[0] {
@@ -334,6 +334,142 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		}
 		printSandboxPreflight(a, value)
 		return nil
+	case "evidence":
+		fs := newFlagSet("run sandbox evidence", a.errOut)
+		manifestPath := fs.String("manifest", "", "resupplied Docker sandbox manifest JSON file")
+		imageDigest := fs.String("image-digest", "", "exact OCI sha256 image digest")
+		operationKey := fs.String("operation-key", "", "stable backend evidence operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"manifest": true, "image-digest": true, "operation-key": true, "operator": true,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" ||
+			strings.TrimSpace(*imageDigest) == "" || strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox evidence <preflight-id> --manifest <manifest.json> --image-digest <sha256:digest> --operation-key <key> [--operator <id>]")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		value, err := service.RecordSimulatedBackendEvidence(ctx,
+			application.RecordSandboxBackendEvidenceRequest{
+				PreflightID: fs.Arg(0), Manifest: manifest, ImageDigest: *imageDigest,
+				OperationKey: *operationKey, RequestedBy: *operator,
+			})
+		if err != nil {
+			return err
+		}
+		printSandboxBackendEvidence(a, value)
+		return nil
+	case "evidences":
+		fs := newFlagSet("run sandbox evidences", a.errOut)
+		limit := fs.Int("limit", 100, "maximum sandbox backend evidence records")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox evidences <run-id> [--limit <n>]")
+		}
+		values, err := service.ListBackendEvidence(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no sandbox backend evidence")
+			return nil
+		}
+		for _, value := range values {
+			fmt.Fprintf(a.out, "%s\tpreflight=%s\tstatus=%s\tsimulated_satisfied=%d\tproduction_verified=0\tbackend_enabled=false\texecution_authorized=false\tcreated_at=%s\n",
+				value.ID, value.PreflightID, value.Report.Status, len(value.Report.Items),
+				value.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "evidence-show":
+		fs := newFlagSet("run sandbox evidence-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox evidence-show <evidence-id>")
+		}
+		value, err := service.GetBackendEvidence(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxBackendEvidence(a, value)
+		return nil
+	case "output-simulate":
+		fs := newFlagSet("run sandbox output-simulate", a.errOut)
+		manifestPath := fs.String("manifest", "", "resupplied Docker sandbox manifest JSON file")
+		fixturePath := fs.String("fixture", "", "bounded output fixture JSON file")
+		operationKey := fs.String("operation-key", "", "stable output simulation operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"manifest": true, "fixture": true, "operation-key": true, "operator": true,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" ||
+			strings.TrimSpace(*fixturePath) == "" || strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox output-simulate <evidence-id> --manifest <manifest.json> --fixture <fixture.json> --operation-key <key> [--operator <id>]")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		fixture, err := readSandboxOutputFixture(*fixturePath)
+		if err != nil {
+			return err
+		}
+		value, err := service.SimulateOutputTransaction(ctx,
+			application.SimulateSandboxOutputRequest{
+				EvidenceID: fs.Arg(0), Manifest: manifest, Fixture: fixture,
+				OperationKey: *operationKey, RequestedBy: *operator,
+			})
+		if err != nil {
+			return err
+		}
+		printSandboxOutputSimulation(a, value)
+		return nil
+	case "output-simulations":
+		fs := newFlagSet("run sandbox output-simulations", a.errOut)
+		limit := fs.Int("limit", 100, "maximum sandbox output simulations")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox output-simulations <run-id> [--limit <n>]")
+		}
+		values, err := service.ListOutputSimulations(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no sandbox output simulations")
+			return nil
+		}
+		for _, value := range values {
+			fmt.Fprintf(a.out, "%s\tevidence=%s\tstatus=%s\tstaged_outputs=%d\tfake_artifacts=%d\tproduction_artifacts=0\tartifact_commit_authorized=false\tcreated_at=%s\n",
+				value.ID, value.EvidenceID, value.Status, value.StagedOutputCount,
+				value.FakeArtifactCount, value.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "output-simulation-show":
+		fs := newFlagSet("run sandbox output-simulation-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox output-simulation-show <simulation-id>")
+		}
+		value, err := service.GetOutputSimulation(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxOutputSimulation(a, value)
+		return nil
 	case "cancel":
 		fs := newFlagSet("run sandbox cancel", a.errOut)
 		operationKey := fs.String("operation-key", "", "stable cancellation operation key")
@@ -443,6 +579,40 @@ func printSandboxPreflight(a *App, value sandbox.DisabledPreflight) {
 	}
 }
 
+func printSandboxBackendEvidence(a *App, value sandbox.BackendEvidence) {
+	report := value.Report
+	fmt.Fprintf(a.out, "evidence: %s\npreflight: %s\nexecution: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nsource: %s\ntrust_class: %s\nstatus: %s\nbackend: %s\nimage_digest: %s\nmanifest_fingerprint: %s\nthreat_model_fingerprint: %s\ndaemon_capabilities_fingerprint: %s\nmount_plan_fingerprint: %s\nnetwork_plan_fingerprint: %s\nsecret_plan_fingerprint: %s\ncontainer_config_fingerprint: %s\nresource_plan_fingerprint: %s\ntermination_plan_fingerprint: %s\norphan_plan_fingerprint: %s\noutput_plan_fingerprint: %s\nsimulated_satisfied: %d\nproduction_verified: 0\nverified_checks: 0\nbackend_available: false\nbackend_enabled: false\nexecution_authorized: false\nartifact_commit_authorized: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\n",
+		value.ID, value.PreflightID, value.ExecutionID, value.RunID, value.MissionID,
+		value.WorkspaceID, report.ProtocolVersion, report.Source, report.TrustClass,
+		report.Status, report.Backend, report.ImageDigest, value.ManifestFingerprint,
+		value.ThreatModelFingerprint, report.DaemonCapabilitiesFingerprint,
+		report.MountPlanFingerprint, report.NetworkPlanFingerprint,
+		report.SecretPlanFingerprint, report.ContainerConfigFingerprint,
+		report.ResourcePlanFingerprint, report.TerminationPlanFingerprint,
+		report.OrphanPlanFingerprint, report.OutputPlanFingerprint, len(report.Items),
+		value.RequestedBy, value.CreatedAt.Format(timeFormatRFC3339Nano), value.Replayed)
+	fmt.Fprintln(a.out, "items:")
+	for _, item := range report.Items {
+		fmt.Fprintf(a.out, "%d\t%s\tstate=%s\tsatisfied=%t\tverified=false\tevidence_digest=%s\n",
+			item.Ordinal, item.Name, item.EvidenceState, item.Satisfied, item.EvidenceDigest)
+	}
+}
+
+func printSandboxOutputSimulation(a *App, value sandbox.OutputSimulation) {
+	fmt.Fprintf(a.out, "simulation: %s\nevidence: %s\npreflight: %s\nexecution: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nstatus: %s\noutput_plan_fingerprint: %s\nexpected_slots: %d\nstaged_outputs: %d\nstaged_output_bytes: %d\nfake_artifacts: %d\nproduction_artifacts: 0\nall_or_nothing: true\nsimulation_only: true\nartifact_commit_authorized: false\nbackend_enabled: false\nexecution_authorized: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\n",
+		value.ID, value.EvidenceID, value.PreflightID, value.ExecutionID, value.RunID,
+		value.MissionID, value.WorkspaceID, value.ProtocolVersion, value.Status,
+		value.OutputPlanFingerprint, value.ExpectedSlotCount, value.StagedOutputCount,
+		value.StagedOutputBytes, value.FakeArtifactCount, value.RequestedBy,
+		value.CreatedAt.Format(timeFormatRFC3339Nano), value.Replayed)
+	fmt.Fprintln(a.out, "outputs:")
+	for _, descriptor := range value.Descriptors {
+		fmt.Fprintf(a.out, "%d\tkind=%s\tmime=%s\tsha256=%s\tsize_bytes=%d\tredacted=%t\n",
+			descriptor.Ordinal, descriptor.Kind, descriptor.MIME, descriptor.SHA256,
+			descriptor.SizeBytes, descriptor.Redacted)
+	}
+}
+
 func printSandboxLifecycle(a *App, value sandbox.Lifecycle) {
 	execution := value.Execution
 	fmt.Fprintf(a.out, "execution: %s\ncandidate: %s\npreparation: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nstatus: %s\nmanifest_fingerprint: %s\nauthorization_fingerprint: %s\npolicy_fingerprint: %s\nmount_binding_fingerprint: %s\ninput_artifacts: %d\ninput_artifact_bytes: %d\ninput_artifact_digest: %s\ncapture_stdout: %t\ncapture_stderr: %t\noutput_paths: %d\nmax_output_bytes: %d\noutput_plan_fingerprint: %s\nlease_generation: %d\nlease_status: %s\ncancellation_requested: %t\ncleanup_complete: %t\nbackend_enabled: false\nexecution_authorized: false\nbackend_started: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\n",
@@ -513,6 +683,24 @@ func readSandboxManifest(path string) (sandbox.Manifest, error) {
 			"sandbox manifest is invalid: "+err.Error(), err)
 	}
 	return manifest, nil
+}
+
+func readSandboxOutputFixture(path string) (sandbox.OutputFixture, error) {
+	file, err := os.Open(strings.TrimSpace(path))
+	if err != nil {
+		return sandbox.OutputFixture{}, err
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, sandbox.MaxOutputFixtureBytes+1))
+	if err != nil {
+		return sandbox.OutputFixture{}, err
+	}
+	fixture, err := sandbox.DecodeOutputFixture(data)
+	if err != nil {
+		return sandbox.OutputFixture{}, apperror.Wrap(apperror.CodeInvalidArgument,
+			"sandbox output fixture is invalid: "+err.Error(), err)
+	}
+	return fixture, nil
 }
 
 func defaultSandboxManifestTemplate() sandbox.Manifest {

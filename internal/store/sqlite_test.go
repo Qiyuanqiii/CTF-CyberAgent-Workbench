@@ -1298,7 +1298,7 @@ func removeSchemaV50ForTestStatements() []string {
 }
 
 func removeSchemaV51ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV52ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_preflight_operation_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_preflight_operation_update_immutable`,
 		`DROP TRIGGER trg_sandbox_output_export_slot_delete_immutable`,
@@ -1318,7 +1318,7 @@ func removeSchemaV51ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_disabled_preflights_run_created`,
 		`DROP TABLE sandbox_disabled_preflights`,
 		`DELETE FROM schema_migrations WHERE version = 51`,
-	}
+	}...)
 }
 
 func TestSQLiteUpgradesV21MemoryRowsToOptionalAgentOwnership(t *testing.T) {
