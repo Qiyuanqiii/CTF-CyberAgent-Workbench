@@ -588,6 +588,8 @@ schema v49 Sandbox 审批/再校验切片已完成：共享审批请求与显式
 
 schema v49 发布审计未发现未解决的高/中风险问题。收口修复了四类低风险健壮性边界：requester/reviewer 统一脱敏并拒绝控制字符；候选重放再次复核 operation 与候选本体摘要；SQL 直接写入必须匹配 preparation 挂载数量；v48 外部绑定审批不能被误解释为 v49 preparation-owned 批准。挂载循环响应 context 取消，双 SQLite 连接的审批请求与候选创建各连续并发收敛。最终门禁通过 `go test ./... -count=1`、`go test -race ./... -count=1`、`go vet`、零告警 `staticcheck`、`go mod verify`、无差异 `go mod tidy -diff`、零可达漏洞 `govulncheck`、OpenAPI 生成无漂移、strict TypeScript、8 个 Vitest 文件 17 项测试、Vite production build、零漏洞 npm audit、受跟踪凭证/运行产物扫描和隔离真实二进制 `prepare -> request -> approve -> candidate -> event` smoke。真实 Provider、Shell、网络、Local 和 Docker 均未执行。当前双指标保持：架构完成度约 97%，完整产品可用度约 45-50%（通用 Coding Agent 约 40%，Cyber 自动化约 20%）。
 
+README 开发历程已完成顺序修复：项目简介恢复为简洁的中英双语产品说明，新增唯一权威的 `v1 -> v49` 双语 schema 时间线，早期 v1/v2/v3 不再缺失；原有长篇增量文字明确归入按能力阅读的架构详解，不再冒充时间线。新增 `TestREADMEListsEverySchemaVersionInOrder` 将 README 行数和顺序绑定到 `LatestSchemaVersion`。49 个英文里程碑逐项匹配真实 migration 名称，README 本地链接、diff check、定向测试、uncached 全仓测试、全仓 race、`go vet` 和零告警 `staticcheck` 全部通过；本切片未改变 runtime、schema 或安全权限，未发现未解决的高/中风险问题。
+
 Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过独立审计。
 
 ## 八、仓库同步与恢复约定

@@ -25,6 +25,78 @@ CyberAgent Workbench 是一个由 Go 驱动的本地 AI Agent 工作台，面向
 
 项目当前优先完善通用 Agent 运行时及其受控多 Agent 内核。CTF 将作为后续 Profile 和 Skills 能力接入，而不是另建一套独立运行系统。
 
+### English
+
+CyberAgent Workbench is a local AI agent workbench powered by Go for coding, code review, security learning, scripting, and controlled cybersecurity analysis. It unifies model calls, long-context memory, workspace files, policy checks, approvals, execution budgets, and event history in one resumable and auditable runtime.
+
+Each user objective is stored as a `Mission`, while each resumable execution attempt is a `Run`. Go is the sole control plane for model routing, state machines, SQLite persistence, safety policy, and tool boundaries. The read-only TypeScript console and future deterministic Rust analyzers connect through Go-defined protocols instead of bypassing those controls.
+
+The current priority is the general-purpose Agent runtime and its controlled multi-agent kernel. CTF capabilities will be added later as Profiles and Skills on the same foundation rather than as a separate execution system.
+
+## 开发历程 / Development History
+
+下表是唯一按时间排序的 schema 开发历程，完整保留了早期 `v1`、`v2`、`v3`，并连续列到当前 `v49`。这里的 `vN` 是不可变 SQLite schema/runtime 里程碑，不等同于产品发布版本；后面的架构说明按能力域组织，因此不再承担版本排序职责。
+
+The table below is the canonical chronological schema history. It includes every immutable SQLite schema/runtime milestone from `v1` through the current `v49`. These schema numbers are not product release versions; the architecture notes that follow are grouped by capability instead of chronology.
+
+| Schema | 中文里程碑 | English milestone |
+| --- | --- | --- |
+| v1 | v0.1 基线存储 | v0.1 baseline |
+| v2 | Mission/Run 中心化基础 | run-centric foundation |
+| v3 | Run 与 Session 投影 | run session projection |
+| v4 | 旧 Task 到 Run 的兼容映射 | legacy task run mapping |
+| v5 | Supervisor 检查点 | supervisor checkpoints |
+| v6 | Supervisor 预算账本 | supervisor budget ledger |
+| v7 | Supervisor 待处理输入 | supervisor pending input |
+| v8 | Supervisor 协议修复 | supervisor protocol repair |
+| v9 | Run 工作看板 | run work board |
+| v10 | Run Notes 结构化记忆 | run notes |
+| v11 | 持久化工具审批 | durable tool approvals |
+| v12 | Session Grant 与工具预算 | session grants and tool budgets |
+| v13 | 类型化脚本进程提案 | typed script process proposals |
+| v14 | Run 工具输出 Artifact | run tool output artifacts |
+| v15 | 结构化记忆工具操作 | structured memory tool operations |
+| v16 | Supervisor 结构化工具循环 | supervisor structured tool loop |
+| v17 | Run execution lease | run execution leases |
+| v18 | 跨进程模型取消 | cross-process model cancellation |
+| v19 | 单 root Agent Coordinator | single-root agent coordinator |
+| v20 | 幂等 Agent inbox 协议 | idempotent agent inbox protocol |
+| v21 | 有界 Specialist 准入 | bounded specialist admission |
+| v22 | Agent 归属的工作记忆 | agent-owned work memory |
+| v23 | Specialist 完成报告 | specialist completion reports |
+| v24 | 受 lease 保护的 Specialist Attempt | leased specialist attempts |
+| v25 | root inbox 上下文交付 | root inbox context delivery |
+| v26 | Specialist 模型调用账本 | specialist model call ledger |
+| v27 | Specialist 上下文交付 | specialist context delivery |
+| v28 | Specialist 协议修复 | specialist protocol repair |
+| v29 | Specialist 调度与取消控制 | specialist schedule and cancellation control |
+| v30 | 审阅门禁的 Specialist 委派提案 | review-gated specialist delegation proposals |
+| v31 | 不可变 Specialist 委派审阅 | immutable specialist delegation reviews |
+| v32 | 可恢复 Specialist 委派应用 | recoverable specialist delegation application |
+| v33 | 不可变只读 Fan-out 计划 | immutable read-only fan-out plans |
+| v34 | 有界只读 Fan-out 执行 | bounded read-only fan-out execution |
+| v35 | 确定性 Finding 报告投影 | deterministic finding report projection |
+| v36 | Artifact 支撑的 Finding 验证 | Artifact-backed finding validation |
+| v37 | Finding 接受、修复生命周期 | accepted and fixed finding remediation lifecycle |
+| v38 | 操作者控制的 Specialist 调度 | operator-controlled Specialist scheduling |
+| v39 | 不可变 Run Skill 选择 | immutable Run Skill selection |
+| v40 | root Skill 上下文来源 | root Skill context provenance |
+| v41 | 不可变 Run 执行模式 | immutable Run execution mode |
+| v42 | 审阅门禁的 Plan/Delivery 工作流 | review-gated Plan Delivery workflow |
+| v43 | 不可变 Session 上下文来源 | immutable session context provenance |
+| v44 | 不可变 Delivery 检查点门禁 | immutable Delivery checkpoint gates |
+| v45 | 持久化操作者引导队列 | durable operator steering queue |
+| v46 | 操作者引导队列控制 | operator steering queue controls |
+| v47 | 最小化 Specialist Skill 上下文 | minimal Specialist Skill context |
+| v48 | Go 主控 Sandbox Manifest 准备 | Go-owned Sandbox Manifest preparation |
+| v49 | Sandbox 审批与禁用执行候选 | sandbox approval and disabled execution candidates |
+
+## 架构能力详解 / Architecture Details
+
+### 中文详解
+
+以下内容按能力域和当前阅读价值组织，不代表 schema 时间顺序；需要核对开发先后时，请以上方 `v1 -> v49` 表为准。
+
 P7 Skills 的第一条纵向链路已经落地。Go 内置并严格校验 `code`、`review`、`learn`、`script` 与跨 Profile 的 `plan-delivery` 五份 `skill.v1` 工作流指导，包括固定版本、兼容 Profile、工具前置声明、相对内容路径、UTF-8、字节数、保守 token 上界和 SHA-256。只读 Registry 与 `skill list/show/validate` 不创建数据库，也不读取任意外部路径；当前内置指导版本为 `1.1.0`，工具依赖绝不直接授予执行权限。
 
 P7 的第二条纵向链路新增 schema v39 与不可变 `skill_selection.v1`。操作者可在 Run 启动前，用 `skill select` 为其 Profile 固定最多 8 个 Skill 的名称、版本、内容哈希和总保守 token 预算；同一 Run 只能有一份选择，原始 operation key 只以域分隔 SHA-256 摘要落库，并发请求和跨重启重放会收敛到同一结果。选择事件只记录数量与预算，不记录 Skill 正文、路径、工具依赖或原始 key。
@@ -133,13 +205,9 @@ Bubble Tea TUI 现在以 Run-first 选择器启动，可在最近 50 个 Run 与
 
 `cyberagent headless events` 提供版本化 `headless.v1` NDJSON。它按 SQLite sequence 有界读取与续传同一条脱敏 Run 时间线，可用 `--follow` 等待终态，但不执行 Run、不调用 Provider、也不写入任何状态。每个事件和最终 `stream.end` 都各占一行；完成返回 0，失败返回 4，取消返回 7，事件上限返回 8，follow 超时返回 9。stdout 始终只包含 NDJSON，诊断文本保留在 stderr。
 
-### English
+### English details
 
-CyberAgent Workbench is a local AI agent workbench powered by Go for coding, code review, security learning, scripting, and controlled cybersecurity analysis. It brings model calls, long-context memory, workspace files, policy checks, approvals, execution budgets, and event history into one resumable runtime, so work can continue after a process restart and every action remains inspectable.
-
-Each user objective is stored as a `Mission`, while each resumable execution is a `Run`. Go is the sole control plane for model routing, state machines, SQLite persistence, safety policy, and tool boundaries. The current read-only TypeScript console and future deterministic Rust analyzers connect through Go-defined protocols instead of bypassing those controls.
-
-The current priority is the general-purpose Agent runtime and its controlled multi-agent kernel. CTF capabilities will be added later as Profiles and Skills on top of the same foundation rather than as a separate execution system.
+The following notes are organized by capability and current reading value, not by schema order. Use the canonical `v1 -> v49` table above whenever chronology matters.
 
 The first P7 Skills vertical slice is now in place. Go embeds and strictly validates five `skill.v1` workflow guides for `code`, `review`, `learn`, `script`, and cross-Profile `plan-delivery`, including pinned versions, compatible Profiles, tool prerequisites, relative content paths, UTF-8, byte counts, a conservative token upper bound, and SHA-256. The read-only Registry and `skill list/show/validate` create no database and accept no arbitrary external path. The current built-in guidance version is `1.1.0`, and a declared tool dependency is never a capability grant.
 
