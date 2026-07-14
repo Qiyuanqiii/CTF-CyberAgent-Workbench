@@ -119,6 +119,15 @@ func NewSandboxManifestService(store SandboxManifestStore,
 	}
 }
 
+func (s *SandboxManifestService) WithDockerProductionObserver(
+	observer sandbox.DockerProductionObserver,
+) *SandboxManifestService {
+	if s != nil && observer != nil {
+		s.dockerObserver = observer
+	}
+	return s
+}
+
 func (s *SandboxManifestService) Prepare(ctx context.Context,
 	request PrepareSandboxManifestRequest,
 ) (sandbox.PreparedIntent, error) {

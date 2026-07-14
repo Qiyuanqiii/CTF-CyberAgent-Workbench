@@ -21,6 +21,7 @@ import (
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/redact"
+	"cyberagent-workbench/internal/sandbox"
 	"cyberagent-workbench/internal/store"
 	"cyberagent-workbench/internal/toolgateway"
 	"cyberagent-workbench/internal/tools"
@@ -47,14 +48,15 @@ type envAnthropicProviderConfig struct {
 }
 
 type App struct {
-	home    string
-	out     io.Writer
-	errOut  io.Writer
-	store   *store.SQLiteStore
-	router  *llm.Router
-	checker policy.Checker
-	kernel  *agent.Kernel
-	calls   *application.ActiveCallRegistry
+	home           string
+	out            io.Writer
+	errOut         io.Writer
+	store          *store.SQLiteStore
+	router         *llm.Router
+	checker        policy.Checker
+	kernel         *agent.Kernel
+	calls          *application.ActiveCallRegistry
+	dockerObserver sandbox.DockerProductionObserver
 }
 
 func Execute(args []string, out io.Writer, errOut io.Writer) int {
@@ -62,6 +64,12 @@ func Execute(args []string, out io.Writer, errOut io.Writer) int {
 }
 
 func ExecuteContext(ctx context.Context, args []string, out io.Writer, errOut io.Writer) int {
+	return executeContextWithConfig(ctx, args, out, errOut, nil)
+}
+
+func executeContextWithConfig(ctx context.Context, args []string, out io.Writer, errOut io.Writer,
+	configure func(*App),
+) int {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -72,6 +80,9 @@ func ExecuteContext(ctx context.Context, args []string, out io.Writer, errOut io
 		router:  llm.NewDefaultRouter(),
 		checker: policy.NewDefaultChecker(),
 		calls:   application.NewActiveCallRegistry(),
+	}
+	if configure != nil {
+		configure(app)
 	}
 	app.registerEnvProviders()
 	defer app.Close()

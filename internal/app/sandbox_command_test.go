@@ -1,6 +1,8 @@
 package app
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -18,6 +20,18 @@ var sandboxPreflightIDPattern = regexp.MustCompile(`sandbox-preflight-[0-9]{14}-
 var sandboxEvidenceIDPattern = regexp.MustCompile(`sandbox-evidence-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxOutputSimulationIDPattern = regexp.MustCompile(`sandbox-output-sim-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerObservationIDPattern = regexp.MustCompile(`sandbox-docker-observation-[0-9]{14}-[a-f0-9]{12}`)
+
+func executeTestCommandWithDockerObserver(t *testing.T, observer sandbox.DockerProductionObserver,
+	args ...string,
+) (string, string, int) {
+	t.Helper()
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	code := executeContextWithConfig(context.Background(), args, &out, &errOut, func(app *App) {
+		app.dockerObserver = observer
+	})
+	return out.String(), errOut.String(), code
+}
 
 func TestSandboxCLIValidatesPreparesListsAndShowsMetadataOnly(t *testing.T) {
 	t.Setenv("CYBERAGENT_HOME", t.TempDir())
@@ -325,7 +339,11 @@ func TestSandboxCLISimulatesBackendEvidenceAndAtomicOutputWithoutExecution(t *te
 		t.Fatalf("unconfirmed probe left an observation: output=%s stderr=%s code=%d",
 			emptyObservations, stderr, code)
 	}
-	observed, stderr, code := executeTestCommand(t, "run", "sandbox", "observe", evidenceID,
+	dockerObserver := sandbox.NewReadOnlyDockerProductionObserver(
+		sandbox.NewUnavailableDockerReadOnlyTransport(sandbox.DockerObservationEndpointLocalNPipe,
+			sandbox.DockerObservationFailureTransportUnsupported))
+	observed, stderr, code := executeTestCommandWithDockerObserver(t, dockerObserver,
+		"run", "sandbox", "observe", evidenceID,
 		"--simulation", simulationID, "--manifest", manifestPath,
 		"--operation-key", "sandbox-docker-observe", "--confirm-readonly-probe")
 	if code != 0 || stderr != "" ||
@@ -345,7 +363,8 @@ func TestSandboxCLISimulatesBackendEvidenceAndAtomicOutputWithoutExecution(t *te
 	if observationID == "" {
 		t.Fatalf("missing Docker observation id: %s", observed)
 	}
-	observedReplay, stderr, code := executeTestCommand(t, "run", "sandbox", "observe", evidenceID,
+	observedReplay, stderr, code := executeTestCommandWithDockerObserver(t, dockerObserver,
+		"run", "sandbox", "observe", evidenceID,
 		"--simulation", simulationID, "--manifest", manifestPath,
 		"--operation-key", "sandbox-docker-observe", "--confirm-readonly-probe")
 	if code != 0 || stderr != "" || !strings.Contains(observedReplay,

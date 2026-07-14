@@ -71,6 +71,9 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
+	if a.dockerObserver != nil {
+		service.WithDockerProductionObserver(a.dockerObserver)
+	}
 	switch args[0] {
 	case "prepare":
 		fs := newFlagSet("run sandbox prepare", a.errOut)
