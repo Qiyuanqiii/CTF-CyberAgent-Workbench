@@ -63,6 +63,8 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runFanouts(ctx, args[1:])
 	case "fanout":
 		return a.runFanout(ctx, args[1:])
+	case "sandbox":
+		return a.runSandboxManifest(ctx, args[1:])
 	case "lease":
 		return a.runExecutionLease(ctx, service, args[1:])
 	case "usage":

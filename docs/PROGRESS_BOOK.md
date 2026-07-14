@@ -19,6 +19,8 @@ P8 已推进到 schema v37 及其只读 CI 投影：v35 把完成的 Fan-out exe
 
 P7 已推进到 schema v47：v39-v40 固定并交付 root Skill，v41-v42 建立 Code/Cyber 与 Plan/Deliver 工作流，v43-v44 固化来源隔离和切片交付门禁，v45-v46 提供 exactly-once 操作者引导及控制，v47 为每个 Specialist Attempt 从父 Run 选择中派生最多一项最小 Skill。Code/Cyber 目录保持分离，child assignment 与模型都不能选择或扩权，Skill 正文不落库。
 
+P6 已启动并完成第一条纵向链路：schema v48 定义严格 `sandbox_manifest.v1`，把命令/argv、挂载、网络、资源、环境、输入 Artifact、输出、超时和取消宽限规范化后，绑定到 Run/Mission/Workspace/Scope/Policy/可选精确审批与 Go 生成的取消身份。SQLite 和事件只保存不可变元数据与指纹；相同操作跨进程收敛，异意图冲突。Noop 只校验，Local/Docker、写挂载、网络和密钥引用不因描述或审批而获得执行权，真实进程仍完全关闭。
+
 ## 二、已完成功能
 
 ### Agent 与运行时
@@ -96,7 +98,8 @@ P7 已推进到 schema v47：v39-v40 固定并交付 root Skill，v41-v42 建立
 - RunSupervisor 仅公布 `work_item_create`/`note_create`，每批最多 4 个调用、每 turn 最多 4 轮。Provider call ID 不落库，语义 operation key 来自 Run/turn/工具/脱敏规范化参数；Policy 拒绝和预算耗尽作为 metadata-only error result 返回模型。
 - `script run` 现在要求 workspace 相对文件，并在单个 SQLite 事务中创建 Script Profile Mission/Run/Session、初始预算扣减、`script_process.v1` typed proposal、Approval 及 Policy/Tool events。
 - `script run --idempotency-key` 可安全跨进程重试；相同意图返回同一 Mission/Run/Session/Process，异意图复用返回冲突，原始 key 不持久化。
-- `--local` 只记录 requested backend；CLI 不再构造 Local/Noop Runner，审批前后均只产生 dry-run，不执行宿主机命令。
+- `--local` 只记录 requested backend；schema v48 仅构造 NoopRunner 做确定性 Manifest 校验，CLI 不构造 Local 执行器，审批前后均只产生 dry-run，不执行宿主机命令。
+- schema v48 增加 `sandbox_manifest.v1`、严格 duplicate-aware JSON 与硬上限；`sandbox validate|template` 可离线检查，`run sandbox prepare|list|show` 只持久化 Run 绑定的 preparation/validation 元数据。命令、argv、路径、环境值、密钥引用、目标和 Manifest JSON 不落库；即使审批为 approved，`backend_enabled` 与 `execution_authorized` 仍为 false。
 - Store 对 JSON payload 先解析、递归脱敏字符串值再编码，嵌套 JSON、转义和 64-bit 数字不会被字符串级正则破坏。
 - 文件编辑提案、diff 预览、审批、拒绝、失败和已应用状态持久化。
 - 审批前重新解析路径并校验 SHA-256，拒绝覆盖提案后被修改的文件。
@@ -114,7 +117,7 @@ P7 已推进到 schema v47：v39-v40 固定并交付 root Skill，v41-v42 建立
 
 ### 存储与 Run 架构
 
-- CGO SQLite 驱动 `github.com/mattn/go-sqlite3`，当前 schema 版本为 v27。
+- CGO SQLite 驱动 `github.com/mattn/go-sqlite3`，当前 schema 版本为 v48。
 - checksum 校验的版本化事务 migration，可保留旧库数据原地升级。
 - Mission、Run 和 append-only Run Events 持久化。
 - schema v3 为非空 `session_id` 建立唯一关联并拒绝引用不存在 Session 的 Run。
@@ -235,7 +238,7 @@ P7 已推进到 schema v47：v39-v40 固定并交付 root Skill，v41-v42 建立
 - 本轮审计修复了截断时非法 UTF-8 被误判成功、极小输出上限溢出、持久化拒绝状态在错误路径下映射不一致，以及文件工具信任调用方 workspace root 的问题；均已增加回归测试。
 - Gateway 已集中现有工作区读、Shell 提案和 FileEdit 生产入口，仍复用 `tool_runs`/`file_edits` 作为兼容 Proposal 表；统一逐次 Decision 与 Session Grant 已分别由 schema v11/v12 账本承担。
 - `staticcheck ./...` 当前零告警；本轮顺带清理了既存 TUI `S1008`、`S1011` 和未使用 helper `U1000`。
-- `script run --local` 的执行旁路已移除；生产代码扫描中不再存在 Sandbox Runner 调用，LocalSandbox 仅保留为未接线的开发后端。
+- `script run --local` 的执行旁路已移除；生产代码扫描中不存在 `Runner.Run` 调用。schema v48 后仅有 Noop 校验接线，LocalSandbox 仍是禁用的开发后端。
 - schema v13 已消除旧的 Script Run/ToolRun 两事务窗口；故障注入证明任一 Process/Approval/Event 写入失败都会回滚整套 Mission/Session/Run/预算状态。
 - schema v14 将 Artifact 行与 `artifact.created` 置于同一事务；事件写入失败不留孤立证据，终态工具已另行提交时可用同一审批幂等恢复捕获，不重复 Tool/Approval 事件。
 - Artifact 哈希针对脱敏后正文；`artifact.created` 仅保存哈希、MIME、大小、stream 和 source ID，不复制输出内容。自动读取保存该次读工具实际返回的内容，不恢复读取参数已主动省略的字节。
@@ -580,7 +583,9 @@ schema v47 新增不可变 `specialist_skill_context_preparations/commits`。八
 
 v47 发布后的远端 CI 复核暴露并修正两项既有并发假设。`ed1a2f1` 让阶段切换重放在其他 worker 已到达目标 phase 时再次读取持久化 operation，避免把成功并发提交误报为重复切换；`fa6dfbd` 将 Provider 取消测试改为等待真实调用入口，并规定已有 durable `model.started` 的 root 模型调用至少计费 1ms，关闭 `999/1000ms` deadline 可重复进入的预算边界。为保持 schema-v47 升级兼容，旧 Specialist 严格重放账本的 `0ms` 解释未被暗中改变。定向普通测试 100 轮、race 30 轮、全仓普通/race、vet、staticcheck、模块校验和 govulncheck 均通过；GitHub Actions run `29325171043` 对 `fa6dfbd` 一次通过，Go 2 分 53 秒、TypeScript 18 秒，无未解决高/中风险问题。
 
-唯一推荐下一切片：转入 P6 的 Go-owned Sandbox Manifest v1。先固化 Manifest/Mount/NetworkScope/ResourceLimit/command/argv/input/output/timeout/cancellation 的有界协议、Run/Workspace/Policy/审批绑定、metadata-only validation/preparation 和幂等恢复；Noop 只做确定性验证，Local/Docker 继续 fail closed，不在该切片启动任何宿主机或容器进程。该协议随后作为 Go -> Docker 与 Go -> Rust JSON 工具边界，Rust analyzer 和 CTF 求解仍后置。
+schema v48 Sandbox Manifest 切片已完成：严格解析、规范化指纹、Run/Workspace/Scope/Policy/审批/取消绑定、metadata-only 不可变账本、Policy 拒绝审计、同键/并发恢复、v47 升级、CLI 检查以及 Local/Docker fail-closed 均有测试。审计补强了非规范 CIDR、凭证形态 argv/环境字面量、输出挂载根、SQL 写能力审批门和恢复绑定；未发现未解决高/中风险问题，真实执行仍为零。Uncached 全仓测试、全仓 race、vet、staticcheck、模块校验/tidy diff、govulncheck、凭证/产物扫描、OpenAPI/TypeScript 漂移、17 个前端测试、生产构建、npm audit，以及隔离 schema-v48 CLI Run/preparation/event smoke 全部通过。
+
+唯一推荐下一切片：继续 P6，增加精确 Sandbox 审批请求与“重新提交 Manifest 后再校验”桥。每次后续动作必须重新规范化并匹配已存指纹，使用 symlink-safe Go 文件 API 解析 Workspace 内挂载源，再复核 Scope、Policy、审批、预算和 lease；只记录 `execution_authorized=false` 的候选事实，不启动 Local/Docker。Docker client、取消/清理、网络隔离、secret materialization 和 Artifact 输出需独立审计后才能开放，Rust analyzer 与 CTF 求解仍后置。
 
 Docker/Local 真实执行继续关闭，直到 Sandbox manifest、资源、网络、取消与证据导出全部通过独立审计。
 

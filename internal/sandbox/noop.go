@@ -23,6 +23,13 @@ func (NoopRunner) Available(ctx context.Context) bool {
 	return true
 }
 
+func (NoopRunner) ValidateManifest(ctx context.Context, manifest Manifest) (Manifest, error) {
+	if err := ctx.Err(); err != nil {
+		return Manifest{}, err
+	}
+	return NormalizeManifest(manifest)
+}
+
 func (NoopRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	if err := ctx.Err(); err != nil {
 		return RunResult{ExitCode: 130}, err

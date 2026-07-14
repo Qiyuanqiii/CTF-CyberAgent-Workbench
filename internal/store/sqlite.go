@@ -269,6 +269,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 45, Name: "durable operator steering queue", Statements: operatorSteeringStatements},
 		{Version: 46, Name: "operator steering queue controls", Statements: operatorSteeringControlStatements},
 		{Version: 47, Name: "minimal Specialist Skill context", Statements: specialistSkillContextStatements},
+		{Version: 48, Name: "Go-owned Sandbox Manifest preparation", Statements: sandboxManifestStatements},
 	})
 }
 

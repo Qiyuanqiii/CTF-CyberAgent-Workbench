@@ -286,7 +286,13 @@ Existing `tool_runs` and `file_edits` remain compatibility proposal records, whi
 
 ## Sandbox
 
-Sandbox backends implement a Go interface and are selected per run. The target model is one isolated environment per run, shared only by agents in that run through the Go coordinator.
+Schema v48 introduces `sandbox_manifest.v1` as a descriptive protocol before any backend is enabled. Go strictly decodes and normalizes executable/ordered argv, a virtual working directory, workspace-relative mounts, exact network scope, resource limits, environment literal/secret-reference bindings, input Artifact IDs, output capture/paths, timeout, and cancellation grace. Unknown or duplicate fields, invalid UTF-8, trailing data, traversal, overlapping mounts, wildcard or non-canonical network targets, credential-shaped literals, and values outside hard bounds fail closed.
+
+The application binds one normalized fingerprint to an exact non-terminal Run, Mission, persisted Workspace root, normalized Mission Scope, Policy decision, optional exact approval, requester, and generated cancellation identity. A Manifest may only narrow the Mission network allowlist. Docker/Local intent, writable mounts, network, or secret references require approval when Policy allows them; permanent denial remains final.
+
+SQLite stores immutable preparation, validation, and digest-keyed operation metadata plus content-free events. It does not retain executable, argv, paths, environment values, secret references, network targets, or Manifest JSON. Same-key and cross-process replay converge; changed intent conflicts. `NoopRunner` is the only application validator. Go types, SQL checks/triggers, events, and CLI output all fix `backend_enabled=false` and `execution_authorized=false`, including for approved records. `LocalRunner` and `DockerRunner` fail closed and start no process.
+
+The target model remains one isolated environment per Run, shared only by Agents in that Run through the Go coordinator. A future execution step must resupply the Manifest, reproduce its fingerprint, re-resolve mount sources under the Workspace root, and recheck Policy, Scope, approval, budget, and execution lease before it can even become a candidate.
 
 - local sources are copied or mounted read-only by explicit manifest entries;
 - writable outputs use dedicated run directories;
@@ -295,7 +301,7 @@ Sandbox backends implement a Go interface and are selected per run. The target m
 - teardown is idempotent and records cleanup failures;
 - the Docker client is introduced only with the real backend.
 
-`LocalSandbox` remains development-only and must use the same approval/event pipeline. It is never treated as an isolation boundary.
+`LocalSandbox` remains development-only and must use the same approval/event pipeline. It is never treated as an isolation boundary. None of the target-model bullets are execution claims for schema v48; Docker lifecycle, cancellation, cleanup, network enforcement, secret materialization, and Artifact export remain separately gated work. See [ADR 0008](adr/0008-sandbox-manifest-boundary.md).
 
 ## Scope and Safety
 

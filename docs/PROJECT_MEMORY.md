@@ -20,18 +20,19 @@ Read in this order after a long context break:
 10. `docs/adr/0005-operator-steering-queue.md`
 11. `docs/adr/0006-operator-steering-controls.md`
 12. `docs/adr/0007-specialist-skill-context.md`
+13. `docs/adr/0008-sandbox-manifest-boundary.md`
 
 ## Current Baseline
 
 - Overall product vision: about 97%.
 - General Agent MVP: about 99%.
 - V2 run-centric runtime: about 99%.
-- Database schema: v47.
+- Database schema: v48.
 - Main languages: Go control plane, TypeScript React/Vite read console; Rust has not started.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
 
-Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, parent-selected minimal Specialist Skill context, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, safe-boundary operator steering with pending-only cancellation and explicit drain, loopback read API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite read console.
+Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, parent-selected minimal Specialist Skill context, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, safe-boundary operator steering with pending-only cancellation and explicit drain, a strict metadata-only Sandbox Manifest preparation boundary, loopback read API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite read console.
 
 ## Security Invariants
 
@@ -42,28 +43,27 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 - Dangerous cyber commands remain permanently denied; approval cannot override permanent Policy denial.
 - External files, repository text, logs, web/mail, tool output, and memory are untrusted evidence with `instruction_authorized=false`; they never become system/assistant authority through persistence or compaction.
 - Shell and ScriptProcess approval paths are dry-run only. Real Local/Docker command execution is disabled.
+- `sandbox_manifest.v1` is descriptive input, never an execution permit. Schema v48 fixes both `backend_enabled` and `execution_authorized` to false even when an exact approval is approved.
 - The Web UI is read-first. Its bearer remains in memory and never belongs in URLs or browser storage.
 - Provider keys are read from process environment only and must never enter Git, SQLite, events, or logs.
 
 ## Latest Completed Slice
 
-Schema v47 adds `specialist_skill_context.v1`. Go derives at most one guide for each active Specialist Attempt from the parent Run's immutable Skill selection and current Run mode. Code uses only the matching Profile guide; Cyber gets an empty set except for the narrow Script Profile. `plan-delivery` is root-only. Child assignment state is fingerprinted for provenance but cannot choose or widen Skills, and the child must already hold delegated `model.chat`.
+Schema v48 adds the Go-owned `sandbox_manifest.v1` preparation boundary. The strict JSON protocol hard-bounds backend description, executable/ordered argv, workspace-relative mounts, sandbox working directory, exact network targets, CPU/memory/PID/output resources, literal or secret-reference environment bindings, input Artifact identities, output capture/paths, timeout, and cancellation grace. It rejects unknown or duplicate fields, trailing data, invalid UTF-8, traversal, overlapping mounts, wildcard targets, non-canonical CIDRs, literal secret variables, credential-shaped argv, and values outside protocol limits.
 
-The exact body is reconstructed from the embedded versioned Registry, revalidated, redacted, and delivered only in the in-memory Provider request under a separate 1,024-token default budget and 2,048-token hard limit. SQLite schema v47 stores one immutable metadata-only preparation per AgentAttempt and one commit bound atomically to the first durable Specialist model start. Events contain aggregate counts, budget, mode, and Agent identity but no Skill body, path, name, version, or content hash. Runs without a historical Skill selection preserve their previous no-Skill child behavior; an in-flight selected Attempt without provenance fails closed and must recover as a fresh Attempt.
+Go normalizes the Manifest and binds its fingerprint to one non-terminal Run, Mission, persisted Workspace root, normalized Mission Scope, Policy decision, optional exact approval, requester, and generated cancellation identity. Manifest network access can only narrow the Mission allowlist. Docker/Local intent, write mounts, network, or secret references require approval if Policy permits them; permanent denial cannot be overridden. SQLite stores immutable preparation, validation, and digest-only operation rows plus metadata-only events. It stores no executable, argv, path, environment value, secret reference, network target, or Manifest JSON. Same-key replay and two-store concurrency converge; changed intent conflicts.
 
-The audit found no unresolved high- or medium-severity issue. It added direct proof that an unprepared selected child cannot start a model call, a later event failure rolls back both model-call and Skill-commit state, concurrent preparation converges to one row, both tables are immutable, event order is `prepared -> committed -> model.started`, and the schema/events remain metadata-only. The real-binary smoke also found and fixed stale CLI text that still claimed context was root-only. Full ordinary and race tests, vet, staticcheck, module verification, Go/npm vulnerability scans, API generation, 17 frontend tests, production build, credential/runtime scans, and isolated schema-v47 smoke pass. GitHub Actions run `29321708904` passed release commit `d7e269b`: Go control plane completed in 1m51s and TypeScript console in 20s.
-
-The post-release CI audit then exposed two pre-existing concurrency assumptions. Commit `ed1a2f1` makes phase-transition replay recheck its durable operation after another worker reaches the target phase. Commit `fa6dfbd` synchronizes cancellation coverage on actual Provider entry and makes every root model call with a durable start consume at least 1ms, closing the `999/1000ms` deadline re-entry boundary while keeping historical Specialist ledger semantics unchanged. The focused tests passed 100 ordinary repetitions and 30 race repetitions; full ordinary/race tests, vet, staticcheck, module verification, and `govulncheck` also pass. GitHub Actions run `29325171043` passed `fa6dfbd` in one attempt: Go completed in 2m53s and TypeScript in 18s. No unresolved high- or medium-severity issue remains.
+This slice does not execute anything. `NoopRunner` is the only validator used by the service. Local and Docker validation/run paths fail closed, and Go types, SQLite CHECK/trigger rules, CLI, and events all hold `backend_enabled=false` and `execution_authorized=false`, including when an exact approval is approved. Focused tests cover strict parsing, credential rejection, scope widening, Policy denial persistence without raw intent, exact approval binding, immutable tables, schema v47 upgrade, SQL-level write-capability approval enforcement, no workspace side effects, and cross-store concurrency. Uncached full tests, full-repository race detection, vet, staticcheck, module verification/tidy diff, govulncheck, credential/runtime scans, OpenAPI/TypeScript drift, 17 frontend tests, production build, npm audit, isolated Manifest validation, and an isolated real schema-v48 Run/preparation/event smoke all pass. No unresolved high- or medium-severity issue is known.
 
 ## Next Slice
 
-Start P6 with a Go-owned Sandbox Manifest and immutable execution-intent boundary, without enabling process execution:
+Continue P6 with an exact Sandbox approval-request and revalidation bridge, still without enabling process execution:
 
-1. Define versioned Manifest, Mount, NetworkScope, ResourceLimit, command/argv, input/output, timeout, and cancellation identities with hard bounds.
-2. Separate descriptive intent from authorization. Only Go can bind a manifest to Run, Workspace, Policy, approval, and an execution backend.
-3. Persist metadata-only preparation and validation facts with idempotent recovery; keep command content and credentials out of events.
-4. Make Noop validation deterministic and keep Local/Docker runners fail-closed. Do not start host or container processes in this slice.
-5. Use this envelope as the later TS -> Go -> Docker and Go -> Rust JSON boundary; Rust analyzers and CTF solving remain deferred.
+1. Create a first-class approval request from one preparation's `authorization_fingerprint`, with no raw Manifest content in the approval ledger or events.
+2. Require callers to resupply the Manifest for every later step; normalize it again and require the exact stored fingerprint, Run, Workspace root, Scope, Policy, and approval binding.
+3. Resolve mount sources beneath the persisted Workspace root with symlink-safe Go filesystem APIs and record only bounded identity metadata. Do not mount or launch anything.
+4. Add a metadata-only execution-candidate/recovery ledger whose state still fixes `execution_authorized=false`; separately threat-model Docker client, cancellation, cleanup, output Artifact capture, and secret materialization.
+5. Do not add Docker process creation until a dedicated audit proves lease fencing, cancellation, cleanup, network default-deny, and host-path isolation. Rust analyzers and CTF solving remain deferred.
 
 ## Local Machine Note
 

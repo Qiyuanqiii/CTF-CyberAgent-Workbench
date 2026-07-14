@@ -1210,7 +1210,7 @@ func removeSchemaV46ForTestStatements() []string {
 }
 
 func removeSchemaV47ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV48ForTestStatements(), []string{
 		`DROP TRIGGER trg_specialist_skill_context_commit_delete_immutable`,
 		`DROP TRIGGER trg_specialist_skill_context_commit_update_immutable`,
 		`DROP TRIGGER trg_specialist_skill_context_preparation_delete_immutable`,
@@ -1221,6 +1221,25 @@ func removeSchemaV47ForTestStatements() []string {
 		`DROP INDEX idx_specialist_skill_context_run_agent_turn`,
 		`DROP TABLE specialist_skill_context_preparations`,
 		`DELETE FROM schema_migrations WHERE version = 47`,
+	}...)
+}
+
+func removeSchemaV48ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_manifest_operation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_manifest_operation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_manifest_validation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_manifest_validation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_manifest_preparation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_manifest_preparation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_manifest_operation_insert`,
+		`DROP TRIGGER trg_sandbox_manifest_validation_insert`,
+		`DROP TRIGGER trg_sandbox_manifest_preparation_insert`,
+		`DROP TABLE sandbox_manifest_operations`,
+		`DROP TABLE sandbox_manifest_validations`,
+		`DROP INDEX idx_sandbox_manifest_preparations_run_prepared`,
+		`DROP TABLE sandbox_manifest_preparations`,
+		`DELETE FROM schema_migrations WHERE version = 48`,
 	}
 }
 

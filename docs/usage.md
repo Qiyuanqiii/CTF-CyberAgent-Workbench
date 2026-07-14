@@ -291,6 +291,22 @@ The WorkItem and Note tools are create-only and return metadata rather than cont
 
 Update, completion, archive, Shell, file, process, network, and other Provider-driven tools remain disabled pending separate lifecycle, approval, and Sandbox audits. Use the ordinary `todo` and `note` commands for operator-controlled updates.
 
+## Sandbox Manifest
+
+```powershell
+cyberagent sandbox template
+cyberagent sandbox validate configs/sandbox-manifest.example.json
+cyberagent run sandbox prepare <run-id> --manifest configs/sandbox-manifest.example.json --operation-key sandbox-prepare-001
+cyberagent run sandbox list <run-id>
+cyberagent run sandbox show <preparation-id>
+```
+
+`sandbox validate` performs strict duplicate-aware `sandbox_manifest.v1` decoding and deterministic Noop validation without opening the runtime database. `run sandbox prepare` requires a Run whose Mission has a persisted Workspace, then binds the normalized Manifest fingerprint to that exact Run/Mission/Workspace root, Mission Scope, current Policy result, optional exact approval, requester, and a Go-generated cancellation identity. Operation keys are normalized 16-256 byte client identities; SQLite stores only their domain-separated digest.
+
+The preparation and validation ledgers contain counts, limits, fingerprints, status, and binding identities only. Executable, argv, mount/output paths, environment values, secret references, network targets, and Manifest JSON are not stored or emitted in events. Network allowlists may only narrow a Mission allowlist. Docker/Local intent, writable mounts, network, or secret references require approval when Policy allows them, while permanent Policy denial is recorded and cannot be overridden.
+
+Schema v48 is not an execution API. `backend_enabled` and `execution_authorized` remain false even for an approved binding; Local and Docker validation/run methods fail closed and no host/container process starts. The later approval/revalidation and Docker lifecycle slices must resupply the Manifest and pass separate path, lease, budget, cancellation, cleanup, network, and Artifact audits.
+
 ## Workspaces
 
 ```powershell

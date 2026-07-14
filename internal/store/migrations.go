@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 47
+const LatestSchemaVersion = 48
 
 type migration struct {
 	Version    int
@@ -6219,6 +6219,202 @@ var specialistSkillContextStatements = []string{
 	`CREATE TRIGGER trg_specialist_skill_context_commit_delete_immutable
 		BEFORE DELETE ON specialist_skill_context_commits BEGIN
 			SELECT RAISE(ABORT, 'Specialist Skill context commit cannot be deleted');
+		END;`,
+}
+
+var sandboxManifestStatements = []string{
+	`CREATE TABLE sandbox_manifest_preparations (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		mission_id TEXT NOT NULL,
+		workspace_id TEXT NOT NULL,
+		cancellation_id TEXT NOT NULL UNIQUE,
+		protocol_version TEXT NOT NULL,
+		backend TEXT NOT NULL,
+		manifest_fingerprint TEXT NOT NULL,
+		authorization_fingerprint TEXT NOT NULL,
+		workspace_fingerprint TEXT NOT NULL,
+		scope_fingerprint TEXT NOT NULL,
+		command_argument_count INTEGER NOT NULL,
+		mount_count INTEGER NOT NULL,
+		writable_mount_count INTEGER NOT NULL,
+		environment_count INTEGER NOT NULL,
+		secret_reference_count INTEGER NOT NULL,
+		network_mode TEXT NOT NULL,
+		allowed_target_count INTEGER NOT NULL,
+		input_artifact_count INTEGER NOT NULL,
+		output_count INTEGER NOT NULL,
+		timeout_seconds INTEGER NOT NULL,
+		grace_period_millis INTEGER NOT NULL,
+		cpu_quota_millis INTEGER NOT NULL,
+		memory_bytes INTEGER NOT NULL,
+		pids INTEGER NOT NULL,
+		max_output_bytes INTEGER NOT NULL,
+		requested_by TEXT NOT NULL,
+		prepared_at TEXT NOT NULL,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(mission_id) REFERENCES missions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(workspace_id) REFERENCES workspaces(id) ON DELETE RESTRICT,
+		CHECK(protocol_version = 'sandbox_manifest.v1'),
+		CHECK(backend IN ('noop', 'local', 'docker')),
+		CHECK(command_argument_count BETWEEN 0 AND 128),
+		CHECK(mount_count BETWEEN 1 AND 32),
+		CHECK(writable_mount_count BETWEEN 0 AND mount_count),
+		CHECK(environment_count BETWEEN 0 AND 64),
+		CHECK(secret_reference_count BETWEEN 0 AND environment_count),
+		CHECK(network_mode IN ('disabled', 'allowlist')),
+		CHECK((network_mode = 'disabled' AND allowed_target_count = 0)
+			OR (network_mode = 'allowlist' AND allowed_target_count BETWEEN 1 AND 32)),
+		CHECK(input_artifact_count BETWEEN 0 AND 16),
+		CHECK(output_count BETWEEN 1 AND 18),
+		CHECK(timeout_seconds BETWEEN 1 AND 3600),
+		CHECK(grace_period_millis BETWEEN 0 AND 30000),
+		CHECK(cpu_quota_millis BETWEEN 1 AND 8000),
+		CHECK(memory_bytes BETWEEN 16777216 AND 8589934592),
+		CHECK(pids BETWEEN 1 AND 512),
+		CHECK(max_output_bytes BETWEEN 1 AND 16777216),
+		CHECK(length(manifest_fingerprint) = 64 AND manifest_fingerprint = lower(manifest_fingerprint)
+			AND manifest_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(authorization_fingerprint) = 64 AND authorization_fingerprint = lower(authorization_fingerprint)
+			AND authorization_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(workspace_fingerprint) = 64 AND workspace_fingerprint = lower(workspace_fingerprint)
+			AND workspace_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(scope_fingerprint) = 64 AND scope_fingerprint = lower(scope_fingerprint)
+			AND scope_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(id = trim(id) AND length(id) BETWEEN 1 AND 256 AND instr(id, char(0)) = 0),
+		CHECK(run_id = trim(run_id) AND length(run_id) BETWEEN 1 AND 256 AND instr(run_id, char(0)) = 0),
+		CHECK(mission_id = trim(mission_id) AND length(mission_id) BETWEEN 1 AND 256 AND instr(mission_id, char(0)) = 0),
+		CHECK(workspace_id = trim(workspace_id) AND length(workspace_id) BETWEEN 1 AND 256 AND instr(workspace_id, char(0)) = 0),
+		CHECK(cancellation_id = trim(cancellation_id) AND length(cancellation_id) BETWEEN 1 AND 256
+			AND instr(cancellation_id, char(0)) = 0),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE INDEX idx_sandbox_manifest_preparations_run_prepared
+		ON sandbox_manifest_preparations(run_id, prepared_at, id);`,
+	`CREATE TABLE sandbox_manifest_validations (
+		preparation_id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		protocol_version TEXT NOT NULL,
+		policy_allowed INTEGER NOT NULL,
+		needs_approval INTEGER NOT NULL,
+		risk TEXT NOT NULL,
+		policy_fingerprint TEXT NOT NULL,
+		approval_id TEXT NOT NULL DEFAULT '',
+		approval_status TEXT NOT NULL,
+		validator_name TEXT NOT NULL,
+		backend_enabled INTEGER NOT NULL,
+		execution_authorized INTEGER NOT NULL,
+		validated_at TEXT NOT NULL,
+		FOREIGN KEY(preparation_id) REFERENCES sandbox_manifest_preparations(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(protocol_version = 'sandbox_validation.v1'),
+		CHECK(policy_allowed IN (0, 1) AND needs_approval IN (0, 1)),
+		CHECK(risk IN ('low', 'medium', 'high', 'critical')),
+		CHECK(length(policy_fingerprint) = 64 AND policy_fingerprint = lower(policy_fingerprint)
+			AND policy_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(approval_status IN ('not_applicable', 'not_required', 'required', 'pending', 'approved', 'denied')),
+		CHECK((policy_allowed = 0 AND needs_approval = 0 AND approval_id = '' AND approval_status = 'not_applicable')
+			OR (policy_allowed = 1 AND needs_approval = 0 AND approval_id = '' AND approval_status = 'not_required')
+			OR (policy_allowed = 1 AND needs_approval = 1 AND approval_id = '' AND approval_status = 'required')
+			OR (policy_allowed = 1 AND needs_approval = 1 AND length(approval_id) BETWEEN 1 AND 256
+				AND approval_status IN ('pending', 'approved', 'denied'))),
+		CHECK(validator_name = 'noop'),
+		CHECK(backend_enabled = 0 AND execution_authorized = 0),
+		CHECK(run_id = trim(run_id) AND length(run_id) BETWEEN 1 AND 256 AND instr(run_id, char(0)) = 0),
+		CHECK(approval_id = trim(approval_id) AND instr(approval_id, char(0)) = 0)
+	) WITHOUT ROWID;`,
+	`CREATE TABLE sandbox_manifest_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		preparation_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(preparation_id) REFERENCES sandbox_manifest_preparations(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64 AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64 AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(run_id = trim(run_id) AND length(run_id) BETWEEN 1 AND 256 AND instr(run_id, char(0)) = 0),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	) WITHOUT ROWID;`,
+	`CREATE TRIGGER trg_sandbox_manifest_preparation_insert
+		BEFORE INSERT ON sandbox_manifest_preparations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM runs run
+			JOIN missions mission ON mission.id = run.mission_id
+			JOIN workspaces workspace ON workspace.id = NEW.workspace_id
+			WHERE run.id = NEW.run_id AND run.mission_id = NEW.mission_id
+				AND mission.id = NEW.mission_id AND mission.workspace_id = NEW.workspace_id
+				AND run.status IN ('created', 'preparing', 'running', 'waiting_approval', 'paused')
+				AND julianday(NEW.prepared_at) >= julianday(run.created_at)
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox manifest preparation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_manifest_validation_insert
+		BEFORE INSERT ON sandbox_manifest_validations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_manifest_preparations preparation
+			JOIN runs run ON run.id = preparation.run_id
+			WHERE preparation.id = NEW.preparation_id AND preparation.run_id = NEW.run_id
+				AND julianday(NEW.validated_at) >= julianday(preparation.prepared_at)
+				AND (NEW.policy_allowed = 0 OR NEW.needs_approval = 1
+					OR (preparation.backend = 'noop' AND preparation.network_mode = 'disabled'
+						AND preparation.writable_mount_count = 0
+						AND preparation.secret_reference_count = 0))
+				AND (NEW.approval_id = '' OR EXISTS (
+					SELECT 1 FROM tool_approvals approval
+					WHERE approval.id = NEW.approval_id AND approval.run_id = preparation.run_id
+						AND approval.session_id = run.session_id
+						AND approval.workspace_id = preparation.workspace_id
+						AND approval.tool_name = 'sandbox.manifest'
+						AND approval.action_class = 'sandbox_execute'
+						AND approval.request_fingerprint = preparation.authorization_fingerprint
+						AND approval.status = NEW.approval_status
+				))
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox manifest validation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_manifest_operation_insert
+		BEFORE INSERT ON sandbox_manifest_operations
+		WHEN NOT EXISTS (
+			SELECT 1 FROM sandbox_manifest_preparations preparation
+			JOIN sandbox_manifest_validations validation ON validation.preparation_id = preparation.id
+			WHERE preparation.id = NEW.preparation_id AND preparation.run_id = NEW.run_id
+				AND preparation.requested_by = NEW.requested_by
+				AND preparation.prepared_at = NEW.created_at
+		)
+		BEGIN
+			SELECT RAISE(ABORT, 'sandbox manifest operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_manifest_preparation_update_immutable
+		BEFORE UPDATE ON sandbox_manifest_preparations BEGIN
+			SELECT RAISE(ABORT, 'sandbox manifest preparation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_manifest_preparation_delete_immutable
+		BEFORE DELETE ON sandbox_manifest_preparations BEGIN
+			SELECT RAISE(ABORT, 'sandbox manifest preparation cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_manifest_validation_update_immutable
+		BEFORE UPDATE ON sandbox_manifest_validations BEGIN
+			SELECT RAISE(ABORT, 'sandbox manifest validation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_manifest_validation_delete_immutable
+		BEFORE DELETE ON sandbox_manifest_validations BEGIN
+			SELECT RAISE(ABORT, 'sandbox manifest validation cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_manifest_operation_update_immutable
+		BEFORE UPDATE ON sandbox_manifest_operations BEGIN
+			SELECT RAISE(ABORT, 'sandbox manifest operation cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_sandbox_manifest_operation_delete_immutable
+		BEFORE DELETE ON sandbox_manifest_operations BEGIN
+			SELECT RAISE(ABORT, 'sandbox manifest operation cannot be deleted');
 		END;`,
 }
 

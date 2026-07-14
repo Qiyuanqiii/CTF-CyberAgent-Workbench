@@ -27,6 +27,16 @@ func (r DockerRunner) Available(ctx context.Context) bool {
 	return err == nil
 }
 
+func (r DockerRunner) ValidateManifest(ctx context.Context, manifest Manifest) (Manifest, error) {
+	if err := ctx.Err(); err != nil {
+		return Manifest{}, err
+	}
+	if !r.Available(ctx) {
+		return Manifest{}, fmt.Errorf("docker runner unavailable: %q was not found on PATH", r.binary)
+	}
+	return Manifest{}, fmt.Errorf("docker runner is detected but execution remains disabled")
+}
+
 func (r DockerRunner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	if err := ctx.Err(); err != nil {
 		return RunResult{ExitCode: 130}, err
