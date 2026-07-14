@@ -4119,6 +4119,87 @@
         ],
         "type": "object"
       },
+      "OperatorSteeringMessageView": {
+        "additionalProperties": false,
+        "properties": {
+          "cancelled_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "committed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "sequence": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "committed",
+              "cancelled"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sequence",
+          "status",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "OperatorSteeringQueueView": {
+        "additionalProperties": false,
+        "properties": {
+          "cancelled": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "committed": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/OperatorSteeringMessageView"
+            },
+            "type": "array"
+          },
+          "pending": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "prepared": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending",
+          "prepared",
+          "committed",
+          "cancelled",
+          "messages"
+        ],
+        "type": "object"
+      },
       "Page": {
         "additionalProperties": false,
         "properties": {
@@ -4417,6 +4498,9 @@
           "mode": {
             "$ref": "#/components/schemas/RunModeView"
           },
+          "operator_steering": {
+            "$ref": "#/components/schemas/OperatorSteeringQueueView"
+          },
           "plan_delivery": {
             "$ref": "#/components/schemas/PlanDeliveryStateView"
           },
@@ -4431,6 +4515,7 @@
           "run",
           "mission",
           "mode",
+          "operator_steering",
           "tool_usage"
         ],
         "type": "object"

@@ -941,6 +941,30 @@ export interface components {
             /** @enum {string} */
             visibility: "run" | "root" | "owner";
         };
+        OperatorSteeringMessageView: {
+            /** Format: date-time */
+            cancelled_at?: string;
+            /** Format: date-time */
+            committed_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            /** Format: int64 */
+            sequence: number;
+            /** @enum {string} */
+            status: "pending" | "committed" | "cancelled";
+        };
+        OperatorSteeringQueueView: {
+            /** Format: int32 */
+            cancelled: number;
+            /** Format: int32 */
+            committed: number;
+            messages: components["schemas"]["OperatorSteeringMessageView"][];
+            /** Format: int32 */
+            pending: number;
+            /** Format: int32 */
+            prepared: number;
+        };
         Page: {
             /** Format: int32 */
             limit: number;
@@ -1018,6 +1042,7 @@ export interface components {
             execution_lease?: components["schemas"]["RunExecutionLeaseView"];
             mission: components["schemas"]["MissionView"];
             mode: components["schemas"]["RunModeView"];
+            operator_steering: components["schemas"]["OperatorSteeringQueueView"];
             plan_delivery?: components["schemas"]["PlanDeliveryStateView"];
             run: components["schemas"]["RunView"];
             tool_usage: components["schemas"]["ToolUsageView"];

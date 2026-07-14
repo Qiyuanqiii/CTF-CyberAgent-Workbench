@@ -11,6 +11,7 @@ export type FindingReportView = components["schemas"]["FindingReportView"];
 export type HealthView = components["schemas"]["HealthView"];
 export type MessageView = components["schemas"]["MessageView"];
 export type NoteView = components["schemas"]["NoteView"];
+export type OperatorSteeringQueueView = components["schemas"]["OperatorSteeringQueueView"];
 export type Page = components["schemas"]["Page"];
 export type PlanDeliveryStateView = components["schemas"]["PlanDeliveryStateView"];
 export type RunDetailView = components["schemas"]["RunDetailView"];

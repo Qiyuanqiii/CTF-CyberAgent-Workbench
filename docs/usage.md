@@ -19,6 +19,9 @@ cyberagent run delivery checkpoint <work-id> --operation-key <stable-key> --focu
 cyberagent run delivery checkpoint <final-work-id> --operation-key <stable-key> --focused "focused tests passed" --diff-audit "diff reviewed" --security-audit "security reviewed" --handoff "module handoff" --functional "full suite passed" --robustness "race and failure paths passed"
 cyberagent run delivery list <run-id>
 cyberagent run delivery show <checkpoint-id>
+cyberagent run steer enqueue <run-id> "review the current diff" --operation-key <stable-key>
+cyberagent run steer list <run-id> --limit 100
+cyberagent run steer show <steering-id>
 cyberagent run events <run-id>
 cyberagent headless events <run-id> --max-events 1000
 cyberagent headless events <run-id> --after-sequence <n> --follow --timeout 30m
@@ -57,6 +60,12 @@ Use `run plans` and `run plan show` to inspect proposals after the Run pauses. `
 Schema v44 enrolls new and untouched legacy selections in `delivery_checkpoint.v1`. Before a selected WorkItem can complete, move it to `in_progress`, pause the Run in Deliver phase, and record one checkpoint for its exact current WorkItem version and mode revision. `--focused`, `--diff-audit`, `--security-audit`, and `--handoff` are mandatory, redacted, normalized operator attestations. The last selected module is the deterministic larger-module boundary and also requires `--functional` plus `--robustness`; non-final modules reject those flags. Recording atomically creates an immutable pinned handoff Note, a digest-keyed idempotency operation, and metadata-only events. Exact retries converge across processes; changed evidence under the same key conflicts. Afterward, `todo complete <work-id>` uses the existing WorkItem transition path and rechecks the gate in Go and SQLite.
 
 The model has no checkpoint tool. HTTP, TUI, and Web expose only enforcement, required/ready counts, and bounded checkpoint metadata; they omit evidence, internal digests, operation keys, and requester identity. Policy also denies obvious Agent attempts to execute `cyberagent run delivery checkpoint` through Shell, process, script, or Sandbox tools. This is defense in depth rather than a claim that command-text regexes are a complete OS security boundary; real process execution remains disabled. A pre-v44 selection that already contained a completed or cancelled WorkItem is left explicitly compatibility-exempt (`delivery_gate_enforced=false`) rather than receiving invented evidence.
+
+Schema v45 adds ordered operator steering for running or paused Runs. `run steer enqueue` requires a normalized 16-256-byte operation key and accepts one normalized UTF-8 message up to 16 KiB. A Run may hold at most 64 pending messages and 256 KiB of pending text. Exact replay returns the existing message; changed content, Run, or operator under the same key conflicts, and SQLite stores only a domain-separated key digest. `list` shows counts and ordered metadata, while trusted local `show` also displays the redacted content and its digest.
+
+The Supervisor consumes only the oldest message at the next safe root-turn boundary. A failed model/tool turn leaves it pending and supersedes only that attempt's delivery; restart or lease takeover prepares it again. Session history receives the operator message and assistant response only in the same successful lifecycle transaction. If another message remains, model `finish` or `wait` is deferred to an effective `continue`, and Run completion is rejected until the queue drains. Failing or cancelling the Run cancels all outstanding steering. The queue never interrupts an active tool/model commit and grants no tool, Shell, network, write, approval, or child-Agent capability.
+
+For a Run-bound Session, an ordinary `session send` automatically uses this queue when an execution lease is active, a recoverable attempt already owns PendingInput, or the Run already has queued steering. The command reports `queued`, steering ID, and sequence instead of pretending a model reply was produced. During a busy TUI action, plain text follows the same path without clearing live progress; slash commands remain blocked. HTTP, React, and the TUI queue view expose metadata only and cannot enqueue. A paused Run remains paused after enqueue and must be resumed explicitly.
 
 ## Skills
 

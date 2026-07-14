@@ -35,6 +35,10 @@ type RunProjection struct {
 	PlanDirection           int
 	DeliveryCheckpointCount int
 	DeliveryGateReadyCount  int
+	SteeringPending         int
+	SteeringPrepared        int
+	SteeringCommitted       int
+	SteeringCancelled       int
 }
 
 func (m *Model) CurrentRunProjection() (RunProjection, bool) {
@@ -62,6 +66,10 @@ func (m *Model) CurrentRunProjection() (RunProjection, bool) {
 	projection.DeliveryCheckpointCount = len(m.runContext.DeliveryCheckpoints)
 	projection.DeliveryGateReadyCount = readyDeliveryCheckpointCount(
 		m.runContext.DeliveryCheckpoints, m.runContext.WorkItems, m.runContext.Mode)
+	projection.SteeringPending = m.runContext.Steering.Pending
+	projection.SteeringPrepared = m.runContext.Steering.Prepared
+	projection.SteeringCommitted = m.runContext.Steering.Committed
+	projection.SteeringCancelled = m.runContext.Steering.Cancelled
 	return projection, true
 }
 

@@ -57,6 +57,8 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runPlanDelivery(ctx, args[1:])
 	case "delivery":
 		return a.runDeliveryCheckpoint(ctx, args[1:])
+	case "steer":
+		return a.runOperatorSteering(ctx, args[1:])
 	case "fanouts":
 		return a.runFanouts(ctx, args[1:])
 	case "fanout":
@@ -79,6 +81,82 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runTransition(ctx, service, "cancel", args[1:])
 	default:
 		return fmt.Errorf("unknown run subcommand %q", args[0])
+	}
+}
+
+func (a *App) runOperatorSteering(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: cyberagent run steer enqueue|list|show")
+	}
+	service := application.NewOperatorSteeringService(a.store)
+	switch args[0] {
+	case "enqueue":
+		fs := newFlagSet("run steer enqueue", a.errOut)
+		operationKey := fs.String("operation-key", "", "stable operator steering operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"operation-key": true, "operator": true,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() < 2 || strings.TrimSpace(*operationKey) == "" {
+			return errors.New(`usage: cyberagent run steer enqueue <run-id> "message" --operation-key <key> [--operator <id>]`)
+		}
+		result, err := service.Enqueue(ctx, application.QueueOperatorSteeringRequest{
+			RunID: fs.Arg(0), Content: strings.Join(fs.Args()[1:], " "),
+			OperationKey: *operationKey, RequestedBy: *operator,
+		})
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(a.out, "steering: %s\nrun: %s\nsequence: %d\nstatus: %s\nrequested_by: %s\nreplayed: %t\nnext: cyberagent run execute %s --max-steps 1\n",
+			result.Message.ID, result.Message.RunID, result.Message.Sequence,
+			result.Message.Status, result.Message.RequestedBy, result.Replayed,
+			result.Message.RunID)
+		return nil
+	case "list":
+		fs := newFlagSet("run steer list", a.errOut)
+		limit := fs.Int("limit", 100, "maximum steering messages")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run steer list <run-id> [--limit <n>]")
+		}
+		values, summary, err := service.List(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(a.out, "pending: %d\nprepared: %d\ncommitted: %d\ncancelled: %d\n",
+			summary.Pending, summary.Prepared, summary.Committed, summary.Cancelled)
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no operator steering messages")
+			return nil
+		}
+		for _, value := range values {
+			fmt.Fprintf(a.out, "%s\tsequence=%d\tstatus=%s\trequested_by=%s\tcreated_at=%s\n",
+				value.ID, value.Sequence, value.Status, value.RequestedBy,
+				value.CreatedAt.Format(time.RFC3339Nano))
+		}
+		return nil
+	case "show":
+		fs := newFlagSet("run steer show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run steer show <steering-id>")
+		}
+		value, err := service.Get(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(a.out, "steering: %s\nrun: %s\nsession: %s\nsequence: %d\nstatus: %s\nrequested_by: %s\ncontent_sha256: %s\ncontent:\n%s\n",
+			value.ID, value.RunID, value.SessionID, value.Sequence, value.Status,
+			value.RequestedBy, value.ContentSHA256, value.Content)
+		return nil
+	default:
+		return fmt.Errorf("unknown run steer subcommand %q", args[0])
 	}
 }
 

@@ -168,6 +168,16 @@ func newAPIFixture(t *testing.T) *apiFixture {
 
 func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *testing.T) {
 	fixture := newAPIFixture(t)
+	steeringContent := "private queued operator guidance"
+	steering, err := fixture.store.EnqueueOperatorSteering(context.Background(),
+		domain.EnqueueOperatorSteeringRequest{
+			RunID: fixture.run.ID, SessionID: fixture.run.SessionID,
+			Content: steeringContent, OperationKey: "http-api-steering-operation-0001",
+			RequestedBy: "private_operator_identity",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	health := fixture.get(t, "/api/v1/health")
 	if health.Code != http.StatusOK {
@@ -190,8 +200,11 @@ func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *te
 		t.Fatalf("unexpected Run list: %#v", runViews)
 	}
 	runDetailResponse := fixture.get(t, "/api/v1/runs/"+fixture.run.ID)
-	if strings.Contains(runDetailResponse.Body.String(), "pending input is deliberately private") {
-		t.Fatal("Run detail exposed the durable pending model input")
+	if strings.Contains(runDetailResponse.Body.String(), "pending input is deliberately private") ||
+		strings.Contains(runDetailResponse.Body.String(), steeringContent) ||
+		strings.Contains(runDetailResponse.Body.String(), "private_operator_identity") ||
+		strings.Contains(runDetailResponse.Body.String(), steering.Message.ContentSHA256) {
+		t.Fatal("Run detail exposed private Supervisor or operator steering data")
 	}
 	var runDetail RunDetailView
 	decodeData(t, runDetailResponse, &runDetail)
@@ -202,7 +215,11 @@ func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *te
 		runDetail.Mode.Revision != 1 || runDetail.Mode.CapabilityGrant ||
 		runDetail.Checkpoint.Phase != string(domain.SupervisorTurnStarted) || runDetail.ToolUsage.Consumed != 1 ||
 		runDetail.Lease == nil || !runDetail.Lease.Active || runDetail.Lease.Generation != 1 ||
-		runDetail.Lease.OwnerID != "http-api-test-worker" {
+		runDetail.Lease.OwnerID != "http-api-test-worker" ||
+		runDetail.Steering.Pending != 1 || runDetail.Steering.Prepared != 0 ||
+		len(runDetail.Steering.Messages) != 1 ||
+		runDetail.Steering.Messages[0].ID != steering.Message.ID ||
+		runDetail.Steering.Messages[0].Sequence != 1 {
 		t.Fatalf("unexpected Run detail: %#v", runDetail)
 	}
 	if strings.Contains(runDetailResponse.Body.String(), `"lease_id"`) {

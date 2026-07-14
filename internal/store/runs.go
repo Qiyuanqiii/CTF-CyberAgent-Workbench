@@ -235,6 +235,17 @@ func (s *SQLiteStore) TransitionRun(ctx context.Context, run domain.Run, expecte
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if run.Status == domain.RunCompleted {
+		if err := requireNoPendingOperatorSteeringTx(ctx, tx, run.ID); err != nil {
+			return err
+		}
+	}
+	if run.Status == domain.RunFailed || run.Status == domain.RunCancelled {
+		if _, err := cancelOperatorSteeringTx(ctx, tx, before, "run_service",
+			string(run.Status), run.UpdatedAt); err != nil {
+			return err
+		}
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE runs SET status = ?, config_json = ?, budget_json = ?,
 		started_at = ?, finished_at = ?, updated_at = ? WHERE id = ? AND status = ?`,
 		run.Status, configJSON, budgetJSON, nullableTS(run.StartedAt), nullableTS(run.FinishedAt),

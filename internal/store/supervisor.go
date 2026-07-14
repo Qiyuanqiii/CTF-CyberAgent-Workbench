@@ -70,6 +70,9 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunE
 		return domain.SupervisorTurn{}, apperror.New(apperror.CodeFailedPrecondition,
 			fmt.Sprintf("run %s is %s; supervisor requires running", run.ID, run.Status))
 	}
+	if err := lockRunningRunForSteeringTx(ctx, tx, run.ID); err != nil {
+		return domain.SupervisorTurn{}, err
+	}
 	var applyingDelegations int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*)
 		FROM specialist_delegation_applications WHERE run_id = ? AND status = 'applying'`,
@@ -167,8 +170,18 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunE
 		return domain.SupervisorTurn{}, apperror.New(apperror.CodeDeadlineExceeded,
 			fmt.Sprintf("run %s exhausted its %s execution timeout", run.ID, time.Duration(run.Budget.TimeoutSeconds)*time.Second))
 	}
-	if checkpoint.Phase == domain.SupervisorTurnFailed && pendingInput == "" {
-		pendingInput = checkpoint.PendingInput
+	failedInput := ""
+	preferredSteeringID := ""
+	if checkpoint.Phase == domain.SupervisorTurnFailed {
+		failedInput = checkpoint.PendingInput
+		preferredSteeringID, _, err = supersedeOperatorSteeringDeliveryTx(ctx, tx, run,
+			checkpoint, time.Now().UTC())
+		if err != nil {
+			return domain.SupervisorTurn{}, err
+		}
+		if pendingInput == "" {
+			pendingInput = failedInput
+		}
 	}
 
 	checkpoint.Phase = domain.SupervisorTurnStarted
@@ -180,8 +193,31 @@ func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunE
 	checkpoint.RepairReason = ""
 	checkpoint.LastError = ""
 	checkpoint.UpdatedAt = time.Now().UTC()
+	var steeringMessage domain.OperatorSteeringMessage
+	steeringFound := false
+	if pendingInput == "" || (preferredSteeringID != "" && pendingInput == failedInput) {
+		steeringMessage, steeringFound, err = selectOperatorSteeringForTurnTx(ctx, tx,
+			run.ID, preferredSteeringID)
+		if err != nil {
+			return domain.SupervisorTurn{}, err
+		}
+		if preferredSteeringID != "" && !steeringFound {
+			return domain.SupervisorTurn{}, apperror.New(apperror.CodeConflict,
+				"failed operator steering delivery could not be prepared for retry")
+		}
+		if steeringFound {
+			pendingInput = steeringMessage.Content
+			checkpoint.PendingInput = pendingInput
+		}
+	}
 	if err := upsertSupervisorCheckpointTx(ctx, tx, checkpoint); err != nil {
 		return domain.SupervisorTurn{}, err
+	}
+	if steeringFound {
+		if _, err := prepareOperatorSteeringDeliveryTx(ctx, tx, run, checkpoint,
+			steeringMessage, checkpoint.UpdatedAt); err != nil {
+			return domain.SupervisorTurn{}, err
+		}
 	}
 	agentNode, _, agentChanged, err := syncRootAgentTx(ctx, tx, run, mission, rootAgentProjection{
 		Status: domain.AgentRunning, ActiveAttemptID: checkpoint.AttemptID,
@@ -1050,7 +1086,17 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	if err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}
-	if current.Phase == supervisorPhaseForAction(action.Kind) && current.NextTurn == checkpoint.NextTurn+1 {
+	completionReplay := current.Phase == supervisorPhaseForAction(action.Kind) &&
+		current.NextTurn == checkpoint.NextTurn+1
+	if !completionReplay && current.Phase == domain.SupervisorIdle &&
+		current.NextTurn == checkpoint.NextTurn+1 &&
+		(action.Kind == domain.RootActionFinish || action.Kind == domain.RootActionWait) {
+		completionReplay, err = operatorSteeringActionDeferredTx(ctx, tx, checkpoint)
+		if err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+		}
+	}
+	if completionReplay {
 		if err := tx.Commit(); err != nil {
 			return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 		}
@@ -1092,6 +1138,23 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	if err := requireSupervisorToolsReadyTx(ctx, tx, checkpoint); err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}
+	if err := lockRunningRunForSteeringTx(ctx, tx, run.ID); err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+	}
+	requestedAction := action.Kind
+	deferredSteering := 0
+	if action.Kind == domain.RootActionFinish || action.Kind == domain.RootActionWait {
+		deferredSteering, err = pendingOperatorSteeringAfterCurrentTx(ctx, tx, checkpoint)
+		if err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+		}
+		if deferredSteering > 0 {
+			action.Kind = domain.RootActionContinue
+			action.Summary = ""
+			action.Reason = ""
+			response.Text = action.Message
+		}
+	}
 	if action.Kind == domain.RootActionFinish {
 		if err := requireRunModeAllowsCompletionTx(ctx, tx, run.ID); err != nil {
 			return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
@@ -1106,6 +1169,10 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	}
 	userMessage, err := saveSessionMessageTx(ctx, tx, session.NewMessage(run.SessionID, "user", current.PendingInput))
 	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+	}
+	if _, _, err := commitOperatorSteeringDeliveryTx(ctx, tx, run, checkpoint,
+		userMessage, time.Now().UTC()); err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}
 	assistantMessage, err := saveSessionMessageTx(ctx, tx, session.NewMessage(run.SessionID, "assistant", response.Text))
@@ -1127,7 +1194,8 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 		"agent_id": agentNode.ID, "turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
 		"user_message_id": userMessage.ID, "assistant_message_id": assistantMessage.ID,
 		"provider": response.Provider, "model": response.Model, "usage": response.Usage,
-		"lifecycle_action": action.Kind, "inbox_messages_committed": committedInboxMessages,
+		"lifecycle_action": action.Kind, "requested_lifecycle_action": requestedAction,
+		"inbox_messages_committed": committedInboxMessages,
 	}); err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}
@@ -1135,6 +1203,17 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 		if err := appendSupervisorEventTx(ctx, tx, run, events.ProtocolRepairCompletedEvent, "run_supervisor", checkpoint.AttemptID, map[string]any{
 			"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID, "protocol_repair": 1,
 		}); err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+		}
+	}
+	if deferredSteering > 0 {
+		if err := appendSupervisorEventTx(ctx, tx, run,
+			events.OperatorSteeringActionDeferredEvent, "run_supervisor",
+			checkpoint.AttemptID, map[string]any{
+				"turn": checkpoint.NextTurn, "attempt_id": checkpoint.AttemptID,
+				"requested_action": requestedAction, "effective_action": action.Kind,
+				"remaining_messages": deferredSteering,
+			}); err != nil {
 			return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 		}
 	}
@@ -1189,7 +1268,8 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}
 	if err := appendSupervisorEventTx(ctx, tx, run, events.SupervisorActionEvent, "run_supervisor", run.ID, map[string]any{
-		"action": action.Kind, "turn": checkpoint.NextTurn, "summary": action.Summary, "reason": action.Reason,
+		"action": action.Kind, "requested_action": requestedAction, "turn": checkpoint.NextTurn,
+		"summary": action.Summary, "reason": action.Reason,
 	}); err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}
@@ -1467,6 +1547,9 @@ func (s *SQLiteStore) FinalizeSupervisorRun(ctx context.Context, lease domain.Ru
 			fmt.Sprintf("run %s is already terminal as %s", run.ID, run.Status))
 	}
 	if target == domain.RunCompleted {
+		if err := requireNoPendingOperatorSteeringTx(ctx, tx, run.ID); err != nil {
+			return domain.Run{}, domain.SupervisorCheckpoint{}, err
+		}
 		if err := requireRunModeAllowsCompletionTx(ctx, tx, run.ID); err != nil {
 			return domain.Run{}, domain.SupervisorCheckpoint{}, err
 		}
@@ -1662,6 +1745,16 @@ func transitionSupervisorRunTx(ctx context.Context, tx *sql.Tx, run *domain.Run,
 		return apperror.New(apperror.CodeFailedPrecondition, "supervisor run is required")
 	}
 	expected := run.Status
+	if target == domain.RunCompleted {
+		if err := requireNoPendingOperatorSteeringTx(ctx, tx, run.ID); err != nil {
+			return err
+		}
+	}
+	if target == domain.RunFailed || target == domain.RunCancelled {
+		if _, err := cancelOperatorSteeringTx(ctx, tx, *run, "run_supervisor", reason, at); err != nil {
+			return err
+		}
+	}
 	if err := run.Transition(target, at); err != nil {
 		return apperror.Wrap(apperror.CodeFailedPrecondition, err.Error(), err)
 	}

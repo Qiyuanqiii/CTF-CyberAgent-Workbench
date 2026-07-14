@@ -194,6 +194,67 @@ func TestModelEnterSubmitsAsyncAction(t *testing.T) {
 	}
 }
 
+func TestModelQueuesOperatorGuidanceWhileBusyWithoutExposingContent(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "tui-steering.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	_, created, err := application.NewRunService(st).Create(ctx, application.CreateRunRequest{
+		Goal: "queue TUI guidance", Profile: "review", Budget: domain.Budget{MaxTurns: 4},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.NewRunService(st).Start(ctx, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := st.GetSession(ctx, created.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := session.NewManager(st, llm.NewDefaultRouter(), policy.NewDefaultChecker())
+	model, err := NewModel(ctx, sess, manager,
+		toolgateway.New(st, policy.NewDefaultChecker()).ToolRuns(), st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretGuidance := "verify the private queued requirement"
+	model.busy = true
+	model.input.SetValue(secretGuidance)
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(*Model)
+	if cmd == nil || !model.busy || !strings.Contains(model.status, "queueing") {
+		t.Fatalf("busy TUI did not start a separate queue command: status=%q busy=%t",
+			model.status, model.busy)
+	}
+	queued, ok := cmd().(steeringQueuedMsg)
+	if !ok || queued.err != nil || queued.result.Message.Sequence != 1 {
+		t.Fatalf("unexpected queue command result: %#v", queued)
+	}
+	updated, cmd = model.Update(queued)
+	model = updated.(*Model)
+	if cmd != nil || !model.busy || !strings.Contains(model.status, "queued steering") {
+		t.Fatalf("queue completion disturbed the active action: status=%q busy=%t cmd=%#v",
+			model.status, model.busy, cmd)
+	}
+	if err := model.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	model.setActivityView(activityQueue)
+	snapshot := model.Snapshot()
+	if !strings.Contains(snapshot, "Operator Queue 1") ||
+		!strings.Contains(snapshot, "queued=1 prepared=0 committed=0 cancelled=0") ||
+		strings.Contains(snapshot, secretGuidance) {
+		t.Fatalf("TUI queue projection is missing metadata or exposes content:\n%s", snapshot)
+	}
+	projection, found := model.CurrentRunProjection()
+	if !found || projection.SteeringPending != 1 || projection.SteeringPrepared != 0 {
+		t.Fatalf("TUI steering projection drifted: %#v found=%t", projection, found)
+	}
+}
+
 func TestModelRendersWorkspaceContext(t *testing.T) {
 	home := t.TempDir()
 	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))

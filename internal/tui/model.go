@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -75,6 +76,11 @@ type actionDoneMsg struct {
 	err    error
 }
 
+type steeringQueuedMsg struct {
+	result domain.OperatorSteeringEnqueueResult
+	err    error
+}
+
 type actionResult struct {
 	session        session.Session
 	messages       []session.Message
@@ -123,6 +129,12 @@ type RunStateStore interface {
 		offset int, limit int) ([]domain.FindingReportSummary, error)
 	ListFileEditPreviewsPage(ctx context.Context, filter fileedit.ListFilter,
 		offset int, limit int) ([]fileedit.Preview, error)
+	EnqueueOperatorSteering(ctx context.Context,
+		request domain.EnqueueOperatorSteeringRequest) (domain.OperatorSteeringEnqueueResult, error)
+	ListOperatorSteering(ctx context.Context, runID string,
+		limit int) ([]domain.OperatorSteeringMessage, error)
+	GetOperatorSteeringQueueSummary(ctx context.Context,
+		runID string) (domain.OperatorSteeringQueueSummary, error)
 }
 
 type workspaceContext struct {
@@ -158,6 +170,22 @@ type runContext struct {
 	PlanSelection        *domain.PlanDeliverySelection
 	DeliveryGateEnforced bool
 	DeliveryCheckpoints  []domain.DeliveryCheckpoint
+	Steering             operatorSteeringContext
+}
+
+type operatorSteeringContext struct {
+	Pending   int
+	Prepared  int
+	Committed int
+	Cancelled int
+	Messages  []operatorSteeringMetadata
+}
+
+type operatorSteeringMetadata struct {
+	ID        string
+	Sequence  int64
+	Status    domain.OperatorSteeringStatus
+	CreatedAt time.Time
 }
 
 type agentContext struct {
@@ -177,6 +205,7 @@ const (
 	activityAgents       activityView = "agents"
 	activityFindings     activityView = "findings"
 	activityEdits        activityView = "edits"
+	activityQueue        activityView = "queue"
 	maxTUIRunItems                    = 50
 	maxTUIToolRounds                  = 20
 	maxTUIFindingReports              = 10
@@ -240,6 +269,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case activeCallCancelDoneMsg:
 		m.handleActiveCallCancelDone(msg)
 		return m, nil
+	case steeringQueuedMsg:
+		if msg.err != nil {
+			m.status = "queue error: " + msg.err.Error()
+			return m, nil
+		}
+		m.status = fmt.Sprintf("queued steering %s at sequence %d",
+			msg.result.Message.ID, msg.result.Message.Sequence)
+		return m, nil
 	case actionDoneMsg:
 		m.stopLiveTracking(msg.err)
 		m.busy = false
@@ -300,6 +337,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.cancelActiveCallCmd(m.liveGeneration, m.session.ID)
 		}
 		if m.busy {
+			if m.focus == focusInput && msg.String() == "enter" {
+				value := strings.TrimSpace(m.input.Value())
+				m.input.SetValue("")
+				if value == "" {
+					return m, nil
+				}
+				if strings.HasPrefix(value, "/") {
+					m.status = "slash commands are unavailable while an action is running"
+					return m, nil
+				}
+				if m.runStateStore == nil || !m.runContext.Found {
+					m.status = "operator steering queue unavailable"
+					return m, nil
+				}
+				m.status = "queueing operator guidance..."
+				return m, m.enqueueSteeringCmd(value)
+			}
+			if m.focus == focusInput {
+				m.input, cmd = m.input.Update(msg)
+				return m, cmd
+			}
 			m.status = "busy; waiting for current action"
 			return m, nil
 		}
@@ -465,6 +523,10 @@ func (m *Model) submitAction(ctx context.Context, sess session.Session, input st
 			selectedID = result.ToolRunID
 		} else if result.RunID != "" {
 			status = fmt.Sprintf("run %s: %s -> %s", result.RunID, result.RunAction, result.RunStatus)
+			if result.Queued {
+				status += fmt.Sprintf("; steering=%s sequence=%d", result.SteeringID,
+					result.SteeringSequence)
+			}
 			if result.Compacted {
 				status += fmt.Sprintf("; context compacted: summary=%d", result.SummaryID)
 			}
@@ -531,7 +593,7 @@ func (m *Model) PreviousActivityView() {
 func (m *Model) setActivityView(view activityView) {
 	switch view {
 	case activityTools, activityPlan, activityWork, activityNotes, activityRounds,
-		activityEvents, activityAgents, activityFindings, activityEdits:
+		activityEvents, activityAgents, activityFindings, activityEdits, activityQueue:
 		m.activityView = view
 	default:
 		m.activityView = activityTools
@@ -562,6 +624,8 @@ func (m *Model) SelectNextActivityItem() {
 		m.SelectNextTool()
 	case activityPlan:
 		m.status = "Plan/Delivery view is read-only"
+	case activityQueue:
+		m.status = "operator steering view is read-only"
 	case activityWork:
 		m.selectedWorkItem++
 		m.normalizeActivitySelection()
@@ -599,6 +663,8 @@ func (m *Model) SelectPreviousActivityItem() {
 		m.SelectPreviousTool()
 	case activityPlan:
 		m.status = "Plan/Delivery view is read-only"
+	case activityQueue:
+		m.status = "operator steering view is read-only"
 	case activityWork:
 		m.selectedWorkItem--
 		m.normalizeActivitySelection()
@@ -840,6 +906,19 @@ func (m *Model) submitCmdContext(ctx context.Context, input string) tea.Cmd {
 	}
 }
 
+func (m *Model) enqueueSteeringCmd(input string) tea.Cmd {
+	run := m.runContext.Run
+	stateStore := m.runStateStore
+	return func() tea.Msg {
+		result, err := stateStore.EnqueueOperatorSteering(context.Background(),
+			domain.EnqueueOperatorSteeringRequest{
+				RunID: run.ID, SessionID: run.SessionID, Content: input,
+				OperationKey: idgen.New("tui-steering"), RequestedBy: "tui_operator",
+			})
+		return steeringQueuedMsg{result: result, err: err}
+	}
+}
+
 func (m *Model) refreshCmd(status string) tea.Cmd {
 	sess := m.session
 	return func() tea.Msg {
@@ -974,9 +1053,32 @@ func (m *Model) renderActivity(width int, height int) string {
 		return m.renderFindings(width, height)
 	case activityEdits:
 		return m.renderEdits(width, height)
+	case activityQueue:
+		return m.renderOperatorSteering(width, height)
 	default:
 		return m.renderTools(width, height)
 	}
+}
+
+func (m *Model) renderOperatorSteering(width int, height int) string {
+	queue := m.runContext.Steering
+	lines := m.activityHeader(fmt.Sprintf("Operator Queue %d",
+		queue.Pending+queue.Prepared), activityQueue, width)
+	if !m.runContext.Found {
+		lines = append(lines, "no Run attached")
+		return strings.Join(lines, "\n")
+	}
+	lines = append(lines, truncate(fmt.Sprintf("queued=%d prepared=%d committed=%d cancelled=%d",
+		queue.Pending, queue.Prepared, queue.Committed, queue.Cancelled), width))
+	if len(queue.Messages) == 0 {
+		lines = append(lines, "none")
+		return strings.Join(windowTop(lines, height+1), "\n")
+	}
+	for _, message := range queue.Messages {
+		lines = append(lines, truncate(fmt.Sprintf("#%d %s %s", message.Sequence,
+			message.Status, message.ID), width))
+	}
+	return strings.Join(windowTop(lines, height+1), "\n")
 }
 
 func (m *Model) renderPlanDelivery(width int, height int) string {
@@ -1245,14 +1347,16 @@ func activityLabel(view activityView) string {
 		return "Findings"
 	case activityEdits:
 		return "Edits"
+	case activityQueue:
+		return "Queue"
 	default:
 		return "Tools"
 	}
 }
 
 func activityViews() []activityView {
-	return []activityView{activityTools, activityPlan, activityWork, activityNotes, activityRounds,
-		activityEvents, activityAgents, activityFindings, activityEdits}
+	return []activityView{activityTools, activityPlan, activityQueue, activityWork, activityNotes,
+		activityRounds, activityEvents, activityAgents, activityFindings, activityEdits}
 }
 
 func (m *Model) statusLine() string {
@@ -1269,6 +1373,8 @@ func (m *Model) statusLine() string {
 	}
 	if m.runContext.Found {
 		parts = append(parts, fmt.Sprintf("events=#%d", m.runContext.EventSequence))
+		parts = append(parts, fmt.Sprintf("steering=%d/%d",
+			m.runContext.Steering.Pending, m.runContext.Steering.Prepared))
 	}
 	if m.eventPollError {
 		parts = append(parts, "event-stream=retrying")
@@ -1377,12 +1483,49 @@ func loadRunContext(ctx context.Context, runStateStore RunStateStore,
 	if err != nil {
 		return runContext{}, err
 	}
+	steering, err := loadOperatorSteeringContext(ctx, runStateStore, run)
+	if err != nil {
+		return runContext{}, err
+	}
 	return runContext{Found: true, Run: run, Mode: mode, WorkItems: workItems, Notes: notes,
 		ToolRounds: rounds, Grants: grants, Events: eventList, EventSequence: eventSequence,
 		Agents: agents, FindingReports: reports, FileEdits: edits,
 		FileEditsTruncated: editsTruncated, PlanProposal: planProposal,
 		PlanSelection: planSelection, DeliveryGateEnforced: deliveryGateEnforced,
-		DeliveryCheckpoints: deliveryCheckpoints}, nil
+		DeliveryCheckpoints: deliveryCheckpoints, Steering: steering}, nil
+}
+
+func loadOperatorSteeringContext(ctx context.Context, stateStore RunStateStore,
+	run domain.Run,
+) (operatorSteeringContext, error) {
+	values, err := stateStore.ListOperatorSteering(ctx, run.ID, 20)
+	if err != nil {
+		return operatorSteeringContext{}, err
+	}
+	summary, err := stateStore.GetOperatorSteeringQueueSummary(ctx, run.ID)
+	if err != nil {
+		return operatorSteeringContext{}, err
+	}
+	if summary.RunID != run.ID {
+		return operatorSteeringContext{}, errors.New("TUI operator steering summary is cross-Run")
+	}
+	result := operatorSteeringContext{
+		Pending: summary.Pending, Prepared: summary.Prepared,
+		Committed: summary.Committed, Cancelled: summary.Cancelled,
+		Messages: make([]operatorSteeringMetadata, len(values)),
+	}
+	for index, value := range values {
+		if err := value.Validate(); err != nil || value.RunID != run.ID ||
+			value.SessionID != run.SessionID {
+			return operatorSteeringContext{},
+				errors.New("TUI operator steering metadata is invalid or cross-Run")
+		}
+		result.Messages[index] = operatorSteeringMetadata{
+			ID: value.ID, Sequence: value.Sequence, Status: value.Status,
+			CreatedAt: value.CreatedAt,
+		}
+	}
+	return result, nil
 }
 
 func readyDeliveryCheckpointCount(checkpoints []domain.DeliveryCheckpoint,

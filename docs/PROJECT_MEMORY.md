@@ -17,18 +17,19 @@ Read in this order after a long context break:
 7. `docs/adr/0002-run-centric-runtime.md`
 8. `docs/adr/0003-run-execution-modes.md`
 9. `docs/adr/0004-plan-delivery-workflow.md`
+10. `docs/adr/0005-operator-steering-queue.md`
 
 ## Current Baseline
 
 - Overall product vision: about 97%.
 - General Agent MVP: about 99%.
 - V2 run-centric runtime: about 99%.
-- Database schema: v44.
+- Database schema: v45.
 - Main languages: Go control plane, TypeScript React/Vite read console; Rust has not started.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
 
-Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, loopback read API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite read console.
+Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, safe-boundary operator steering, loopback read API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite read console.
 
 ## Security Invariants
 
@@ -43,23 +44,27 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 
 ## Latest Completed Slice
 
-Schema v44 adds immutable `delivery_checkpoint.v1` over schema v42 selected WorkItems. A checkpoint can be recorded only by the operator application/CLI for an `in_progress` selected item while its Run is paused in Deliver phase and has no active execution lease. It pins the proposal and selection, exact source module, acceptance fingerprint, source fingerprint, current mode snapshot/revision, and WorkItem version. Focused verification, diff review, security review, and handoff summary are mandatory; the deterministic final selected module also requires full functional verification and robustness review.
+Schema v45 adds a durable operator steering queue over the existing RunSupervisor and Session pipeline. `run steer enqueue` accepts a stable operation key, while an ordinary Run-bound `session send` automatically queues when the Run has an active lease, a started/failed pending attempt, or an existing queue. Input is redacted, normalized, limited to 16 KiB, ordered by a per-Run sequence, and bounded to 64 pending items/256 KiB. Raw operation keys are never stored.
 
-One transaction creates the checkpoint, a digest-only idempotency operation, an immutable pinned handoff Note, and metadata-only Note/checkpoint events. The existing WorkItem transition and both Supervisor/Run completion paths consume these facts. Go and SQLite independently require the exact current Deliver revision and item version. Checkpoint, operation, handoff Note, and all Note relation rows are immutable. Cross-process retries converge; changed intent conflicts. An old selection with any already completed/cancelled item remains explicitly unenrolled instead of receiving fabricated evidence.
+At a safe root-turn boundary, `BeginSupervisorTurn` prepares only the oldest item and binds it to the exact attempt/turn. Successful lifecycle commit writes the authorized Session user message, assistant response, delivery commit, and queue state in one transaction. A failed attempt supersedes its delivery and retries the same item without early Session history. If more input remains, model `finish`/`wait` is deferred to a Go-owned `continue`; final Run completion is blocked while pending input exists. Failed/cancelled Runs cancel outstanding queue items transactionally.
 
-CLI adds `run delivery checkpoint/list/show`. HTTP/OpenAPI, generated TypeScript, React, and TUI show only enforcement, required/ready counts, and bounded checkpoint metadata. They omit evidence, internal digests, operation keys, and requester identity. The model has no checkpoint tool; Policy denies obvious Shell/process/script/Sandbox self-invocation of the operator checkpoint command. This is defense in depth, while Local/Docker process execution remains closed.
+CLI provides enqueue/list/show, and Session/TUI input can queue without interrupting the active action. HTTP/OpenAPI, React, and TUI expose bounded status/sequence metadata only. They omit content, hashes, operator identity, Session IDs, and Session-message IDs; no public mutation or capability was added. The local CLI detail is the intentional trusted surface that can display content.
 
-The focused audit found no unresolved high- or medium-severity issue. It fixed four low-risk boundaries before release: handoff Note titles are independent of maximum-length model module titles, relation-table update triggers check both old and new Note ownership, checkpoint events no longer expose internal fingerprints/digests, and CLI wording distinguishes gate readiness from capability authorization. Full local release checks passed. GitHub Actions run `29280076450` passed both the Go control-plane and TypeScript-console jobs for commit `0fa5ee3`.
+The release audit found no unresolved high- or medium-severity issue. It fixed three low-risk boundaries: a paused Run with an existing queue returns the durable queued fact without a fallible post-commit auto-resume; queue events no longer expose requester identity; and `run steer list` validates that its parent Run exists instead of treating an unknown Run as an empty queue. Full Go tests, full race detection, vet, staticcheck, module verification, govulncheck, strict TypeScript, 17 Vitest tests, production build, npm audit, and an isolated real-binary queue smoke pass locally.
 
 ## Next Slice
 
-Build schema v45 durable operator steering queue without interrupting unsafe boundaries:
+Build schema v46 queue-control hardening before widening autonomy:
 
-1. Accept bounded operator input while a Run is busy and persist it in order instead of returning only “busy”.
-2. Deliver queued input exactly once at a safe root-turn boundary, never midway through an active model/tool commit.
-3. Reuse PendingInput, Coordinator inbox, execution lease, cancellation, provenance, and idempotency semantics rather than creating a second message engine.
-4. Expose queue state read-only first; keep model, HTTP, TypeScript, and child Agents unable to forge operator authority.
-5. Keep Specialist Skill minimization as the following independent P7 audit, and keep Rust analyzers behind the later Sandbox/process protocol.
+1. Add digest-idempotent, operator-only cancellation for `pending` steering; never edit, reorder, or cancel the currently prepared item.
+2. Define an explicit wake/drain policy for queued work on idle or paused Runs without allowing a post-commit API error to hide a successful enqueue.
+3. Add caller-supplied idempotency to ordinary Session steering so client retries across process boundaries can converge as precisely as `run steer enqueue`.
+4. Keep HTTP and React read-only; expose no queue mutation to models or child Agents.
+5. Follow with the independent Specialist Skill-minimization audit, preserving distinct Code and Cyber Skill sets. Rust analyzers remain behind the later Sandbox/process JSON protocol.
+
+## Local Machine Note
+
+The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so startup correctly fails closed with `migration 30 checksum or name mismatch`. The v45 code did not modify migrations 1-44, and fresh/upgrade fixtures plus isolated `CYBERAGENT_HOME` runs pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically.
 
 ## Delivery Loop
 

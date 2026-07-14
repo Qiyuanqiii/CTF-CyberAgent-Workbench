@@ -121,27 +121,33 @@ type Manager struct {
 }
 
 type SendResult struct {
-	Session      Session
-	UserMessage  Message
-	ReplyMessage Message
-	Text         string
-	Command      bool
-	Compacted    bool
-	SummaryID    int64
-	FileEditID   string
-	ToolRunID    string
-	RunID        string
-	RunAction    string
-	RunStatus    string
+	Session          Session
+	UserMessage      Message
+	ReplyMessage     Message
+	Text             string
+	Command          bool
+	Compacted        bool
+	SummaryID        int64
+	FileEditID       string
+	ToolRunID        string
+	RunID            string
+	RunAction        string
+	RunStatus        string
+	Queued           bool
+	SteeringID       string
+	SteeringSequence int64
 }
 
 type RunChatResult struct {
-	RunID        string
-	UserMessage  Message
-	ReplyMessage Message
-	Text         string
-	Action       string
-	RunStatus    string
+	RunID            string
+	UserMessage      Message
+	ReplyMessage     Message
+	Text             string
+	Action           string
+	RunStatus        string
+	Queued           bool
+	SteeringID       string
+	SteeringSequence int64
 }
 
 type TurnMessages struct {
@@ -210,14 +216,20 @@ func (m *Manager) Send(ctx context.Context, sessionID string, input string) (Sen
 			return SendResult{}, err
 		}
 		if handled {
-			compacted, summaryID, err := m.compactAfterTurn(ctx, sess)
-			if err != nil {
-				return SendResult{}, err
+			var compacted bool
+			var summaryID int64
+			if !runResult.Queued {
+				compacted, summaryID, err = m.compactAfterTurn(ctx, sess)
+				if err != nil {
+					return SendResult{}, err
+				}
 			}
 			return SendResult{
 				Session: sess, UserMessage: runResult.UserMessage, ReplyMessage: runResult.ReplyMessage,
 				Text: runResult.Text, Compacted: compacted, SummaryID: summaryID,
 				RunID: runResult.RunID, RunAction: runResult.Action, RunStatus: runResult.RunStatus,
+				Queued: runResult.Queued, SteeringID: runResult.SteeringID,
+				SteeringSequence: runResult.SteeringSequence,
 			}, nil
 		}
 	}

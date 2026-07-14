@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
@@ -15,6 +16,147 @@ import (
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/store"
 )
+
+func TestSessionRunChatQueuesConcurrentOperatorInputAtSafeBoundary(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	service := application.NewRunService(st)
+	_, run, err := service.Create(ctx, application.CreateRunRequest{
+		Goal: "concurrent operator steering", Profile: "review",
+		ModelRoute: "lifecycle-test/model", Budget: domain.Budget{MaxTurns: 4},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider := &lifecycleProvider{responses: []string{
+		rootActionResponse(domain.RootActionFinish, "first result", "first done", ""),
+		rootActionResponse(domain.RootActionFinish, "second result", "all done", ""),
+	}, afterResponse: func(index int) {
+		if index == 0 {
+			close(started)
+			<-release
+		}
+	}}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	sess, err := st.GetSession(ctx, run.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := session.NewManager(st, router, policy.NewDefaultChecker()).WithRunChatExecutor(
+		application.NewSessionRunChatExecutor(st, router, policy.NewDefaultChecker()),
+	)
+	firstDone := make(chan struct {
+		result session.SendResult
+		err    error
+	}, 1)
+	go func() {
+		result, sendErr := manager.Send(ctx, sess.ID, "finish the initial request")
+		firstDone <- struct {
+			result session.SendResult
+			err    error
+		}{result: result, err: sendErr}
+	}()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first model call did not reach its blocking boundary")
+	}
+	queued, err := manager.Send(ctx, sess.ID, "also verify the queued requirement")
+	if err != nil || !queued.Queued || queued.RunAction != "queued" ||
+		queued.SteeringID == "" || queued.SteeringSequence != 1 || queued.Compacted ||
+		queued.UserMessage.ID != 0 || queued.ReplyMessage.ID != 0 {
+		t.Fatalf("concurrent Session input was not queued cleanly: result=%#v err=%v", queued, err)
+	}
+	history, err := st.ListSessionMessages(ctx, sess.ID, true)
+	if err != nil || len(history) != 0 {
+		t.Fatalf("queued input was committed before a safe boundary: history=%#v err=%v", history, err)
+	}
+	close(release)
+	var first struct {
+		result session.SendResult
+		err    error
+	}
+	select {
+	case first = <-firstDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first Session turn did not finish after release")
+	}
+	if first.err != nil || first.result.RunAction != string(domain.RootActionContinue) ||
+		first.result.RunStatus != string(domain.RunRunning) {
+		t.Fatalf("queued input did not defer the first finish action: result=%#v err=%v",
+			first.result, first.err)
+	}
+	step, err := application.NewRunSupervisor(st, router, policy.NewDefaultChecker()).Step(ctx, run.ID)
+	if err != nil || step.Action.Kind != domain.RootActionFinish || step.RunStatus != domain.RunCompleted ||
+		step.UserMessage.Content != "also verify the queued requirement" {
+		t.Fatalf("queued input was not delivered by the next Supervisor step: result=%#v err=%v",
+			step, err)
+	}
+	history, err = st.ListSessionMessages(ctx, sess.ID, true)
+	if err != nil || len(history) != 4 || history[0].Content != "finish the initial request" ||
+		history[2].Content != "also verify the queued requirement" {
+		t.Fatalf("concurrent Session history is not exactly-once and ordered: %#v err=%v",
+			history, err)
+	}
+}
+
+func TestSessionRunChatKeepsCommittedQueueFactWhenPausedRunAlreadyHasGuidance(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	runs := application.NewRunService(st)
+	_, created, err := runs.Create(ctx, application.CreateRunRequest{
+		Goal: "paused queue ordering", Profile: "review", Budget: domain.Budget{MaxTurns: 4},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := runs.Start(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = runs.Pause(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.EnqueueOperatorSteering(ctx, domain.EnqueueOperatorSteeringRequest{
+		RunID: run.ID, SessionID: run.SessionID, Content: "first queued guidance",
+		OperationKey: "paused-session-steering-first-0001", RequestedBy: "operator",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sess, err := st.GetSession(ctx, run.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := session.NewManager(st, llm.NewDefaultRouter(), policy.NewDefaultChecker()).
+		WithRunChatExecutor(application.NewSessionRunChatExecutor(st,
+			llm.NewDefaultRouter(), policy.NewDefaultChecker()))
+	result, err := manager.Send(ctx, sess.ID, "second queued guidance")
+	if err != nil || !result.Queued || result.RunStatus != string(domain.RunPaused) ||
+		result.SteeringSequence != 2 {
+		t.Fatalf("paused Session did not report its committed queue fact: result=%#v err=%v",
+			result, err)
+	}
+	persisted, err := st.GetRun(ctx, run.ID)
+	if err != nil || persisted.Status != domain.RunPaused {
+		t.Fatalf("queueing changed paused Run lifecycle: run=%#v err=%v", persisted, err)
+	}
+	summary, err := st.GetOperatorSteeringQueueSummary(ctx, run.ID)
+	if err != nil || summary.Pending != 2 || summary.Prepared != 0 {
+		t.Fatalf("paused queue ordering was not durable: %#v err=%v", summary, err)
+	}
+}
 
 func TestSessionRunChatAutoStartsAndCommitsOneMessagePair(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))

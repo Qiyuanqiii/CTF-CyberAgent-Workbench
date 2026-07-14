@@ -96,6 +96,10 @@ func (a *App) sessionSend(ctx context.Context, manager *session.Manager, args []
 	if result.RunID != "" {
 		fmt.Fprintf(a.out, "\n[run %s: action=%s status=%s]\n", result.RunID, result.RunAction, result.RunStatus)
 	}
+	if result.Queued {
+		fmt.Fprintf(a.out, "[steering %s: sequence=%d queued=true]\n",
+			result.SteeringID, result.SteeringSequence)
+	}
 	if result.Compacted {
 		fmt.Fprintf(a.out, "\n[context compacted: summary=%d]\n", result.SummaryID)
 	}

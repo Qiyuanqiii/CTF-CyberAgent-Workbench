@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-const LatestSchemaVersion = 44
+const LatestSchemaVersion = 45
 
 type migration struct {
 	Version    int
@@ -5800,6 +5800,168 @@ var deliveryCheckpointStatements = []string{
 		)
 		BEGIN
 			SELECT RAISE(ABORT, 'Run has incomplete Delivery checkpoint gates');
+		END;`,
+}
+
+var operatorSteeringStatements = []string{
+	`CREATE TABLE operator_steering_messages (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		session_id TEXT NOT NULL,
+		sequence INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		content TEXT NOT NULL,
+		content_sha256 TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		session_message_id INTEGER UNIQUE,
+		created_at TEXT NOT NULL,
+		committed_at TEXT,
+		cancelled_at TEXT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE RESTRICT,
+		FOREIGN KEY(session_message_id) REFERENCES session_messages(id) ON DELETE RESTRICT,
+		UNIQUE(run_id, sequence),
+		CHECK(sequence > 0),
+		CHECK(status IN ('pending', 'committed', 'cancelled')),
+		CHECK(length(CAST(content AS BLOB)) BETWEEN 1 AND 16384
+			AND content = trim(content) AND instr(content, char(0)) = 0),
+		CHECK(length(content_sha256) = 64 AND content_sha256 = lower(content_sha256)
+			AND content_sha256 NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0),
+		CHECK((status = 'pending' AND session_message_id IS NULL
+				AND committed_at IS NULL AND cancelled_at IS NULL)
+			OR (status = 'committed' AND session_message_id IS NOT NULL
+				AND committed_at IS NOT NULL AND cancelled_at IS NULL)
+			OR (status = 'cancelled' AND session_message_id IS NULL
+				AND committed_at IS NULL AND cancelled_at IS NOT NULL))
+	);`,
+	`CREATE INDEX idx_operator_steering_run_status_sequence
+		ON operator_steering_messages(run_id, status, sequence);`,
+	`CREATE TABLE operator_steering_operations (
+		operation_key_digest TEXT PRIMARY KEY,
+		request_fingerprint TEXT NOT NULL,
+		message_id TEXT NOT NULL UNIQUE,
+		run_id TEXT NOT NULL,
+		requested_by TEXT NOT NULL,
+		created_at TEXT NOT NULL,
+		FOREIGN KEY(message_id) REFERENCES operator_steering_messages(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(length(operation_key_digest) = 64
+			AND operation_key_digest = lower(operation_key_digest)
+			AND operation_key_digest NOT GLOB '*[^0-9a-f]*'),
+		CHECK(length(request_fingerprint) = 64
+			AND request_fingerprint = lower(request_fingerprint)
+			AND request_fingerprint NOT GLOB '*[^0-9a-f]*'),
+		CHECK(requested_by = trim(requested_by) AND length(requested_by) BETWEEN 1 AND 256
+			AND instr(requested_by, char(0)) = 0)
+	);`,
+	`CREATE TABLE operator_steering_deliveries (
+		id TEXT PRIMARY KEY,
+		message_id TEXT NOT NULL,
+		run_id TEXT NOT NULL,
+		attempt_id TEXT NOT NULL UNIQUE,
+		turn INTEGER NOT NULL,
+		status TEXT NOT NULL,
+		prepared_at TEXT NOT NULL,
+		terminal_at TEXT,
+		FOREIGN KEY(message_id) REFERENCES operator_steering_messages(id) ON DELETE RESTRICT,
+		FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE RESTRICT,
+		CHECK(turn > 0),
+		CHECK(status IN ('prepared', 'committed', 'superseded', 'cancelled')),
+		CHECK((status = 'prepared' AND terminal_at IS NULL)
+			OR (status != 'prepared' AND terminal_at IS NOT NULL))
+	);`,
+	`CREATE INDEX idx_operator_steering_deliveries_run_turn
+		ON operator_steering_deliveries(run_id, turn, prepared_at);`,
+	`CREATE UNIQUE INDEX idx_operator_steering_one_prepared
+		ON operator_steering_deliveries(message_id) WHERE status = 'prepared';`,
+	`CREATE UNIQUE INDEX idx_operator_steering_one_committed
+		ON operator_steering_deliveries(message_id) WHERE status = 'committed';`,
+	`CREATE TRIGGER trg_operator_steering_insert_binding
+		BEFORE INSERT ON operator_steering_messages
+		WHEN NOT EXISTS (SELECT 1 FROM runs run
+			WHERE run.id = NEW.run_id AND run.session_id = NEW.session_id
+				AND run.status IN ('running', 'paused'))
+		BEGIN
+			SELECT RAISE(ABORT, 'operator steering Run binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_update_monotonic
+		BEFORE UPDATE ON operator_steering_messages
+		WHEN NEW.id IS NOT OLD.id OR NEW.run_id IS NOT OLD.run_id
+			OR NEW.session_id IS NOT OLD.session_id OR NEW.sequence IS NOT OLD.sequence
+			OR NEW.content IS NOT OLD.content OR NEW.content_sha256 IS NOT OLD.content_sha256
+			OR NEW.requested_by IS NOT OLD.requested_by OR NEW.created_at IS NOT OLD.created_at
+			OR OLD.status != 'pending' OR NEW.status NOT IN ('committed', 'cancelled')
+		BEGIN
+			SELECT RAISE(ABORT, 'operator steering content is immutable and status is monotonic');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_commit_binding
+		BEFORE UPDATE ON operator_steering_messages
+		WHEN NEW.status = 'committed' AND NOT EXISTS (
+			SELECT 1 FROM session_messages message
+			WHERE message.id = NEW.session_message_id AND message.session_id = NEW.session_id
+				AND message.role = 'user' AND message.content = NEW.content
+				AND message.content_sha256 = NEW.content_sha256
+				AND message.source_kind = 'operator_message'
+				AND message.instruction_authorized = 1)
+		BEGIN
+			SELECT RAISE(ABORT, 'operator steering Session message binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_delete_immutable
+		BEFORE DELETE ON operator_steering_messages BEGIN
+			SELECT RAISE(ABORT, 'operator steering messages cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_operation_insert
+		BEFORE INSERT ON operator_steering_operations
+		WHEN NOT EXISTS (SELECT 1 FROM operator_steering_messages message
+			WHERE message.id = NEW.message_id AND message.run_id = NEW.run_id
+				AND message.requested_by = NEW.requested_by
+				AND message.created_at = NEW.created_at)
+		BEGIN
+			SELECT RAISE(ABORT, 'operator steering operation binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_operation_update_immutable
+		BEFORE UPDATE ON operator_steering_operations BEGIN
+			SELECT RAISE(ABORT, 'operator steering operations cannot be updated');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_operation_delete_immutable
+		BEFORE DELETE ON operator_steering_operations BEGIN
+			SELECT RAISE(ABORT, 'operator steering operations cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_delivery_insert
+		BEFORE INSERT ON operator_steering_deliveries
+		WHEN NOT EXISTS (SELECT 1 FROM operator_steering_messages message
+			JOIN run_supervisor_checkpoints checkpoint ON checkpoint.run_id = message.run_id
+			WHERE message.id = NEW.message_id AND message.run_id = NEW.run_id
+				AND message.status = 'pending' AND message.content = checkpoint.pending_input
+				AND checkpoint.phase = 'turn_started' AND checkpoint.attempt_id = NEW.attempt_id
+				AND checkpoint.next_turn = NEW.turn)
+		BEGIN
+			SELECT RAISE(ABORT, 'operator steering delivery binding is invalid');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_delivery_update_monotonic
+		BEFORE UPDATE ON operator_steering_deliveries
+		WHEN NEW.id IS NOT OLD.id OR NEW.message_id IS NOT OLD.message_id
+			OR NEW.run_id IS NOT OLD.run_id OR NEW.attempt_id IS NOT OLD.attempt_id
+			OR NEW.turn IS NOT OLD.turn OR NEW.prepared_at IS NOT OLD.prepared_at
+			OR OLD.status != 'prepared'
+			OR NEW.status NOT IN ('committed', 'superseded', 'cancelled')
+			OR NEW.terminal_at IS NULL
+		BEGIN
+			SELECT RAISE(ABORT, 'operator steering delivery identity is immutable and status is monotonic');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_delivery_delete_immutable
+		BEFORE DELETE ON operator_steering_deliveries BEGIN
+			SELECT RAISE(ABORT, 'operator steering deliveries cannot be deleted');
+		END;`,
+	`CREATE TRIGGER trg_operator_steering_run_completion_guard
+		BEFORE UPDATE OF status ON runs
+		WHEN NEW.status = 'completed' AND OLD.status != 'completed'
+			AND EXISTS (SELECT 1 FROM operator_steering_messages message
+				WHERE message.run_id = NEW.id AND message.status = 'pending')
+		BEGIN
+			SELECT RAISE(ABORT, 'Run has pending operator steering');
 		END;`,
 }
 

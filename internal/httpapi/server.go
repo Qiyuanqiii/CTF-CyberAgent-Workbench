@@ -50,6 +50,10 @@ type Store interface {
 	ListRunEventsAfterSequence(ctx context.Context, runID string, afterSequence int64, limit int) ([]events.Event, error)
 	GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error)
 	GetRunExecutionLease(ctx context.Context, runID string) (domain.RunExecutionLease, bool, error)
+	ListOperatorSteering(ctx context.Context, runID string,
+		limit int) ([]domain.OperatorSteeringMessage, error)
+	GetOperatorSteeringQueueSummary(ctx context.Context,
+		runID string) (domain.OperatorSteeringQueueSummary, error)
 	RequestSupervisorModelCancellation(ctx context.Context, request domain.RequestModelCancellation) (domain.ModelCancellationResult, error)
 	RequestSpecialistModelCancellation(ctx context.Context,
 		request domain.RequestSpecialistModelCancellation) (domain.SpecialistModelCancellationResult, error)

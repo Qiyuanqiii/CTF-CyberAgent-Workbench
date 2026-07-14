@@ -9,6 +9,7 @@ import {
   Gauge,
   GitBranch,
   ListChecks,
+  ListOrdered,
   Network,
   Radio,
   ScanSearch,
@@ -21,6 +22,7 @@ import type {
   ArtifactView,
   EventView,
   NoteView,
+  OperatorSteeringQueueView,
   PlanDeliveryStateView,
   RunDetailView,
   SupervisorToolRoundView,
@@ -164,6 +166,7 @@ function RunOverview({ detail }: { detail: RunDetailView }) {
   const checkpoint = detail.checkpoint;
   const usage = detail.tool_usage;
   const percent = usage.limit > 0 ? Math.min(100, Math.round((usage.consumed / usage.limit) * 100)) : 0;
+  const steering = detail.operator_steering;
   return (
     <div className="overview-layout">
       <section className="metric-strip" aria-label="Run 指标">
@@ -206,8 +209,37 @@ function RunOverview({ detail }: { detail: RunDetailView }) {
           <KeyValue label="Exhausted" value={formatDate(usage.exhausted_at)} />
         </dl>
       </section>
+      <OperatorSteeringPanel state={steering} />
       {detail.plan_delivery && <PlanDeliveryPanel state={detail.plan_delivery} />}
     </div>
+  );
+}
+
+export function OperatorSteeringPanel({ state }: { state: OperatorSteeringQueueView }) {
+  return (
+    <section className="detail-section steering-section">
+      <div className="section-heading">
+        <h2><ListOrdered aria-hidden="true" size={15} />Operator steering</h2>
+        <StatusBadge status={state.pending + state.prepared > 0 ? "pending" : "idle"} />
+      </div>
+      <div className="steering-state-line">
+        <span>Queued {formatNumber(state.pending)}</span>
+        <span>Prepared {formatNumber(state.prepared)}</span>
+        <span>Committed {formatNumber(state.committed)}</span>
+        <span>Cancelled {formatNumber(state.cancelled)}</span>
+      </div>
+      <div className="steering-list" aria-label="Operator steering metadata">
+        {state.messages.length === 0 ? <p>No operator guidance recorded</p> :
+          state.messages.map((message) => (
+            <div className="steering-row" key={message.id}>
+              <span>#{message.sequence}</span>
+              <code>{shortID(message.id)}</code>
+              <StatusBadge status={message.status} />
+              <time dateTime={message.created_at}>{formatDate(message.created_at)}</time>
+            </div>
+          ))}
+      </div>
+    </section>
   );
 }
 

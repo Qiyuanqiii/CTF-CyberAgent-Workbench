@@ -1127,7 +1127,7 @@ func removeSchemaV43ForTestStatements() []string {
 }
 
 func removeSchemaV44ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV45ForTestStatements(), []string{
 		`DROP TRIGGER trg_delivery_run_completion_guard`,
 		`DROP TRIGGER trg_delivery_work_item_completion_guard`,
 		`DROP TRIGGER trg_delivery_handoff_note_evidence_delete_immutable`,
@@ -1156,6 +1156,30 @@ func removeSchemaV44ForTestStatements() []string {
 		`DROP TABLE delivery_checkpoints`,
 		`DROP TABLE delivery_gate_enrollments`,
 		`DELETE FROM schema_migrations WHERE version = 44`,
+	}...)
+}
+
+func removeSchemaV45ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_operator_steering_run_completion_guard`,
+		`DROP TRIGGER trg_operator_steering_delivery_delete_immutable`,
+		`DROP TRIGGER trg_operator_steering_delivery_update_monotonic`,
+		`DROP TRIGGER trg_operator_steering_delivery_insert`,
+		`DROP TRIGGER trg_operator_steering_operation_delete_immutable`,
+		`DROP TRIGGER trg_operator_steering_operation_update_immutable`,
+		`DROP TRIGGER trg_operator_steering_operation_insert`,
+		`DROP TRIGGER trg_operator_steering_delete_immutable`,
+		`DROP TRIGGER trg_operator_steering_commit_binding`,
+		`DROP TRIGGER trg_operator_steering_update_monotonic`,
+		`DROP TRIGGER trg_operator_steering_insert_binding`,
+		`DROP INDEX idx_operator_steering_one_committed`,
+		`DROP INDEX idx_operator_steering_one_prepared`,
+		`DROP INDEX idx_operator_steering_deliveries_run_turn`,
+		`DROP TABLE operator_steering_deliveries`,
+		`DROP TABLE operator_steering_operations`,
+		`DROP INDEX idx_operator_steering_run_status_sequence`,
+		`DROP TABLE operator_steering_messages`,
+		`DELETE FROM schema_migrations WHERE version = 45`,
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/session"
@@ -15,6 +16,7 @@ import (
 type SessionRunStore interface {
 	RunStore
 	RunSupervisorStore
+	OperatorSteeringStore
 	GetRunBySession(ctx context.Context, sessionID string) (domain.Run, bool, error)
 }
 
@@ -48,12 +50,29 @@ func (e *SessionRunChatExecutor) ExecuteSessionTurn(ctx context.Context, sess se
 	if run.SessionID != sess.ID {
 		return session.RunChatResult{}, true, apperror.New(apperror.CodeConflict, "run and session binding changed")
 	}
+	steeringRequest := domain.EnqueueOperatorSteeringRequest{
+		RunID: run.ID, SessionID: sess.ID, Content: input,
+		OperationKey: idgen.New("session-steering"), RequestedBy: "session_operator",
+	}
+	queueIfBusy := func(current domain.Run) (session.RunChatResult, bool, error) {
+		queued, busy, queueErr := e.store.EnqueueOperatorSteeringIfBusy(ctx, steeringRequest)
+		if queueErr != nil || !busy {
+			return session.RunChatResult{}, busy, apperror.Normalize(queueErr)
+		}
+		return queuedSessionRunChatResult(current, queued.Message), true, nil
+	}
 	switch run.Status {
 	case domain.RunCreated, domain.RunPreparing:
 		run, err = e.runs.Start(ctx, run.ID)
 	case domain.RunPaused:
+		if queued, busy, queueErr := queueIfBusy(run); queueErr != nil || busy {
+			return queued, true, queueErr
+		}
 		run, err = e.runs.Resume(ctx, run.ID)
 	case domain.RunRunning:
+		if queued, busy, queueErr := queueIfBusy(run); queueErr != nil || busy {
+			return queued, true, queueErr
+		}
 	case domain.RunWaitingApproval:
 		return session.RunChatResult{}, true, apperror.New(apperror.CodeFailedPrecondition, "run is waiting for approval")
 	default:
@@ -65,10 +84,25 @@ func (e *SessionRunChatExecutor) ExecuteSessionTurn(ctx context.Context, sess se
 	}
 	result, err := e.supervisor.StepWithInput(ctx, run.ID, input)
 	if err != nil {
+		if apperror.CodeOf(err) == apperror.CodeConflict {
+			if queued, busy, queueErr := queueIfBusy(run); queueErr != nil || busy {
+				return queued, true, queueErr
+			}
+		}
 		return session.RunChatResult{}, true, err
 	}
 	return session.RunChatResult{
 		RunID: run.ID, UserMessage: result.UserMessage, ReplyMessage: result.ReplyMessage,
 		Text: result.Text, Action: string(result.Action.Kind), RunStatus: string(result.RunStatus),
 	}, true, nil
+}
+
+func queuedSessionRunChatResult(run domain.Run,
+	message domain.OperatorSteeringMessage,
+) session.RunChatResult {
+	return session.RunChatResult{
+		RunID: run.ID, Text: "Operator guidance queued for the next safe root-turn boundary.",
+		Action: "queued", RunStatus: string(run.Status), Queued: true,
+		SteeringID: message.ID, SteeringSequence: message.Sequence,
+	}
 }

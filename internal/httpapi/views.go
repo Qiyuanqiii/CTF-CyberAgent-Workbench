@@ -113,6 +113,23 @@ type RunExecutionLeaseView struct {
 	ReleasedAt *time.Time `json:"released_at,omitempty"`
 }
 
+type OperatorSteeringMessageView struct {
+	ID          string     `json:"id"`
+	Sequence    int64      `json:"sequence"`
+	Status      string     `json:"status"`
+	CreatedAt   time.Time  `json:"created_at"`
+	CommittedAt *time.Time `json:"committed_at,omitempty"`
+	CancelledAt *time.Time `json:"cancelled_at,omitempty"`
+}
+
+type OperatorSteeringQueueView struct {
+	Pending   int                           `json:"pending"`
+	Prepared  int                           `json:"prepared"`
+	Committed int                           `json:"committed"`
+	Cancelled int                           `json:"cancelled"`
+	Messages  []OperatorSteeringMessageView `json:"messages"`
+}
+
 type PlanDeliveryModuleView struct {
 	Ordinal            int      `json:"ordinal"`
 	Title              string   `json:"title"`
@@ -186,6 +203,7 @@ type RunDetailView struct {
 	Mode         RunModeView               `json:"mode"`
 	Checkpoint   *SupervisorCheckpointView `json:"checkpoint,omitempty"`
 	Lease        *RunExecutionLeaseView    `json:"execution_lease,omitempty"`
+	Steering     OperatorSteeringQueueView `json:"operator_steering"`
 	ToolUsage    ToolUsageView             `json:"tool_usage"`
 	PlanDelivery *PlanDeliveryStateView    `json:"plan_delivery,omitempty"`
 }
@@ -365,6 +383,24 @@ func runExecutionLeaseView(value domain.RunExecutionLease, now time.Time) RunExe
 		OwnerID: value.OwnerID, Generation: value.Generation, Status: string(value.Status),
 		Active: value.ActiveAt(now), AcquiredAt: value.AcquiredAt, RenewedAt: value.RenewedAt,
 		ExpiresAt: value.ExpiresAt, ReleasedAt: value.ReleasedAt,
+	}
+}
+
+func operatorSteeringQueueView(summary domain.OperatorSteeringQueueSummary,
+	values []domain.OperatorSteeringMessage,
+) OperatorSteeringQueueView {
+	messages := make([]OperatorSteeringMessageView, len(values))
+	for index, value := range values {
+		messages[index] = OperatorSteeringMessageView{
+			ID: value.ID, Sequence: value.Sequence, Status: string(value.Status),
+			CreatedAt: value.CreatedAt, CommittedAt: value.CommittedAt,
+			CancelledAt: value.CancelledAt,
+		}
+	}
+	return OperatorSteeringQueueView{
+		Pending: summary.Pending, Prepared: summary.Prepared,
+		Committed: summary.Committed, Cancelled: summary.Cancelled,
+		Messages: messages,
 	}
 }
 

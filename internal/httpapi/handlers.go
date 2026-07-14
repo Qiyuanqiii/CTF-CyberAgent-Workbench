@@ -217,6 +217,15 @@ func (a *API) run(request *http.Request, runID string) (any, *Page, error) {
 		view := runExecutionLeaseView(lease, time.Now().UTC())
 		detail.Lease = &view
 	}
+	steeringMessages, err := a.store.ListOperatorSteering(request.Context(), run.ID, 20)
+	if err != nil {
+		return nil, nil, err
+	}
+	steeringSummary, err := a.store.GetOperatorSteeringQueueSummary(request.Context(), run.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	detail.Steering = operatorSteeringQueueView(steeringSummary, steeringMessages)
 	selection, selected, err := a.store.GetPlanDeliverySelectionByRun(request.Context(), run.ID)
 	if err != nil {
 		return nil, nil, err

@@ -618,6 +618,12 @@ func (s *RunSupervisor) stepWithLease(ctx context.Context, lease domain.RunExecu
 		if err != nil {
 			return result, apperror.Normalize(err)
 		}
+		if (safeAction.Kind == domain.RootActionFinish || safeAction.Kind == domain.RootActionWait) &&
+			updatedRun.Status == domain.RunRunning && checkpoint.Phase == domain.SupervisorIdle {
+			safeAction.Kind = domain.RootActionContinue
+			safeAction.Summary = ""
+			safeAction.Reason = ""
+		}
 		result.Status = LifecycleTurnCompleted
 		result.Text = safeAction.Message
 		result.Provider = response.Provider
