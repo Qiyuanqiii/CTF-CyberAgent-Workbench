@@ -59,22 +59,11 @@ func (s *RunService) ChangePhase(ctx context.Context,
 		normalized.OperationKey)
 	requestFingerprint := runmutation.Fingerprint("run_phase_change_request.v1",
 		normalized.RunID, string(target), normalized.RequestedBy, normalized.Reason)
-	if existing, found, err := s.store.GetRunModeOperation(ctx, keyDigest); err != nil {
-		return ChangeRunPhaseResult{}, apperror.Normalize(err)
+	if replay, found, err := s.loadRunPhaseReplay(ctx, keyDigest, requestFingerprint,
+		normalized.RunID, normalized.RequestedBy, target); err != nil {
+		return ChangeRunPhaseResult{}, err
 	} else if found {
-		if existing.RequestFingerprint != requestFingerprint ||
-			existing.RunID != normalized.RunID || existing.RequestedBy != normalized.RequestedBy {
-			return ChangeRunPhaseResult{}, apperror.New(apperror.CodeConflict,
-				"run mode operation key was already used for different intent")
-		}
-		stored, err := s.store.GetRunModeSnapshot(ctx, existing.SnapshotID)
-		if err == nil && (stored.ID != existing.SnapshotID || stored.RunID != existing.RunID ||
-			stored.RequestedBy != existing.RequestedBy ||
-			!stored.CreatedAt.Equal(existing.CreatedAt) || stored.Phase != target) {
-			return ChangeRunPhaseResult{}, apperror.New(apperror.CodeInternal,
-				"stored run mode operation binding is invalid")
-		}
-		return ChangeRunPhaseResult{Mode: stored, Replayed: true}, apperror.Normalize(err)
+		return replay, nil
 	}
 	run, err := s.store.GetRun(ctx, normalized.RunID)
 	if err != nil {
@@ -89,6 +78,15 @@ func (s *RunService) ChangePhase(ctx context.Context,
 		return ChangeRunPhaseResult{}, apperror.Normalize(err)
 	}
 	if current.Phase == target {
+		// Another Store may have committed this exact operation after our first
+		// lookup but before the current mode read. Recheck the atomic operation
+		// ledger before treating the already-reached phase as a new request.
+		if replay, found, err := s.loadRunPhaseReplay(ctx, keyDigest, requestFingerprint,
+			normalized.RunID, normalized.RequestedBy, target); err != nil {
+			return ChangeRunPhaseResult{}, err
+		} else if found {
+			return replay, nil
+		}
 		return ChangeRunPhaseResult{}, apperror.New(apperror.CodeFailedPrecondition,
 			"run is already in the requested phase")
 	}
@@ -123,6 +121,35 @@ func (s *RunService) ChangePhase(ctx context.Context,
 	event.CreatedAt = next.CreatedAt
 	stored, replayed, err := s.store.TransitionRunPhase(ctx, next, operation, event)
 	return ChangeRunPhaseResult{Mode: stored, Replayed: replayed}, apperror.Normalize(err)
+}
+
+func (s *RunService) loadRunPhaseReplay(ctx context.Context, keyDigest string,
+	requestFingerprint string, runID string, requestedBy string,
+	target domain.ExecutionPhase,
+) (ChangeRunPhaseResult, bool, error) {
+	existing, found, err := s.store.GetRunModeOperation(ctx, keyDigest)
+	if err != nil {
+		return ChangeRunPhaseResult{}, false, apperror.Normalize(err)
+	}
+	if !found {
+		return ChangeRunPhaseResult{}, false, nil
+	}
+	if existing.RequestFingerprint != requestFingerprint || existing.RunID != runID ||
+		existing.RequestedBy != requestedBy {
+		return ChangeRunPhaseResult{}, true, apperror.New(apperror.CodeConflict,
+			"run mode operation key was already used for different intent")
+	}
+	stored, err := s.store.GetRunModeSnapshot(ctx, existing.SnapshotID)
+	if err != nil {
+		return ChangeRunPhaseResult{}, true, apperror.Normalize(err)
+	}
+	if stored.ID != existing.SnapshotID || stored.RunID != existing.RunID ||
+		stored.RequestedBy != existing.RequestedBy ||
+		!stored.CreatedAt.Equal(existing.CreatedAt) || stored.Phase != target {
+		return ChangeRunPhaseResult{}, true, apperror.New(apperror.CodeInternal,
+			"stored run mode operation binding is invalid")
+	}
+	return ChangeRunPhaseResult{Mode: stored, Replayed: true}, true, nil
 }
 
 func normalizeChangeRunPhaseRequest(request ChangeRunPhaseRequest) (
