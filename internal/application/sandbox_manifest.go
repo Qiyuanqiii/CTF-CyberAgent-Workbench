@@ -88,6 +88,11 @@ type SandboxManifestStore interface {
 		operation sandbox.DockerObservationOperation) (sandbox.DockerObservation, bool, error)
 	GetDockerObservation(ctx context.Context, id string) (sandbox.DockerObservation, error)
 	ListDockerObservations(ctx context.Context, runID string, limit int) ([]sandbox.DockerObservation, error)
+	GetDockerContainerPlanOperation(ctx context.Context, keyDigest string) (sandbox.DockerContainerPlanOperation, bool, error)
+	CreateDockerContainerPlan(ctx context.Context, plan sandbox.DockerContainerPlan,
+		operation sandbox.DockerContainerPlanOperation) (sandbox.DockerContainerPlan, bool, error)
+	GetDockerContainerPlan(ctx context.Context, id string) (sandbox.DockerContainerPlan, error)
+	ListDockerContainerPlans(ctx context.Context, runID string, limit int) ([]sandbox.DockerContainerPlan, error)
 }
 
 type SandboxManifestService struct {
@@ -97,6 +102,7 @@ type SandboxManifestService struct {
 	evidenceClient sandbox.BackendEvidenceClient
 	outputHarness  sandbox.OutputSimulationHarness
 	dockerObserver sandbox.DockerProductionObserver
+	dockerWriter   sandbox.DockerContainerTransactionHarness
 }
 
 type PrepareSandboxManifestRequest struct {
@@ -116,7 +122,17 @@ func NewSandboxManifestService(store SandboxManifestStore,
 		outputHarness:  sandbox.NewInMemoryOutputHarness(),
 		dockerObserver: sandbox.NewReadOnlyDockerProductionObserver(
 			sandbox.NewLocalDockerReadOnlyTransport()),
+		dockerWriter: sandbox.NewInMemoryDockerWriteTransaction(),
 	}
+}
+
+func (s *SandboxManifestService) WithDockerContainerTransactionHarness(
+	harness sandbox.DockerContainerTransactionHarness,
+) *SandboxManifestService {
+	if s != nil && harness != nil {
+		s.dockerWriter = harness
+	}
+	return s
 }
 
 func (s *SandboxManifestService) WithDockerProductionObserver(

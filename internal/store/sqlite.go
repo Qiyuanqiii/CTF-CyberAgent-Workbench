@@ -275,6 +275,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 51, Name: "disabled Sandbox backend and output preflight", Statements: sandboxPreflightStatements},
 		{Version: 52, Name: "simulation-only Sandbox backend evidence and output transaction", Statements: sandboxBackendEvidenceStatements},
 		{Version: 53, Name: "read-only Docker production observations", Statements: sandboxDockerObservationStatements},
+		{Version: 54, Name: "deterministic Docker container plans and fake write transactions", Statements: sandboxDockerContainerPlanStatements},
 	})
 }
 

@@ -215,5 +215,5 @@ Pagination is a bounded live SQLite projection, not a multi-request snapshot. Ap
 - No general write API, Web control action, or user-visible model-text stream. The Go-hosted browser UI is read-only; the only API write capability remains exact active-call cancellation under a separate token that the UI does not accept.
 - Execution-lease rows coordinate workers, but the API exposes neither `lease_id` nor any operation that accepts a fencing token.
 - No Artifact content route. Use the authenticated local CLI `artifact read` when content is explicitly required.
-- No real Shell, LocalSandbox, or Docker execution. Existing approvals still resolve to audited dry-run results.
+- No real Shell, LocalSandbox, or Docker execution. Schema v54 Docker plans and write transactions are in-memory compilation/fake-harness facts only; HTTP exposes no Sandbox or Docker mutation route. Existing approvals still resolve to audited dry-run results.
 - No per-resource authorization below the process token. Future remote or multi-user use requires a separate identity and authorization design.

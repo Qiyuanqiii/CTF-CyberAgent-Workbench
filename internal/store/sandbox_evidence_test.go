@@ -351,7 +351,7 @@ func removeSchemaV52ForTestStatements() []string {
 }
 
 func removeSchemaV53ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV54ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_docker_observation_operation_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_observation_operation_update_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_observation_item_delete_immutable`,
@@ -366,5 +366,28 @@ func removeSchemaV53ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_docker_observations_run_created`,
 		`DROP TABLE sandbox_docker_observations`,
 		`DELETE FROM schema_migrations WHERE version = 53`,
+	}...)
+}
+
+func removeSchemaV54ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_docker_container_plan_operation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_plan_operation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_plan_step_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_plan_step_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_plan_control_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_plan_control_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_plan_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_plan_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_plan_operation_insert`,
+		`DROP TRIGGER trg_sandbox_docker_container_plan_step_insert`,
+		`DROP TRIGGER trg_sandbox_docker_container_plan_control_insert`,
+		`DROP TRIGGER trg_sandbox_docker_container_plan_insert`,
+		`DROP TABLE sandbox_docker_container_plan_operations`,
+		`DROP TABLE sandbox_docker_container_plan_steps`,
+		`DROP TABLE sandbox_docker_container_plan_controls`,
+		`DROP INDEX idx_sandbox_docker_container_plans_run_created`,
+		`DROP TABLE sandbox_docker_container_plans`,
+		`DELETE FROM schema_migrations WHERE version = 54`,
 	}
 }

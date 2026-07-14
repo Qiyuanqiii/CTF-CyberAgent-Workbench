@@ -68,7 +68,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|cancel|cleanup|executions|execution-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	if a.dockerObserver != nil {
@@ -546,6 +546,77 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		}
 		printSandboxDockerObservation(a, value)
 		return nil
+	case "docker-plan":
+		fs := newFlagSet("run sandbox docker-plan", a.errOut)
+		manifestPath := fs.String("manifest", "", "resupplied Docker sandbox manifest JSON file")
+		operationKey := fs.String("operation-key", "", "stable Docker container plan operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		confirmed := fs.Bool("confirm-fake-write", false,
+			"confirm an in-memory fake Docker write transaction with zero daemon writes")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"manifest": true, "operation-key": true, "operator": true,
+			"confirm-fake-write": false,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" ||
+			strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox docker-plan <observation-id> --manifest <manifest.json> --operation-key <key> --confirm-fake-write [--operator <id>]")
+		}
+		if !*confirmed {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker container planning requires --confirm-fake-write")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		value, err := service.CompileDockerContainerPlan(ctx,
+			application.CompileDockerContainerPlanRequest{ObservationID: fs.Arg(0),
+				Manifest: manifest, OperationKey: *operationKey, RequestedBy: *operator})
+		if err != nil {
+			return err
+		}
+		printSandboxDockerContainerPlan(a, value)
+		return nil
+	case "docker-plans":
+		fs := newFlagSet("run sandbox docker-plans", a.errOut)
+		limit := fs.Int("limit", 100, "maximum Docker container plans")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-plans <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDockerContainerPlans(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no Docker container plans")
+			return nil
+		}
+		for _, value := range values {
+			fmt.Fprintf(a.out, "%s\tobservation=%s\tstatus=%s\tcontrols=%d\tfake_write_steps=%d\tdaemon_writes=0\tproduction_submitted=false\texecution_authorized=false\tcreated_at=%s\n",
+				value.ID, value.ObservationID, value.Status, len(value.Controls),
+				value.Transaction.CommittedStepCount,
+				value.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "docker-plan-show":
+		fs := newFlagSet("run sandbox docker-plan-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-plan-show <plan-id>")
+		}
+		value, err := service.GetDockerContainerPlan(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxDockerContainerPlan(a, value)
+		return nil
 	case "cancel":
 		fs := newFlagSet("run sandbox cancel", a.errOut)
 		operationKey := fs.String("operation-key", "", "stable cancellation operation key")
@@ -716,6 +787,38 @@ func printSandboxDockerObservation(a *App, value sandbox.DockerObservation) {
 	for _, item := range report.Items {
 		fmt.Fprintf(a.out, "%d\t%s\tstate=%s\tobserved=%t\tverified=false\tevidence_digest=%s\n",
 			item.Ordinal, item.Name, item.State, item.Observed, item.EvidenceDigest)
+	}
+}
+
+func printSandboxDockerContainerPlan(a *App, value sandbox.DockerContainerPlan) {
+	fmt.Fprintf(a.out, "docker_plan: %s\nobservation: %s\nevidence: %s\noutput_simulation: %s\npreflight: %s\nexecution: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nsource: %s\ntrust_class: %s\nstatus: %s\nmanifest_fingerprint: %s\nauthority_fingerprint: %s\nspec_fingerprint: %s\nplan_fingerprint: %s\nos_type: %s\narchitecture: %s\ncontainer_user: %s\nread_only_rootfs: %t\nno_new_privileges: %t\ndrop_all_capabilities: %t\ninit_enabled: %t\nmounts: %d\nread_only_mounts: %d\nwritable_mounts: %d\ndedicated_output_mounts: %d\nprivate_propagation_mounts: %d\nenvironment_bindings: %d\nsecret_references: %d\nsecrets_ephemeral: %t\nsecrets_metadata_excluded: %t\ninput_artifacts: %d\noutputs: %d\nnetwork_mode: %s\nnetwork_targets: %d\nnetwork_default_deny: %t\nexact_network_allowlist: %t\nnetwork_guard_required: %t\nnano_cpus: %d\nmemory_bytes: %d\npids: %d\nmax_output_bytes: %d\ntimeout_seconds: %d\ngrace_period_millis: %d\nreconcile_before_create: %t\nremove_on_rollback: %t\nexport_after_stop: %t\nremove_after_export: %t\ntransaction_protocol: %s\ntransaction_status: %s\nfake_write_steps: %d\ndaemon_writes: 0\nbackend_touched: false\nsimulation_only: true\nproduction_submitted: false\nproduction_verified: false\nbackend_available: false\nbackend_enabled: false\nexecution_authorized: false\nartifact_commit_authorized: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\n",
+		value.ID, value.ObservationID, value.EvidenceID, value.OutputSimulationID,
+		value.PreflightID, value.ExecutionID, value.RunID, value.MissionID,
+		value.WorkspaceID, value.ProtocolVersion, value.Source, value.TrustClass,
+		value.Status, value.ManifestFingerprint, value.AuthorityFingerprint,
+		value.SpecFingerprint, value.PlanFingerprint, value.OSType, value.Architecture,
+		value.ContainerUser, value.ReadOnlyRootFS, value.NoNewPrivileges,
+		value.DropAllCapabilities, value.InitEnabled, value.MountCount,
+		value.ReadOnlyMountCount, value.WritableMountCount, value.DedicatedOutputMounts,
+		value.PrivatePropagationMounts, value.EnvironmentCount,
+		value.SecretReferenceCount, value.SecretsEphemeral,
+		value.SecretsMetadataExcluded, value.InputArtifactCount, value.OutputCount,
+		value.NetworkMode, value.NetworkTargetCount, value.NetworkDefaultDeny,
+		value.ExactNetworkAllowlist, value.NetworkGuardRequired, value.NanoCPUs,
+		value.MemoryBytes, value.PIDs, value.MaxOutputBytes, value.TimeoutSeconds,
+		value.GracePeriodMillis, value.ReconcileBeforeCreate, value.RemoveOnRollback,
+		value.ExportAfterStop, value.RemoveAfterExport, value.Transaction.ProtocolVersion,
+		value.Transaction.Status, value.Transaction.CommittedStepCount,
+		value.RequestedBy, value.CreatedAt.Format(timeFormatRFC3339Nano), value.Replayed)
+	fmt.Fprintln(a.out, "controls:")
+	for _, control := range value.Controls {
+		fmt.Fprintf(a.out, "%d\t%s\tstate=%s\tplanned=true\tapplied=false\tverified=false\n",
+			control.Ordinal, control.Name, control.State)
+	}
+	fmt.Fprintln(a.out, "fake_write_transaction:")
+	for _, step := range value.Transaction.Steps {
+		fmt.Fprintf(a.out, "%d\t%s\tstate=%s\tsimulated=true\tproduction_applied=false\n",
+			step.Ordinal, step.Name, step.State)
 	}
 }
 

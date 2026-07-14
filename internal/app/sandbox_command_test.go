@@ -20,6 +20,42 @@ var sandboxPreflightIDPattern = regexp.MustCompile(`sandbox-preflight-[0-9]{14}-
 var sandboxEvidenceIDPattern = regexp.MustCompile(`sandbox-evidence-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxOutputSimulationIDPattern = regexp.MustCompile(`sandbox-output-sim-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerObservationIDPattern = regexp.MustCompile(`sandbox-docker-observation-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxDockerPlanIDPattern = regexp.MustCompile(`sandbox-docker-plan-[0-9]{14}-[a-f0-9]{12}`)
+
+type cliDockerPlanObservationTransport struct {
+	imageDigest string
+}
+
+func (transport cliDockerPlanObservationTransport) Endpoint() sandbox.DockerObservationEndpoint {
+	endpoint, _ := sandbox.NewDockerObservationEndpoint(sandbox.DockerObservationEndpointLocalUnix)
+	return endpoint
+}
+
+func (cliDockerPlanObservationTransport) Ping(context.Context) error { return nil }
+
+func (cliDockerPlanObservationTransport) Version(context.Context) (sandbox.DockerDaemonVersion, error) {
+	return sandbox.DockerDaemonVersion{APIVersion: "1.47", MinAPIVersion: "1.24",
+		EngineVersion: "27.5.1", GitCommit: "abc123", OSType: "linux",
+		Architecture: "amd64"}, nil
+}
+
+func (cliDockerPlanObservationTransport) Info(context.Context) (sandbox.DockerDaemonInfo, error) {
+	return sandbox.DockerDaemonInfo{ID: "private-daemon", Name: "private-host",
+		DockerRootDir: "/private/docker", ServerVersion: "27.5.1", OSType: "linux",
+		Architecture: "amd64", Driver: "overlay2", CgroupDriver: "systemd",
+		CgroupVersion: "2", DefaultRuntime: "runc", NCPU: 8,
+		MemoryBytes: 8 * 1024 * 1024 * 1024, PidsLimit: true,
+		SecurityOptions: []string{"name=rootless"}}, nil
+}
+
+func (transport cliDockerPlanObservationTransport) InspectImage(context.Context,
+	string,
+) (sandbox.DockerImageInspection, error) {
+	return sandbox.DockerImageInspection{ID: "sha256:" + strings.Repeat("f", 64),
+		RepoDigests: []string{"example.invalid/cli@" + transport.imageDigest},
+		OSType:      "linux", Architecture: "amd64", SizeBytes: 4096,
+		User: "root", RootFSType: "layers", GraphDriver: "overlay2"}, nil
+}
 
 func executeTestCommandWithDockerObserver(t *testing.T, observer sandbox.DockerProductionObserver,
 	args ...string,
@@ -387,6 +423,150 @@ func TestSandboxCLISimulatesBackendEvidenceAndAtomicOutputWithoutExecution(t *te
 		strings.Contains(observationShown, "private-build-host") {
 		t.Fatalf("Docker observation show leaked data output=%s stderr=%s code=%d",
 			observationShown, stderr, code)
+	}
+}
+
+func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CYBERAGENT_HOME", home)
+	manifest := defaultSandboxManifestTemplate()
+	manifest.Backend = sandbox.BackendDocker
+	manifest.Mounts = []sandbox.Mount{
+		{Source: "scripts", Target: "/workspace", Access: sandbox.MountReadOnly},
+		{Source: "outputs", Target: "/output", Access: sandbox.MountReadWrite},
+	}
+	manifest.Output.Paths = []string{"/output/report.json"}
+	encoded, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(t.TempDir(), "sandbox-docker-plan-manifest.json")
+	if err := os.WriteFile(manifestPath, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixturePath := filepath.Join(t.TempDir(), "sandbox-docker-plan-output.json")
+	fixture := `{"protocol_version":"sandbox_output_fixture.v1","outputs":[{"kind":"stdout","file_type":"stream","content":"ok"},{"kind":"stderr","file_type":"stream","content":"none"},{"kind":"file","file_type":"regular","content":"{}"}]}`
+	if err := os.WriteFile(fixturePath, []byte(fixture), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, code := executeTestCommand(t, "workspace", "init", "docker-plan-demo"); code != 0 {
+		t.Fatalf("workspace init failed: %s", stderr)
+	}
+	created, stderr, code := executeTestCommand(t, "run", "create", "compile fake Docker plan",
+		"--workspace", "docker-plan-demo", "--profile", "code")
+	if code != 0 {
+		t.Fatalf("run create failed: %s", stderr)
+	}
+	runID := runIDPattern.FindString(created)
+	prepared, stderr, code := executeTestCommand(t, "run", "sandbox", "prepare", runID,
+		"--manifest", manifestPath, "--operation-key", "docker-plan-cli-prepare")
+	if code != 0 {
+		t.Fatalf("Docker plan preparation failed: output=%s stderr=%s", prepared, stderr)
+	}
+	preparationID := sandboxPreparationIDPattern.FindString(prepared)
+	requested, stderr, code := executeTestCommand(t, "run", "sandbox", "request", preparationID)
+	if code != 0 {
+		t.Fatalf("Docker plan approval request failed: %s", stderr)
+	}
+	approvalID := approvalIDPattern.FindString(requested)
+	if _, stderr, code := executeTestCommand(t, "run", "sandbox", "review", preparationID,
+		"--decision", "approve", "--operation-key", "docker-plan-cli-review"); code != 0 {
+		t.Fatalf("Docker plan approval failed: %s", stderr)
+	}
+	candidate, stderr, code := executeTestCommand(t, "run", "sandbox", "candidate", preparationID,
+		"--manifest", manifestPath, "--approval", approvalID,
+		"--operation-key", "docker-plan-cli-candidate")
+	if code != 0 {
+		t.Fatalf("Docker plan candidate failed: %s", stderr)
+	}
+	candidateID := sandboxCandidateIDPattern.FindString(candidate)
+	begun, stderr, code := executeTestCommand(t, "run", "sandbox", "begin", candidateID,
+		"--manifest", manifestPath, "--operation-key", "docker-plan-cli-begin")
+	if code != 0 {
+		t.Fatalf("Docker plan begin failed: %s", stderr)
+	}
+	executionID := sandboxExecutionIDPattern.FindString(begun)
+	preflight, stderr, code := executeTestCommand(t, "run", "sandbox", "preflight", executionID,
+		"--manifest", manifestPath, "--operation-key", "docker-plan-cli-preflight")
+	if code != 0 {
+		t.Fatalf("Docker plan preflight failed: %s", stderr)
+	}
+	preflightID := sandboxPreflightIDPattern.FindString(preflight)
+	imageDigest := "sha256:" + strings.Repeat("6", 64)
+	evidence, stderr, code := executeTestCommand(t, "run", "sandbox", "evidence", preflightID,
+		"--manifest", manifestPath, "--image-digest", imageDigest,
+		"--operation-key", "docker-plan-cli-evidence")
+	if code != 0 {
+		t.Fatalf("Docker plan evidence failed: %s", stderr)
+	}
+	evidenceID := sandboxEvidenceIDPattern.FindString(evidence)
+	simulated, stderr, code := executeTestCommand(t, "run", "sandbox", "output-simulate",
+		evidenceID, "--manifest", manifestPath, "--fixture", fixturePath,
+		"--operation-key", "docker-plan-cli-output")
+	if code != 0 {
+		t.Fatalf("Docker plan output simulation failed: %s", stderr)
+	}
+	simulationID := sandboxOutputSimulationIDPattern.FindString(simulated)
+	observer := sandbox.NewReadOnlyDockerProductionObserver(cliDockerPlanObservationTransport{
+		imageDigest: imageDigest,
+	})
+	observed, stderr, code := executeTestCommandWithDockerObserver(t, observer,
+		"run", "sandbox", "observe", evidenceID, "--simulation", simulationID,
+		"--manifest", manifestPath, "--operation-key", "docker-plan-cli-observe",
+		"--confirm-readonly-probe")
+	if code != 0 || !strings.Contains(observed, "status: observation_complete") {
+		t.Fatalf("Docker plan observation failed: output=%s stderr=%s code=%d", observed, stderr, code)
+	}
+	observationID := sandboxDockerObservationIDPattern.FindString(observed)
+	if _, stderr, code := executeTestCommand(t, "run", "sandbox", "docker-plan",
+		observationID, "--manifest", manifestPath,
+		"--operation-key", "docker-plan-cli-compile"); code != 4 ||
+		!strings.Contains(stderr, "requires --confirm-fake-write") {
+		t.Fatalf("Docker plan skipped explicit fake-write confirmation: stderr=%s code=%d", stderr, code)
+	}
+	empty, stderr, code := executeTestCommand(t, "run", "sandbox", "docker-plans", runID)
+	if code != 0 || stderr != "" || !strings.Contains(empty, "no Docker container plans") {
+		t.Fatalf("unconfirmed fake write left a plan: output=%s stderr=%s code=%d", empty, stderr, code)
+	}
+	planned, stderr, code := executeTestCommand(t, "run", "sandbox", "docker-plan",
+		observationID, "--manifest", manifestPath,
+		"--operation-key", "docker-plan-cli-compile", "--confirm-fake-write")
+	if code != 0 || stderr != "" ||
+		!strings.Contains(planned, "status: compiled_fake_transaction_committed") ||
+		!strings.Contains(planned, "container_user: 65532:65532") ||
+		!strings.Contains(planned, "read_only_rootfs: true") ||
+		!strings.Contains(planned, "dedicated_output_mounts: 1") ||
+		!strings.Contains(planned, "fake_write_steps: 7") ||
+		!strings.Contains(planned, "daemon_writes: 0") ||
+		!strings.Contains(planned, "production_submitted: false") ||
+		!strings.Contains(planned, "execution_authorized: false") ||
+		strings.Contains(planned, "/workspace") || strings.Contains(planned, "/output") ||
+		strings.Contains(planned, "go test") || strings.Contains(planned, "private-daemon") {
+		t.Fatalf("unexpected Docker plan output=%s stderr=%s code=%d", planned, stderr, code)
+	}
+	planID := sandboxDockerPlanIDPattern.FindString(planned)
+	if planID == "" {
+		t.Fatalf("missing Docker plan id: %s", planned)
+	}
+	replayed, stderr, code := executeTestCommand(t, "run", "sandbox", "docker-plan",
+		observationID, "--manifest", manifestPath,
+		"--operation-key", "docker-plan-cli-compile", "--confirm-fake-write")
+	if code != 0 || stderr != "" || !strings.Contains(replayed, "docker_plan: "+planID) ||
+		!strings.Contains(replayed, "replayed: true") {
+		t.Fatalf("Docker plan replay failed: output=%s stderr=%s code=%d", replayed, stderr, code)
+	}
+	listed, stderr, code := executeTestCommand(t, "run", "sandbox", "docker-plans", runID)
+	if code != 0 || stderr != "" || !strings.Contains(listed, planID) ||
+		!strings.Contains(listed, "daemon_writes=0") ||
+		!strings.Contains(listed, "production_submitted=false") {
+		t.Fatalf("Docker plan list failed: output=%s stderr=%s code=%d", listed, stderr, code)
+	}
+	shown, stderr, code := executeTestCommand(t, "run", "sandbox", "docker-plan-show", planID)
+	if code != 0 || stderr != "" || !strings.Contains(shown, "controls:") ||
+		!strings.Contains(shown, "fake_write_transaction:") ||
+		strings.Contains(shown, "scripts") || strings.Contains(shown, "report.json") ||
+		strings.Contains(shown, "private-host") {
+		t.Fatalf("Docker plan show leaked data: output=%s stderr=%s code=%d", shown, stderr, code)
 	}
 }
 
