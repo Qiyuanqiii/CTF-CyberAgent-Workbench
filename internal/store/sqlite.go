@@ -277,6 +277,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 53, Name: "read-only Docker production observations", Statements: sandboxDockerObservationStatements},
 		{Version: 54, Name: "deterministic Docker container plans and fake write transactions", Statements: sandboxDockerContainerPlanStatements},
 		{Version: 55, Name: "bounded Docker create inspect remove rehearsals", Statements: sandboxDockerContainerRehearsalStatements},
+		{Version: 56, Name: "recoverable Docker rehearsal attempts", Statements: sandboxDockerContainerAttemptStatements},
 	})
 }
 

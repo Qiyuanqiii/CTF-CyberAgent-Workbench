@@ -68,7 +68,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	if a.dockerObserver != nil {
@@ -658,6 +658,79 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		}
 		printSandboxDockerContainerRehearsal(a, value)
 		return nil
+	case "docker-attempts":
+		fs := newFlagSet("run sandbox docker-attempts", a.errOut)
+		limit := fs.Int("limit", 100, "maximum Docker container attempts")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-attempts <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDockerContainerRehearsalAttempts(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no Docker container attempts")
+			return nil
+		}
+		for _, value := range values {
+			adopted := value.Stage != nil && value.Stage.Result.ExistingContainerAdopted
+			fmt.Fprintf(a.out, "%s\tplan=%s\tstatus=%s\tgeneration=%d\tfailures=%d\tadopted=%t\tcontainer_started=false\tprocess_executed=false\texecution_authorized=false\tcreated_at=%s\n",
+				value.Intent.ID, value.Intent.PlanID, value.Status, value.Lease.Generation,
+				len(value.Failures), adopted,
+				value.Intent.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "docker-attempt-show":
+		fs := newFlagSet("run sandbox docker-attempt-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-attempt-show <attempt-id>")
+		}
+		value, err := service.GetDockerContainerRehearsalAttempt(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxDockerContainerAttempt(a, value)
+		return nil
+	case "docker-attempt-resume":
+		fs := newFlagSet("run sandbox docker-attempt-resume", a.errOut)
+		manifestPath := fs.String("manifest", "", "resupplied Docker sandbox manifest JSON file")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		confirmed := fs.Bool("confirm-daemon-write", false,
+			"confirm bounded recovery writes to the fixed local Docker socket")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"manifest": true, "operator": true, "confirm-daemon-write": false,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" {
+			return errors.New("usage: cyberagent run sandbox docker-attempt-resume <attempt-id> --manifest <manifest.json> --confirm-daemon-write [--operator <id>]")
+		}
+		if !*confirmed {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker container attempt resume requires --confirm-daemon-write")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		if a.dockerWriteTransport == nil {
+			service.WithDockerContainerWriteTransport(
+				sandbox.NewLocalDockerContainerWriteTransport())
+		}
+		value, err := service.ResumeDockerContainerRehearsal(ctx,
+			application.ResumeDockerContainerRequest{AttemptID: fs.Arg(0),
+				Manifest: manifest, RequestedBy: *operator, OperatorConfirmed: true})
+		if err != nil {
+			return err
+		}
+		printSandboxDockerContainerRehearsal(a, value)
+		return nil
 	case "docker-rehearsals":
 		fs := newFlagSet("run sandbox docker-rehearsals", a.errOut)
 		limit := fs.Int("limit", 100, "maximum Docker container rehearsals")
@@ -920,6 +993,51 @@ func printSandboxDockerContainerRehearsal(a *App, value sandbox.DockerContainerR
 		fmt.Fprintf(a.out, "%d\t%s\tstate=%s\tdaemon_reads=%d\tdaemon_writes=%d\tproduction_applied=%t\n",
 			step.Ordinal, step.Name, step.State, step.DaemonReads, step.DaemonWrites,
 			step.ProductionApplied)
+	}
+}
+
+func printSandboxDockerContainerAttempt(a *App,
+	value sandbox.DockerContainerRehearsalAttempt,
+) {
+	intent := value.Intent
+	adopted, controlCount := false, 0
+	if value.Stage != nil {
+		adopted = value.Stage.Result.ExistingContainerAdopted
+		controlCount = value.Stage.Result.ControlCount
+	}
+	removedNow, alreadyAbsent := false, false
+	if value.Cleanup != nil {
+		removedNow = value.Cleanup.Result.ContainerRemovedNow
+		alreadyAbsent = value.Cleanup.Result.ContainerAlreadyAbsent
+	}
+	rehearsalID := ""
+	if value.Completion != nil {
+		rehearsalID = value.Completion.RehearsalID
+	}
+	fmt.Fprintf(a.out, "docker_attempt: %s\ndocker_plan: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nstatus: %s\nendpoint_class: %s\nintent_fingerprint: %s\nrequest_fingerprint: %s\nauthority_fingerprint: %s\nspec_fingerprint: %s\nplan_fingerprint: %s\nnetwork_mode: %s\nenvironment_bindings: %d\nsecret_references: %d\nlease_generation: %d\nlease_status: %s\nfailures: %d\ncontrol_count: %d\nexisting_container_adopted: %t\ncontainer_removed_now: %t\ncontainer_already_absent: %t\ncontainer_started: false\nprocess_executed: false\nimage_pulled: false\noutput_exported: false\nproduction_verified: false\nbackend_enabled: false\nexecution_authorized: false\nartifact_commit_authorized: false\nrehearsal: %s\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\ntook_over: %t\n",
+		intent.ID, intent.PlanID, intent.RunID, intent.MissionID, intent.WorkspaceID,
+		intent.ProtocolVersion, value.Status, intent.EndpointClass, intent.IntentFingerprint,
+		intent.RequestFingerprint, intent.AuthorityFingerprint, intent.SpecFingerprint,
+		intent.PlanFingerprint, intent.NetworkMode, intent.EnvironmentCount,
+		intent.SecretReferenceCount, value.Lease.Generation, value.Lease.Status,
+		len(value.Failures), controlCount, adopted, removedNow, alreadyAbsent,
+		rehearsalID, intent.RequestedBy,
+		intent.CreatedAt.Format(timeFormatRFC3339Nano), value.Replayed, value.TookOver)
+	if value.Stage != nil {
+		fmt.Fprintln(a.out, "verified_controls:")
+		for _, control := range value.Stage.Result.Controls {
+			fmt.Fprintf(a.out, "%d\t%s\tstate=%s\tobserved=true\tverified=true\texecution_evidence=false\n",
+				control.Ordinal, control.Name, control.State)
+		}
+	}
+	if len(value.Failures) != 0 {
+		fmt.Fprintln(a.out, "failure_ledger:")
+		for _, failure := range value.Failures {
+			fmt.Fprintf(a.out, "%d\tphase=%s\tcode=%s\tretryable=%t\tgeneration=%d\tcreated_at=%s\n",
+				failure.Ordinal, failure.Phase, failure.Code, failure.Retryable,
+				failure.LeaseGeneration,
+				failure.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
 	}
 }
 

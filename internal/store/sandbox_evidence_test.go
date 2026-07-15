@@ -393,7 +393,7 @@ func removeSchemaV54ForTestStatements() []string {
 }
 
 func removeSchemaV55ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV56ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_docker_container_rehearsal_operation_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_container_rehearsal_operation_update_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_container_rehearsal_step_delete_immutable`,
@@ -408,5 +408,40 @@ func removeSchemaV55ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_docker_container_rehearsals_run_created`,
 		`DROP TABLE sandbox_docker_container_rehearsals`,
 		`DELETE FROM schema_migrations WHERE version = 55`,
+	}...)
+}
+
+func removeSchemaV56ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_completion_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_completion_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_failure_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_failure_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_cleanup_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_cleanup_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_control_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_control_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_stage_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_stage_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_lease_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_completion_insert`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_failure_insert`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_cleanup_insert`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_control_insert`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_stage_insert`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_lease_update`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_lease_insert`,
+		`DROP TRIGGER trg_sandbox_docker_container_attempt_insert`,
+		`DROP TABLE sandbox_docker_container_attempt_completions`,
+		`DROP TABLE sandbox_docker_container_attempt_failures`,
+		`DROP TABLE sandbox_docker_container_attempt_cleanups`,
+		`DROP TABLE sandbox_docker_container_attempt_controls`,
+		`DROP TABLE sandbox_docker_container_attempt_stages`,
+		`DROP TABLE sandbox_docker_container_attempt_leases`,
+		`DROP INDEX idx_sandbox_docker_container_attempts_run_created`,
+		`DROP TABLE sandbox_docker_container_rehearsal_attempts`,
+		`DELETE FROM schema_migrations WHERE version = 56`,
 	}
 }

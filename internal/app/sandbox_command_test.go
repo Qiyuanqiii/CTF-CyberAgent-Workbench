@@ -21,6 +21,7 @@ var sandboxEvidenceIDPattern = regexp.MustCompile(`sandbox-evidence-[0-9]{14}-[a
 var sandboxOutputSimulationIDPattern = regexp.MustCompile(`sandbox-output-sim-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerObservationIDPattern = regexp.MustCompile(`sandbox-docker-observation-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerPlanIDPattern = regexp.MustCompile(`sandbox-docker-plan-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxDockerAttemptIDPattern = regexp.MustCompile(`sandbox-docker-attempt-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerRehearsalIDPattern = regexp.MustCompile(`sandbox-docker-rehearsal-[0-9]{14}-[a-f0-9]{12}`)
 
 type cliDockerPlanObservationTransport struct {
@@ -85,6 +86,20 @@ func (transport *cliDockerWriteTransport) Rehearse(_ context.Context,
 	transport.calls++
 	return sandbox.NewDockerContainerWriteResult(transport.Endpoint(), request,
 		strings.Repeat("c", 64), 0)
+}
+
+func (transport *cliDockerWriteTransport) Stage(_ context.Context,
+	request sandbox.DockerContainerWriteRequest,
+) (sandbox.DockerContainerStageResult, error) {
+	transport.calls++
+	return sandbox.NewDockerContainerStageResult(transport.Endpoint(), request,
+		strings.Repeat("c", 64), false)
+}
+
+func (transport *cliDockerWriteTransport) Cleanup(_ context.Context,
+	request sandbox.DockerContainerWriteRequest, stage sandbox.DockerContainerStageResult,
+) (sandbox.DockerContainerCleanupResult, error) {
+	return sandbox.NewDockerContainerCleanupResult(transport.Endpoint(), request, stage, true)
 }
 
 func executeTestCommandWithDockerWriteTransport(t *testing.T,
@@ -632,6 +647,40 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 	rehearsalID := sandboxDockerRehearsalIDPattern.FindString(rehearsed)
 	if rehearsalID == "" {
 		t.Fatalf("missing Docker rehearsal id: %s", rehearsed)
+	}
+	attemptList, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-attempts", runID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(attemptList, "status=rehearsal_completed") ||
+		!strings.Contains(attemptList, "generation=1") ||
+		!strings.Contains(attemptList, "container_started=false") {
+		t.Fatalf("Docker attempt list failed: output=%s stderr=%s code=%d",
+			attemptList, stderr, code)
+	}
+	attemptID := sandboxDockerAttemptIDPattern.FindString(attemptList)
+	if attemptID == "" {
+		t.Fatalf("missing Docker attempt id: %s", attemptList)
+	}
+	attemptShown, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-attempt-show", attemptID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(attemptShown, "verified_controls:") ||
+		!strings.Contains(attemptShown, "environment_empty") ||
+		!strings.Contains(attemptShown, "execution_evidence=false") ||
+		!strings.Contains(attemptShown, "lease_status: released") ||
+		strings.Contains(attemptShown, "/workspace") ||
+		strings.Contains(attemptShown, strings.Repeat("c", 64)) {
+		t.Fatalf("Docker attempt show leaked data: output=%s stderr=%s code=%d",
+			attemptShown, stderr, code)
+	}
+	resumed, stderr, code := executeTestCommandWithDockerWriteTransport(t, writer,
+		"run", "sandbox", "docker-attempt-resume", attemptID, "--manifest", manifestPath,
+		"--confirm-daemon-write")
+	if code != 0 || stderr != "" || writer.calls != 1 ||
+		!strings.Contains(resumed, "docker_rehearsal: "+rehearsalID) ||
+		!strings.Contains(resumed, "replayed: true") {
+		t.Fatalf("Docker attempt-id resume failed: output=%s stderr=%s code=%d calls=%d",
+			resumed, stderr, code, writer.calls)
 	}
 	rehearsalReplay, stderr, code := executeTestCommandWithDockerWriteTransport(t, writer,
 		"run", "sandbox", "docker-rehearse", planID, "--manifest", manifestPath,

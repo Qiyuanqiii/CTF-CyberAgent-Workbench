@@ -28,6 +28,7 @@ type dockerWriteTestDaemon struct {
 	afterCreate                     func()
 	failCreateResponseAfterMutation bool
 	imageVolumes                    bool
+	imageEnvironment                bool
 	unsafe                          bool
 }
 
@@ -51,10 +52,14 @@ func (daemon *dockerWriteTestDaemon) Do(request *http.Request) (*http.Response, 
 					"/declared-volume": json.RawMessage(`{}`),
 				}
 			}
+			var environment []string
+			if daemon.imageEnvironment {
+				environment = []string{"PATH=/untrusted/image/default"}
+			}
 			payload, _ := json.Marshal(map[string]any{
 				"Id":          "sha256:" + strings.Repeat("d", 64),
 				"RepoDigests": []string{"example.invalid/rehearsal@" + digest},
-				"Config":      map[string]any{"Volumes": volumes},
+				"Config":      map[string]any{"Volumes": volumes, "Env": environment},
 			})
 			return dockerWriteTestResponse(request, http.StatusOK, payload), nil
 		}
@@ -120,8 +125,9 @@ func (daemon *dockerWriteTestDaemon) inspectPayload() []byte {
 		"Created": "2026-07-15T00:00:00Z",
 		"Config": map[string]any{
 			"Image": daemon.payload.Image, "Entrypoint": daemon.payload.Entrypoint,
-			"Cmd": daemon.payload.Cmd, "WorkingDir": daemon.payload.WorkingDir,
-			"User": daemon.payload.User, "NetworkDisabled": daemon.payload.NetworkDisabled,
+			"Cmd": daemon.payload.Cmd, "Env": daemon.payload.Env,
+			"WorkingDir": daemon.payload.WorkingDir,
+			"User":       daemon.payload.User, "NetworkDisabled": daemon.payload.NetworkDisabled,
 			"Labels": labels, "StopSignal": daemon.payload.StopSignal,
 		},
 		"State": map[string]any{"Status": "created", "Running": false, "Paused": false,
@@ -209,6 +215,106 @@ func TestDockerContainerWriteTransportRejectsImageDeclaredVolumesBeforeCreate(t 
 	if DockerContainerWriteErrorCode(err) != DockerContainerWriteFailureUnsafeImage ||
 		daemon.creates != 0 || daemon.deletes != 0 || daemon.containerID != "" {
 		t.Fatalf("image-declared volume reached Docker create: daemon=%#v err=%v", daemon, err)
+	}
+}
+
+func TestDockerContainerWriteTransportRejectsImageEnvironmentBeforeCreate(t *testing.T) {
+	request := newDockerContainerWriteTestRequest(t)
+	endpoint, _ := NewDockerObservationEndpoint(DockerObservationEndpointLocalUnix)
+	daemon := &dockerWriteTestDaemon{imageEnvironment: true}
+	transport, err := newDockerEngineContainerWriteTransport(daemon, endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = transport.Stage(context.Background(), request)
+	if DockerContainerWriteErrorCode(err) != DockerContainerWriteFailureUnsafeImage ||
+		daemon.creates != 0 || daemon.deletes != 0 || daemon.containerID != "" {
+		t.Fatalf("image environment reached Docker create: daemon=%#v err=%v", daemon, err)
+	}
+}
+
+func TestDockerContainerStageAndCleanupKeepStoppedRecoveryEvidence(t *testing.T) {
+	request := newDockerContainerWriteTestRequest(t)
+	endpoint, _ := NewDockerObservationEndpoint(DockerObservationEndpointLocalUnix)
+	daemon := &dockerWriteTestDaemon{}
+	transport, err := newDockerEngineContainerWriteTransport(daemon, endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stage, err := transport.Stage(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stage.ContainerCreatedNow || stage.ExistingContainerAdopted ||
+		stage.ControlCount != 19 || len(stage.Controls) != 19 || daemon.creates != 1 ||
+		daemon.deletes != 0 || daemon.containerID == "" {
+		t.Fatalf("Docker stage did not preserve bounded recovery evidence: %#v daemon=%#v",
+			stage, daemon)
+	}
+	cleanup, err := transport.Cleanup(context.Background(), request, stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cleanup.ContainerRemovedNow || cleanup.ContainerAlreadyAbsent ||
+		daemon.creates != 1 || daemon.deletes != 1 || daemon.containerID != "" {
+		t.Fatalf("Docker exact cleanup is invalid: %#v daemon=%#v", cleanup, daemon)
+	}
+}
+
+func TestDockerContainerStageAdoptsUncertainCreateWithoutCreatingTwice(t *testing.T) {
+	request := newDockerContainerWriteTestRequest(t)
+	endpoint, _ := NewDockerObservationEndpoint(DockerObservationEndpointLocalUnix)
+	ctx, cancel := context.WithCancel(context.Background())
+	daemon := &dockerWriteTestDaemon{afterCreate: cancel,
+		failCreateResponseAfterMutation: true}
+	transport, err := newDockerEngineContainerWriteTransport(daemon, endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := transport.Stage(ctx, request); !errorsIsContextCanceled(err) ||
+		daemon.creates != 1 || daemon.deletes != 0 || daemon.containerID == "" {
+		t.Fatalf("uncertain stage did not leave exact recovery evidence: daemon=%#v err=%v",
+			daemon, err)
+	}
+	stage, err := transport.Stage(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stage.ContainerCreatedNow || !stage.ExistingContainerAdopted ||
+		daemon.creates != 1 || daemon.deletes != 0 {
+		t.Fatalf("recovery stage created twice: stage=%#v daemon=%#v", stage, daemon)
+	}
+	if _, err := transport.Cleanup(context.Background(), request, stage); err != nil ||
+		daemon.deletes != 1 || daemon.containerID != "" {
+		t.Fatalf("recovered stage cleanup failed: daemon=%#v err=%v", daemon, err)
+	}
+}
+
+func TestDockerContainerCleanupIsIdempotentAndNeverDeletesUnrelatedContainer(t *testing.T) {
+	request := newDockerContainerWriteTestRequest(t)
+	endpoint, _ := NewDockerObservationEndpoint(DockerObservationEndpointLocalUnix)
+	daemon := &dockerWriteTestDaemon{}
+	transport, err := newDockerEngineContainerWriteTransport(daemon, endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stage, err := transport.Stage(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	daemon.containerID = ""
+	cleanup, err := transport.Cleanup(context.Background(), request, stage)
+	if err != nil || cleanup.ContainerRemovedNow || !cleanup.ContainerAlreadyAbsent ||
+		daemon.deletes != 0 {
+		t.Fatalf("already-absent cleanup was not idempotent: %#v daemon=%#v err=%v",
+			cleanup, daemon, err)
+	}
+	daemon.containerID, daemon.name = dockerWriteTestContainerID, request.Spec.ContainerName
+	daemon.payload, daemon.unsafe = dockerCreatePayload(request), true
+	if _, err := transport.Cleanup(context.Background(), request, stage); DockerContainerWriteErrorCode(err) != DockerContainerWriteFailureUnsafeExisting ||
+		daemon.deletes != 0 || daemon.containerID == "" {
+		t.Fatalf("cleanup deleted an unrelated same-name container: daemon=%#v err=%v",
+			daemon, err)
 	}
 }
 

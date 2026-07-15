@@ -398,6 +398,9 @@ func dockerContainerWriteResultFingerprint(result DockerContainerWriteResult) st
 type DockerContainerWriteTransport interface {
 	Endpoint() DockerObservationEndpoint
 	Rehearse(ctx context.Context, request DockerContainerWriteRequest) (DockerContainerWriteResult, error)
+	Stage(ctx context.Context, request DockerContainerWriteRequest) (DockerContainerStageResult, error)
+	Cleanup(ctx context.Context, request DockerContainerWriteRequest,
+		stage DockerContainerStageResult) (DockerContainerCleanupResult, error)
 }
 
 type UnavailableDockerContainerWriteTransport struct {
@@ -432,6 +435,32 @@ func (transport UnavailableDockerContainerWriteTransport) Rehearse(ctx context.C
 		code = DockerContainerWriteFailureDisabled
 	}
 	return DockerContainerWriteResult{}, newDockerContainerWriteError(code)
+}
+
+func (transport UnavailableDockerContainerWriteTransport) Stage(ctx context.Context,
+	_ DockerContainerWriteRequest,
+) (DockerContainerStageResult, error) {
+	if err := ctx.Err(); err != nil {
+		return DockerContainerStageResult{}, err
+	}
+	code := transport.code
+	if code != DockerContainerWriteFailureDisabled && code != DockerContainerWriteFailureUnsupported {
+		code = DockerContainerWriteFailureDisabled
+	}
+	return DockerContainerStageResult{}, newDockerContainerWriteError(code)
+}
+
+func (transport UnavailableDockerContainerWriteTransport) Cleanup(ctx context.Context,
+	_ DockerContainerWriteRequest, _ DockerContainerStageResult,
+) (DockerContainerCleanupResult, error) {
+	if err := ctx.Err(); err != nil {
+		return DockerContainerCleanupResult{}, err
+	}
+	code := transport.code
+	if code != DockerContainerWriteFailureDisabled && code != DockerContainerWriteFailureUnsupported {
+		code = DockerContainerWriteFailureDisabled
+	}
+	return DockerContainerCleanupResult{}, newDockerContainerWriteError(code)
 }
 
 type DockerContainerRehearsal struct {

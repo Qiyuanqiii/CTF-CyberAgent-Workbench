@@ -98,6 +98,29 @@ type SandboxManifestStore interface {
 		operation sandbox.DockerContainerRehearsalOperation) (sandbox.DockerContainerRehearsal, bool, error)
 	GetDockerContainerRehearsal(ctx context.Context, id string) (sandbox.DockerContainerRehearsal, error)
 	ListDockerContainerRehearsals(ctx context.Context, runID string, limit int) ([]sandbox.DockerContainerRehearsal, error)
+	BeginDockerContainerRehearsalAttempt(ctx context.Context,
+		intent sandbox.DockerContainerAttemptIntent, ownerID string,
+		ttl time.Duration) (sandbox.DockerContainerAttemptAcquisition, error)
+	AcquireDockerContainerRehearsalAttempt(ctx context.Context, attemptID, requestedBy,
+		ownerID string, ttl time.Duration) (sandbox.DockerContainerAttemptAcquisition, error)
+	RecordDockerContainerAttemptStage(ctx context.Context,
+		stage sandbox.DockerContainerAttemptStage,
+		expected sandbox.DockerContainerAttemptLease) (sandbox.DockerContainerRehearsalAttempt, bool, error)
+	RecordDockerContainerAttemptCleanup(ctx context.Context,
+		cleanup sandbox.DockerContainerAttemptCleanup,
+		expected sandbox.DockerContainerAttemptLease) (sandbox.DockerContainerRehearsalAttempt, bool, error)
+	FailDockerContainerRehearsalAttempt(ctx context.Context,
+		failure sandbox.DockerContainerAttemptFailure,
+		expected sandbox.DockerContainerAttemptLease) (sandbox.DockerContainerRehearsalAttempt, error)
+	CompleteDockerContainerRehearsalAttempt(ctx context.Context,
+		completion sandbox.DockerContainerAttemptCompletion,
+		rehearsal sandbox.DockerContainerRehearsal,
+		operation sandbox.DockerContainerRehearsalOperation,
+		expected sandbox.DockerContainerAttemptLease) (sandbox.DockerContainerRehearsal, bool, error)
+	GetDockerContainerRehearsalAttempt(ctx context.Context,
+		id string) (sandbox.DockerContainerRehearsalAttempt, error)
+	ListDockerContainerRehearsalAttempts(ctx context.Context, runID string,
+		limit int) ([]sandbox.DockerContainerRehearsalAttempt, error)
 }
 
 type SandboxManifestService struct {

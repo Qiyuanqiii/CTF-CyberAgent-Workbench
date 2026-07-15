@@ -147,6 +147,87 @@ func (transport dockerEngineContainerWriteTransport) Rehearse(ctx context.Contex
 	return NewDockerContainerWriteResult(transport.endpoint, request, containerID, reconciled)
 }
 
+func (transport dockerEngineContainerWriteTransport) Stage(ctx context.Context,
+	request DockerContainerWriteRequest,
+) (DockerContainerStageResult, error) {
+	if err := ctx.Err(); err != nil {
+		return DockerContainerStageResult{}, err
+	}
+	if err := request.Validate(); err != nil {
+		return DockerContainerStageResult{}, err
+	}
+	if transport.doer == nil || transport.endpoint.Class != DockerObservationEndpointLocalUnix {
+		return DockerContainerStageResult{}, newDockerContainerWriteError(
+			DockerContainerWriteFailureUnsupported)
+	}
+	if err := transport.verifyImageProfile(ctx, request.Spec.ImageDigest); err != nil {
+		return DockerContainerStageResult{}, err
+	}
+
+	inspection, found, err := transport.inspect(ctx, request.Spec.ContainerName)
+	if err != nil {
+		return DockerContainerStageResult{}, err
+	}
+	containerID, adopted := "", found
+	if found {
+		if verifyDockerContainerInspection(inspection, request) != nil {
+			return DockerContainerStageResult{}, newDockerContainerWriteError(
+				DockerContainerWriteFailureUnsafeExisting)
+		}
+		containerID = inspection.ID
+	} else {
+		containerID, err = transport.create(ctx, request)
+		if err != nil {
+			// A timed-out create may still have reached the daemon. The durable attempt owns
+			// the deterministic name, so a later generation must inspect and adopt it.
+			return DockerContainerStageResult{}, err
+		}
+	}
+
+	inspection, found, err = transport.inspect(ctx, containerID)
+	if err != nil {
+		return DockerContainerStageResult{}, err
+	}
+	if !found || inspection.ID != containerID ||
+		verifyDockerContainerInspection(inspection, request) != nil {
+		return DockerContainerStageResult{}, newDockerContainerWriteError(
+			DockerContainerWriteFailureConfigMismatch)
+	}
+	return NewDockerContainerStageResult(transport.endpoint, request, containerID, adopted)
+}
+
+func (transport dockerEngineContainerWriteTransport) Cleanup(ctx context.Context,
+	request DockerContainerWriteRequest, stage DockerContainerStageResult,
+) (DockerContainerCleanupResult, error) {
+	if err := ctx.Err(); err != nil {
+		return DockerContainerCleanupResult{}, err
+	}
+	if request.Validate() != nil || stage.Validate() != nil ||
+		stage.RequestFingerprint != request.RequestFingerprint ||
+		stage.SpecFingerprint != request.Spec.SpecFingerprint ||
+		stage.EndpointFingerprint != transport.endpoint.Fingerprint {
+		return DockerContainerCleanupResult{}, newDockerContainerWriteError(
+			DockerContainerWriteFailureConfigMismatch)
+	}
+	inspection, found, err := transport.inspect(ctx, request.Spec.ContainerName)
+	if err != nil {
+		return DockerContainerCleanupResult{}, err
+	}
+	if !found {
+		return NewDockerContainerCleanupResult(transport.endpoint, request, stage, false)
+	}
+	if verifyDockerContainerInspection(inspection, request) != nil ||
+		fingerprint("sandbox_docker_container_id.v1", inspection.ID) !=
+			stage.ContainerIDFingerprint {
+		return DockerContainerCleanupResult{}, newDockerContainerWriteError(
+			DockerContainerWriteFailureUnsafeExisting)
+	}
+	if err := transport.remove(ctx, inspection.ID, false); err != nil {
+		return DockerContainerCleanupResult{}, err
+	}
+	return NewDockerContainerCleanupResult(transport.endpoint, request, stage, true)
+}
+
 func NewDockerContainerWriteResult(endpoint DockerObservationEndpoint,
 	request DockerContainerWriteRequest, containerID string, reconciled int,
 ) (DockerContainerWriteResult, error) {
@@ -183,6 +264,48 @@ func NewDockerContainerWriteResult(endpoint DockerObservationEndpoint,
 	return result, nil
 }
 
+func NewDockerContainerWriteResultFromRecovery(endpoint DockerObservationEndpoint,
+	request DockerContainerWriteRequest, stage DockerContainerStageResult,
+	cleanup DockerContainerCleanupResult,
+) (DockerContainerWriteResult, error) {
+	if endpoint.Validate() != nil || endpoint.Class != DockerObservationEndpointLocalUnix ||
+		request.Validate() != nil || stage.Validate() != nil || cleanup.Validate() != nil ||
+		stage.EndpointFingerprint != endpoint.Fingerprint ||
+		stage.RequestFingerprint != request.RequestFingerprint ||
+		stage.SpecFingerprint != request.Spec.SpecFingerprint ||
+		cleanup.EndpointFingerprint != endpoint.Fingerprint ||
+		cleanup.RequestFingerprint != request.RequestFingerprint ||
+		cleanup.ContainerIDFingerprint != stage.ContainerIDFingerprint {
+		return DockerContainerWriteResult{}, errors.New(
+			"docker container recovery result input is invalid")
+	}
+	steps := []DockerContainerWriteStep{
+		newDockerContainerWriteStep(request.RequestFingerprint, 1, 1, 0),
+		newDockerContainerWriteStep(request.RequestFingerprint, 2, 1, 0),
+		newDockerContainerWriteStep(request.RequestFingerprint, 3, 0, 1),
+		newDockerContainerWriteStep(request.RequestFingerprint, 4, 1, 0),
+		newDockerContainerWriteStep(request.RequestFingerprint, 5, 0, 1),
+	}
+	result := DockerContainerWriteResult{
+		ProtocolVersion: DockerContainerWriteProtocolVersion,
+		Source:          DockerContainerRehearsalSourceLocal, Status: DockerContainerWriteStatusComplete,
+		EndpointClass: endpoint.Class, EndpointFingerprint: endpoint.Fingerprint,
+		RequestFingerprint:     request.RequestFingerprint,
+		SpecFingerprint:        request.Spec.SpecFingerprint,
+		ContainerIDFingerprint: stage.ContainerIDFingerprint,
+		InspectionFingerprint:  stage.InspectionFingerprint, StepCount: len(steps),
+		DaemonReadCount: 3, DaemonWriteCount: 2, ConfigurationMatched: true,
+		ContainerCreated: true, ContainerInspected: true, ContainerRemoved: true,
+		CleanupConfirmed: true, DaemonReachable: true, DaemonWriteSubmitted: true,
+		Steps: steps,
+	}
+	result.TransportFingerprint = dockerContainerWriteResultFingerprint(result)
+	if err := result.Validate(); err != nil {
+		return DockerContainerWriteResult{}, err
+	}
+	return result, nil
+}
+
 func newDockerContainerWriteStep(requestFingerprint string, ordinal, reads, writes int,
 ) DockerContainerWriteStep {
 	step := DockerContainerWriteStep{Ordinal: ordinal,
@@ -199,6 +322,7 @@ type dockerCreateContainerPayload struct {
 	Image            string                       `json:"Image"`
 	Entrypoint       []string                     `json:"Entrypoint"`
 	Cmd              []string                     `json:"Cmd"`
+	Env              []string                     `json:"Env"`
 	WorkingDir       string                       `json:"WorkingDir"`
 	User             string                       `json:"User"`
 	NetworkDisabled  bool                         `json:"NetworkDisabled"`
@@ -262,6 +386,7 @@ type dockerContainerWriteImageInspection struct {
 	RepoDigests []string `json:"RepoDigests"`
 	Config      struct {
 		Volumes map[string]json.RawMessage `json:"Volumes"`
+		Env     []string                   `json:"Env"`
 	} `json:"Config"`
 }
 
@@ -280,8 +405,9 @@ func dockerCreatePayload(request DockerContainerWriteRequest) dockerCreateContai
 	initEnabled := true
 	return dockerCreateContainerPayload{
 		Image: spec.ImageDigest, Entrypoint: []string{spec.Executable},
-		Cmd: append([]string(nil), spec.Arguments...), WorkingDir: spec.WorkingDirectory,
-		User: spec.User, NetworkDisabled: true, StopSignal: DockerTerminationSignalGraceful,
+		Cmd: append([]string(nil), spec.Arguments...), Env: []string{},
+		WorkingDir: spec.WorkingDirectory,
+		User:       spec.User, NetworkDisabled: true, StopSignal: DockerTerminationSignalGraceful,
 		Labels: labels,
 		HostConfig: dockerCreateHostConfig{
 			ReadonlyRootfs: true, SecurityOpt: []string{"no-new-privileges"},
@@ -314,7 +440,8 @@ func (transport dockerEngineContainerWriteTransport) verifyImageProfile(ctx cont
 		return err
 	}
 	if !ValidOCIImageDigest(inspection.ID) || len(inspection.RepoDigests) == 0 ||
-		len(inspection.RepoDigests) > 128 || len(inspection.Config.Volumes) != 0 {
+		len(inspection.RepoDigests) > 128 || len(inspection.Config.Volumes) != 0 ||
+		len(inspection.Config.Env) != 0 {
 		return newDockerContainerWriteError(DockerContainerWriteFailureUnsafeImage)
 	}
 	matched := false
@@ -341,6 +468,7 @@ type dockerContainerInspection struct {
 		Image           string            `json:"Image"`
 		Entrypoint      []string          `json:"Entrypoint"`
 		Cmd             []string          `json:"Cmd"`
+		Env             []string          `json:"Env"`
 		WorkingDir      string            `json:"WorkingDir"`
 		User            string            `json:"User"`
 		NetworkDisabled bool              `json:"NetworkDisabled"`
@@ -403,6 +531,7 @@ func verifyDockerContainerInspection(inspection dockerContainerInspection,
 		inspection.Config.AttachStdin || inspection.Config.AttachStdout ||
 		inspection.Config.AttachStderr || inspection.Config.OpenStdin ||
 		inspection.Config.StdinOnce || inspection.Config.Tty ||
+		len(inspection.Config.Env) != 0 ||
 		!equalStrings(inspection.Config.Entrypoint, []string{spec.Executable}) ||
 		!equalStrings(inspection.Config.Cmd, spec.Arguments) ||
 		!equalDockerLabels(inspection.Config.Labels, spec.Labels) ||
