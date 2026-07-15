@@ -676,6 +676,8 @@ schema v61 recoverable runtime-input application 切片已完成实现。`ApplyD
 
 定向测试覆盖双确认无副作用、写前 intent、transport 失败与 generation2 恢复、stale worker fencing、完成与语义重放、get/list、v60 原地迁移不伪造 application、SQL 不可变/隐私/事件、foreign volume 保护、readback mismatch exact cleanup、禁止 endpoint、lease cleanup reserve、最终只留 never-started target/volumes，以及 CLI 输出隐私。ADR 0021 固化了此边界。最终本地门禁通过：全仓普通/race 分别用时 197.5 秒/316.8 秒；vet、零告警 staticcheck、module verify、零可达漏洞 govulncheck、严格 TypeScript、8 个文件 17 项前端测试、OpenAPI 无漂移、production build、零漏洞 npm audit、仓库隐私/进程/禁止 endpoint/编码/Markdown 扫描、diff、Linux sandbox test binary 交叉编译和隔离真实二进制 schema-v61 smoke 均为绿色，Sandbox race 20 轮通过。审计补强逐卷回读上限、到期前 cleanup reserve、未来租约/最短 TTL、resume 双确认、取消后独立失败落账、稳定错误码、v55/v59/v61 最小 transport 接口、Docker `RW`/`NoCopy` 实际证据和 operation digest 格式；未发现未解决高/中风险。本机 Windows 没有 Docker，Linux real-daemon v59/v61 harness 仍需人工环境执行，因此当前不作进程隔离或可启动声明。架构完成度维持约 98%，产品可用度维持约 45-50%。下一切片 schema v62 先实现 retained target/volume 的显式 inspect 与 exact-owned cleanup/reconciliation，继续不开放 start。
 
+GitHub Actions run `29437941378` 已通过 v61 功能提交 `f4aaf7a`：Go/Linux 作业 2 分 37 秒、TypeScript 作业 27 秒；Linux 全仓测试、vet、govulncheck 与前端完整门禁全部通过。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
