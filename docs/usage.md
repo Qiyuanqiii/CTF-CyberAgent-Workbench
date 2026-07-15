@@ -362,6 +362,13 @@ cyberagent run sandbox docker-runtime-input-apply <projection-id> --manifest con
 cyberagent run sandbox docker-runtime-input-apply-resume <application-intent-id> --manifest configs/sandbox-docker-simulation.example.json --confirm-runtime-input-apply --confirm-daemon-write
 cyberagent run sandbox docker-runtime-input-applications <run-id>
 cyberagent run sandbox docker-runtime-input-application-show <application-intent-id>
+cyberagent run sandbox docker-runtime-input-resource-inspect <application-intent-id> --manifest configs/sandbox-docker-simulation.example.json --operation-key runtime-input-resource-inspect-001 --confirm-readonly-probe
+cyberagent run sandbox docker-runtime-input-resource-inspections <run-id>
+cyberagent run sandbox docker-runtime-input-resource-inspection-show <inspection-id>
+cyberagent run sandbox docker-runtime-input-resource-cleanup <inspection-id> --manifest configs/sandbox-docker-simulation.example.json --operation-key runtime-input-resource-cleanup-001 --confirm-resource-cleanup --confirm-daemon-write
+cyberagent run sandbox docker-runtime-input-resource-cleanup-resume <cleanup-intent-id> --manifest configs/sandbox-docker-simulation.example.json --confirm-resource-cleanup --confirm-daemon-write
+cyberagent run sandbox docker-runtime-input-resource-cleanups <run-id>
+cyberagent run sandbox docker-runtime-input-resource-cleanup-show <cleanup-intent-id>
 ```
 
 `evidence` never contacts a daemon. It binds a canonical OCI image digest and separate simulated daemon/mount/network/secret/container/resource/termination/orphan/output fingerprints to the 16 v51 checks, but reports `trust_class=simulation_only`, `production_verified=0`, and `verified_checks=0`. `output-simulate` strictly validates and redacts fixture content, stages all slots, and commits only to an in-memory fake sink. A failure or cancellation rolls the fake transaction back to zero, and no production Artifact is created. The Store and Application revalidate the complete v48-v51 chain at both boundaries. CLI and events omit fixture bodies, locator fingerprints, raw paths, commands, Manifest content, container IDs, operation digests, and private leases. These commands test protocol behavior only; they cannot create or start a Docker container and cannot authorize real execution.
@@ -402,6 +409,10 @@ Schema v60 `docker-runtime-input-plan` separately confirms and recompiles the ex
 
 Application list/show output includes only status, generation, bounded counts, fingerprints, verification flags, and false authority bits. It excludes targets, host paths, file/resource names, raw IDs, archives, socket details, raw operation keys, and lease identities. `volumes_applied_target_never_started` means the target and input volumes are prepared, not runnable. There is no `start`, process, export, backend, execution, or Artifact authority in v61, and Windows returns `application_unsupported`.
 
+Schema v62 separates retained-resource observation from deletion. `docker-runtime-input-resource-inspect` requires `--confirm-readonly-probe`, rebuilds the exact descriptor from the completed v61 record and resupplied Manifest, and performs no input recapture. It records whether the target and each deterministic volume are exact-owned, absent, or foreign. A foreign or changed resource is persisted as unsafe evidence and the command exits with a failed-precondition status; complete read-only/`NoCopy` evidence is claimed only when the never-started target and every volume match.
+
+`docker-runtime-input-resource-cleanup` requires both `--confirm-resource-cleanup` and `--confirm-daemon-write`, plus a cleanup-eligible inspection. Go persists the immutable intent and generation lease before contacting the write transport. The transport preflights the target and every volume before any DELETE; a single foreign collision means zero DELETE. Otherwise it removes the target by its inspected ID, removes exact-owned volumes, and rechecks that all resources are absent. Typed failures release the lease and `cleanup-resume` can acquire a later generation. Completed operation-key replay and completed resume are metadata-only. List/show output omits resource names, raw IDs, host paths, sockets, raw operation keys, and private lease identities. v62 adds no start, exec, attach, pull, output export, backend, execution, or Artifact authority; Windows returns an explicit unsupported error.
+
 An optional real-daemon test is available only when an exact image is already present; it never pulls or creates anything:
 
 ```powershell
@@ -424,7 +435,7 @@ $env:CYBERAGENT_DOCKER_WRITE_TEST_IMAGE_DIGEST = "sha256:<already-present-volume
 go test ./internal/sandbox -run TestDockerHostInputHandoffRealDaemonOptIn -count=1 -v
 ```
 
-Schema v61 has a separate end-to-end opt-in harness using the same already-present image constraints. It runs the v57 capture, v59 handoff, v60 projection, and v61 application chain, verifies the retained never-started target and read-only volumes, then removes every exact-owned resource. It never pulls or starts the container:
+The end-to-end opt-in harness now runs the v57 capture, v59 handoff, v60 projection, v61 application, and v62 inspection/cleanup chain using the same already-present image constraints. It verifies the retained never-started target and read-only volumes, then uses the v62 exact-owned lifecycle to remove and recheck every resource. It never pulls or starts the container:
 
 ```powershell
 $env:CYBERAGENT_DOCKER_WRITE_TEST_IMAGE_DIGEST = "sha256:<already-present-volume-free-digest>"

@@ -248,20 +248,87 @@ type dockerRuntimeInputApplicationRebuild struct {
 	writeRequest sandbox.DockerContainerWriteRequest
 }
 
+type dockerRuntimeInputResourceAuthority struct {
+	handoff      sandbox.DockerHostInputHandoffRecord
+	staging      sandbox.DockerHostInputStagingRecord
+	preflight    sandboxPreflightAuthority
+	writeRequest sandbox.DockerContainerWriteRequest
+}
+
 func (s *SandboxManifestService) rebuildDockerRuntimeInputApplication(ctx context.Context,
 	projection sandbox.DockerRuntimeInputProjectionPlan, manifest sandbox.Manifest,
 	requestedBy string,
 ) (dockerRuntimeInputApplicationRebuild, error) {
+	rebuilt, err := s.rebuildDockerRuntimeInputResourceAuthority(ctx, projection, manifest,
+		requestedBy)
+	if err != nil {
+		return dockerRuntimeInputApplicationRebuild{}, err
+	}
+	bundleRequest, err := s.dockerHostInputBundleRequest(ctx, rebuilt.preflight, manifest)
+	if err != nil {
+		return dockerRuntimeInputApplicationRebuild{}, err
+	}
+	provider, ok := s.hostInputStager.(sandbox.DockerHostInputBundleProvider)
+	if !ok || provider == nil {
+		return dockerRuntimeInputApplicationRebuild{}, apperror.New(
+			apperror.CodeFailedPrecondition,
+			"Docker runtime input application requires a sealed bundle provider")
+	}
+	if err := provider.Probe(ctx, rebuilt.preflight.rootPath); err != nil {
+		return dockerRuntimeInputApplicationRebuild{}, apperror.Wrap(
+			apperror.CodeFailedPrecondition,
+			"Docker runtime input application host input probe failed", err)
+	}
+	bundle, err := provider.Capture(ctx, bundleRequest)
+	if err != nil {
+		return dockerRuntimeInputApplicationRebuild{}, apperror.Wrap(
+			apperror.CodeFailedPrecondition,
+			"Docker runtime input application bundle recapture failed", err)
+	}
+	if bundle == nil {
+		return dockerRuntimeInputApplicationRebuild{}, apperror.New(
+			apperror.CodeFailedPrecondition,
+			"Docker runtime input application provider returned a nil bundle")
+	}
+	defer bundle.Close()
+	report := bundle.Report()
+	if report.Validate() != nil || rebuilt.staging.Staging == nil ||
+		report.ReportFingerprint != rebuilt.staging.Staging.Report.ReportFingerprint ||
+		report.ReportFingerprint != projection.BundleReportFingerprint ||
+		report.BundleDigest != projection.BundleDigest || report.BundleBytes != projection.BundleBytes ||
+		report.ReadOnlyMountCount != projection.ReadOnlyMountCount ||
+		report.ArtifactCount != projection.InputArtifactCount ||
+		report.ArtifactBytes != bundleRequest.ArtifactBytes() ||
+		report.ArtifactPayloadDigest != bundleRequest.ArtifactPayloadDigest() {
+		return dockerRuntimeInputApplicationRebuild{}, apperror.New(
+			apperror.CodeConflict, "recaptured Docker runtime input changed after projection")
+	}
+	frozen := frozenHostInputBundle{HostInputBundle: bundle, report: report}
+	compilation, err := sandbox.CompileDockerRuntimeInputProjectionBundle(ctx, manifest,
+		frozen, rebuilt.handoff.Handoff.HandoffFingerprint)
+	if err != nil {
+		return dockerRuntimeInputApplicationRebuild{}, apperror.Wrap(
+			apperror.CodeFailedPrecondition,
+			"Docker runtime input application projection recompilation failed", err)
+	}
+	return dockerRuntimeInputApplicationRebuild{compilation: compilation,
+		writeRequest: rebuilt.writeRequest}, nil
+}
+
+func (s *SandboxManifestService) rebuildDockerRuntimeInputResourceAuthority(ctx context.Context,
+	projection sandbox.DockerRuntimeInputProjectionPlan, manifest sandbox.Manifest,
+	requestedBy string,
+) (dockerRuntimeInputResourceAuthority, error) {
 	manifestFingerprint, err := manifest.Fingerprint()
 	if err != nil || projection.Validate() != nil || projection.Replayed ||
 		projection.ManifestFingerprint != manifestFingerprint ||
 		projection.RequestedBy != requestedBy {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.New(
+		return dockerRuntimeInputResourceAuthority{}, apperror.New(
 			apperror.CodeConflict, "Docker runtime input application projection authority is invalid")
 	}
 	handoff, err := s.store.GetDockerHostInputHandoff(ctx, projection.HandoffIntentID)
 	if err != nil {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.Normalize(err)
+		return dockerRuntimeInputResourceAuthority{}, apperror.Normalize(err)
 	}
 	if handoff.Handoff == nil || handoff.Handoff.Result.Validate() != nil ||
 		handoff.Handoff.ID != projection.HandoffID ||
@@ -277,20 +344,20 @@ func (s *SandboxManifestService) rebuildDockerRuntimeInputApplication(ctx contex
 		handoff.Handoff.Result.ProductionVerified || handoff.Handoff.Result.BackendEnabled ||
 		handoff.Handoff.Result.ExecutionAuthorized ||
 		handoff.Handoff.Result.ArtifactCommitAuthorized {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.New(
+		return dockerRuntimeInputResourceAuthority{}, apperror.New(
 			apperror.CodeConflict, "Docker runtime input application v59 handoff changed")
 	}
 	attempt, err := s.store.GetDockerContainerRehearsalAttempt(ctx, projection.AttemptID)
 	if err != nil {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.Normalize(err)
+		return dockerRuntimeInputResourceAuthority{}, apperror.Normalize(err)
 	}
 	containerPlan, err := s.store.GetDockerContainerPlan(ctx, projection.ContainerPlanID)
 	if err != nil {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.Normalize(err)
+		return dockerRuntimeInputResourceAuthority{}, apperror.Normalize(err)
 	}
 	staging, err := s.store.GetDockerHostInputStaging(ctx, handoff.Intent.StagingIntentID)
 	if err != nil {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.Normalize(err)
+		return dockerRuntimeInputResourceAuthority{}, apperror.Normalize(err)
 	}
 	if attempt.Completion == nil ||
 		attempt.Status != sandbox.DockerContainerAttemptStatusCompleted ||
@@ -320,21 +387,21 @@ func (s *SandboxManifestService) rebuildDockerRuntimeInputApplication(ctx contex
 		containerPlan.ProductionSubmitted || containerPlan.ProductionVerified ||
 		containerPlan.BackendAvailable || containerPlan.BackendEnabled ||
 		containerPlan.ExecutionAuthorized || containerPlan.ArtifactCommitAuthorized {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.New(
+		return dockerRuntimeInputResourceAuthority{}, apperror.New(
 			apperror.CodeConflict, "Docker runtime input application v54-v60 authority chain changed")
 	}
 	preflight, err := s.store.GetSandboxDisabledPreflight(ctx, containerPlan.PreflightID)
 	if err != nil {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.Normalize(err)
+		return dockerRuntimeInputResourceAuthority{}, apperror.Normalize(err)
 	}
 	authority, err := s.revalidateSandboxPreflightAuthority(ctx, preflight, manifest,
 		manifestFingerprint, requestedBy)
 	if err != nil {
-		return dockerRuntimeInputApplicationRebuild{}, err
+		return dockerRuntimeInputResourceAuthority{}, err
 	}
 	observation, err := s.store.GetDockerObservation(ctx, containerPlan.ObservationID)
 	if err != nil {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.Normalize(err)
+		return dockerRuntimeInputResourceAuthority{}, apperror.Normalize(err)
 	}
 	if authority.run.ID != containerPlan.RunID ||
 		authority.mission.ID != containerPlan.MissionID ||
@@ -346,74 +413,27 @@ func (s *SandboxManifestService) rebuildDockerRuntimeInputApplication(ctx contex
 		observation.Report.ProductionVerified || observation.Report.BackendAvailable ||
 		observation.Report.BackendEnabled || observation.Report.ExecutionAuthorized ||
 		observation.Report.ArtifactCommitAuthorized {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.New(
+		return dockerRuntimeInputResourceAuthority{}, apperror.New(
 			apperror.CodeConflict, "Docker runtime input application v48-v54 authority changed")
 	}
 	spec, err := sandbox.CompileDockerContainerSpec(ctx, observation, manifest)
 	if err != nil {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.Wrap(
+		return dockerRuntimeInputResourceAuthority{}, apperror.Wrap(
 			apperror.CodeFailedPrecondition,
 			"Docker runtime input application specification recompilation failed", err)
 	}
 	if err := sandbox.DockerContainerPlanMatchesSpec(containerPlan, spec); err != nil {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.Wrap(
+		return dockerRuntimeInputResourceAuthority{}, apperror.Wrap(
 			apperror.CodeConflict, "Docker container plan changed before runtime input application", err)
 	}
 	writeRequest, err := sandbox.NewDockerContainerWriteRequest(ctx, authority.rootPath, spec)
 	if err != nil {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.Wrap(
+		return dockerRuntimeInputResourceAuthority{}, apperror.Wrap(
 			apperror.CodeFailedPrecondition,
 			"Docker runtime input application host mount resolution failed", err)
 	}
-	bundleRequest, err := s.dockerHostInputBundleRequest(ctx, authority, manifest)
-	if err != nil {
-		return dockerRuntimeInputApplicationRebuild{}, err
-	}
-	provider, ok := s.hostInputStager.(sandbox.DockerHostInputBundleProvider)
-	if !ok || provider == nil {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.New(
-			apperror.CodeFailedPrecondition,
-			"Docker runtime input application requires a sealed bundle provider")
-	}
-	if err := provider.Probe(ctx, authority.rootPath); err != nil {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.Wrap(
-			apperror.CodeFailedPrecondition,
-			"Docker runtime input application host input probe failed", err)
-	}
-	bundle, err := provider.Capture(ctx, bundleRequest)
-	if err != nil {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.Wrap(
-			apperror.CodeFailedPrecondition,
-			"Docker runtime input application bundle recapture failed", err)
-	}
-	if bundle == nil {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.New(
-			apperror.CodeFailedPrecondition,
-			"Docker runtime input application provider returned a nil bundle")
-	}
-	defer bundle.Close()
-	report := bundle.Report()
-	if report.Validate() != nil ||
-		report.ReportFingerprint != staging.Staging.Report.ReportFingerprint ||
-		report.ReportFingerprint != projection.BundleReportFingerprint ||
-		report.BundleDigest != projection.BundleDigest || report.BundleBytes != projection.BundleBytes ||
-		report.ReadOnlyMountCount != projection.ReadOnlyMountCount ||
-		report.ArtifactCount != projection.InputArtifactCount ||
-		report.ArtifactBytes != bundleRequest.ArtifactBytes() ||
-		report.ArtifactPayloadDigest != bundleRequest.ArtifactPayloadDigest() {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.New(
-			apperror.CodeConflict, "recaptured Docker runtime input changed after projection")
-	}
-	frozen := frozenHostInputBundle{HostInputBundle: bundle, report: report}
-	compilation, err := sandbox.CompileDockerRuntimeInputProjectionBundle(ctx, manifest,
-		frozen, handoff.Handoff.HandoffFingerprint)
-	if err != nil {
-		return dockerRuntimeInputApplicationRebuild{}, apperror.Wrap(
-			apperror.CodeFailedPrecondition,
-			"Docker runtime input application projection recompilation failed", err)
-	}
-	return dockerRuntimeInputApplicationRebuild{compilation: compilation,
-		writeRequest: writeRequest}, nil
+	return dockerRuntimeInputResourceAuthority{handoff: handoff, staging: staging,
+		preflight: authority, writeRequest: writeRequest}, nil
 }
 
 func (s *SandboxManifestService) GetDockerRuntimeInputApplication(ctx context.Context,

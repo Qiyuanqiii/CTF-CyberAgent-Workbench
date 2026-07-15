@@ -29,6 +29,73 @@ type recordingDockerRuntimeInputApplicationTransport struct {
 	request sandbox.DockerRuntimeInputApplicationRequest
 }
 
+type recordingDockerRuntimeInputResourceInspector struct {
+	calls              int
+	targetState        string
+	foreignVolumeCount int
+}
+
+func (transport *recordingDockerRuntimeInputResourceInspector) Endpoint() sandbox.DockerObservationEndpoint {
+	value, _ := sandbox.NewDockerObservationEndpoint(sandbox.DockerObservationEndpointLocalUnix)
+	return value
+}
+
+func (transport *recordingDockerRuntimeInputResourceInspector) Inspect(ctx context.Context,
+	descriptor sandbox.DockerRuntimeInputResourceDescriptor,
+) (sandbox.DockerRuntimeInputResourceObservation, error) {
+	if err := ctx.Err(); err != nil {
+		return sandbox.DockerRuntimeInputResourceObservation{}, err
+	}
+	transport.calls++
+	targetState := transport.targetState
+	if targetState == "" {
+		targetState = sandbox.DockerRuntimeInputResourceTargetOwned
+	}
+	owned := len(descriptor.Mounts) - transport.foreignVolumeCount
+	return sandbox.DockerRuntimeInputResourceObservation{
+		EndpointClass:       transport.Endpoint().Class,
+		EndpointFingerprint: transport.Endpoint().Fingerprint,
+		TargetState:         targetState,
+		OwnedVolumeCount:    owned,
+		ForeignVolumeCount:  transport.foreignVolumeCount,
+		DaemonReadCount:     len(descriptor.Mounts) + 1,
+		ObservedAt:          time.Now().UTC(),
+	}, nil
+}
+
+type recordingDockerRuntimeInputResourceCleanupTransport struct {
+	calls     int
+	cancel    bool
+	onCleanup func(sandbox.DockerRuntimeInputResourceCleanupIntent)
+}
+
+func (transport *recordingDockerRuntimeInputResourceCleanupTransport) Endpoint() sandbox.DockerObservationEndpoint {
+	value, _ := sandbox.NewDockerObservationEndpoint(sandbox.DockerObservationEndpointLocalUnix)
+	return value
+}
+
+func (transport *recordingDockerRuntimeInputResourceCleanupTransport) Cleanup(ctx context.Context,
+	intent sandbox.DockerRuntimeInputResourceCleanupIntent,
+	lease sandbox.DockerRuntimeInputResourceCleanupLease,
+	descriptor sandbox.DockerRuntimeInputResourceDescriptor,
+) (sandbox.DockerRuntimeInputResourceCleanupResult, error) {
+	if err := ctx.Err(); err != nil {
+		return sandbox.DockerRuntimeInputResourceCleanupResult{}, err
+	}
+	transport.calls++
+	if transport.onCleanup != nil {
+		transport.onCleanup(intent)
+	}
+	if transport.cancel {
+		transport.cancel = false
+		return sandbox.DockerRuntimeInputResourceCleanupResult{}, context.Canceled
+	}
+	total := len(descriptor.Mounts) + 1
+	return sandbox.NewDockerRuntimeInputResourceCleanupResult(
+		fmt.Sprintf("runtime-input-cleanup-result-%d", transport.calls), intent, lease,
+		descriptor, total, 0, total, 2*total, total, time.Now().UTC())
+}
+
 func (transport *recordingDockerRuntimeInputApplicationTransport) Endpoint() sandbox.DockerObservationEndpoint {
 	value, _ := sandbox.NewDockerObservationEndpoint(sandbox.DockerObservationEndpointLocalUnix)
 	return value
@@ -259,6 +326,125 @@ func TestDockerRuntimeInputProjectionPlansPersistsReplaysAndDoesNotWidenAuthorit
 		runtimeTransport.calls != 2 || stager.captureCalls != 4 {
 		t.Fatalf("runtime input application replay touched inputs or daemon: %#v err=%v",
 			replayedApplication, err)
+	}
+	resourceInspector := &recordingDockerRuntimeInputResourceInspector{}
+	resourceCleanup := &recordingDockerRuntimeInputResourceCleanupTransport{cancel: true}
+	service.WithDockerRuntimeInputResourceInspector(resourceInspector).
+		WithDockerRuntimeInputResourceCleanupTransport(resourceCleanup)
+	inspectionRequest := InspectDockerRuntimeInputResourcesRequest{
+		ApplicationIntentID: completed.Intent.ID, Manifest: manifest,
+		OperationKey: "docker-runtime-input-resource-inspection",
+		RequestedBy:  "runtime_input_operator",
+	}
+	if _, err := service.InspectDockerRuntimeInputResources(ctx,
+		inspectionRequest); apperror.CodeOf(err) != apperror.CodeFailedPrecondition ||
+		resourceInspector.calls != 0 || stager.captureCalls != 4 {
+		t.Fatalf("runtime resource inspection skipped confirmation: calls=%d captures=%d err=%v",
+			resourceInspector.calls, stager.captureCalls, err)
+	}
+	inspectionRequest.OperatorConfirmed = true
+	inspection, err := service.InspectDockerRuntimeInputResources(ctx, inspectionRequest)
+	if err != nil || inspection.Replayed || !inspection.Complete ||
+		!inspection.CleanupEligible || !inspection.OwnedTargetNeverStarted ||
+		!inspection.AllOwnedVolumesReadOnly || !inspection.AllOwnedVolumesNoCopy ||
+		inspection.ContainerStartAuthorized || inspection.ProcessExecutionAuthorized ||
+		inspection.OutputExportAuthorized || inspection.ArtifactCommitAuthorized ||
+		resourceInspector.calls != 1 || stager.captureCalls != 4 {
+		t.Fatalf("runtime resource inspection widened authority: value=%#v calls=%d captures=%d err=%v",
+			inspection, resourceInspector.calls, stager.captureCalls, err)
+	}
+	replayedInspection, err := service.InspectDockerRuntimeInputResources(ctx, inspectionRequest)
+	if err != nil || !replayedInspection.Replayed || replayedInspection.ID != inspection.ID ||
+		resourceInspector.calls != 1 || stager.captureCalls != 4 {
+		t.Fatalf("runtime resource inspection replay touched inputs or daemon: %#v err=%v",
+			replayedInspection, err)
+	}
+	changedInspection := inspectionRequest
+	changedInspection.Manifest.TimeoutSeconds++
+	if _, err := service.InspectDockerRuntimeInputResources(ctx,
+		changedInspection); apperror.CodeOf(err) != apperror.CodeConflict ||
+		resourceInspector.calls != 1 || stager.captureCalls != 4 {
+		t.Fatalf("changed Manifest reused resource inspection operation: %v", err)
+	}
+	cleanupRequest := CleanupDockerRuntimeInputResourcesRequest{
+		InspectionID: inspection.ID, Manifest: manifest,
+		OperationKey: "docker-runtime-input-resource-cleanup",
+		RequestedBy:  "runtime_input_operator", OwnerID: "runtime_resource_owner",
+	}
+	if _, err := service.CleanupDockerRuntimeInputResources(ctx,
+		cleanupRequest); apperror.CodeOf(err) != apperror.CodeFailedPrecondition ||
+		resourceCleanup.calls != 0 || stager.captureCalls != 4 {
+		t.Fatalf("runtime resource cleanup skipped confirmation: calls=%d captures=%d err=%v",
+			resourceCleanup.calls, stager.captureCalls, err)
+	}
+	intentVisibleBeforeTransport := false
+	resourceCleanup.onCleanup = func(intent sandbox.DockerRuntimeInputResourceCleanupIntent) {
+		durable, lookupErr := st.GetDockerRuntimeInputResourceCleanup(ctx, intent.ID)
+		intentVisibleBeforeTransport = lookupErr == nil && durable.Result == nil &&
+			durable.Lease.Status == sandbox.DockerRuntimeInputResourceCleanupLeaseActive
+	}
+	cleanupRequest.OperatorConfirmed, cleanupRequest.DaemonWriteConfirmed = true, true
+	failedCleanup, err := service.CleanupDockerRuntimeInputResources(ctx, cleanupRequest)
+	if apperror.CodeOf(err) != apperror.CodeCancelled || !intentVisibleBeforeTransport ||
+		failedCleanup.Result != nil || len(failedCleanup.Failures) != 1 ||
+		failedCleanup.Lease.Status != sandbox.DockerRuntimeInputResourceCleanupLeaseReleased ||
+		failedCleanup.Failures[0].Code != sandbox.DockerRuntimeInputResourceErrorCanceled ||
+		resourceCleanup.calls != 1 || stager.captureCalls != 4 {
+		t.Fatalf("runtime resource cleanup failure was not recoverable: record=%#v calls=%d captures=%d err=%v",
+			failedCleanup, resourceCleanup.calls, stager.captureCalls, err)
+	}
+	resumeCleanup := ResumeDockerRuntimeInputResourceCleanupRequest{
+		IntentID: failedCleanup.Intent.ID, Manifest: manifest,
+		RequestedBy: "runtime_input_operator", OwnerID: "runtime_resource_owner_2",
+	}
+	if _, err := service.ResumeDockerRuntimeInputResourceCleanup(ctx,
+		resumeCleanup); apperror.CodeOf(err) != apperror.CodeFailedPrecondition ||
+		resourceCleanup.calls != 1 {
+		t.Fatalf("runtime resource cleanup resume skipped confirmation: %v", err)
+	}
+	resumeCleanup.OperatorConfirmed, resumeCleanup.DaemonWriteConfirmed = true, true
+	cleaned, err := service.ResumeDockerRuntimeInputResourceCleanup(ctx, resumeCleanup)
+	if err != nil || cleaned.Result == nil || cleaned.Lease.Generation != 2 ||
+		cleaned.Lease.Status != sandbox.DockerRuntimeInputResourceCleanupLeaseReleased ||
+		!cleaned.Result.TargetAbsent || !cleaned.Result.AllVolumesAbsent ||
+		cleaned.Result.ContainerStartAuthorized || cleaned.Result.ProcessExecutionAuthorized ||
+		cleaned.Result.OutputExportAuthorized || cleaned.Result.ArtifactCommitAuthorized ||
+		resourceCleanup.calls != 2 || stager.captureCalls != 4 {
+		t.Fatalf("runtime resource cleanup resume did not converge: record=%#v calls=%d captures=%d err=%v",
+			cleaned, resourceCleanup.calls, stager.captureCalls, err)
+	}
+	replayedCleanup, err := service.CleanupDockerRuntimeInputResources(ctx, cleanupRequest)
+	if err != nil || !replayedCleanup.Replayed || replayedCleanup.Result == nil ||
+		resourceCleanup.calls != 2 || stager.captureCalls != 4 {
+		t.Fatalf("runtime resource cleanup replay touched inputs or daemon: %#v err=%v",
+			replayedCleanup, err)
+	}
+	resourceInspector.targetState = sandbox.DockerRuntimeInputResourceTargetForeign
+	unsafeRequest := inspectionRequest
+	unsafeRequest.OperationKey = "docker-runtime-input-resource-inspection-after-cleanup"
+	unsafeInspection, err := service.InspectDockerRuntimeInputResources(ctx, unsafeRequest)
+	if apperror.CodeOf(err) != apperror.CodeFailedPrecondition ||
+		unsafeInspection.Status != sandbox.DockerRuntimeInputResourceInspectionUnsafe ||
+		unsafeInspection.CleanupEligible || unsafeInspection.ForeignResourceCount != 1 ||
+		resourceInspector.calls != 2 || stager.captureCalls != 4 {
+		t.Fatalf("unsafe runtime resource collision was not persisted and rejected: %#v err=%v",
+			unsafeInspection, err)
+	}
+	loadedInspection, err := service.GetDockerRuntimeInputResourceInspection(ctx, inspection.ID)
+	if err != nil || loadedInspection.InspectionFingerprint != inspection.InspectionFingerprint {
+		t.Fatalf("load runtime resource inspection: %#v err=%v", loadedInspection, err)
+	}
+	listedInspections, err := service.ListDockerRuntimeInputResourceInspections(ctx, run.ID, 10)
+	if err != nil || len(listedInspections) != 2 {
+		t.Fatalf("list runtime resource inspections: %#v err=%v", listedInspections, err)
+	}
+	loadedCleanup, err := service.GetDockerRuntimeInputResourceCleanup(ctx, cleaned.Intent.ID)
+	if err != nil || loadedCleanup.Result == nil {
+		t.Fatalf("load runtime resource cleanup: %#v err=%v", loadedCleanup, err)
+	}
+	listedCleanups, err := service.ListDockerRuntimeInputResourceCleanups(ctx, run.ID, 10)
+	if err != nil || len(listedCleanups) != 1 || listedCleanups[0].Intent.ID != cleaned.Intent.ID {
+		t.Fatalf("list runtime resource cleanups: %#v err=%v", listedCleanups, err)
 	}
 	loadedApplication, err := service.GetDockerRuntimeInputApplication(ctx, failed.Intent.ID)
 	if err != nil || loadedApplication.Result == nil {

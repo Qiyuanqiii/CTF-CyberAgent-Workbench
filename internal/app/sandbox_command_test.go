@@ -33,6 +33,8 @@ var sandboxDockerHostInputIntentIDPattern = regexp.MustCompile(`sandbox-docker-h
 var sandboxDockerHostInputHandoffIntentIDPattern = regexp.MustCompile(`sandbox-docker-host-input-handoff-intent-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerRuntimeInputPlanIDPattern = regexp.MustCompile(`sandbox-docker-runtime-input-plan-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerRuntimeInputApplicationIDPattern = regexp.MustCompile(`sandbox-docker-runtime-input-application-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxDockerRuntimeInputResourceInspectionIDPattern = regexp.MustCompile(`sandbox-docker-runtime-input-resource-inspection-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxDockerRuntimeInputResourceCleanupIDPattern = regexp.MustCompile(`sandbox-docker-runtime-input-resource-cleanup-[0-9]{14}-[a-f0-9]{12}`)
 
 type cliDockerPlanObservationTransport struct {
 	imageDigest string
@@ -111,6 +113,48 @@ type cliDockerHostInputHandoffTransport struct {
 
 type cliDockerRuntimeInputApplicationTransport struct {
 	calls int
+}
+
+type cliDockerRuntimeInputResourceInspector struct {
+	calls int
+}
+
+func (transport *cliDockerRuntimeInputResourceInspector) Endpoint() sandbox.DockerObservationEndpoint {
+	endpoint, _ := sandbox.NewDockerObservationEndpoint(sandbox.DockerObservationEndpointLocalUnix)
+	return endpoint
+}
+
+func (transport *cliDockerRuntimeInputResourceInspector) Inspect(_ context.Context,
+	descriptor sandbox.DockerRuntimeInputResourceDescriptor,
+) (sandbox.DockerRuntimeInputResourceObservation, error) {
+	transport.calls++
+	return sandbox.DockerRuntimeInputResourceObservation{
+		EndpointClass: transport.Endpoint().Class, EndpointFingerprint: transport.Endpoint().Fingerprint,
+		TargetState:      sandbox.DockerRuntimeInputResourceTargetOwned,
+		OwnedVolumeCount: len(descriptor.Mounts), DaemonReadCount: len(descriptor.Mounts) + 1,
+		ObservedAt: time.Now().UTC(),
+	}, nil
+}
+
+type cliDockerRuntimeInputResourceCleanupTransport struct {
+	calls int
+}
+
+func (transport *cliDockerRuntimeInputResourceCleanupTransport) Endpoint() sandbox.DockerObservationEndpoint {
+	endpoint, _ := sandbox.NewDockerObservationEndpoint(sandbox.DockerObservationEndpointLocalUnix)
+	return endpoint
+}
+
+func (transport *cliDockerRuntimeInputResourceCleanupTransport) Cleanup(_ context.Context,
+	intent sandbox.DockerRuntimeInputResourceCleanupIntent,
+	lease sandbox.DockerRuntimeInputResourceCleanupLease,
+	descriptor sandbox.DockerRuntimeInputResourceDescriptor,
+) (sandbox.DockerRuntimeInputResourceCleanupResult, error) {
+	transport.calls++
+	total := len(descriptor.Mounts) + 1
+	return sandbox.NewDockerRuntimeInputResourceCleanupResult(
+		fmt.Sprintf("cli-runtime-input-resource-cleanup-result-%d", transport.calls),
+		intent, lease, descriptor, total, 0, total, 2*total, total, time.Now().UTC())
 }
 
 func (transport *cliDockerRuntimeInputApplicationTransport) Endpoint() sandbox.DockerObservationEndpoint {
@@ -318,6 +362,21 @@ func executeTestCommandWithDockerRuntimeInput(t *testing.T,
 		app.dockerWriteTransport = writeTransport
 		app.hostInputStager = stager
 		app.runtimeInputApply = runtimeTransport
+	})
+	return out.String(), errOut.String(), code
+}
+
+func executeTestCommandWithDockerRuntimeResources(t *testing.T,
+	inspector sandbox.DockerRuntimeInputResourceInspector,
+	cleanup sandbox.DockerRuntimeInputResourceCleanupTransport,
+	args ...string,
+) (string, string, int) {
+	t.Helper()
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	code := executeContextWithConfig(context.Background(), args, &out, &errOut, func(app *App) {
+		app.runtimeResourceRead = inspector
+		app.runtimeResourceClean = cleanup
 	})
 	return out.String(), errOut.String(), code
 }
@@ -1078,6 +1137,144 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		hostInputStager.captureCalls != 3 || !strings.Contains(runtimeResumeReplay, "replayed: true") {
 		t.Fatalf("completed runtime input resume was not metadata-only: output=%s stderr=%s code=%d",
 			runtimeResumeReplay, stderr, code)
+	}
+	resourceInspector := &cliDockerRuntimeInputResourceInspector{}
+	resourceCleanup := &cliDockerRuntimeInputResourceCleanupTransport{}
+	if _, stderr, code := executeTestCommandWithDockerRuntimeResources(t, resourceInspector,
+		resourceCleanup, "run", "sandbox", "docker-runtime-input-resource-inspect",
+		runtimeApplicationID, "--manifest", manifestPath, "--operation-key",
+		"runtime-input-resource-inspect-cli"); code != 4 ||
+		!strings.Contains(stderr, "requires --confirm-readonly-probe") ||
+		resourceInspector.calls != 0 || hostInputStager.captureCalls != 3 {
+		t.Fatalf("runtime resource inspection skipped confirmation: stderr=%s code=%d", stderr, code)
+	}
+	emptyResourceInspections, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-runtime-input-resource-inspections", runID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(emptyResourceInspections, "no Docker runtime input resource inspections") {
+		t.Fatalf("unconfirmed runtime resource inspection left state: output=%s stderr=%s code=%d",
+			emptyResourceInspections, stderr, code)
+	}
+	resourceInspected, stderr, code := executeTestCommandWithDockerRuntimeResources(t,
+		resourceInspector, resourceCleanup, "run", "sandbox",
+		"docker-runtime-input-resource-inspect", runtimeApplicationID,
+		"--manifest", manifestPath, "--operation-key", "runtime-input-resource-inspect-cli",
+		"--confirm-readonly-probe")
+	if code != 0 || stderr != "" || resourceInspector.calls != 1 ||
+		hostInputStager.captureCalls != 3 ||
+		!strings.Contains(resourceInspected, "status: exact_owned_resources_present") ||
+		!strings.Contains(resourceInspected, "cleanup_eligible: true") ||
+		!strings.Contains(resourceInspected, "owned_target_never_started: true") ||
+		!strings.Contains(resourceInspected, "raw_resource_names_stored: false") ||
+		!strings.Contains(resourceInspected, "container_started: false") ||
+		!strings.Contains(resourceInspected, "execution_authorized: false") ||
+		strings.Contains(resourceInspected, "scripts") ||
+		strings.Contains(resourceInspected, "/workspace") ||
+		strings.Contains(resourceInspected, home) ||
+		strings.Contains(resourceInspected, "cyberagent-runtime-") {
+		t.Fatalf("runtime resource inspection leaked data or widened authority: output=%s stderr=%s code=%d",
+			resourceInspected, stderr, code)
+	}
+	resourceInspectionID := sandboxDockerRuntimeInputResourceInspectionIDPattern.FindString(resourceInspected)
+	if resourceInspectionID == "" {
+		t.Fatalf("missing runtime resource inspection id: %s", resourceInspected)
+	}
+	resourceInspectionReplay, stderr, code := executeTestCommandWithDockerRuntimeResources(t,
+		resourceInspector, resourceCleanup, "run", "sandbox",
+		"docker-runtime-input-resource-inspect", runtimeApplicationID,
+		"--manifest", manifestPath, "--operation-key", "runtime-input-resource-inspect-cli",
+		"--confirm-readonly-probe")
+	if code != 0 || stderr != "" || resourceInspector.calls != 1 ||
+		hostInputStager.captureCalls != 3 ||
+		!strings.Contains(resourceInspectionReplay, "replayed: true") {
+		t.Fatalf("runtime resource inspection replay contacted daemon: output=%s stderr=%s code=%d",
+			resourceInspectionReplay, stderr, code)
+	}
+	resourceInspections, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-runtime-input-resource-inspections", runID)
+	if code != 0 || stderr != "" || !strings.Contains(resourceInspections, resourceInspectionID) ||
+		!strings.Contains(resourceInspections, "cleanup_eligible=true") ||
+		strings.Contains(resourceInspections, "/workspace") || strings.Contains(resourceInspections, home) {
+		t.Fatalf("runtime resource inspection list leaked data: output=%s stderr=%s code=%d",
+			resourceInspections, stderr, code)
+	}
+	resourceInspectionShown, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-runtime-input-resource-inspection-show", resourceInspectionID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(resourceInspectionShown, "inspection_fingerprint:") ||
+		!strings.Contains(resourceInspectionShown, "raw_container_ids_stored: false") ||
+		strings.Contains(resourceInspectionShown, "/workspace") ||
+		strings.Contains(resourceInspectionShown, home) ||
+		strings.Contains(resourceInspectionShown, "cyberagent-runtime-") {
+		t.Fatalf("runtime resource inspection show leaked data: output=%s stderr=%s code=%d",
+			resourceInspectionShown, stderr, code)
+	}
+	if _, stderr, code := executeTestCommandWithDockerRuntimeResources(t, resourceInspector,
+		resourceCleanup, "run", "sandbox", "docker-runtime-input-resource-cleanup",
+		resourceInspectionID, "--manifest", manifestPath, "--operation-key",
+		"runtime-input-resource-cleanup-cli"); code != 4 ||
+		!strings.Contains(stderr, "requires --confirm-resource-cleanup and --confirm-daemon-write") ||
+		resourceCleanup.calls != 0 {
+		t.Fatalf("runtime resource cleanup skipped confirmation: stderr=%s code=%d", stderr, code)
+	}
+	resourceCleaned, stderr, code := executeTestCommandWithDockerRuntimeResources(t,
+		resourceInspector, resourceCleanup, "run", "sandbox",
+		"docker-runtime-input-resource-cleanup", resourceInspectionID,
+		"--manifest", manifestPath, "--operation-key", "runtime-input-resource-cleanup-cli",
+		"--confirm-resource-cleanup", "--confirm-daemon-write")
+	if code != 0 || stderr != "" || resourceCleanup.calls != 1 ||
+		hostInputStager.captureCalls != 3 ||
+		!strings.Contains(resourceCleaned, "status: exact_owned_resources_absent") ||
+		!strings.Contains(resourceCleaned, "target_absent: true") ||
+		!strings.Contains(resourceCleaned, "all_volumes_absent: true") ||
+		!strings.Contains(resourceCleaned, "raw_resource_names_stored: false") ||
+		!strings.Contains(resourceCleaned, "container_started: false") ||
+		!strings.Contains(resourceCleaned, "execution_authorized: false") ||
+		strings.Contains(resourceCleaned, "scripts") || strings.Contains(resourceCleaned, home) ||
+		strings.Contains(resourceCleaned, "cyberagent-runtime-") {
+		t.Fatalf("runtime resource cleanup leaked data or widened authority: output=%s stderr=%s code=%d",
+			resourceCleaned, stderr, code)
+	}
+	resourceCleanupID := sandboxDockerRuntimeInputResourceCleanupIDPattern.FindString(resourceCleaned)
+	if resourceCleanupID == "" {
+		t.Fatalf("missing runtime resource cleanup id: %s", resourceCleaned)
+	}
+	resourceCleanupReplay, stderr, code := executeTestCommandWithDockerRuntimeResources(t,
+		resourceInspector, resourceCleanup, "run", "sandbox",
+		"docker-runtime-input-resource-cleanup", resourceInspectionID,
+		"--manifest", manifestPath, "--operation-key", "runtime-input-resource-cleanup-cli",
+		"--confirm-resource-cleanup", "--confirm-daemon-write")
+	if code != 0 || stderr != "" || resourceCleanup.calls != 1 ||
+		!strings.Contains(resourceCleanupReplay, "replayed: true") {
+		t.Fatalf("runtime resource cleanup replay contacted daemon: output=%s stderr=%s code=%d",
+			resourceCleanupReplay, stderr, code)
+	}
+	resourceCleanups, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-runtime-input-resource-cleanups", runID)
+	if code != 0 || stderr != "" || !strings.Contains(resourceCleanups, resourceCleanupID) ||
+		!strings.Contains(resourceCleanups, "status=exact_owned_resources_absent") ||
+		strings.Contains(resourceCleanups, "/workspace") || strings.Contains(resourceCleanups, home) {
+		t.Fatalf("runtime resource cleanup list leaked data: output=%s stderr=%s code=%d",
+			resourceCleanups, stderr, code)
+	}
+	resourceCleanupShown, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-runtime-input-resource-cleanup-show", resourceCleanupID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(resourceCleanupShown, "result_fingerprint:") ||
+		!strings.Contains(resourceCleanupShown, "lease_status: released") ||
+		!strings.Contains(resourceCleanupShown, "raw_container_ids_stored: false") ||
+		strings.Contains(resourceCleanupShown, "/workspace") || strings.Contains(resourceCleanupShown, home) {
+		t.Fatalf("runtime resource cleanup show leaked data: output=%s stderr=%s code=%d",
+			resourceCleanupShown, stderr, code)
+	}
+	resourceCleanupResume, stderr, code := executeTestCommandWithDockerRuntimeResources(t,
+		resourceInspector, resourceCleanup, "run", "sandbox",
+		"docker-runtime-input-resource-cleanup-resume", resourceCleanupID,
+		"--manifest", manifestPath, "--confirm-resource-cleanup", "--confirm-daemon-write")
+	if code != 0 || stderr != "" || resourceCleanup.calls != 1 ||
+		!strings.Contains(resourceCleanupResume, "replayed: true") {
+		t.Fatalf("completed runtime resource cleanup resume was not metadata-only: output=%s stderr=%s code=%d",
+			resourceCleanupResume, stderr, code)
 	}
 	attemptList, stderr, code := executeTestCommand(t, "run", "sandbox",
 		"docker-attempts", runID)

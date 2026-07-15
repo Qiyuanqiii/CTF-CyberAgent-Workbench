@@ -310,6 +310,16 @@ func newDockerRuntimeInputApplicationTransportFixture(t *testing.T) (
 	DockerRuntimeInputApplicationRequest,
 ) {
 	t.Helper()
+	intent, lease, request, _, _ := newDockerRuntimeInputApplicationTransportFixtureFull(t)
+	return intent, lease, request
+}
+
+func newDockerRuntimeInputApplicationTransportFixtureFull(t *testing.T) (
+	DockerRuntimeInputApplicationIntent, DockerRuntimeInputApplicationLease,
+	DockerRuntimeInputApplicationRequest, DockerRuntimeInputProjectionPlan,
+	DockerContainerWriteRequest,
+) {
+	t.Helper()
 	ctx := context.Background()
 	manifest := dockerContainerCompilerManifest()
 	manifest.Network = NetworkScope{Mode: "disabled"}
@@ -348,7 +358,7 @@ func newDockerRuntimeInputApplicationTransportFixture(t *testing.T) (
 	plan := DockerRuntimeInputProjectionPlan{
 		ID: "runtime-projection", HandoffID: "runtime-handoff",
 		HandoffIntentID: "runtime-handoff-intent", AttemptID: "runtime-attempt",
-		ContainerPlanID: "runtime-container-plan", RunID: "runtime-run",
+		ContainerPlanID: "runtime-container-plan", RunID: spec.RunID,
 		MissionID: "runtime-mission", WorkspaceID: "runtime-workspace",
 		ProtocolVersion:    DockerRuntimeInputProjectionPlanProtocolVersion,
 		Status:             DockerRuntimeInputProjectionStatusCompiled,
@@ -395,7 +405,7 @@ func newDockerRuntimeInputApplicationTransportFixture(t *testing.T) (
 	if err != nil {
 		t.Fatal(err)
 	}
-	return intent, lease, request
+	return intent, lease, request, plan, writeRequest
 }
 
 func wrapRuntimeInputTestReadback(inner []byte) []byte {

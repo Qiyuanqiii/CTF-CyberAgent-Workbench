@@ -875,9 +875,8 @@ func buildRuntimeInputProjection(ordinal int, kind string, mountOrdinal int, tar
 		return DockerRuntimeInputProjectionItem{}, DockerRuntimeInputProjectionArchive{},
 			errors.New("docker runtime input projection archive is outside bounds")
 	}
-	seed := fingerprint("sandbox_docker_runtime_input_volume.v1", manifestFingerprint,
-		runtimeBindingFingerprint, bundleDigest, kind, strconv.Itoa(mountOrdinal), target)
-	volumeName := "cyberagent-runtime-" + seed[:24]
+	volumeName := dockerRuntimeInputProjectionVolumeName(manifestFingerprint,
+		runtimeBindingFingerprint, bundleDigest, kind, mountOrdinal, target)
 	item := DockerRuntimeInputProjectionItem{
 		Ordinal: ordinal, ProtocolVersion: DockerRuntimeInputProjectionItemProtocolVersion,
 		Kind: kind, ManifestMountOrdinal: mountOrdinal,
@@ -893,6 +892,14 @@ func buildRuntimeInputProjection(ordinal int, kind string, mountOrdinal int, tar
 	archive := DockerRuntimeInputProjectionArchive{ItemOrdinal: ordinal, Target: target,
 		VolumeName: volumeName, Data: append([]byte(nil), output.Bytes()...)}
 	return item, archive, item.Validate()
+}
+
+func dockerRuntimeInputProjectionVolumeName(manifestFingerprint, runtimeBindingFingerprint,
+	bundleDigest, kind string, mountOrdinal int, target string,
+) string {
+	seed := fingerprint("sandbox_docker_runtime_input_volume.v1", manifestFingerprint,
+		runtimeBindingFingerprint, bundleDigest, kind, strconv.Itoa(mountOrdinal), target)
+	return "cyberagent-runtime-" + seed[:24]
 }
 
 func validDockerRuntimeInputVolumeName(value string) bool {

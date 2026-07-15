@@ -188,6 +188,16 @@ func newDockerRuntimeInputApplicationStoreFixture(t *testing.T, ctx context.Cont
 	st *SQLiteStore, root string, projection sandbox.DockerRuntimeInputProjectionPlan,
 ) (sandbox.DockerRuntimeInputApplicationIntent, sandbox.DockerRuntimeInputApplicationRequest) {
 	t.Helper()
+	intent, request, _ := newDockerRuntimeInputApplicationStoreFixtureFull(
+		t, ctx, st, root, projection)
+	return intent, request
+}
+
+func newDockerRuntimeInputApplicationStoreFixtureFull(t *testing.T, ctx context.Context,
+	st *SQLiteStore, root string, projection sandbox.DockerRuntimeInputProjectionPlan,
+) (sandbox.DockerRuntimeInputApplicationIntent, sandbox.DockerRuntimeInputApplicationRequest,
+	sandbox.DockerContainerWriteRequest) {
+	t.Helper()
 	manifest := sandboxStoreTestManifest()
 	manifest.Backend = sandbox.BackendDocker
 	manifest.Command.Executable = "private-build-command"
@@ -243,7 +253,7 @@ func newDockerRuntimeInputApplicationStoreFixture(t *testing.T, ctx context.Cont
 	if err != nil {
 		t.Fatal(err)
 	}
-	return intent, request
+	return intent, request, writeRequest
 }
 
 func assertDockerRuntimeInputApplicationSchemaPrivacy(t *testing.T, ctx context.Context,

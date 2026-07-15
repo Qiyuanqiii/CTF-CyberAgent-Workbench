@@ -61,6 +61,8 @@ type App struct {
 	hostInputStager      sandbox.DockerHostInputStager
 	hostInputHandoff     sandbox.DockerHostInputHandoffTransport
 	runtimeInputApply    sandbox.DockerRuntimeInputApplicationTransport
+	runtimeResourceRead  sandbox.DockerRuntimeInputResourceInspector
+	runtimeResourceClean sandbox.DockerRuntimeInputResourceCleanupTransport
 }
 
 func Execute(args []string, out io.Writer, errOut io.Writer) int {

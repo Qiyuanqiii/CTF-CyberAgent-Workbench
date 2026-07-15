@@ -154,11 +154,17 @@ const (
 )
 
 const (
-	SandboxDockerRuntimeInputApplicationPreparedEvent  = "sandbox.docker_runtime_input_application_prepared"
-	SandboxDockerRuntimeInputApplicationAcquiredEvent  = "sandbox.docker_runtime_input_application_acquired"
-	SandboxDockerRuntimeInputApplicationTakenOverEvent = "sandbox.docker_runtime_input_application_taken_over"
-	SandboxDockerRuntimeInputApplicationFailedEvent    = "sandbox.docker_runtime_input_application_failed"
-	SandboxDockerRuntimeInputApplicationCompletedEvent = "sandbox.docker_runtime_input_application_completed"
+	SandboxDockerRuntimeInputApplicationPreparedEvent      = "sandbox.docker_runtime_input_application_prepared"
+	SandboxDockerRuntimeInputApplicationAcquiredEvent      = "sandbox.docker_runtime_input_application_acquired"
+	SandboxDockerRuntimeInputApplicationTakenOverEvent     = "sandbox.docker_runtime_input_application_taken_over"
+	SandboxDockerRuntimeInputApplicationFailedEvent        = "sandbox.docker_runtime_input_application_failed"
+	SandboxDockerRuntimeInputApplicationCompletedEvent     = "sandbox.docker_runtime_input_application_completed"
+	SandboxDockerRuntimeInputResourceInspectedEvent        = "sandbox.docker_runtime_input_resource_inspected"
+	SandboxDockerRuntimeInputResourceCleanupPreparedEvent  = "sandbox.docker_runtime_input_resource_cleanup_prepared"
+	SandboxDockerRuntimeInputResourceCleanupAcquiredEvent  = "sandbox.docker_runtime_input_resource_cleanup_acquired"
+	SandboxDockerRuntimeInputResourceCleanupTakenOverEvent = "sandbox.docker_runtime_input_resource_cleanup_taken_over"
+	SandboxDockerRuntimeInputResourceCleanupFailedEvent    = "sandbox.docker_runtime_input_resource_cleanup_failed"
+	SandboxDockerRuntimeInputResourceCleanupCompletedEvent = "sandbox.docker_runtime_input_resource_cleanup_completed"
 )
 
 type Event struct {

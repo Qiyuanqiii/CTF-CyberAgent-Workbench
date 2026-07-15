@@ -191,6 +191,31 @@ type SandboxManifestStore interface {
 		keyDigest string) (sandbox.DockerRuntimeInputApplicationRecord, bool, error)
 	ListDockerRuntimeInputApplications(ctx context.Context, runID string,
 		limit int) ([]sandbox.DockerRuntimeInputApplicationRecord, error)
+	RecordDockerRuntimeInputResourceInspection(ctx context.Context,
+		value sandbox.DockerRuntimeInputResourceInspection) (sandbox.DockerRuntimeInputResourceInspection, bool, error)
+	GetDockerRuntimeInputResourceInspection(ctx context.Context,
+		id string) (sandbox.DockerRuntimeInputResourceInspection, error)
+	GetDockerRuntimeInputResourceInspectionByOperation(ctx context.Context,
+		keyDigest string) (sandbox.DockerRuntimeInputResourceInspection, bool, error)
+	ListDockerRuntimeInputResourceInspections(ctx context.Context, runID string,
+		limit int) ([]sandbox.DockerRuntimeInputResourceInspection, error)
+	BeginDockerRuntimeInputResourceCleanup(ctx context.Context,
+		intent sandbox.DockerRuntimeInputResourceCleanupIntent, ownerID string,
+		ttl time.Duration) (sandbox.DockerRuntimeInputResourceCleanupAcquisition, error)
+	AcquireDockerRuntimeInputResourceCleanup(ctx context.Context, intentID, requestedBy,
+		ownerID string, ttl time.Duration) (sandbox.DockerRuntimeInputResourceCleanupAcquisition, error)
+	CompleteDockerRuntimeInputResourceCleanup(ctx context.Context,
+		result sandbox.DockerRuntimeInputResourceCleanupResult,
+		expected sandbox.DockerRuntimeInputResourceCleanupLease) (sandbox.DockerRuntimeInputResourceCleanupRecord, bool, error)
+	RecordDockerRuntimeInputResourceCleanupFailure(ctx context.Context, intentID string,
+		expected sandbox.DockerRuntimeInputResourceCleanupLease, code string,
+		createdAt time.Time) (sandbox.DockerRuntimeInputResourceCleanupRecord, error)
+	GetDockerRuntimeInputResourceCleanup(ctx context.Context,
+		id string) (sandbox.DockerRuntimeInputResourceCleanupRecord, error)
+	GetDockerRuntimeInputResourceCleanupByOperation(ctx context.Context,
+		keyDigest string) (sandbox.DockerRuntimeInputResourceCleanupRecord, bool, error)
+	ListDockerRuntimeInputResourceCleanups(ctx context.Context, runID string,
+		limit int) ([]sandbox.DockerRuntimeInputResourceCleanupRecord, error)
 }
 
 type SandboxManifestService struct {
@@ -205,6 +230,8 @@ type SandboxManifestService struct {
 	hostInputStager      sandbox.DockerHostInputStager
 	hostInputHandoff     sandbox.DockerHostInputHandoffTransport
 	runtimeInputApply    sandbox.DockerRuntimeInputApplicationTransport
+	runtimeResourceRead  sandbox.DockerRuntimeInputResourceInspector
+	runtimeResourceClean sandbox.DockerRuntimeInputResourceCleanupTransport
 }
 
 type PrepareSandboxManifestRequest struct {
@@ -229,7 +256,27 @@ func NewSandboxManifestService(store SandboxManifestStore,
 		hostInputStager:      sandbox.NewUnavailableDockerHostInputStager(),
 		hostInputHandoff:     sandbox.NewUnavailableDockerHostInputHandoffTransport(),
 		runtimeInputApply:    sandbox.NewUnavailableDockerRuntimeInputApplicationTransport(),
+		runtimeResourceRead:  sandbox.NewUnavailableDockerRuntimeInputResourceTransport(),
+		runtimeResourceClean: sandbox.NewUnavailableDockerRuntimeInputResourceTransport(),
 	}
+}
+
+func (s *SandboxManifestService) WithDockerRuntimeInputResourceInspector(
+	inspector sandbox.DockerRuntimeInputResourceInspector,
+) *SandboxManifestService {
+	if s != nil && inspector != nil {
+		s.runtimeResourceRead = inspector
+	}
+	return s
+}
+
+func (s *SandboxManifestService) WithDockerRuntimeInputResourceCleanupTransport(
+	transport sandbox.DockerRuntimeInputResourceCleanupTransport,
+) *SandboxManifestService {
+	if s != nil && transport != nil {
+		s.runtimeResourceClean = transport
+	}
+	return s
 }
 
 func (s *SandboxManifestService) WithDockerRuntimeInputApplicationTransport(

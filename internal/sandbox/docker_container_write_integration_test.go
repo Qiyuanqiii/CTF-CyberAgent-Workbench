@@ -205,7 +205,7 @@ func TestDockerRuntimeInputApplicationRealDaemonOptIn(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	intent, lease, request := newDockerRuntimeInputApplicationIntegrationFixture(
+	intent, lease, request, projection, writeRequest := newDockerRuntimeInputApplicationIntegrationFixture(
 		t, ctx, imageDigest)
 	local, ok := NewLocalDockerRuntimeInputApplicationTransport().(localDockerRuntimeInputApplicationTransport)
 	if !ok {
@@ -237,8 +237,50 @@ func TestDockerRuntimeInputApplicationRealDaemonOptIn(t *testing.T) {
 				mount.Ordinal, found, err)
 		}
 	}
-	if err := transport.cleanupDockerRuntimeInputApplication(request); err != nil {
+	releasedAt := result.CreatedAt
+	releasedLease := lease
+	releasedLease.Status = DockerRuntimeInputApplicationLeaseReleased
+	releasedLease.ReleasedAt = &releasedAt
+	application := DockerRuntimeInputApplicationRecord{Intent: intent, Lease: releasedLease,
+		Result: &result}
+	descriptor, err := NewDockerRuntimeInputResourceDescriptor(application, projection,
+		writeRequest)
+	if err != nil {
 		t.Fatal(err)
+	}
+	resourceInspector := NewLocalDockerRuntimeInputResourceInspector()
+	observation, err := resourceInspector.Inspect(ctx, descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspection, err := NewDockerRuntimeInputResourceInspection(
+		"runtime-input-integration-resource-inspection", strings.Repeat("2", 64),
+		intent.RequestedBy, application, descriptor, observation)
+	if err != nil || !inspection.Complete || !inspection.CleanupEligible ||
+		!inspection.AllOwnedVolumesReadOnly || !inspection.AllOwnedVolumesNoCopy {
+		t.Fatalf("real daemon resource inspection did not establish exact ownership: %#v err=%v",
+			inspection, err)
+	}
+	cleanupTransport := NewLocalDockerRuntimeInputResourceCleanupTransport()
+	cleanupIntent, err := NewDockerRuntimeInputResourceCleanupIntent(
+		"runtime-input-integration-resource-cleanup", strings.Repeat("3", 64),
+		inspection, descriptor, cleanupTransport.Endpoint(), true, true,
+		intent.RequestedBy, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquiredAt := time.Now().UTC()
+	cleanupLease := DockerRuntimeInputResourceCleanupLease{IntentID: cleanupIntent.ID,
+		LeaseID: "runtime-input-integration-resource-cleanup-lease",
+		OwnerID: "integration_operator", Generation: 1,
+		Status: DockerRuntimeInputResourceCleanupLeaseActive, AcquiredAt: acquiredAt,
+		ExpiresAt: acquiredAt.Add(5 * time.Minute)}
+	cleanupResult, err := cleanupTransport.Cleanup(ctx, cleanupIntent, cleanupLease, descriptor)
+	if err != nil || cleanupResult.Validate() != nil || !cleanupResult.TargetAbsent ||
+		!cleanupResult.AllVolumesAbsent || cleanupResult.ForeignResourceDetected ||
+		cleanupResult.ContainerStartAuthorized || cleanupResult.ProcessExecutionAuthorized {
+		t.Fatalf("real daemon resource cleanup escaped its boundary: %#v err=%v",
+			cleanupResult, err)
 	}
 	if _, found, err := transport.inspectRuntimeInputContainer(ctx,
 		request.Spec.ContainerName); err != nil || found {
@@ -256,7 +298,8 @@ func TestDockerRuntimeInputApplicationRealDaemonOptIn(t *testing.T) {
 func newDockerRuntimeInputApplicationIntegrationFixture(t *testing.T, ctx context.Context,
 	imageDigest string,
 ) (DockerRuntimeInputApplicationIntent, DockerRuntimeInputApplicationLease,
-	DockerRuntimeInputApplicationRequest,
+	DockerRuntimeInputApplicationRequest, DockerRuntimeInputProjectionPlan,
+	DockerContainerWriteRequest,
 ) {
 	t.Helper()
 	writeRequest, containerPlan, manifest, workspaceRoot := newDockerWriteIntegrationFixture(
@@ -406,7 +449,7 @@ func newDockerRuntimeInputApplicationIntegrationFixture(t *testing.T, ctx contex
 	if err != nil {
 		t.Fatal(err)
 	}
-	return applicationIntent, applicationLease, request
+	return applicationIntent, applicationLease, request, projection, writeRequest
 }
 
 func newDockerWriteIntegrationRequest(t *testing.T, ctx context.Context,

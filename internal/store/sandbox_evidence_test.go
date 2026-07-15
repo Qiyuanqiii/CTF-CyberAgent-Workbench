@@ -533,7 +533,7 @@ func removeSchemaV60ForTestStatements() []string {
 }
 
 func removeSchemaV61ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV62ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_result_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_result_update_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_failure_delete_immutable`,
@@ -550,5 +550,33 @@ func removeSchemaV61ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_docker_runtime_input_application_intents_run_created`,
 		`DROP TABLE sandbox_docker_runtime_input_application_intents`,
 		`DELETE FROM schema_migrations WHERE version = 61`,
+	}...)
+}
+
+func removeSchemaV62ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_lease_delete_immutable_v62`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_cleanup_lease_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_cleanup_result_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_cleanup_result_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_cleanup_failure_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_cleanup_failure_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_cleanup_intent_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_cleanup_intent_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_inspection_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_inspection_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_cleanup_lease_update`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_cleanup_result_insert`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_cleanup_failure_insert`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_cleanup_intent_insert`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_inspection_insert`,
+		`DROP TABLE sandbox_docker_runtime_input_resource_cleanup_results`,
+		`DROP TABLE sandbox_docker_runtime_input_resource_cleanup_failures`,
+		`DROP TABLE sandbox_docker_runtime_input_resource_cleanup_leases`,
+		`DROP INDEX idx_sandbox_docker_runtime_input_resource_cleanup_intents_run_created`,
+		`DROP TABLE sandbox_docker_runtime_input_resource_cleanup_intents`,
+		`DROP INDEX idx_sandbox_docker_runtime_input_resource_inspections_run_created`,
+		`DROP TABLE sandbox_docker_runtime_input_resource_inspections`,
+		`DELETE FROM schema_migrations WHERE version = 62`,
 	}
 }

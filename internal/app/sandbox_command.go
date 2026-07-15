@@ -68,7 +68,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-runtime-input-plan|docker-runtime-input-plans|docker-runtime-input-plan-show|docker-runtime-input-apply|docker-runtime-input-apply-resume|docker-runtime-input-applications|docker-runtime-input-application-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-runtime-input-plan|docker-runtime-input-plans|docker-runtime-input-plan-show|docker-runtime-input-apply|docker-runtime-input-apply-resume|docker-runtime-input-applications|docker-runtime-input-application-show|docker-runtime-input-resource-inspect|docker-runtime-input-resource-inspections|docker-runtime-input-resource-inspection-show|docker-runtime-input-resource-cleanup|docker-runtime-input-resource-cleanup-resume|docker-runtime-input-resource-cleanups|docker-runtime-input-resource-cleanup-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	if a.dockerObserver != nil {
@@ -85,6 +85,12 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	}
 	if a.runtimeInputApply != nil {
 		service.WithDockerRuntimeInputApplicationTransport(a.runtimeInputApply)
+	}
+	if a.runtimeResourceRead != nil {
+		service.WithDockerRuntimeInputResourceInspector(a.runtimeResourceRead)
+	}
+	if a.runtimeResourceClean != nil {
+		service.WithDockerRuntimeInputResourceCleanupTransport(a.runtimeResourceClean)
 	}
 	switch args[0] {
 	case "prepare":
@@ -1097,6 +1103,208 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		}
 		printSandboxDockerRuntimeInputApplication(a, value)
 		return nil
+	case "docker-runtime-input-resource-inspect":
+		fs := newFlagSet("run sandbox docker-runtime-input-resource-inspect", a.errOut)
+		manifestPath := fs.String("manifest", "", "resupplied Docker sandbox manifest JSON file")
+		operationKey := fs.String("operation-key", "", "stable runtime input resource inspection operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		confirmed := fs.Bool("confirm-readonly-probe", false,
+			"confirm metadata-only inspection of exact retained Docker resources")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"manifest": true, "operation-key": true, "operator": true,
+			"confirm-readonly-probe": false,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" ||
+			strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox docker-runtime-input-resource-inspect <application-intent-id> --manifest <manifest.json> --operation-key <key> --confirm-readonly-probe [--operator <id>]")
+		}
+		if !*confirmed {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker runtime input resource inspection requires --confirm-readonly-probe")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		if a.runtimeResourceRead == nil {
+			service.WithDockerRuntimeInputResourceInspector(
+				sandbox.NewLocalDockerRuntimeInputResourceInspector())
+		}
+		value, inspectErr := service.InspectDockerRuntimeInputResources(ctx,
+			application.InspectDockerRuntimeInputResourcesRequest{
+				ApplicationIntentID: fs.Arg(0), Manifest: manifest,
+				OperationKey: *operationKey, RequestedBy: *operator,
+				OperatorConfirmed: true,
+			})
+		if value.ID != "" {
+			printSandboxDockerRuntimeInputResourceInspection(a, value)
+		}
+		return inspectErr
+	case "docker-runtime-input-resource-inspections":
+		fs := newFlagSet("run sandbox docker-runtime-input-resource-inspections", a.errOut)
+		limit := fs.Int("limit", 100, "maximum Docker runtime input resource inspections")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-runtime-input-resource-inspections <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDockerRuntimeInputResourceInspections(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no Docker runtime input resource inspections")
+			return nil
+		}
+		for _, value := range values {
+			fmt.Fprintf(a.out, "%s\tapplication=%s\tstatus=%s\ttarget=%s\towned_volumes=%d\tabsent_volumes=%d\tforeign_resources=%d\tcleanup_eligible=%t\tcontainer_started=false\tprocess_executed=false\texecution_authorized=false\tcreated_at=%s\n",
+				value.ID, value.ApplicationIntentID, value.Status, value.TargetState,
+				value.OwnedVolumeCount, value.AbsentVolumeCount, value.ForeignResourceCount,
+				value.CleanupEligible, value.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "docker-runtime-input-resource-inspection-show":
+		fs := newFlagSet("run sandbox docker-runtime-input-resource-inspection-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-runtime-input-resource-inspection-show <inspection-id>")
+		}
+		value, err := service.GetDockerRuntimeInputResourceInspection(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxDockerRuntimeInputResourceInspection(a, value)
+		return nil
+	case "docker-runtime-input-resource-cleanup":
+		fs := newFlagSet("run sandbox docker-runtime-input-resource-cleanup", a.errOut)
+		manifestPath := fs.String("manifest", "", "resupplied Docker sandbox manifest JSON file")
+		operationKey := fs.String("operation-key", "", "stable runtime input resource cleanup operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		owner := fs.String("owner", "", "cleanup lease owner identity")
+		operatorConfirmed := fs.Bool("confirm-resource-cleanup", false,
+			"confirm deletion of only exact-owned retained resources")
+		daemonConfirmed := fs.Bool("confirm-daemon-write", false,
+			"confirm bounded deletes on the fixed local Docker daemon")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"manifest": true, "operation-key": true, "operator": true, "owner": true,
+			"confirm-resource-cleanup": false, "confirm-daemon-write": false,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" ||
+			strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox docker-runtime-input-resource-cleanup <inspection-id> --manifest <manifest.json> --operation-key <key> --confirm-resource-cleanup --confirm-daemon-write [--operator <id>] [--owner <id>]")
+		}
+		if !*operatorConfirmed || !*daemonConfirmed {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker runtime input resource cleanup requires --confirm-resource-cleanup and --confirm-daemon-write")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		if a.runtimeResourceClean == nil {
+			service.WithDockerRuntimeInputResourceCleanupTransport(
+				sandbox.NewLocalDockerRuntimeInputResourceCleanupTransport())
+		}
+		value, cleanupErr := service.CleanupDockerRuntimeInputResources(ctx,
+			application.CleanupDockerRuntimeInputResourcesRequest{
+				InspectionID: fs.Arg(0), Manifest: manifest, OperationKey: *operationKey,
+				RequestedBy: *operator, OwnerID: *owner, OperatorConfirmed: true,
+				DaemonWriteConfirmed: true,
+			})
+		if value.Intent.ID != "" {
+			printSandboxDockerRuntimeInputResourceCleanup(a, value)
+		}
+		return cleanupErr
+	case "docker-runtime-input-resource-cleanup-resume":
+		fs := newFlagSet("run sandbox docker-runtime-input-resource-cleanup-resume", a.errOut)
+		manifestPath := fs.String("manifest", "", "resupplied Docker sandbox manifest JSON file")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		owner := fs.String("owner", "", "cleanup lease owner identity")
+		operatorConfirmed := fs.Bool("confirm-resource-cleanup", false,
+			"confirm resuming exact-owned retained resource deletion")
+		daemonConfirmed := fs.Bool("confirm-daemon-write", false,
+			"confirm bounded deletes on the fixed local Docker daemon")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"manifest": true, "operator": true, "owner": true,
+			"confirm-resource-cleanup": false, "confirm-daemon-write": false,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" {
+			return errors.New("usage: cyberagent run sandbox docker-runtime-input-resource-cleanup-resume <cleanup-intent-id> --manifest <manifest.json> --confirm-resource-cleanup --confirm-daemon-write [--operator <id>] [--owner <id>]")
+		}
+		if !*operatorConfirmed || !*daemonConfirmed {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker runtime input resource cleanup resume requires --confirm-resource-cleanup and --confirm-daemon-write")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		if a.runtimeResourceClean == nil {
+			service.WithDockerRuntimeInputResourceCleanupTransport(
+				sandbox.NewLocalDockerRuntimeInputResourceCleanupTransport())
+		}
+		value, resumeErr := service.ResumeDockerRuntimeInputResourceCleanup(ctx,
+			application.ResumeDockerRuntimeInputResourceCleanupRequest{
+				IntentID: fs.Arg(0), Manifest: manifest, RequestedBy: *operator,
+				OwnerID: *owner, OperatorConfirmed: true, DaemonWriteConfirmed: true,
+			})
+		if value.Intent.ID != "" {
+			printSandboxDockerRuntimeInputResourceCleanup(a, value)
+		}
+		return resumeErr
+	case "docker-runtime-input-resource-cleanups":
+		fs := newFlagSet("run sandbox docker-runtime-input-resource-cleanups", a.errOut)
+		limit := fs.Int("limit", 100, "maximum Docker runtime input resource cleanups")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-runtime-input-resource-cleanups <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDockerRuntimeInputResourceCleanups(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no Docker runtime input resource cleanups")
+			return nil
+		}
+		for _, value := range values {
+			status := "pending"
+			if value.Result != nil {
+				status = value.Result.Status
+			} else if len(value.Failures) > 0 {
+				status = "failed_recoverable"
+			}
+			fmt.Fprintf(a.out, "%s\tinspection=%s\tapplication=%s\tstatus=%s\tlease_generation=%d\tlease_status=%s\tfailures=%d\tcontainer_started=false\tprocess_executed=false\texecution_authorized=false\tcreated_at=%s\n",
+				value.Intent.ID, value.Intent.InspectionID, value.Intent.ApplicationIntentID,
+				status, value.Lease.Generation, value.Lease.Status, len(value.Failures),
+				value.Intent.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "docker-runtime-input-resource-cleanup-show":
+		fs := newFlagSet("run sandbox docker-runtime-input-resource-cleanup-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-runtime-input-resource-cleanup-show <cleanup-intent-id>")
+		}
+		value, err := service.GetDockerRuntimeInputResourceCleanup(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxDockerRuntimeInputResourceCleanup(a, value)
+		return nil
 	case "docker-rehearsals":
 		fs := newFlagSet("run sandbox docker-rehearsals", a.errOut)
 		limit := fs.Int("limit", 100, "maximum Docker container rehearsals")
@@ -1579,6 +1787,75 @@ func printSandboxDockerRuntimeInputApplication(a *App,
 	if resultFingerprint != "" {
 		fmt.Fprintf(a.out, "result_fingerprint: %s\n", resultFingerprint)
 	}
+	if len(value.Failures) > 0 {
+		fmt.Fprintln(a.out, "failures:")
+		for _, failure := range value.Failures {
+			fmt.Fprintf(a.out, "%d\tgeneration=%d\tcode=%s\tfingerprint=%s\tcreated_at=%s\n",
+				failure.Sequence, failure.Generation, failure.Code,
+				failure.FailureFingerprint, failure.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+	}
+}
+
+func printSandboxDockerRuntimeInputResourceInspection(a *App,
+	value sandbox.DockerRuntimeInputResourceInspection,
+) {
+	fmt.Fprintf(a.out, "docker_runtime_input_resource_inspection: %s\ndocker_runtime_input_application_intent: %s\ndocker_runtime_input_application_result: %s\ndocker_runtime_input_projection: %s\ndocker_plan: %s\nrun: %s\nprotocol: %s\nstatus: %s\ntrust_class: %s\ntarget_state: %s\noperation_key_digest: %s\nmanifest_fingerprint: %s\ndescriptor_fingerprint: %s\nrequest_fingerprint: %s\napplication_result_fingerprint: %s\nendpoint_class: %s\nendpoint_fingerprint: %s\nrequest_semantic_fingerprint: %s\ninspection_fingerprint: %s\nprojections: %d\nowned_volumes: %d\nabsent_volumes: %d\nforeign_volumes: %d\nforeign_resources: %d\ndaemon_reads: %d\ninspection_complete: %t\ncleanup_eligible: %t\nowned_target_never_started: %t\nall_owned_volumes_read_only: %t\nall_owned_volumes_no_copy: %t\nraw_resource_names_stored: false\nraw_container_ids_stored: false\ncontainer_started: false\nprocess_executed: false\noutput_exported: false\nexecution_authorized: false\nartifact_commit_authorized: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\n",
+		value.ID, value.ApplicationIntentID, value.ApplicationResultID,
+		value.ProjectionID, value.ContainerPlanID, value.RunID, value.ProtocolVersion,
+		value.Status, value.TrustClass, value.TargetState, value.OperationKeyDigest,
+		value.ManifestFingerprint, value.DescriptorFingerprint, value.RequestFingerprint,
+		value.ApplicationResultFingerprint, value.EndpointClass, value.EndpointFingerprint,
+		value.RequestSemanticFingerprint, value.InspectionFingerprint,
+		value.ProjectionCount, value.OwnedVolumeCount, value.AbsentVolumeCount,
+		value.ForeignVolumeCount, value.ForeignResourceCount, value.DaemonReadCount,
+		value.Complete, value.CleanupEligible, value.OwnedTargetNeverStarted,
+		value.AllOwnedVolumesReadOnly, value.AllOwnedVolumesNoCopy, value.RequestedBy,
+		value.CreatedAt.Format(timeFormatRFC3339Nano), value.Replayed)
+}
+
+func printSandboxDockerRuntimeInputResourceCleanup(a *App,
+	value sandbox.DockerRuntimeInputResourceCleanupRecord,
+) {
+	intent := value.Intent
+	status, resultID, resultProtocol, resultFingerprint := "pending", "", "", ""
+	trustClass := "not_established"
+	initialOwned, initialAbsent, deleteAttempts := 0, 0, 0
+	finalAbsent, daemonReads, daemonWrites := 0, 0, 0
+	targetAbsent, volumesAbsent, foreignDetected := false, false, false
+	createdAt := intent.CreatedAt
+	if value.Result != nil {
+		result := value.Result
+		status, resultID, resultProtocol = result.Status, result.ID, result.ProtocolVersion
+		trustClass, resultFingerprint = result.TrustClass, result.ResultFingerprint
+		initialOwned, initialAbsent = result.InitialOwnedResourceCount,
+			result.InitialAbsentResourceCount
+		deleteAttempts, finalAbsent = result.DeleteAttemptCount,
+			result.FinalAbsentResourceCount
+		daemonReads, daemonWrites = result.DaemonReadCount, result.DaemonWriteCount
+		targetAbsent, volumesAbsent = result.TargetAbsent, result.AllVolumesAbsent
+		createdAt = result.CreatedAt
+	} else if len(value.Failures) > 0 {
+		status = "failed_recoverable"
+		for _, failure := range value.Failures {
+			if failure.Code == sandbox.DockerRuntimeInputResourceErrorUnsafeCollision {
+				foreignDetected = true
+			}
+		}
+	}
+	fmt.Fprintf(a.out, "docker_runtime_input_resource_cleanup_intent: %s\ndocker_runtime_input_resource_cleanup_result: %s\ndocker_runtime_input_resource_inspection: %s\ndocker_runtime_input_application_intent: %s\ndocker_runtime_input_application_result: %s\ndocker_runtime_input_projection: %s\ndocker_plan: %s\nrun: %s\nintent_protocol: %s\nresult_protocol: %s\nstatus: %s\ntrust_class: %s\noperation_key_digest: %s\nmanifest_fingerprint: %s\ndescriptor_fingerprint: %s\nrequest_fingerprint: %s\ninspection_fingerprint: %s\napplication_result_fingerprint: %s\nendpoint_class: %s\nendpoint_fingerprint: %s\nintent_fingerprint: %s\nresult_fingerprint: %s\nprojections: %d\nlease_generation: %d\nlease_status: %s\nfailure_count: %d\ninitial_owned_resources: %d\ninitial_absent_resources: %d\ndelete_attempts: %d\nfinal_absent_resources: %d\ndaemon_reads: %d\ndaemon_writes: %d\noperator_confirmed: true\ndaemon_write_confirmed: true\ntarget_absent: %t\nall_volumes_absent: %t\nforeign_resource_detected: %t\nraw_resource_names_stored: false\nraw_container_ids_stored: false\ncontainer_started: false\nprocess_executed: false\noutput_exported: false\nexecution_authorized: false\nartifact_commit_authorized: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\ntook_over: %t\n",
+		intent.ID, resultID, intent.InspectionID, intent.ApplicationIntentID,
+		intent.ApplicationResultID, intent.ProjectionID, intent.ContainerPlanID,
+		intent.RunID, intent.ProtocolVersion, resultProtocol, status, trustClass,
+		intent.OperationKeyDigest, intent.ManifestFingerprint,
+		intent.DescriptorFingerprint, intent.RequestFingerprint,
+		intent.InspectionFingerprint, intent.ApplicationResultFingerprint,
+		intent.EndpointClass, intent.EndpointFingerprint, intent.IntentFingerprint,
+		resultFingerprint, intent.ProjectionCount, value.Lease.Generation,
+		value.Lease.Status, len(value.Failures), initialOwned, initialAbsent,
+		deleteAttempts, finalAbsent, daemonReads, daemonWrites, targetAbsent,
+		volumesAbsent, foreignDetected, intent.RequestedBy,
+		createdAt.Format(timeFormatRFC3339Nano), value.Replayed, value.TookOver)
 	if len(value.Failures) > 0 {
 		fmt.Fprintln(a.out, "failures:")
 		for _, failure := range value.Failures {

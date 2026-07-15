@@ -1,6 +1,6 @@
 # CyberAgent Workbench Project Memory
 
-Last updated: 2026-07-15
+Last updated: 2026-07-16
 
 ## Resume First
 
@@ -34,6 +34,7 @@ Read in this order after a long context break:
 24. `docs/adr/0019-daemon-owned-host-input-handoff.md`
 25. `docs/adr/0020-deterministic-runtime-input-projection.md`
 26. `docs/adr/0021-recoverable-runtime-input-application.md`
+27. `docs/adr/0022-retained-runtime-input-resource-lifecycle.md`
 
 ## Current Baseline
 
@@ -42,8 +43,8 @@ Read in this order after a long context break:
 - Generic coding-agent workflow usability: about 40%.
 - Cyber autonomous-workflow usability: about 20%.
 - These are engineering estimates based on tested roadmap slices, not performance benchmarks. Do not reuse the retired single-axis "overall product vision" percentage.
-- Database schema: v61.
-- `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v61` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
+- Database schema: v62.
+- `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v62` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
 - Main languages: Go control plane, TypeScript React/Vite read console; Rust has not started.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
@@ -59,7 +60,7 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 - Dangerous cyber commands remain permanently denied; approval cannot override permanent Policy denial.
 - External files, repository text, logs, web/mail, tool output, and memory are untrusted evidence with `instruction_authorized=false`; they never become system/assistant authority through persistence or compaction.
 - Shell and ScriptProcess approval paths are dry-run only. Real Local and container-process command execution is disabled.
-- `sandbox_manifest.v1`, `sandbox_execution_candidate.v1`, `sandbox_execution.v1`, `sandbox_preflight.v1`, `sandbox_backend_evidence.v1`, `sandbox_output_simulation.v1`, `sandbox_docker_observation.v1`, `sandbox_docker_container_plan.v1`, `sandbox_docker_container_rehearsal.v1`, `sandbox_docker_container_rehearsal_attempt.v1`, `sandbox_docker_host_input_staging.v1`, `sandbox_docker_host_input_requirement.v1`, the v59 handoff, v60 projection plan, and v61 runtime-input application are evidence or preparation, never process-execution permits. Schemas v48-v61 fix execution, start, export, and production Artifact-commit capabilities to false even after exact operator approval.
+- `sandbox_manifest.v1`, `sandbox_execution_candidate.v1`, `sandbox_execution.v1`, `sandbox_preflight.v1`, `sandbox_backend_evidence.v1`, `sandbox_output_simulation.v1`, `sandbox_docker_observation.v1`, `sandbox_docker_container_plan.v1`, `sandbox_docker_container_rehearsal.v1`, `sandbox_docker_container_rehearsal_attempt.v1`, `sandbox_docker_host_input_staging.v1`, `sandbox_docker_host_input_requirement.v1`, the v59 handoff, v60 projection plan, v61 runtime-input application, and v62 retained-resource lifecycle are evidence, preparation, or cleanup, never process-execution permits. Schemas v48-v62 fix execution, start, export, and production Artifact-commit capabilities to false even after exact operator approval.
 - Sandbox execution ownership uses a separate generation-fenced lease. The initial lease can only prepare a disabled record; cleanup can recover after Run termination, but stale generations cannot commit.
 - Input Artifacts are reverified by exact Run/Session/Workspace, digest, size, MIME, source, stream, order, and a 16 MiB aggregate cap. v50 stores no Artifact body or raw output path.
 - The v51 backend handshake is disabled, container identity is unbound, and all 16 threat-model checks remain required/unverified/not-probed. Output slots store only opaque locator fingerprints and cannot export or commit Artifacts.
@@ -72,10 +73,11 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 - The v59 handoff is default-disabled and requires daemon-write, capture, and handoff confirmation. It uses only fixed API `1.40` archive/volume/container operations, a deterministic local-volume carrier, fixed `/cyberagent-input/bundle.tar`, exact daemon readback, a final read-only never-started target check, and complete resource deletion. User mounts cannot overlap the reserved destination. Retry removes only exact owned residue, while foreign collisions fail closed. Durable evidence grants no start, exec, output, backend, execution, or Artifact authority.
 - The v60 projection plan requires a separately persisted operator confirmation and a completed v59 handoff. It recaptures the exact sealed input, accepts only byte-for-byte canonical v57 PAX tar, maps directory-root read-only mounts and fixed Artifact input in memory, and binds deterministic future volume identity to the handoff fingerprint. Tables/events/CLI retain no raw target, path, file name/content, volume name, or archive bytes. `compiled_not_applied` grants no daemon, start, exec, output, backend, execution, or Artifact authority.
 - The v61 application requires separate operator and daemon-write confirmations plus a durable intent and independent generation lease before Docker mutation. It revalidates v48-v60 and recaptures the exact sealed input, then uses a fixed local-Unix allowlist to create deterministic volumes/carriers, upload only to `/cyberagent-input`, verify daemon readback, and attach every input read-only/`NoCopy` to one fully inspected never-started target. Retry and bounded cleanup touch only full authority matches; foreign collisions fail closed, stale generations cannot commit, and operations stop early enough to reserve cleanup before takeover. Durable output contains no paths, targets, file/resource names, raw IDs, archives, sockets, raw keys, or private lease identities. `volumes_applied_target_never_started` grants no start, exec, output, backend, execution, or Artifact authority.
+- The v62 resource lifecycle requires an explicit read-only inspection before a separately dual-confirmed cleanup. Descriptor reconstruction revalidates v48-v61 but never recaptures the input bundle. Complete never-started/read-only/`NoCopy` evidence is true only when the exact target and every volume are present. Cleanup intent and generation lease commit before Docker access; all resources are preflighted before any DELETE, a foreign collision causes zero DELETE, the target is removed by inspected ID before exact volumes, and final inspection requires total absence. Failure release, takeover, stale-worker fencing, and semantic replay are durable. No names, IDs, paths, sockets, raw keys, or private leases persist, and `exact_owned_resources_absent` grants no start, exec, output, backend, execution, or Artifact authority.
 - The Web UI is read-first. Its bearer remains in memory and never belongs in URLs or browser storage.
 - Provider keys are read from process environment only and must never enter Git, SQLite, events, or logs.
 
-## Completed Sandbox Slice History (Latest: v61)
+## Completed Sandbox Slice History (Latest: v62)
 
 Schema v57 adds a default-disabled host-input capture gate to the recoverable v56 never-started rehearsal. It requires separate operator confirmation, binds an immutable intent to the exact attempt, stopped-container fingerprint, plan, input digest, requester, and current lease generation, and makes SQLite completion depend on a matching result.
 
@@ -119,19 +121,25 @@ SQLite v61 stores intent (including its unique digest-keyed operation binding), 
 
 The v61 final local gate passed full ordinary/race suites in 197.5s/316.8s, vet, zero-warning staticcheck, module verification, zero-finding govulncheck, strict TypeScript, 17 frontend tests, OpenAPI drift, production build, zero-vulnerability npm audit, repository privacy/process/endpoint/encoding/Markdown scans, diff checks, Linux sandbox test-binary cross-compilation, and isolated schema-v61 real-binary smoke; Sandbox race tests passed 20 repetitions. The audit tightened per-volume readback limits, lease cleanup reserve and time validity, Application-level resume confirmations, cancellation-safe typed failure persistence, narrow v55/v59/v61 transport interfaces, daemon-returned `RW`/`NoCopy` evidence, and operation-digest syntax. No unresolved high/medium issue is known. The Windows host cannot execute the opt-in Linux v59/v61 real-daemon harnesses, so start remains blocked. GitHub Actions run `29437941378` passed feature commit `f4aaf7a` with Go/Linux in 2m37s and TypeScript in 27s.
 
+Schema v62 adds immutable metadata-only inspection for the v61 retained target and volumes, plus a separate recoverable exact-owned cleanup. Inspection requires explicit read confirmation, reconstructs the exact resource descriptor from current durable authority without input recapture, and records complete, partial/absent, or unsafe foreign-collision state. Only a complete exact target and all exact volumes establish never-started/read-only/`NoCopy` evidence; unsafe evidence is persisted and returned as a failed precondition.
+
+Cleanup requires its own operator and daemon-write confirmations and a cleanup-eligible inspection. An immutable intent and active generation lease commit before transport use. The fixed local-Unix implementation preflights every target/volume before any DELETE, performs zero DELETE after a foreign collision, removes the target by inspected ID before exact volumes, and rechecks total absence. Bounded failure codes release the lease; later generations recover while stale workers are fenced. Completed operation and resume replay are metadata-only. Windows exposes distinct narrow unsupported inspector/cleanup capabilities and never falls back to host execution.
+
+Focused Sandbox, Store, Application, CLI, migration, SQL immutability, privacy, replay, failure/takeover, and platform tests pass. The audit corrected read-only/`NoCopy` overclaiming for partial or unsafe inspections, made resource-cleanup event names unambiguous, exposed foreign-collision failure truthfully in CLI output, rejected future/out-of-window terminal timestamps, made v61/v62 lease rows undeletable, and extended the Linux opt-in v57/v59/v60/v61 harness through v62 cleanup. No high/medium issue is currently known. ADR 0022 records the boundary.
+
 ## Next Slice
 
-Continue P6 with schema-v62 retained-resource inspection and cleanup; do not reinterpret v61 volume application as process-isolation or execution proof:
+Continue P6 with a schema-v63 design-only start-gate review; do not reinterpret v61 preparation or v62 cleanup as process-isolation or execution proof:
 
-1. Add explicit metadata-only inspect and exact-owned cleanup/reconciliation operations for a completed v61 target and its volumes.
-2. Give cleanup its own confirmation, write-ahead fact, generation ownership, restart recovery, stale-worker fencing, and foreign-resource protection.
-3. Keep container start absent from v62. Design start/wait/TERM/KILL only as a later independent fixed-endpoint state machine with cancellation fan-out and running-orphan ownership.
-4. Run the v59 handoff and v61 application opt-in harnesses on Linux with an already-present exact image before any start gate depends on them.
-5. Output export/Artifact commit, broader network/secrets, HTTP/React mutation, Rust analyzers, and CTF solving remain deferred.
+1. Run the opt-in v59/v61/v62 real-daemon chain on Linux with an already-present exact image before a start gate depends on it.
+2. Map every still-unverified v51 requirement to concrete production evidence and define release blockers.
+3. Design start/wait/TERM/KILL/orphan ownership as a later independent fixed-endpoint state machine with write-ahead state, cancellation fan-out, bounded logs, and generation fencing; keep implementation absent until review acceptance.
+4. Keep output export and atomic Artifact commit behind another independently audited gate.
+5. Broader network/secrets, HTTP/React mutation, Rust analyzers, and CTF solving remain deferred.
 
 ## Local Machine Note
 
-The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so startup correctly fails closed with `migration 30 checksum or name mismatch`. The v61 slice did not modify migrations 1-60, and fresh/upgrade fixtures plus isolated `CYBERAGENT_HOME` runs pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically.
+The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so startup correctly fails closed with `migration 30 checksum or name mismatch`. The v62 slice did not modify migrations 1-61, and fresh/upgrade fixtures plus isolated `CYBERAGENT_HOME` runs pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically.
 
 ## Delivery Loop
 
