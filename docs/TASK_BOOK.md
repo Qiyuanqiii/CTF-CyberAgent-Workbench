@@ -229,6 +229,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] v61 本地发布门禁通过全仓普通/race（197.5 秒/316.8 秒）、vet/staticcheck/module/govulncheck、严格 TypeScript、17 项前端测试、OpenAPI/构建/npm audit、仓库扫描、Linux 交叉编译、隔离二进制 smoke 与 Sandbox race 20 轮；审计补强回读上限、租约时序、resume 确认、取消恢复、transport 能力收窄、真实 mount 证据和 digest 语法，未发现未解决高/中风险。GitHub Actions run `29437941378` 已通过功能提交 `f4aaf7a`；Linux real-daemon v59/v61 harness 仍待人工环境执行。
 - [x] schema v62 为 v61 保留的 target/volumes 增加显式 metadata-only inspect 与 exact-owned cleanup/reconciliation 命令。检查不重捕获输入；完整 read-only/`NoCopy` 证明只在 target 与全部卷精确存在时成立。清理要求独立双确认、写前 intent、generation lease、全资源预检、foreign collision 零 DELETE、target 先删、最终全缺失复核，失败可释放并接管；迁移不虚构历史事实，决策见 ADR 0022。
 - [x] v62 定向 Sandbox/Store/Application/CLI/迁移/SQL/隐私/平台能力测试通过；审计同时固定 lease 不可删除和终态时间必须位于当前活跃租约窗。Linux opt-in harness 已延伸到 v62 inspection/cleanup，但本机 Windows 无 Docker，真实执行仍待 Linux 人工环境。
+- [x] v62 最终发布门禁通过全仓普通/race（313.6 秒/329.6 秒）、vet/staticcheck/module/govulncheck、严格 TypeScript、17 项前端测试、OpenAPI/构建/npm audit、仓库扫描、Linux 交叉编译、隔离二进制 smoke 与四层高频回归；GitHub Actions run `29444398815` 已通过功能提交 `d250d32`，未发现未解决高/中风险。
 - [ ] schema v63 先做 start gate 的设计与生产证据复核，再单独实现 per-run start/wait/TERM/KILL/orphan 生命周期；不得把 v59 handoff、v60 projection compilation、v61 never-started target 或 v62 cleanup 当作进程隔离证据。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
 - [ ] 网络默认关闭，后续仅允许显式 allowlist。

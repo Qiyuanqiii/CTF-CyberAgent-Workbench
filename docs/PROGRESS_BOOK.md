@@ -686,6 +686,8 @@ cleanup 需要独立的 `--confirm-resource-cleanup` 与 `--confirm-daemon-write
 
 定向测试覆盖确认前零调用、无输入 recapture、写前 intent、失败/generation2 恢复、stale worker、幂等重放、unsafe evidence、部分/缺失资源、foreign collision 零 DELETE、target-before-volume、最终全缺失、SQL 不可变、迁移不伪造事实、事件/CLI 隐私与 Windows 最小接口。审计修复了 partial/unsafe 状态误报 read-only/`NoCopy`、清理事件命名歧义、CLI foreign-collision 显示、未来/越界终态时间戳和 v61/v62 lease 可直接删除问题，并把 Linux opt-in harness 延伸到 v62 inspect/cleanup。ADR 0022 固化该边界。架构完成度维持约 98%，产品可用度维持约 45-50%；下一切片先做 schema-v63 start gate 设计与生产证据复核，不直接开放进程。
 
+v62 最终本地门禁通过：全仓普通/race 分别用时 313.6 秒/329.6 秒；vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、严格 TypeScript、8 个文件 17 项前端测试、OpenAPI 无漂移、production build、零漏洞 npm audit、仓库隐私/禁止能力/编码/Markdown 扫描、diff、Linux sandbox test binary 交叉编译和隔离真实二进制 schema-v62 smoke 均为绿色；Sandbox/Store/Application/CLI 高频回归分别通过 20/15/10/10 轮。GitHub Actions run `29444398815` 已通过功能提交 `d250d32`，Go/Linux 与 TypeScript 作业分别用时 2 分 35 秒和 20 秒。本机仍无法执行 Linux real-daemon opt-in 链，因此 start gate 保持关闭。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。

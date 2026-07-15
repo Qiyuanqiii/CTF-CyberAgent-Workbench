@@ -127,6 +127,8 @@ Cleanup requires its own operator and daemon-write confirmations and a cleanup-e
 
 Focused Sandbox, Store, Application, CLI, migration, SQL immutability, privacy, replay, failure/takeover, and platform tests pass. The audit corrected read-only/`NoCopy` overclaiming for partial or unsafe inspections, made resource-cleanup event names unambiguous, exposed foreign-collision failure truthfully in CLI output, rejected future/out-of-window terminal timestamps, made v61/v62 lease rows undeletable, and extended the Linux opt-in v57/v59/v60/v61 harness through v62 cleanup. No high/medium issue is currently known. ADR 0022 records the boundary.
 
+The v62 final local gate passed full ordinary/race suites in 313.6s/329.6s, vet, zero-warning staticcheck, module verification/tidy diff, zero-finding govulncheck, strict TypeScript, 17 frontend tests across 8 files, OpenAPI/build/npm audit, repository privacy/capability/encoding/Markdown scans, diff checks, Linux sandbox test-binary cross-compilation, isolated schema-v62 real-binary smoke, and Sandbox/Store/Application/CLI stress repetitions of 20/15/10/10. GitHub Actions run `29444398815` passed feature commit `d250d32` with Go/Linux in 2m35s and TypeScript in 20s. The Windows host still cannot execute the opt-in Linux v59/v61/v62 real-daemon chain, so no start or process-isolation claim follows.
+
 ## Next Slice
 
 Continue P6 with a schema-v63 design-only start-gate review; do not reinterpret v61 preparation or v62 cleanup as process-isolation or execution proof:
