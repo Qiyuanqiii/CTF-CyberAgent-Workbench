@@ -654,6 +654,8 @@ CLI 新增 `--handoff-host-inputs --confirm-host-input-handoff` 以及 `docker-h
 
 本机 Windows 没有 Docker，因此 opt-in `TestDockerHostInputHandoffRealDaemonOptIn` 只完成 Linux 编译，尚未执行真实 daemon。该 harness 使用实际 v57 local bundle provider，只接受已存在、RepoDigest 精确匹配、无声明 `VOLUME` 且继承环境为空的镜像，不 pull、不 start，并断言 target/carrier/volume 全部删除。此残余证据缺口阻止后续 start gate，不影响当前 never-started 协议结论。架构完成度维持约 98%，产品可用度维持约 45-50%；下一切片 schema v60 先解决 verified bundle 到 Manifest target 的 runtime projection，再独立设计 start/wait/TERM/KILL/orphan，输出 Artifact 事务继续后置。
 
+GitHub Actions run `29406403201` 已通过功能提交 `fb1daca`，Go/Linux 作业 2 分 37 秒、TypeScript 作业 28 秒；Linux 全仓测试、vet、govulncheck 与前端完整门禁全部通过。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。

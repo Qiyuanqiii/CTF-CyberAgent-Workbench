@@ -222,6 +222,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] v58 GitHub Actions run `29400696276` 已通过功能提交 `4b570f7`，Go/Linux 2 分 39 秒、TypeScript 23 秒。
 - [x] schema v59 单独实现 daemon-owned local-volume carrier：四重显式确认、不可变 requirement、写前 intent、固定 `/cyberagent-input/bundle.tar`、精确 daemon 回读长度/摘要、删除可写 carrier、只读 volume 目标复核和全部资源删除。Manifest mount 保留区、exact crash residue、foreign collision、early-failure cleanup、第二代 lease 恢复、迁移/不可变/隐私与 Go/SQL completion gate 已覆盖；start/exec/export 权限仍为 false，决策见 ADR 0019。
 - [x] v59 增加 Linux opt-in real-daemon handoff harness；只接受已存在且满足 v55 profile 的精确 digest，不 pull、不 start，并断言 target/carrier/volume 最终全部不存在。本机 Windows 只完成 Linux test binary 交叉编译，真实运行仍待 Linux 环境。
+- [x] v59 发布门禁通过全仓普通/race、vet/staticcheck/module/govulncheck、严格 TypeScript、17 项前端测试、OpenAPI/构建/npm audit、仓库扫描、Linux 交叉编译与隔离二进制 smoke；GitHub Actions run `29406403201` 已通过功能提交 `fb1daca`，Go/Linux 2 分 37 秒、TypeScript 28 秒。
 - [ ] schema v60 单独设计并审计 verified bundle 到 Manifest target 的 runtime input projection，以及 per-run start/wait/TERM/KILL/orphan 生命周期；不得把 v59 handoff 当作进程隔离证据。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
 - [ ] 网络默认关闭，后续仅允许显式 allowlist。
