@@ -211,7 +211,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] v56 将 transport 拆为可恢复 Stage/Cleanup：未知 create 结果或旧 generation 留下的精确 stopped authority match 会被收养而不再次 create；cleanup 只删除 authority、配置、request 和 container-ID 指纹全部匹配的对象，already-absent 幂等成功，同名不匹配对象绝不删除。
 - [x] v56 落库 19 项固定 ordinal/name 的不可变检查矩阵，Go 与 SQLite 同时强制 `execution_evidence=false`；镜像与容器 inspect 都必须证明继承环境为空，原始 ID、宿主路径、命令、环境值、密钥、socket、完整规格、operation key 和私有 lease owner 不进入公开账本。
 - [x] `docker-attempts|docker-attempt-show|docker-attempt-resume` 支持 metadata-only 查询和按持久化 attempt ID 恢复；恢复必须完整重交 Manifest、再次确认 daemon 写入、保持 requester/intent 完全一致，不依赖调用方保存原始 operation key。
-- [x] v56 定向测试覆盖未知 create 后恢复、单次 create、already-absent、无关同名保护、释放/过期接管、旧 generation fencing、双 Store 竞态、原子 v55/v56 completion、隐私、不可变 SQL、v55 升级和 CLI。全仓普通/race、vet/staticcheck、模块/漏洞、17 项前端测试、OpenAPI/构建/audit、仓库隐私/链接/编码扫描、diff 和隔离真实二进制 smoke 均通过；高频 transport/Store/Application 恢复回归通过，远端 CI 证据待 push 后补记。
+- [x] v56 定向测试覆盖未知 create 后恢复、单次 create、already-absent、无关同名保护、释放/过期接管、旧 generation fencing、双 Store 竞态、原子 v55/v56 completion、隐私、不可变 SQL、v55 升级和 CLI。全仓普通/race、vet/staticcheck、模块/漏洞、17 项前端测试、OpenAPI/构建/audit、仓库隐私/链接/编码扫描、diff 和隔离真实二进制 smoke 均通过；高频 transport/Store/Application 恢复回归通过。GitHub Actions run `29388724727` 已通过功能提交 `e1710bb`，Go 与 TypeScript 作业分别用时 2 分 32 秒和 23 秒。
 - [ ] schema v57 在任何未来 start 之前关闭宿主 mount TOCTOU：采用 descriptor-pinned Linux resolution 或 daemon 侧不可变 staging，并独立证明 rename/replace/symlink/delete、重启和重放不会改变已授权输入；仍不启动进程。
 - [ ] 在任何容器 start 前解决宿主 mount 的 TOCTOU，优先使用 Linux descriptor-pinned 路径或 daemon-side immutable staging；随后单独实现并审计 per-run start/wait/kill/orphan 生命周期。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
