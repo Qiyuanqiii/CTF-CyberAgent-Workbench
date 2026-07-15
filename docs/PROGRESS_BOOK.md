@@ -666,6 +666,8 @@ schema v60 的 plan/item/completion/operation 四类事实和审计事件在 Run
 
 最终本地发布门禁通过：全仓普通/race 分别用时 198.9 秒/194.0 秒；vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、严格 TypeScript、8 个文件 17 项前端测试、OpenAPI 无漂移、production build、零漏洞 npm audit、凭据/运行产物/乱码/Markdown 链接扫描、diff、Linux sandbox test binary 交叉编译和隔离真实二进制 schema-v60 Workspace smoke 均为绿色。编译器 50 轮、Store 30 轮、Application 20 轮、CLI 10 轮，以及关键 Sandbox/Store/Application race 10 轮通过。烟测只注册 mock Provider，在独立 `CYBERAGENT_HOME` 创建 v60 数据库和 Workspace，确认 schema-v60 表后安全删除临时程序与 runtime；没有调用真实模型、Shell、网络或 Docker。架构完成度仍约 98%，产品可用度仍约 45-50%，因为本轮增强的是可审计输入准备而非用户可见执行。下一切片是 schema v61：独立 write-ahead/generation-fenced transport 只应用 v60 volumes 并保持 container never-started；start 生命周期继续后置。
 
+GitHub Actions run `29428011306` 已通过功能提交 `cc92421`：Go/Linux 作业 2 分 48 秒、TypeScript 作业 24 秒；Linux 全仓测试、vet、govulncheck 与前端完整门禁全部通过。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。

@@ -224,7 +224,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] v59 增加 Linux opt-in real-daemon handoff harness；只接受已存在且满足 v55 profile 的精确 digest，不 pull、不 start，并断言 target/carrier/volume 最终全部不存在。本机 Windows 只完成 Linux test binary 交叉编译，真实运行仍待 Linux 环境。
 - [x] v59 发布门禁通过全仓普通/race、vet/staticcheck/module/govulncheck、严格 TypeScript、17 项前端测试、OpenAPI/构建/npm audit、仓库扫描、Linux 交叉编译与隔离二进制 smoke；GitHub Actions run `29406403201` 已通过功能提交 `fb1daca`，Go/Linux 2 分 37 秒、TypeScript 28 秒。
 - [x] schema v60 单独实现并审计 verified bundle 到 Manifest target 的 runtime input projection plan：显式确认、完整 v48-v59 复核、精确 bundle recapture、逐字节 canonical PAX tar、目录 root/fixed Artifact 映射、handoff-bound 跨 Run 隔离、不可变 aggregate completion、幂等 CLI plan/list/show 与 metadata-only 隐私均已覆盖；状态固定 `compiled_not_applied`，没有 daemon/start/exec/export 权限。
-- [x] v60 发布门禁通过全仓普通/race（198.9 秒/194.0 秒）、vet/staticcheck/module/govulncheck、严格 TypeScript、17 项前端测试、OpenAPI/构建/npm audit、仓库扫描、Linux 交叉编译与隔离二进制 smoke；高频编译器/Store/Application/CLI/race 回归通过，审计修复八项持久化、隔离、canonical、ordinal 与时间线问题，未发现未解决高/中风险。
+- [x] v60 发布门禁通过全仓普通/race（198.9 秒/194.0 秒）、vet/staticcheck/module/govulncheck、严格 TypeScript、17 项前端测试、OpenAPI/构建/npm audit、仓库扫描、Linux 交叉编译与隔离二进制 smoke；高频编译器/Store/Application/CLI/race 回归通过，审计修复八项持久化、隔离、canonical、ordinal 与时间线问题，未发现未解决高/中风险。GitHub Actions run `29428011306` 已通过功能提交 `cc92421`。
 - [ ] schema v61 增加独立写前 intent、generation fencing 和固定 transport，把 v60 projection archive 应用到 handoff-bound local volumes，全部只读/no-copy 附加并在 never-started 状态精确 inspect；collision/retry/cleanup 只能处理完整指纹匹配的自有资源。
 - [ ] v61 之后再单独设计 per-run start/wait/TERM/KILL/orphan 生命周期；不得把 v59 handoff 或 v60 projection compilation 当作进程隔离证据。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
