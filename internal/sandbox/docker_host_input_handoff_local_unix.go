@@ -9,6 +9,20 @@ import (
 	"time"
 )
 
+type localDockerHostInputHandoffTransport struct {
+	inner dockerEngineContainerWriteTransport
+}
+
+func (transport localDockerHostInputHandoffTransport) Endpoint() DockerObservationEndpoint {
+	return transport.inner.Endpoint()
+}
+
+func (transport localDockerHostInputHandoffTransport) Handoff(ctx context.Context,
+	request DockerHostInputHandoffRequest, bundle HostInputBundle,
+) (DockerHostInputHandoffResult, error) {
+	return transport.inner.Handoff(ctx, request, bundle)
+}
+
 func NewLocalDockerHostInputHandoffTransport() DockerHostInputHandoffTransport {
 	endpoint, _ := NewDockerObservationEndpoint(DockerObservationEndpointLocalUnix)
 	dialer := &net.Dialer{Timeout: 2 * time.Second, KeepAlive: -1}
@@ -22,5 +36,5 @@ func NewLocalDockerHostInputHandoffTransport() DockerHostInputHandoffTransport {
 	if err != nil {
 		return newUnsupportedDockerHostInputHandoffTransport()
 	}
-	return transport
+	return localDockerHostInputHandoffTransport{inner: transport}
 }

@@ -68,7 +68,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-runtime-input-plan|docker-runtime-input-plans|docker-runtime-input-plan-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-runtime-input-plan|docker-runtime-input-plans|docker-runtime-input-plan-show|docker-runtime-input-apply|docker-runtime-input-apply-resume|docker-runtime-input-applications|docker-runtime-input-application-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	if a.dockerObserver != nil {
@@ -82,6 +82,9 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	}
 	if a.hostInputHandoff != nil {
 		service.WithDockerHostInputHandoffTransport(a.hostInputHandoff)
+	}
+	if a.runtimeInputApply != nil {
+		service.WithDockerRuntimeInputApplicationTransport(a.runtimeInputApply)
 	}
 	switch args[0] {
 	case "prepare":
@@ -965,6 +968,135 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		}
 		printSandboxDockerRuntimeInputProjection(a, value)
 		return nil
+	case "docker-runtime-input-apply":
+		fs := newFlagSet("run sandbox docker-runtime-input-apply", a.errOut)
+		manifestPath := fs.String("manifest", "", "resupplied Docker sandbox manifest JSON file")
+		operationKey := fs.String("operation-key", "", "stable Docker runtime input application operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		owner := fs.String("owner", "", "application lease owner identity")
+		operatorConfirmed := fs.Bool("confirm-runtime-input-apply", false,
+			"confirm exact projection-volume application")
+		daemonConfirmed := fs.Bool("confirm-daemon-write", false,
+			"confirm bounded writes to the fixed local Docker daemon")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"manifest": true, "operation-key": true, "operator": true, "owner": true,
+			"confirm-runtime-input-apply": false, "confirm-daemon-write": false,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" ||
+			strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox docker-runtime-input-apply <projection-id> --manifest <manifest.json> --operation-key <key> --confirm-runtime-input-apply --confirm-daemon-write [--operator <id>] [--owner <id>]")
+		}
+		if !*operatorConfirmed || !*daemonConfirmed {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker runtime input application requires --confirm-runtime-input-apply and --confirm-daemon-write")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		if a.hostInputStager == nil {
+			service.WithDockerHostInputStager(sandbox.NewLocalDockerHostInputStager())
+		}
+		if a.runtimeInputApply == nil {
+			service.WithDockerRuntimeInputApplicationTransport(
+				sandbox.NewLocalDockerRuntimeInputApplicationTransport())
+		}
+		value, applyErr := service.ApplyDockerRuntimeInputs(ctx,
+			application.ApplyDockerRuntimeInputsRequest{ProjectionID: fs.Arg(0),
+				Manifest: manifest, OperationKey: *operationKey, RequestedBy: *operator,
+				OwnerID: *owner, OperatorConfirmed: true, DaemonWriteConfirmed: true})
+		if value.Intent.ID != "" {
+			printSandboxDockerRuntimeInputApplication(a, value)
+		}
+		return applyErr
+	case "docker-runtime-input-apply-resume":
+		fs := newFlagSet("run sandbox docker-runtime-input-apply-resume", a.errOut)
+		manifestPath := fs.String("manifest", "", "resupplied Docker sandbox manifest JSON file")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		owner := fs.String("owner", "", "application lease owner identity")
+		operatorConfirmed := fs.Bool("confirm-runtime-input-apply", false,
+			"confirm resuming exact projection-volume application")
+		daemonConfirmed := fs.Bool("confirm-daemon-write", false,
+			"confirm bounded writes to the fixed local Docker daemon")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"manifest": true, "operator": true, "owner": true,
+			"confirm-runtime-input-apply": false, "confirm-daemon-write": false,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" {
+			return errors.New("usage: cyberagent run sandbox docker-runtime-input-apply-resume <application-intent-id> --manifest <manifest.json> --confirm-runtime-input-apply --confirm-daemon-write [--operator <id>] [--owner <id>]")
+		}
+		if !*operatorConfirmed || !*daemonConfirmed {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker runtime input application resume requires --confirm-runtime-input-apply and --confirm-daemon-write")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		if a.hostInputStager == nil {
+			service.WithDockerHostInputStager(sandbox.NewLocalDockerHostInputStager())
+		}
+		if a.runtimeInputApply == nil {
+			service.WithDockerRuntimeInputApplicationTransport(
+				sandbox.NewLocalDockerRuntimeInputApplicationTransport())
+		}
+		value, resumeErr := service.ResumeDockerRuntimeInputs(ctx,
+			application.ResumeDockerRuntimeInputsRequest{IntentID: fs.Arg(0),
+				Manifest: manifest, RequestedBy: *operator, OwnerID: *owner,
+				OperatorConfirmed: true, DaemonWriteConfirmed: true})
+		if value.Intent.ID != "" {
+			printSandboxDockerRuntimeInputApplication(a, value)
+		}
+		return resumeErr
+	case "docker-runtime-input-applications":
+		fs := newFlagSet("run sandbox docker-runtime-input-applications", a.errOut)
+		limit := fs.Int("limit", 100, "maximum Docker runtime input application records")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-runtime-input-applications <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDockerRuntimeInputApplications(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no Docker runtime input application records")
+			return nil
+		}
+		for _, value := range values {
+			status := "pending"
+			if value.Result != nil {
+				status = value.Result.Status
+			} else if len(value.Failures) > 0 {
+				status = "failed_recoverable"
+			}
+			fmt.Fprintf(a.out, "%s\tprojection=%s\tplan=%s\tstatus=%s\tlease_generation=%d\tlease_status=%s\tfailures=%d\ttarget_present=%t\tcontainer_started=false\tprocess_executed=false\texecution_authorized=false\tcreated_at=%s\n",
+				value.Intent.ID, value.Intent.ProjectionID, value.Intent.ContainerPlanID,
+				status, value.Lease.Generation, value.Lease.Status, len(value.Failures),
+				value.Result != nil && value.Result.TargetContainerPresent,
+				value.Intent.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "docker-runtime-input-application-show":
+		fs := newFlagSet("run sandbox docker-runtime-input-application-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-runtime-input-application-show <application-intent-id>")
+		}
+		value, err := service.GetDockerRuntimeInputApplication(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxDockerRuntimeInputApplication(a, value)
+		return nil
 	case "docker-rehearsals":
 		fs := newFlagSet("run sandbox docker-rehearsals", a.errOut)
 		limit := fs.Int("limit", 100, "maximum Docker container rehearsals")
@@ -1398,6 +1530,62 @@ func printSandboxDockerRuntimeInputProjection(a *App,
 			item.ProjectionArchiveBytes, item.TargetFingerprint,
 			item.ArchiveRootFingerprint, item.VolumeNameFingerprint,
 			item.ContentDigest, item.ProjectionArchiveDigest)
+	}
+}
+
+func printSandboxDockerRuntimeInputApplication(a *App,
+	value sandbox.DockerRuntimeInputApplicationRecord,
+) {
+	intent := value.Intent
+	status, resultID, resultProtocol, resultFingerprint := "pending", "", "", ""
+	trustClass := "not_established"
+	requestFingerprint, transportFingerprint := "", ""
+	targetContainerFingerprint, targetInspectionFingerprint := "", ""
+	projectionCount, daemonReads, daemonWrites, reconciled := intent.ProjectionCount, 0, 0, 0
+	targetPresent, readbackVerified := false, false
+	createdAt := intent.CreatedAt
+	if value.Result != nil {
+		result := value.Result
+		status, resultID, resultProtocol = result.Status, result.ID, result.ProtocolVersion
+		trustClass = result.TrustClass
+		resultFingerprint, requestFingerprint = result.ResultFingerprint, result.RequestFingerprint
+		transportFingerprint = result.TransportFingerprint
+		targetContainerFingerprint = result.TargetContainerFingerprint
+		targetInspectionFingerprint = result.TargetInspectionFingerprint
+		projectionCount, daemonReads, daemonWrites = result.ProjectionCount,
+			result.DaemonReadCount, result.DaemonWriteCount
+		reconciled = result.ReconciledResourceCount
+		targetPresent = result.TargetContainerPresent
+		readbackVerified = result.AllProjectionBytesVerified
+		createdAt = result.CreatedAt
+	} else if len(value.Failures) > 0 {
+		status = "failed_recoverable"
+	}
+	fmt.Fprintf(a.out, "docker_runtime_input_application_intent: %s\ndocker_runtime_input_application_result: %s\ndocker_runtime_input_projection: %s\ndocker_host_input_handoff: %s\ndocker_host_input_handoff_intent: %s\nattempt: %s\ndocker_plan: %s\nrun: %s\nmission: %s\nworkspace: %s\nintent_protocol: %s\nresult_protocol: %s\nstatus: %s\ntrust_class: %s\noperation_key_digest: %s\nmanifest_fingerprint: %s\nmount_binding_fingerprint: %s\ninput_artifact_digest: %s\nauthority_fingerprint: %s\nspec_fingerprint: %s\ncontainer_plan_fingerprint: %s\nhandoff_fingerprint: %s\nprojection_set_fingerprint: %s\nprojection_fingerprint: %s\nendpoint_class: %s\nendpoint_fingerprint: %s\nintent_fingerprint: %s\nrequest_fingerprint: %s\ntransport_fingerprint: %s\ntarget_container_fingerprint: %s\ntarget_inspection_fingerprint: %s\nprojections: %d\nlease_generation: %d\nlease_status: %s\nfailure_count: %d\ndaemon_reads: %d\ndaemon_writes: %d\nreconciled_resources: %d\noperator_confirmed: true\ndaemon_write_confirmed: true\nall_volumes_read_only: %t\nall_volumes_no_copy: %t\nprojection_readback_verified: %t\ntarget_configuration_matched: %t\ntarget_container_present: %t\nraw_targets_stored: false\nraw_volume_names_stored: false\nraw_archive_bytes_stored: false\ncontainer_started: false\nprocess_executed: false\noutput_exported: false\nproduction_execution_submitted: false\nproduction_verified: false\nbackend_enabled: false\nexecution_authorized: false\nartifact_commit_authorized: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\n",
+		intent.ID, resultID, intent.ProjectionID, intent.HandoffID, intent.HandoffIntentID,
+		intent.AttemptID, intent.ContainerPlanID, intent.RunID, intent.MissionID,
+		intent.WorkspaceID, intent.ProtocolVersion, resultProtocol, status,
+		trustClass, intent.OperationKeyDigest,
+		intent.ManifestFingerprint, intent.MountBindingFingerprint, intent.InputArtifactDigest,
+		intent.AuthorityFingerprint, intent.SpecFingerprint, intent.ContainerPlanFingerprint,
+		intent.HandoffFingerprint, intent.ProjectionSetFingerprint,
+		intent.ProjectionFingerprint, intent.EndpointClass, intent.EndpointFingerprint,
+		intent.IntentFingerprint, requestFingerprint, transportFingerprint,
+		targetContainerFingerprint, targetInspectionFingerprint, projectionCount,
+		value.Lease.Generation, value.Lease.Status, len(value.Failures), daemonReads,
+		daemonWrites, reconciled, value.Result != nil, value.Result != nil,
+		readbackVerified, value.Result != nil && value.Result.TargetConfigurationMatched,
+		targetPresent, intent.RequestedBy, createdAt.Format(timeFormatRFC3339Nano), value.Replayed)
+	if resultFingerprint != "" {
+		fmt.Fprintf(a.out, "result_fingerprint: %s\n", resultFingerprint)
+	}
+	if len(value.Failures) > 0 {
+		fmt.Fprintln(a.out, "failures:")
+		for _, failure := range value.Failures {
+			fmt.Fprintf(a.out, "%d\tgeneration=%d\tcode=%s\tfingerprint=%s\tcreated_at=%s\n",
+				failure.Sequence, failure.Generation, failure.Code,
+				failure.FailureFingerprint, failure.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
 	}
 }
 

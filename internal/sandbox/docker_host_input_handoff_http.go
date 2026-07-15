@@ -344,13 +344,8 @@ func verifyDockerHostInputContainer(inspection dockerContainerInspection,
 	volumeFound := false
 	for _, observed := range inspection.Mounts {
 		if observed.Destination == DockerHostInputCarrierDestination {
-			expectedMode := "ro"
-			if carrier {
-				expectedMode = "rw"
-			}
 			if volumeFound || observed.Type != "volume" || observed.Name != request.VolumeName ||
-				observed.Driver != "local" || observed.RW != carrier ||
-				observed.Mode != expectedMode {
+				observed.Driver != "local" || observed.RW != carrier {
 				return newDockerHostInputHandoffError(DockerHostInputHandoffErrorUnsafeCollision)
 			}
 			volumeFound = true

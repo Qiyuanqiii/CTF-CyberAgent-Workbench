@@ -32,6 +32,7 @@ var sandboxDockerRehearsalIDPattern = regexp.MustCompile(`sandbox-docker-rehears
 var sandboxDockerHostInputIntentIDPattern = regexp.MustCompile(`sandbox-docker-host-input-intent-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerHostInputHandoffIntentIDPattern = regexp.MustCompile(`sandbox-docker-host-input-handoff-intent-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerRuntimeInputPlanIDPattern = regexp.MustCompile(`sandbox-docker-runtime-input-plan-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxDockerRuntimeInputApplicationIDPattern = regexp.MustCompile(`sandbox-docker-runtime-input-application-[0-9]{14}-[a-f0-9]{12}`)
 
 type cliDockerPlanObservationTransport struct {
 	imageDigest string
@@ -106,6 +107,27 @@ func (bundle *cliHostInputBundle) Close() error {
 
 type cliDockerHostInputHandoffTransport struct {
 	calls int
+}
+
+type cliDockerRuntimeInputApplicationTransport struct {
+	calls int
+}
+
+func (transport *cliDockerRuntimeInputApplicationTransport) Endpoint() sandbox.DockerObservationEndpoint {
+	endpoint, _ := sandbox.NewDockerObservationEndpoint(sandbox.DockerObservationEndpointLocalUnix)
+	return endpoint
+}
+
+func (transport *cliDockerRuntimeInputApplicationTransport) Apply(_ context.Context,
+	intent sandbox.DockerRuntimeInputApplicationIntent,
+	lease sandbox.DockerRuntimeInputApplicationLease,
+	request sandbox.DockerRuntimeInputApplicationRequest,
+) (sandbox.DockerRuntimeInputApplicationResult, error) {
+	transport.calls++
+	count := len(request.Mounts)
+	return sandbox.NewDockerRuntimeInputApplicationResult(
+		fmt.Sprintf("cli-runtime-input-result-%d", transport.calls), intent, lease, request,
+		strings.Repeat("b", 64), 3+5*count, 1+4*count, 0, time.Now().UTC())
 }
 
 func (stager *cliDockerHostInputStager) Probe(context.Context, string) error {
@@ -279,6 +301,23 @@ func executeTestCommandWithDockerInputHandoff(t *testing.T,
 		app.dockerWriteTransport = writeTransport
 		app.hostInputStager = stager
 		app.hostInputHandoff = handoff
+	})
+	return out.String(), errOut.String(), code
+}
+
+func executeTestCommandWithDockerRuntimeInput(t *testing.T,
+	writeTransport sandbox.DockerContainerWriteTransport,
+	stager sandbox.DockerHostInputStager,
+	runtimeTransport sandbox.DockerRuntimeInputApplicationTransport,
+	args ...string,
+) (string, string, int) {
+	t.Helper()
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	code := executeContextWithConfig(context.Background(), args, &out, &errOut, func(app *App) {
+		app.dockerWriteTransport = writeTransport
+		app.hostInputStager = stager
+		app.runtimeInputApply = runtimeTransport
 	})
 	return out.String(), errOut.String(), code
 }
@@ -965,6 +1004,81 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		t.Fatalf("runtime input plan show leaked data: output=%s stderr=%s code=%d",
 			runtimeShown, stderr, code)
 	}
+	runtimeTransport := &cliDockerRuntimeInputApplicationTransport{}
+	if _, stderr, code := executeTestCommandWithDockerRuntimeInput(t, writer,
+		hostInputStager, runtimeTransport, "run", "sandbox", "docker-runtime-input-apply",
+		runtimePlanID, "--manifest", manifestPath, "--operation-key", "runtime-input-apply-cli"); code != 4 || !strings.Contains(stderr, "requires --confirm-runtime-input-apply and --confirm-daemon-write") ||
+		runtimeTransport.calls != 0 || hostInputStager.captureCalls != 2 {
+		t.Fatalf("runtime input apply skipped dual confirmation: stderr=%s code=%d", stderr, code)
+	}
+	emptyApplications, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-runtime-input-applications", runID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(emptyApplications, "no Docker runtime input application records") {
+		t.Fatalf("unconfirmed runtime input apply left state: output=%s stderr=%s code=%d",
+			emptyApplications, stderr, code)
+	}
+	runtimeApplied, stderr, code := executeTestCommandWithDockerRuntimeInput(t, writer,
+		hostInputStager, runtimeTransport, "run", "sandbox", "docker-runtime-input-apply",
+		runtimePlanID, "--manifest", manifestPath, "--operation-key", "runtime-input-apply-cli",
+		"--confirm-runtime-input-apply", "--confirm-daemon-write")
+	if code != 0 || stderr != "" || runtimeTransport.calls != 1 ||
+		hostInputStager.captureCalls != 3 ||
+		!strings.Contains(runtimeApplied, "status: volumes_applied_target_never_started") ||
+		!strings.Contains(runtimeApplied, "target_container_present: true") ||
+		!strings.Contains(runtimeApplied, "projection_readback_verified: true") ||
+		!strings.Contains(runtimeApplied, "raw_targets_stored: false") ||
+		!strings.Contains(runtimeApplied, "container_started: false") ||
+		!strings.Contains(runtimeApplied, "process_executed: false") ||
+		!strings.Contains(runtimeApplied, "execution_authorized: false") ||
+		strings.Contains(runtimeApplied, "scripts") || strings.Contains(runtimeApplied, "/workspace") ||
+		strings.Contains(runtimeApplied, home) || strings.Contains(runtimeApplied, "cyberagent-runtime-") {
+		t.Fatalf("runtime input apply leaked data or widened authority: output=%s stderr=%s code=%d",
+			runtimeApplied, stderr, code)
+	}
+	runtimeApplicationID := sandboxDockerRuntimeInputApplicationIDPattern.FindString(runtimeApplied)
+	if runtimeApplicationID == "" {
+		t.Fatalf("missing Docker runtime input application id: %s", runtimeApplied)
+	}
+	runtimeApplyReplay, stderr, code := executeTestCommandWithDockerRuntimeInput(t, writer,
+		hostInputStager, runtimeTransport, "run", "sandbox", "docker-runtime-input-apply",
+		runtimePlanID, "--manifest", manifestPath, "--operation-key", "runtime-input-apply-cli",
+		"--confirm-runtime-input-apply", "--confirm-daemon-write")
+	if code != 0 || stderr != "" || runtimeTransport.calls != 1 ||
+		hostInputStager.captureCalls != 3 || !strings.Contains(runtimeApplyReplay, "replayed: true") {
+		t.Fatalf("runtime input apply replay touched daemon or input: output=%s stderr=%s code=%d",
+			runtimeApplyReplay, stderr, code)
+	}
+	runtimeApplications, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-runtime-input-applications", runID)
+	if code != 0 || stderr != "" || !strings.Contains(runtimeApplications, runtimeApplicationID) ||
+		!strings.Contains(runtimeApplications, "status=volumes_applied_target_never_started") ||
+		!strings.Contains(runtimeApplications, "target_present=true") ||
+		strings.Contains(runtimeApplications, "/workspace") || strings.Contains(runtimeApplications, home) {
+		t.Fatalf("runtime input application list leaked data: output=%s stderr=%s code=%d",
+			runtimeApplications, stderr, code)
+	}
+	runtimeApplicationShown, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-runtime-input-application-show", runtimeApplicationID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(runtimeApplicationShown, "target_container_fingerprint:") ||
+		!strings.Contains(runtimeApplicationShown, "lease_status: released") ||
+		!strings.Contains(runtimeApplicationShown, "raw_archive_bytes_stored: false") ||
+		strings.Contains(runtimeApplicationShown, "/workspace") ||
+		strings.Contains(runtimeApplicationShown, home) ||
+		strings.Contains(runtimeApplicationShown, "cyberagent-runtime-") {
+		t.Fatalf("runtime input application show leaked data: output=%s stderr=%s code=%d",
+			runtimeApplicationShown, stderr, code)
+	}
+	runtimeResumeReplay, stderr, code := executeTestCommandWithDockerRuntimeInput(t, writer,
+		hostInputStager, runtimeTransport, "run", "sandbox", "docker-runtime-input-apply-resume",
+		runtimeApplicationID, "--manifest", manifestPath, "--confirm-runtime-input-apply",
+		"--confirm-daemon-write")
+	if code != 0 || stderr != "" || runtimeTransport.calls != 1 ||
+		hostInputStager.captureCalls != 3 || !strings.Contains(runtimeResumeReplay, "replayed: true") {
+		t.Fatalf("completed runtime input resume was not metadata-only: output=%s stderr=%s code=%d",
+			runtimeResumeReplay, stderr, code)
+	}
 	attemptList, stderr, code := executeTestCommand(t, "run", "sandbox",
 		"docker-attempts", runID)
 	if code != 0 || stderr != "" ||
@@ -1009,7 +1123,7 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		hostInputStager,
 		"run", "sandbox", "docker-rehearse", planID, "--manifest", manifestPath,
 		"--operation-key", "docker-rehearsal-cli", "--confirm-daemon-write")
-	if code != 0 || stderr != "" || writer.calls != 1 || hostInputStager.captureCalls != 2 ||
+	if code != 0 || stderr != "" || writer.calls != 1 || hostInputStager.captureCalls != 3 ||
 		handoffTransport.calls != 1 ||
 		!strings.Contains(rehearsalReplay, "docker_rehearsal: "+rehearsalID) ||
 		!strings.Contains(rehearsalReplay, "replayed: true") {

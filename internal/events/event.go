@@ -153,6 +153,14 @@ const (
 	NoteChangedEvent                              = "note.changed"
 )
 
+const (
+	SandboxDockerRuntimeInputApplicationPreparedEvent  = "sandbox.docker_runtime_input_application_prepared"
+	SandboxDockerRuntimeInputApplicationAcquiredEvent  = "sandbox.docker_runtime_input_application_acquired"
+	SandboxDockerRuntimeInputApplicationTakenOverEvent = "sandbox.docker_runtime_input_application_taken_over"
+	SandboxDockerRuntimeInputApplicationFailedEvent    = "sandbox.docker_runtime_input_application_failed"
+	SandboxDockerRuntimeInputApplicationCompletedEvent = "sandbox.docker_runtime_input_application_completed"
+)
+
 type Event struct {
 	ID          int64
 	EventID     string

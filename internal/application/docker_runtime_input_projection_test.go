@@ -23,6 +23,37 @@ type canonicalRuntimeInputStager struct {
 	lastBundle   *recordingHostInputBundle
 }
 
+type recordingDockerRuntimeInputApplicationTransport struct {
+	calls   int
+	cancel  context.CancelFunc
+	request sandbox.DockerRuntimeInputApplicationRequest
+}
+
+func (transport *recordingDockerRuntimeInputApplicationTransport) Endpoint() sandbox.DockerObservationEndpoint {
+	value, _ := sandbox.NewDockerObservationEndpoint(sandbox.DockerObservationEndpointLocalUnix)
+	return value
+}
+
+func (transport *recordingDockerRuntimeInputApplicationTransport) Apply(ctx context.Context,
+	intent sandbox.DockerRuntimeInputApplicationIntent,
+	lease sandbox.DockerRuntimeInputApplicationLease,
+	request sandbox.DockerRuntimeInputApplicationRequest,
+) (sandbox.DockerRuntimeInputApplicationResult, error) {
+	if err := ctx.Err(); err != nil {
+		return sandbox.DockerRuntimeInputApplicationResult{}, err
+	}
+	transport.calls++
+	transport.request = request
+	if transport.cancel != nil {
+		transport.cancel()
+		return sandbox.DockerRuntimeInputApplicationResult{}, context.Canceled
+	}
+	count := len(request.Mounts)
+	return sandbox.NewDockerRuntimeInputApplicationResult(
+		fmt.Sprintf("runtime-input-result-%d", transport.calls), intent, lease, request,
+		strings.Repeat("d", 64), 3+5*count, 1+4*count, 0, time.Now().UTC())
+}
+
 func (stager *canonicalRuntimeInputStager) Probe(ctx context.Context, _ string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -177,6 +208,67 @@ func TestDockerRuntimeInputProjectionPlansPersistsReplaysAndDoesNotWidenAuthorit
 		stager.lastBundle == nil || !stager.lastBundle.closed {
 		t.Fatalf("runtime projection widened authority: plan=%#v stager=%#v", plan, stager)
 	}
+	runtimeTransport := &recordingDockerRuntimeInputApplicationTransport{}
+	service.WithDockerRuntimeInputApplicationTransport(runtimeTransport)
+	applyRequest := ApplyDockerRuntimeInputsRequest{ProjectionID: plan.ID,
+		Manifest: manifest, OperationKey: "docker-runtime-input-application",
+		RequestedBy: "runtime_input_operator"}
+	if _, err := service.ApplyDockerRuntimeInputs(ctx, applyRequest); apperror.CodeOf(err) != apperror.CodeFailedPrecondition ||
+		runtimeTransport.calls != 0 || stager.captureCalls != 2 {
+		t.Fatalf("runtime input application skipped dual confirmation: calls=%d captures=%d err=%v",
+			runtimeTransport.calls, stager.captureCalls, err)
+	}
+	applyRequest.OperatorConfirmed, applyRequest.DaemonWriteConfirmed = true, true
+	applyCtx, cancelApply := context.WithCancel(ctx)
+	runtimeTransport.cancel = cancelApply
+	failed, err := service.ApplyDockerRuntimeInputs(applyCtx, applyRequest)
+	if apperror.CodeOf(err) != apperror.CodeCancelled ||
+		failed.Lease.Status != sandbox.DockerRuntimeInputApplicationLeaseReleased ||
+		len(failed.Failures) != 1 || failed.Result != nil || runtimeTransport.calls != 1 ||
+		stager.captureCalls != 3 || failed.Failures[0].Code !=
+		sandbox.DockerRuntimeInputApplicationErrorCanceled {
+		t.Fatalf("runtime input failure was not durable: record=%#v calls=%d captures=%d err=%v",
+			failed, runtimeTransport.calls, stager.captureCalls, err)
+	}
+	runtimeTransport.cancel = nil
+	resumeRequest := ResumeDockerRuntimeInputsRequest{
+		IntentID: failed.Intent.ID, Manifest: manifest, RequestedBy: "runtime_input_operator",
+	}
+	if _, err := service.ResumeDockerRuntimeInputs(ctx, resumeRequest); apperror.CodeOf(err) != apperror.CodeFailedPrecondition ||
+		runtimeTransport.calls != 1 || stager.captureCalls != 3 {
+		t.Fatalf("runtime input resume skipped dual confirmation: calls=%d captures=%d err=%v",
+			runtimeTransport.calls, stager.captureCalls, err)
+	}
+	notAcquired, err := service.GetDockerRuntimeInputApplication(ctx, failed.Intent.ID)
+	if err != nil || notAcquired.Lease.Generation != 1 ||
+		notAcquired.Lease.Status != sandbox.DockerRuntimeInputApplicationLeaseReleased {
+		t.Fatalf("unconfirmed resume changed lease: record=%#v err=%v", notAcquired, err)
+	}
+	resumeRequest.OperatorConfirmed, resumeRequest.DaemonWriteConfirmed = true, true
+	completed, err := service.ResumeDockerRuntimeInputs(ctx, resumeRequest)
+	if err != nil || completed.Result == nil || completed.Lease.Generation != 2 ||
+		completed.Result.ContainerStarted || completed.Result.ProcessExecuted ||
+		!completed.Result.TargetContainerPresent || runtimeTransport.calls != 2 ||
+		stager.captureCalls != 4 || len(runtimeTransport.request.Mounts) != plan.ProjectionCount ||
+		runtimeTransport.request.WritableMount.ReadOnly {
+		t.Fatalf("runtime input resume did not converge: record=%#v calls=%d captures=%d err=%v",
+			completed, runtimeTransport.calls, stager.captureCalls, err)
+	}
+	replayedApplication, err := service.ApplyDockerRuntimeInputs(ctx, applyRequest)
+	if err != nil || !replayedApplication.Replayed || replayedApplication.Result == nil ||
+		runtimeTransport.calls != 2 || stager.captureCalls != 4 {
+		t.Fatalf("runtime input application replay touched inputs or daemon: %#v err=%v",
+			replayedApplication, err)
+	}
+	loadedApplication, err := service.GetDockerRuntimeInputApplication(ctx, failed.Intent.ID)
+	if err != nil || loadedApplication.Result == nil {
+		t.Fatalf("load runtime input application: %#v err=%v", loadedApplication, err)
+	}
+	listedApplications, err := service.ListDockerRuntimeInputApplications(ctx, run.ID, 10)
+	if err != nil || len(listedApplications) != 1 ||
+		listedApplications[0].Intent.ID != failed.Intent.ID {
+		t.Fatalf("list runtime input applications: %#v err=%v", listedApplications, err)
+	}
 	loaded, err := service.GetDockerRuntimeInputProjectionPlan(ctx, plan.ID)
 	if err != nil || loaded.ProjectionFingerprint != plan.ProjectionFingerprint {
 		t.Fatalf("load runtime projection: %#v err=%v", loaded, err)
@@ -187,17 +279,17 @@ func TestDockerRuntimeInputProjectionPlansPersistsReplaysAndDoesNotWidenAuthorit
 	}
 	replayed, err := service.PlanDockerRuntimeInputs(ctx, request)
 	if err != nil || !replayed.Replayed || replayed.ID != plan.ID ||
-		stager.captureCalls != 2 {
+		stager.captureCalls != 4 {
 		t.Fatalf("runtime projection replay recaptured input: %#v err=%v", replayed, err)
 	}
 	changed := request
 	changed.Manifest.TimeoutSeconds++
-	if _, err := service.PlanDockerRuntimeInputs(ctx, changed); apperror.CodeOf(err) != apperror.CodeConflict || stager.captureCalls != 2 {
+	if _, err := service.PlanDockerRuntimeInputs(ctx, changed); apperror.CodeOf(err) != apperror.CodeConflict || stager.captureCalls != 4 {
 		t.Fatalf("changed Manifest reused runtime projection operation: %v", err)
 	}
 	otherOperation := request
 	otherOperation.OperationKey = "docker-runtime-input-projection-other"
-	if _, err := service.PlanDockerRuntimeInputs(ctx, otherOperation); apperror.CodeOf(err) != apperror.CodeConflict || stager.captureCalls != 2 {
+	if _, err := service.PlanDockerRuntimeInputs(ctx, otherOperation); apperror.CodeOf(err) != apperror.CodeConflict || stager.captureCalls != 4 {
 		t.Fatalf("handoff accepted a second runtime projection: %v", err)
 	}
 	events, err := st.ListRunEvents(ctx, run.ID)

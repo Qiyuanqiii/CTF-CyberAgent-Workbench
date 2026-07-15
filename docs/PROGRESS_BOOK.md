@@ -668,10 +668,18 @@ schema v60 的 plan/item/completion/operation 四类事实和审计事件在 Run
 
 GitHub Actions run `29428011306` 已通过功能提交 `cc92421`：Go/Linux 作业 2 分 48 秒、TypeScript 作业 24 秒；Linux 全仓测试、vet、govulncheck 与前端完整门禁全部通过。
 
+schema v61 recoverable runtime-input application 切片已完成实现。`ApplyDockerRuntimeInputs` 要求操作者分别确认输入应用与 daemon 写入，并在任何 bundle recapture 或 Docker 写入前，把不可变 application intent 与独立 generation lease 原子落库。intent 精确绑定 v60 projection、v59 handoff、v56 attempt、container plan、Run/Mission/Workspace、Manifest/mount/input/authority/spec、固定 endpoint、requester 和摘要化 operation key。Application 随后重新核验完整 v48-v60 链、重编译规格、重新解析唯一 output bind，并通过 descriptor-safe provider 重新捕获 v57 密封包；report、bundle、Artifact payload 与全部 v60 projection aggregate/item 必须逐项一致。
+
+固定 Unix transport 只允许 Docker API `1.40` 的 exact image/container/volume inspect、deterministic local volume 与 never-started carrier/target create/delete，以及固定 `/cyberagent-input` 的 archive PUT/GET。每个 projection 使用独立可写 carrier 写入 volume，再从 daemon 回读并按完整 tar entry、mode、content 语义复核，成功后删除 carrier。最终 target 只保留一个已复核 output bind 和全部 read-only/`NoCopy` 输入卷，并再次核验 image、identity、readonly root、capability、network、environment、resource、port/device/attachment、label、mount 与 never-started 配置。allowlist 没有 start、exec、attach、logs、export、pull/build、network mutation、force volume delete 或任意 endpoint。
+
+重试仅在 container/volume 的完整 request/projection/role/item 标签及配置一致时回收或协调，外来同名资源拒绝且不删除。当前 active generation 才能提交 failure/result；失败以有界代码追加并原子释放，released/expired lease 可由 generation+1 恢复，旧 worker 被 SQL fencing。daemon 工作在 lease 到期前预留两段 cleanup 窗口，失败清理使用独立有界 context，只处理 exact-owned 资源。相同 operation 完成后重放不重新捕获、不访问 daemon。SQLite v61 的 intent（含唯一 operation digest 绑定）、lease、failure、result 与 event，以及 CLI apply/resume/list/show 全部 metadata-only；不额外建立 operation 表，也不保存 target、宿主路径、文件或资源名称、raw ID、archive、socket、raw operation key 或 private lease。成功固定 `volumes_applied_target_never_started`，start/process/export/backend/execution/Artifact 权限仍全部为 false；Windows 明确 unsupported。
+
+定向测试覆盖双确认无副作用、写前 intent、transport 失败与 generation2 恢复、stale worker fencing、完成与语义重放、get/list、v60 原地迁移不伪造 application、SQL 不可变/隐私/事件、foreign volume 保护、readback mismatch exact cleanup、禁止 endpoint、lease cleanup reserve、最终只留 never-started target/volumes，以及 CLI 输出隐私。ADR 0021 固化了此边界。最终本地门禁通过：全仓普通/race 分别用时 197.5 秒/316.8 秒；vet、零告警 staticcheck、module verify、零可达漏洞 govulncheck、严格 TypeScript、8 个文件 17 项前端测试、OpenAPI 无漂移、production build、零漏洞 npm audit、仓库隐私/进程/禁止 endpoint/编码/Markdown 扫描、diff、Linux sandbox test binary 交叉编译和隔离真实二进制 schema-v61 smoke 均为绿色，Sandbox race 20 轮通过。审计补强逐卷回读上限、到期前 cleanup reserve、未来租约/最短 TTL、resume 双确认、取消后独立失败落账、稳定错误码、v55/v59/v61 最小 transport 接口、Docker `RW`/`NoCopy` 实际证据和 operation digest 格式；未发现未解决高/中风险。本机 Windows 没有 Docker，Linux real-daemon v59/v61 harness 仍需人工环境执行，因此当前不作进程隔离或可启动声明。架构完成度维持约 98%，产品可用度维持约 45-50%。下一切片 schema v62 先实现 retained target/volume 的显式 inspect 与 exact-owned cleanup/reconciliation，继续不开放 start。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每次完成一个开发切片后，依次执行功能复核、测试、代码与安全审计、项目记忆更新、Git 提交和 GitHub 推送。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0020-deterministic-runtime-input-projection.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0021-recoverable-runtime-input-application.md`。

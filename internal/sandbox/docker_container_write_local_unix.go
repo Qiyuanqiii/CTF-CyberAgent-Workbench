@@ -9,6 +9,32 @@ import (
 	"time"
 )
 
+type localDockerContainerWriteTransport struct {
+	inner dockerEngineContainerWriteTransport
+}
+
+func (transport localDockerContainerWriteTransport) Endpoint() DockerObservationEndpoint {
+	return transport.inner.Endpoint()
+}
+
+func (transport localDockerContainerWriteTransport) Rehearse(ctx context.Context,
+	request DockerContainerWriteRequest,
+) (DockerContainerWriteResult, error) {
+	return transport.inner.Rehearse(ctx, request)
+}
+
+func (transport localDockerContainerWriteTransport) Stage(ctx context.Context,
+	request DockerContainerWriteRequest,
+) (DockerContainerStageResult, error) {
+	return transport.inner.Stage(ctx, request)
+}
+
+func (transport localDockerContainerWriteTransport) Cleanup(ctx context.Context,
+	request DockerContainerWriteRequest, stage DockerContainerStageResult,
+) (DockerContainerCleanupResult, error) {
+	return transport.inner.Cleanup(ctx, request, stage)
+}
+
 func NewLocalDockerContainerWriteTransport() DockerContainerWriteTransport {
 	endpoint, _ := NewDockerObservationEndpoint(DockerObservationEndpointLocalUnix)
 	dialer := &net.Dialer{Timeout: 2 * time.Second, KeepAlive: -1}
@@ -30,5 +56,5 @@ func NewLocalDockerContainerWriteTransport() DockerContainerWriteTransport {
 	if err != nil {
 		return newUnsupportedDockerContainerWriteTransport()
 	}
-	return transport
+	return localDockerContainerWriteTransport{inner: transport}
 }

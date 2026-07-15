@@ -510,7 +510,7 @@ func removeSchemaV59ForTestStatements() []string {
 }
 
 func removeSchemaV60ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV61ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_operation_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_operation_update_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_completion_delete_immutable`,
@@ -529,5 +529,26 @@ func removeSchemaV60ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_docker_runtime_input_projection_plans_run_created`,
 		`DROP TABLE sandbox_docker_runtime_input_projection_plans`,
 		`DELETE FROM schema_migrations WHERE version = 60`,
+	}...)
+}
+
+func removeSchemaV61ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_result_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_result_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_failure_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_failure_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_intent_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_intent_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_lease_update`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_result_insert`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_failure_insert`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_intent_insert`,
+		`DROP TABLE sandbox_docker_runtime_input_application_results`,
+		`DROP TABLE sandbox_docker_runtime_input_application_failures`,
+		`DROP TABLE sandbox_docker_runtime_input_application_leases`,
+		`DROP INDEX idx_sandbox_docker_runtime_input_application_intents_run_created`,
+		`DROP TABLE sandbox_docker_runtime_input_application_intents`,
+		`DELETE FROM schema_migrations WHERE version = 61`,
 	}
 }

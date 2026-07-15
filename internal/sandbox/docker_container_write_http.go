@@ -515,6 +515,7 @@ type dockerContainerInspection struct {
 		AutoRemove      bool                `json:"AutoRemove"`
 		RestartPolicy   dockerRestartPolicy `json:"RestartPolicy"`
 		LogConfig       dockerLogConfig     `json:"LogConfig"`
+		Mounts          []dockerCreateMount `json:"Mounts"`
 	} `json:"HostConfig"`
 	Mounts []struct {
 		Type        string `json:"Type"`

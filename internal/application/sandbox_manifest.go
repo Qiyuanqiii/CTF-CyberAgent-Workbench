@@ -172,6 +172,25 @@ type SandboxManifestStore interface {
 		handoffID string) (sandbox.DockerRuntimeInputProjectionPlan, bool, error)
 	ListDockerRuntimeInputProjectionPlans(ctx context.Context, runID string,
 		limit int) ([]sandbox.DockerRuntimeInputProjectionPlan, error)
+	BeginDockerRuntimeInputApplication(ctx context.Context,
+		intent sandbox.DockerRuntimeInputApplicationIntent, ownerID string,
+		ttl time.Duration) (sandbox.DockerRuntimeInputApplicationAcquisition, error)
+	AcquireDockerRuntimeInputApplication(ctx context.Context, intentID, requestedBy,
+		ownerID string, ttl time.Duration) (sandbox.DockerRuntimeInputApplicationAcquisition, error)
+	CompleteDockerRuntimeInputApplication(ctx context.Context,
+		result sandbox.DockerRuntimeInputApplicationResult,
+		expected sandbox.DockerRuntimeInputApplicationLease) (sandbox.DockerRuntimeInputApplicationRecord, bool, error)
+	RecordDockerRuntimeInputApplicationFailure(ctx context.Context, intentID string,
+		expected sandbox.DockerRuntimeInputApplicationLease, code string,
+		createdAt time.Time) (sandbox.DockerRuntimeInputApplicationRecord, error)
+	GetDockerRuntimeInputApplication(ctx context.Context,
+		id string) (sandbox.DockerRuntimeInputApplicationRecord, error)
+	GetDockerRuntimeInputApplicationByProjection(ctx context.Context,
+		projectionID string) (sandbox.DockerRuntimeInputApplicationRecord, bool, error)
+	GetDockerRuntimeInputApplicationByOperation(ctx context.Context,
+		keyDigest string) (sandbox.DockerRuntimeInputApplicationRecord, bool, error)
+	ListDockerRuntimeInputApplications(ctx context.Context, runID string,
+		limit int) ([]sandbox.DockerRuntimeInputApplicationRecord, error)
 }
 
 type SandboxManifestService struct {
@@ -185,6 +204,7 @@ type SandboxManifestService struct {
 	dockerWriteTransport sandbox.DockerContainerWriteTransport
 	hostInputStager      sandbox.DockerHostInputStager
 	hostInputHandoff     sandbox.DockerHostInputHandoffTransport
+	runtimeInputApply    sandbox.DockerRuntimeInputApplicationTransport
 }
 
 type PrepareSandboxManifestRequest struct {
@@ -208,7 +228,17 @@ func NewSandboxManifestService(store SandboxManifestStore,
 		dockerWriteTransport: sandbox.NewUnavailableDockerContainerWriteTransport(),
 		hostInputStager:      sandbox.NewUnavailableDockerHostInputStager(),
 		hostInputHandoff:     sandbox.NewUnavailableDockerHostInputHandoffTransport(),
+		runtimeInputApply:    sandbox.NewUnavailableDockerRuntimeInputApplicationTransport(),
 	}
+}
+
+func (s *SandboxManifestService) WithDockerRuntimeInputApplicationTransport(
+	transport sandbox.DockerRuntimeInputApplicationTransport,
+) *SandboxManifestService {
+	if s != nil && transport != nil {
+		s.runtimeInputApply = transport
+	}
+	return s
 }
 
 func (s *SandboxManifestService) WithDockerHostInputHandoffTransport(

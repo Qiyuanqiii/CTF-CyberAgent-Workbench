@@ -355,6 +355,13 @@ cyberagent run sandbox docker-host-inputs <run-id>
 cyberagent run sandbox docker-host-input-show <intent-id>
 cyberagent run sandbox docker-host-input-handoffs <run-id>
 cyberagent run sandbox docker-host-input-handoff-show <handoff-intent-id>
+cyberagent run sandbox docker-runtime-input-plan <handoff-intent-id> --manifest configs/sandbox-docker-simulation.example.json --operation-key runtime-input-plan-001 --confirm-runtime-input-plan
+cyberagent run sandbox docker-runtime-input-plans <run-id>
+cyberagent run sandbox docker-runtime-input-plan-show <projection-id>
+cyberagent run sandbox docker-runtime-input-apply <projection-id> --manifest configs/sandbox-docker-simulation.example.json --operation-key runtime-input-apply-001 --confirm-runtime-input-apply --confirm-daemon-write
+cyberagent run sandbox docker-runtime-input-apply-resume <application-intent-id> --manifest configs/sandbox-docker-simulation.example.json --confirm-runtime-input-apply --confirm-daemon-write
+cyberagent run sandbox docker-runtime-input-applications <run-id>
+cyberagent run sandbox docker-runtime-input-application-show <application-intent-id>
 ```
 
 `evidence` never contacts a daemon. It binds a canonical OCI image digest and separate simulated daemon/mount/network/secret/container/resource/termination/orphan/output fingerprints to the 16 v51 checks, but reports `trust_class=simulation_only`, `production_verified=0`, and `verified_checks=0`. `output-simulate` strictly validates and redacts fixture content, stages all slots, and commits only to an in-memory fake sink. A failure or cancellation rolls the fake transaction back to zero, and no production Artifact is created. The Store and Application revalidate the complete v48-v51 chain at both boundaries. CLI and events omit fixture bodies, locator fingerprints, raw paths, commands, Manifest content, container IDs, operation digests, and private leases. These commands test protocol behavior only; they cannot create or start a Docker container and cannot authorize real execution.
@@ -391,6 +398,10 @@ Linux uses only the fixed local Unix socket and Docker API `1.40`. One determini
 
 `docker-host-input-handoffs` and `docker-host-input-handoff-show` expose status, bounded daemon read/write counts, generation, readback/readonly/cleanup flags, and fingerprints. They omit source paths, raw content, descriptors, raw container IDs, carrier/volume names, socket details, raw operation keys, and private lease identities. A successful record means only `daemon_consumed=true`, `readback_verified=true`, and cleanup completed. Container start, process execution, output export, backend enablement, execution authority, and Artifact commit authority remain false.
 
+Schema v60 `docker-runtime-input-plan` separately confirms and recompiles the exact completed handoff into one canonical relative archive per reviewed directory-root input plus an optional fixed Artifact projection. It never contacts Docker. Schema v61 `docker-runtime-input-apply` then requires both `--confirm-runtime-input-apply` and `--confirm-daemon-write`. Go persists its intent and generation lease before recapture or daemon writes, revalidates v48-v60, writes each transient archive through a never-started carrier, verifies daemon readback, and retains one target with every input volume read-only/`NoCopy`. `apply-resume` reacquires only a released or expired intent and requires the full Manifest plus both confirmations; a completed operation returns metadata without contacting Docker.
+
+Application list/show output includes only status, generation, bounded counts, fingerprints, verification flags, and false authority bits. It excludes targets, host paths, file/resource names, raw IDs, archives, socket details, raw operation keys, and lease identities. `volumes_applied_target_never_started` means the target and input volumes are prepared, not runnable. There is no `start`, process, export, backend, execution, or Artifact authority in v61, and Windows returns `application_unsupported`.
+
 An optional real-daemon test is available only when an exact image is already present; it never pulls or creates anything:
 
 ```powershell
@@ -411,6 +422,13 @@ The same opt-in digest can exercise the schema-v59 archive/volume handoff. The i
 ```powershell
 $env:CYBERAGENT_DOCKER_WRITE_TEST_IMAGE_DIGEST = "sha256:<already-present-volume-free-digest>"
 go test ./internal/sandbox -run TestDockerHostInputHandoffRealDaemonOptIn -count=1 -v
+```
+
+Schema v61 has a separate end-to-end opt-in harness using the same already-present image constraints. It runs the v57 capture, v59 handoff, v60 projection, and v61 application chain, verifies the retained never-started target and read-only volumes, then removes every exact-owned resource. It never pulls or starts the container:
+
+```powershell
+$env:CYBERAGENT_DOCKER_WRITE_TEST_IMAGE_DIGEST = "sha256:<already-present-volume-free-digest>"
+go test ./internal/sandbox -run TestDockerRuntimeInputApplicationRealDaemonOptIn -count=1 -v
 ```
 
 ## Workspaces
