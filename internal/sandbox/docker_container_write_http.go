@@ -366,15 +366,20 @@ type dockerLogConfig struct {
 }
 
 type dockerCreateMount struct {
-	Type        string                  `json:"Type"`
-	Source      string                  `json:"Source"`
-	Target      string                  `json:"Target"`
-	ReadOnly    bool                    `json:"ReadOnly"`
-	BindOptions dockerCreateBindOptions `json:"BindOptions"`
+	Type          string                     `json:"Type"`
+	Source        string                     `json:"Source"`
+	Target        string                     `json:"Target"`
+	ReadOnly      bool                       `json:"ReadOnly"`
+	BindOptions   *dockerCreateBindOptions   `json:"BindOptions,omitempty"`
+	VolumeOptions *dockerCreateVolumeOptions `json:"VolumeOptions,omitempty"`
 }
 
 type dockerCreateBindOptions struct {
 	Propagation string `json:"Propagation"`
+}
+
+type dockerCreateVolumeOptions struct {
+	NoCopy bool `json:"NoCopy"`
 }
 
 type dockerCreateNetworkingConfig struct {
@@ -400,7 +405,7 @@ func dockerCreatePayload(request DockerContainerWriteRequest) dockerCreateContai
 	for index, mount := range request.HostMounts {
 		mounts[index] = dockerCreateMount{Type: "bind", Source: mount.Source,
 			Target: mount.Target, ReadOnly: mount.ReadOnly,
-			BindOptions: dockerCreateBindOptions{Propagation: mount.Propagation}}
+			BindOptions: &dockerCreateBindOptions{Propagation: mount.Propagation}}
 	}
 	initEnabled := true
 	return dockerCreateContainerPayload{
@@ -513,8 +518,11 @@ type dockerContainerInspection struct {
 	} `json:"HostConfig"`
 	Mounts []struct {
 		Type        string `json:"Type"`
+		Name        string `json:"Name"`
 		Source      string `json:"Source"`
 		Destination string `json:"Destination"`
+		Driver      string `json:"Driver"`
+		Mode        string `json:"Mode"`
 		RW          bool   `json:"RW"`
 		Propagation string `json:"Propagation"`
 	} `json:"Mounts"`

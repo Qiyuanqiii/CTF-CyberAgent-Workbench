@@ -101,7 +101,8 @@ type SandboxManifestStore interface {
 	BeginDockerContainerRehearsalAttempt(ctx context.Context,
 		intent sandbox.DockerContainerAttemptIntent,
 		requirement sandbox.DockerHostInputRequirement, ownerID string,
-		ttl time.Duration) (sandbox.DockerContainerAttemptAcquisition, error)
+		ttl time.Duration,
+		handoffRequirements ...sandbox.DockerHostInputHandoffRequirement) (sandbox.DockerContainerAttemptAcquisition, error)
 	AcquireDockerContainerRehearsalAttempt(ctx context.Context, attemptID, requestedBy,
 		ownerID string, ttl time.Duration) (sandbox.DockerContainerAttemptAcquisition, error)
 	RecordDockerContainerAttemptStage(ctx context.Context,
@@ -142,6 +143,24 @@ type SandboxManifestStore interface {
 		attemptID string) (sandbox.DockerHostInputRequirement, bool, error)
 	GetDockerHostInputRequirementByOperation(ctx context.Context,
 		operationKeyDigest string) (sandbox.DockerHostInputRequirement, bool, error)
+	GetDockerHostInputHandoffRequirement(ctx context.Context,
+		attemptID string) (sandbox.DockerHostInputHandoffRequirement, bool, error)
+	GetDockerHostInputHandoffRequirementByOperation(ctx context.Context,
+		operationKeyDigest string) (sandbox.DockerHostInputHandoffRequirement, bool, error)
+	PrepareDockerHostInputHandoffIntent(ctx context.Context,
+		intent sandbox.DockerHostInputHandoffIntent,
+		expected sandbox.DockerContainerAttemptLease) (sandbox.DockerHostInputHandoffRecord, bool, error)
+	RecordDockerHostInputHandoff(ctx context.Context,
+		value sandbox.DockerHostInputHandoff,
+		expected sandbox.DockerContainerAttemptLease) (sandbox.DockerHostInputHandoffRecord, bool, error)
+	GetDockerHostInputHandoff(ctx context.Context,
+		id string) (sandbox.DockerHostInputHandoffRecord, error)
+	GetDockerHostInputHandoffByAttempt(ctx context.Context,
+		attemptID string) (sandbox.DockerHostInputHandoffRecord, bool, error)
+	GetDockerHostInputHandoffByOperation(ctx context.Context,
+		keyDigest string) (sandbox.DockerHostInputHandoffRecord, bool, error)
+	ListDockerHostInputHandoffs(ctx context.Context, runID string,
+		limit int) ([]sandbox.DockerHostInputHandoffRecord, error)
 }
 
 type SandboxManifestService struct {
@@ -154,6 +173,7 @@ type SandboxManifestService struct {
 	dockerWriter         sandbox.DockerContainerTransactionHarness
 	dockerWriteTransport sandbox.DockerContainerWriteTransport
 	hostInputStager      sandbox.DockerHostInputStager
+	hostInputHandoff     sandbox.DockerHostInputHandoffTransport
 }
 
 type PrepareSandboxManifestRequest struct {
@@ -176,7 +196,17 @@ func NewSandboxManifestService(store SandboxManifestStore,
 		dockerWriter:         sandbox.NewInMemoryDockerWriteTransaction(),
 		dockerWriteTransport: sandbox.NewUnavailableDockerContainerWriteTransport(),
 		hostInputStager:      sandbox.NewUnavailableDockerHostInputStager(),
+		hostInputHandoff:     sandbox.NewUnavailableDockerHostInputHandoffTransport(),
 	}
+}
+
+func (s *SandboxManifestService) WithDockerHostInputHandoffTransport(
+	transport sandbox.DockerHostInputHandoffTransport,
+) *SandboxManifestService {
+	if s != nil && transport != nil {
+		s.hostInputHandoff = transport
+	}
+	return s
 }
 
 func (s *SandboxManifestService) WithDockerContainerWriteTransport(

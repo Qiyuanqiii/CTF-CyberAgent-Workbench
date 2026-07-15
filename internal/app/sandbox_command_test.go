@@ -25,6 +25,7 @@ var sandboxDockerPlanIDPattern = regexp.MustCompile(`sandbox-docker-plan-[0-9]{1
 var sandboxDockerAttemptIDPattern = regexp.MustCompile(`sandbox-docker-attempt-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerRehearsalIDPattern = regexp.MustCompile(`sandbox-docker-rehearsal-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerHostInputIntentIDPattern = regexp.MustCompile(`sandbox-docker-host-input-intent-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxDockerHostInputHandoffIntentIDPattern = regexp.MustCompile(`sandbox-docker-host-input-handoff-intent-[0-9]{14}-[a-f0-9]{12}`)
 
 type cliDockerPlanObservationTransport struct {
 	imageDigest string
@@ -78,8 +79,27 @@ type cliDockerWriteTransport struct {
 }
 
 type cliDockerHostInputStager struct {
-	probeCalls int
-	stageCalls int
+	probeCalls   int
+	stageCalls   int
+	captureCalls int
+	lastBundle   *cliHostInputBundle
+}
+
+type cliHostInputBundle struct {
+	*bytes.Reader
+	report sandbox.HostInputBundleReport
+	closed bool
+}
+
+func (bundle *cliHostInputBundle) Report() sandbox.HostInputBundleReport { return bundle.report }
+
+func (bundle *cliHostInputBundle) Close() error {
+	bundle.closed = true
+	return nil
+}
+
+type cliDockerHostInputHandoffTransport struct {
+	calls int
 }
 
 func (stager *cliDockerHostInputStager) Probe(context.Context, string) error {
@@ -91,6 +111,25 @@ func (stager *cliDockerHostInputStager) Stage(_ context.Context,
 	request sandbox.HostInputBundleRequest,
 ) (sandbox.HostInputBundleReport, error) {
 	stager.stageCalls++
+	return stager.report(request)
+}
+
+func (stager *cliDockerHostInputStager) Capture(_ context.Context,
+	request sandbox.HostInputBundleRequest,
+) (sandbox.HostInputBundle, error) {
+	stager.captureCalls++
+	report, err := stager.report(request)
+	if err != nil {
+		return nil, err
+	}
+	bundle := &cliHostInputBundle{Reader: bytes.NewReader(make([]byte, 4096)), report: report}
+	stager.lastBundle = bundle
+	return bundle, nil
+}
+
+func (stager *cliDockerHostInputStager) report(
+	request sandbox.HostInputBundleRequest,
+) (sandbox.HostInputBundleReport, error) {
 	return sandbox.NewHostInputBundleReport(sandbox.HostInputBundleMeasurements{
 		ReadOnlyMountCount: request.ReadOnlyMountCount(), ArtifactCount: len(request.Artifacts),
 		DirectoryCount: request.ReadOnlyMountCount(), ArtifactBytes: request.ArtifactBytes(),
@@ -98,6 +137,19 @@ func (stager *cliDockerHostInputStager) Stage(_ context.Context,
 		ArtifactPayloadDigest: request.ArtifactPayloadDigest(),
 		BundleDigest:          strings.Repeat("b", 64),
 	}, time.Now().UTC())
+}
+
+func (transport *cliDockerHostInputHandoffTransport) Endpoint() sandbox.DockerObservationEndpoint {
+	endpoint, _ := sandbox.NewDockerObservationEndpoint(sandbox.DockerObservationEndpointLocalUnix)
+	return endpoint
+}
+
+func (transport *cliDockerHostInputHandoffTransport) Handoff(_ context.Context,
+	request sandbox.DockerHostInputHandoffRequest, _ sandbox.HostInputBundle,
+) (sandbox.DockerHostInputHandoffResult, error) {
+	transport.calls++
+	return sandbox.NewDockerHostInputHandoffResult(transport.Endpoint(), request,
+		strings.Repeat("e", 64), 9, 8, 0)
 }
 
 func (transport *cliDockerWriteTransport) Endpoint() sandbox.DockerObservationEndpoint {
@@ -149,6 +201,23 @@ func executeTestCommandWithDockerInputStaging(t *testing.T,
 	code := executeContextWithConfig(context.Background(), args, &out, &errOut, func(app *App) {
 		app.dockerWriteTransport = transport
 		app.hostInputStager = stager
+	})
+	return out.String(), errOut.String(), code
+}
+
+func executeTestCommandWithDockerInputHandoff(t *testing.T,
+	writeTransport sandbox.DockerContainerWriteTransport,
+	stager sandbox.DockerHostInputStager,
+	handoff sandbox.DockerHostInputHandoffTransport,
+	args ...string,
+) (string, string, int) {
+	t.Helper()
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	code := executeContextWithConfig(context.Background(), args, &out, &errOut, func(app *App) {
+		app.dockerWriteTransport = writeTransport
+		app.hostInputStager = stager
+		app.hostInputHandoff = handoff
 	})
 	return out.String(), errOut.String(), code
 }
@@ -677,13 +746,27 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		t.Fatalf("Docker host input staging skipped separate confirmation: stderr=%s code=%d",
 			stderr, code)
 	}
-	rehearsed, stderr, code := executeTestCommandWithDockerInputStaging(t, writer,
-		hostInputStager,
+	if _, stderr, code := executeTestCommandWithDockerInputStaging(t, writer,
+		hostInputStager, "run", "sandbox", "docker-rehearse", planID,
+		"--manifest", manifestPath, "--operation-key", "docker-rehearsal-cli",
+		"--confirm-daemon-write", "--stage-host-inputs", "--confirm-host-input-staging",
+		"--handoff-host-inputs"); code != 4 ||
+		!strings.Contains(stderr, "requires staging and both explicit confirmations") ||
+		writer.calls != 0 || hostInputStager.probeCalls != 0 {
+		t.Fatalf("Docker host input handoff skipped separate confirmation: stderr=%s code=%d",
+			stderr, code)
+	}
+	handoffTransport := &cliDockerHostInputHandoffTransport{}
+	rehearsed, stderr, code := executeTestCommandWithDockerInputHandoff(t, writer,
+		hostInputStager, handoffTransport,
 		"run", "sandbox", "docker-rehearse", planID, "--manifest", manifestPath,
 		"--operation-key", "docker-rehearsal-cli", "--confirm-daemon-write",
-		"--stage-host-inputs", "--confirm-host-input-staging")
+		"--stage-host-inputs", "--confirm-host-input-staging", "--handoff-host-inputs",
+		"--confirm-host-input-handoff")
 	if code != 0 || stderr != "" || writer.calls != 1 || hostInputStager.probeCalls != 1 ||
-		hostInputStager.stageCalls != 1 ||
+		hostInputStager.stageCalls != 0 || hostInputStager.captureCalls != 1 ||
+		hostInputStager.lastBundle == nil || !hostInputStager.lastBundle.closed ||
+		handoffTransport.calls != 1 ||
 		!strings.Contains(rehearsed, "status: container_config_rehearsed_removed") ||
 		!strings.Contains(rehearsed, "endpoint_class: local_unix") ||
 		!strings.Contains(rehearsed, "daemon_writes: 2") ||
@@ -726,12 +809,41 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		t.Fatalf("Docker host input show leaked data: output=%s stderr=%s code=%d",
 			hostInputShown, stderr, code)
 	}
+	handoffList, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-host-input-handoffs", runID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(handoffList, "status=daemon_handoff_cleaned") ||
+		!strings.Contains(handoffList, "daemon_reads=9") ||
+		!strings.Contains(handoffList, "daemon_writes=8") ||
+		!strings.Contains(handoffList, "daemon_consumed=true") ||
+		!strings.Contains(handoffList, "process_executed=false") ||
+		strings.Contains(handoffList, "scripts") || strings.Contains(handoffList, home) {
+		t.Fatalf("Docker host input handoff list leaked data: output=%s stderr=%s code=%d",
+			handoffList, stderr, code)
+	}
+	handoffIntentID := sandboxDockerHostInputHandoffIntentIDPattern.FindString(handoffList)
+	if handoffIntentID == "" {
+		t.Fatalf("missing Docker host input handoff intent id: %s", handoffList)
+	}
+	handoffShown, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-host-input-handoff-show", handoffIntentID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(handoffShown, "readback_verified: true") ||
+		!strings.Contains(handoffShown, "final_mount_read_only: true") ||
+		!strings.Contains(handoffShown, "cleanup_confirmed: true") ||
+		!strings.Contains(handoffShown, "raw_content_retained: false") ||
+		!strings.Contains(handoffShown, "execution_authorized: false") ||
+		strings.Contains(handoffShown, "scripts") || strings.Contains(handoffShown, home) {
+		t.Fatalf("Docker host input handoff show leaked data: output=%s stderr=%s code=%d",
+			handoffShown, stderr, code)
+	}
 	attemptList, stderr, code := executeTestCommand(t, "run", "sandbox",
 		"docker-attempts", runID)
 	if code != 0 || stderr != "" ||
 		!strings.Contains(attemptList, "status=rehearsal_completed") ||
 		!strings.Contains(attemptList, "generation=1") ||
 		!strings.Contains(attemptList, "host_input_required=true") ||
+		!strings.Contains(attemptList, "host_input_handoff_required=true") ||
 		!strings.Contains(attemptList, "container_started=false") {
 		t.Fatalf("Docker attempt list failed: output=%s stderr=%s code=%d",
 			attemptList, stderr, code)
@@ -749,6 +861,8 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		!strings.Contains(attemptShown, "lease_status: released") ||
 		!strings.Contains(attemptShown, "host_input_requirement_durable: true") ||
 		!strings.Contains(attemptShown, "host_input_required: true") ||
+		!strings.Contains(attemptShown, "host_input_handoff_requirement_durable: true") ||
+		!strings.Contains(attemptShown, "host_input_handoff_required: true") ||
 		strings.Contains(attemptShown, "/workspace") ||
 		strings.Contains(attemptShown, strings.Repeat("c", 64)) {
 		t.Fatalf("Docker attempt show leaked data: output=%s stderr=%s code=%d",
@@ -767,7 +881,8 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		hostInputStager,
 		"run", "sandbox", "docker-rehearse", planID, "--manifest", manifestPath,
 		"--operation-key", "docker-rehearsal-cli", "--confirm-daemon-write")
-	if code != 0 || stderr != "" || writer.calls != 1 || hostInputStager.stageCalls != 1 ||
+	if code != 0 || stderr != "" || writer.calls != 1 || hostInputStager.captureCalls != 1 ||
+		handoffTransport.calls != 1 ||
 		!strings.Contains(rehearsalReplay, "docker_rehearsal: "+rehearsalID) ||
 		!strings.Contains(rehearsalReplay, "replayed: true") {
 		t.Fatalf("Docker rehearsal replay contacted transport: output=%s stderr=%s code=%d calls=%d",

@@ -59,6 +59,7 @@ type App struct {
 	dockerObserver       sandbox.DockerProductionObserver
 	dockerWriteTransport sandbox.DockerContainerWriteTransport
 	hostInputStager      sandbox.DockerHostInputStager
+	hostInputHandoff     sandbox.DockerHostInputHandoffTransport
 }
 
 func Execute(args []string, out io.Writer, errOut io.Writer) int {

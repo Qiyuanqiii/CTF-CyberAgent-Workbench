@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"mime"
 	"path/filepath"
 	"strconv"
@@ -261,6 +262,22 @@ func DockerHostInputStagingErrorCode(err error) string {
 type DockerHostInputStager interface {
 	Probe(ctx context.Context, workspaceRoot string) error
 	Stage(ctx context.Context, request HostInputBundleRequest) (HostInputBundleReport, error)
+}
+
+// HostInputBundle is a short-lived, sealed byte stream. Implementations must not
+// expose a host path or persist the raw input after Close.
+type HostInputBundle interface {
+	io.Reader
+	io.Seeker
+	Report() HostInputBundleReport
+	Close() error
+}
+
+// DockerHostInputBundleProvider is the stronger v59 extension implemented by a
+// stager that can retain the sealed descriptor until a bounded daemon handoff.
+type DockerHostInputBundleProvider interface {
+	DockerHostInputStager
+	Capture(ctx context.Context, request HostInputBundleRequest) (HostInputBundle, error)
 }
 
 type UnavailableDockerHostInputStager struct {

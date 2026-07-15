@@ -29,11 +29,12 @@ const dockerContainerAttemptIntentSelect = `SELECT id, plan_id, observation_id, 
 func (s *SQLiteStore) BeginDockerContainerRehearsalAttempt(ctx context.Context,
 	intent sandbox.DockerContainerAttemptIntent,
 	requirement sandbox.DockerHostInputRequirement, ownerID string, ttl time.Duration,
+	handoffRequirements ...sandbox.DockerHostInputHandoffRequirement,
 ) (sandbox.DockerContainerAttemptAcquisition, error) {
 	if err := intent.Validate(); err != nil || requirement.Validate() != nil ||
 		requirement.AttemptID != intent.ID ||
 		requirement.AttemptIntentFingerprint != intent.IntentFingerprint ||
-		requirement.OperationKeyDigest != intent.OperationKeyDigest {
+		requirement.OperationKeyDigest != intent.OperationKeyDigest || len(handoffRequirements) > 1 {
 		return sandbox.DockerContainerAttemptAcquisition{}, apperror.Wrap(
 			apperror.CodeInvalidArgument, "Docker container attempt intent or host input requirement is invalid", err)
 	}
@@ -55,6 +56,29 @@ func (s *SQLiteStore) BeginDockerContainerRehearsalAttempt(ctx context.Context,
 	if err := acquireSandboxManifestWriteLock(ctx, tx, intent.RunID); err != nil {
 		return sandbox.DockerContainerAttemptAcquisition{}, err
 	}
+	plan, err := getDockerContainerPlan(ctx, tx, intent.PlanID)
+	if err != nil {
+		return sandbox.DockerContainerAttemptAcquisition{}, err
+	}
+	var handoffRequirement sandbox.DockerHostInputHandoffRequirement
+	if len(handoffRequirements) == 1 {
+		handoffRequirement = handoffRequirements[0]
+	} else {
+		handoffRequirement, err = sandbox.NewDockerHostInputHandoffRequirement(
+			intent, plan, requirement, false, false)
+		if err != nil {
+			return sandbox.DockerContainerAttemptAcquisition{}, err
+		}
+	}
+	if handoffRequirement.Validate() != nil ||
+		handoffRequirement.AttemptID != intent.ID ||
+		handoffRequirement.AttemptIntentFingerprint != intent.IntentFingerprint ||
+		handoffRequirement.OperationKeyDigest != intent.OperationKeyDigest ||
+		handoffRequirement.CaptureRequirementFingerprint != requirement.RequirementFingerprint ||
+		(handoffRequirement.Required && !requirement.Required) {
+		return sandbox.DockerContainerAttemptAcquisition{}, apperror.New(
+			apperror.CodeInvalidArgument, "Docker host input handoff requirement is invalid")
+	}
 	existing, found, err := getDockerContainerAttemptByOperation(ctx, tx,
 		intent.OperationKeyDigest)
 	if err != nil {
@@ -66,7 +90,10 @@ func (s *SQLiteStore) BeginDockerContainerRehearsalAttempt(ctx context.Context,
 			existing.Intent.RequestedBy != intent.RequestedBy ||
 			existing.HostInputRequirement == nil ||
 			existing.HostInputRequirement.RequirementFingerprint !=
-				requirement.RequirementFingerprint {
+				requirement.RequirementFingerprint ||
+			existing.HostInputHandoffRequirement == nil ||
+			existing.HostInputHandoffRequirement.RequirementFingerprint !=
+				handoffRequirement.RequirementFingerprint {
 			return sandbox.DockerContainerAttemptAcquisition{}, apperror.New(
 				apperror.CodeConflict, "Docker attempt operation key was used for different intent")
 		}
@@ -99,6 +126,10 @@ func (s *SQLiteStore) BeginDockerContainerRehearsalAttempt(ctx context.Context,
 	if err := insertDockerHostInputRequirementTx(ctx, tx, requirement, intent); err != nil {
 		return sandbox.DockerContainerAttemptAcquisition{}, err
 	}
+	if err := insertDockerHostInputHandoffRequirementTx(ctx, tx, handoffRequirement,
+		intent); err != nil {
+		return sandbox.DockerContainerAttemptAcquisition{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO sandbox_docker_container_attempt_leases
 		(attempt_id, lease_id, owner_id, generation, status, acquired_at, expires_at,
 		released_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`, lease.AttemptID, lease.LeaseID,
@@ -125,12 +156,24 @@ func (s *SQLiteStore) BeginDockerContainerRehearsalAttempt(ctx context.Context,
 		}); err != nil {
 		return sandbox.DockerContainerAttemptAcquisition{}, err
 	}
+	if err := appendDockerContainerAttemptEvent(ctx, tx, intent,
+		events.SandboxDockerHostInputHandoffRequirementEvent,
+		handoffRequirement.CreatedAt, map[string]any{
+			"required":           handoffRequirement.Required,
+			"operator_confirmed": handoffRequirement.OperatorConfirmed,
+			"capture_required":   requirement.Required, "before_daemon_stage": true,
+			"daemon_consumed": false, "container_started": false,
+			"process_executed": false, "execution_authorized": false,
+		}); err != nil {
+		return sandbox.DockerContainerAttemptAcquisition{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return sandbox.DockerContainerAttemptAcquisition{}, err
 	}
 	attempt := sandbox.DockerContainerRehearsalAttempt{Intent: intent,
-		HostInputRequirement: &requirement,
-		Status:               sandbox.DockerContainerAttemptStatusPrepared, Lease: lease}
+		HostInputRequirement:        &requirement,
+		HostInputHandoffRequirement: &handoffRequirement,
+		Status:                      sandbox.DockerContainerAttemptStatusPrepared, Lease: lease}
 	return sandbox.DockerContainerAttemptAcquisition{Attempt: attempt}, attempt.Validate()
 }
 
@@ -551,6 +594,18 @@ func (s *SQLiteStore) CompleteDockerContainerRehearsalAttempt(ctx context.Contex
 				"Required Docker host input staging is incomplete")
 		}
 	}
+	if attempt.HostInputHandoffRequirement != nil &&
+		attempt.HostInputHandoffRequirement.Required {
+		record, found, err := getDockerHostInputHandoffByAttempt(ctx, tx, attempt.Intent.ID)
+		if err != nil {
+			return sandbox.DockerContainerRehearsal{}, false, err
+		}
+		if !found || record.Handoff == nil {
+			return sandbox.DockerContainerRehearsal{}, false, apperror.New(
+				apperror.CodeFailedPrecondition,
+				"Required Docker host input handoff is incomplete")
+		}
+	}
 	if err := requireCurrentDockerContainerAttemptLease(attempt.Lease, expected,
 		time.Now().UTC()); err != nil {
 		return sandbox.DockerContainerRehearsal{}, false, err
@@ -739,6 +794,11 @@ func getDockerContainerRehearsalAttempt(ctx context.Context, queryer sandboxLife
 	if err != nil {
 		return sandbox.DockerContainerRehearsalAttempt{}, err
 	}
+	handoffRequirement, handoffRequirementFound, err :=
+		getDockerHostInputHandoffRequirementByAttempt(ctx, queryer, id)
+	if err != nil {
+		return sandbox.DockerContainerRehearsalAttempt{}, err
+	}
 	lease, err := getDockerContainerAttemptLease(ctx, queryer, id)
 	if err != nil {
 		return sandbox.DockerContainerRehearsalAttempt{}, err
@@ -763,6 +823,9 @@ func getDockerContainerRehearsalAttempt(ctx context.Context, queryer sandboxLife
 		Status: sandbox.DockerContainerAttemptStatusPrepared, Lease: lease, Failures: failures}
 	if requirementFound {
 		attempt.HostInputRequirement = &requirement
+	}
+	if handoffRequirementFound {
+		attempt.HostInputHandoffRequirement = &handoffRequirement
 	}
 	if found {
 		attempt.Stage = &stage

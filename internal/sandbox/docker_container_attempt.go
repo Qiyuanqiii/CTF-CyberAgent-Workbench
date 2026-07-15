@@ -625,16 +625,17 @@ func (completion DockerContainerAttemptCompletion) Validate() error {
 }
 
 type DockerContainerRehearsalAttempt struct {
-	Intent               DockerContainerAttemptIntent
-	HostInputRequirement *DockerHostInputRequirement
-	Status               string
-	Lease                DockerContainerAttemptLease
-	Stage                *DockerContainerAttemptStage
-	Cleanup              *DockerContainerAttemptCleanup
-	Failures             []DockerContainerAttemptFailure
-	Completion           *DockerContainerAttemptCompletion
-	Replayed             bool
-	TookOver             bool
+	Intent                      DockerContainerAttemptIntent
+	HostInputRequirement        *DockerHostInputRequirement
+	HostInputHandoffRequirement *DockerHostInputHandoffRequirement
+	Status                      string
+	Lease                       DockerContainerAttemptLease
+	Stage                       *DockerContainerAttemptStage
+	Cleanup                     *DockerContainerAttemptCleanup
+	Failures                    []DockerContainerAttemptFailure
+	Completion                  *DockerContainerAttemptCompletion
+	Replayed                    bool
+	TookOver                    bool
 }
 
 func (attempt DockerContainerRehearsalAttempt) Validate() error {
@@ -662,6 +663,30 @@ func (attempt DockerContainerRehearsalAttempt) Validate() error {
 			requirement.RequestedBy != attempt.Intent.RequestedBy ||
 			!requirement.CreatedAt.Equal(attempt.Intent.CreatedAt) {
 			return errors.New("docker container host input requirement is invalid")
+		}
+	}
+	if attempt.HostInputHandoffRequirement != nil {
+		requirement := attempt.HostInputHandoffRequirement
+		if requirement.Validate() != nil || attempt.HostInputRequirement == nil ||
+			requirement.AttemptID != attempt.Intent.ID ||
+			requirement.PlanID != attempt.Intent.PlanID ||
+			requirement.RunID != attempt.Intent.RunID ||
+			requirement.MissionID != attempt.Intent.MissionID ||
+			requirement.WorkspaceID != attempt.Intent.WorkspaceID ||
+			requirement.OperationKeyDigest != attempt.Intent.OperationKeyDigest ||
+			requirement.AttemptIntentFingerprint != attempt.Intent.IntentFingerprint ||
+			requirement.RequestFingerprint != attempt.Intent.RequestFingerprint ||
+			requirement.CaptureRequirementFingerprint !=
+				attempt.HostInputRequirement.RequirementFingerprint ||
+			requirement.ManifestFingerprint != attempt.Intent.ManifestFingerprint ||
+			requirement.MountBindingFingerprint != attempt.Intent.MountBindingFingerprint ||
+			requirement.InputArtifactDigest != attempt.Intent.InputArtifactDigest ||
+			requirement.AuthorityFingerprint != attempt.Intent.AuthorityFingerprint ||
+			requirement.PlanFingerprint != attempt.Intent.PlanFingerprint ||
+			requirement.RequestedBy != attempt.Intent.RequestedBy ||
+			requirement.Required && !attempt.HostInputRequirement.Required ||
+			!requirement.CreatedAt.Equal(attempt.Intent.CreatedAt) {
+			return errors.New("docker container host input handoff requirement is invalid")
 		}
 	}
 	for index, failure := range attempt.Failures {

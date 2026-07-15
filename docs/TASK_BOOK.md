@@ -20,7 +20,7 @@ V2 的 99% 在 P0/P1 基础上完成了可恢复 Supervisor、预算、严格生
 
 P8 已推进到 schema v37：v35 将完成的 Fan-out execution 确定性投影为通用 `draft` Finding、不可变 `model_assertion` Evidence 和 `finding_report.v1` Report；v36 增加同 Run 冻结 Artifact Evidence、一次性 operator `validated/rejected` 决定和复核命令；v37 再以独立事实完成 `validated -> accepted -> fixed`，要求接受后新建且不可复用的 remediation Artifact Evidence。SARIF 只输出 `validated/accepted` 未解决项，默认 validated/high CI 门禁同样阻断二者，fixed/rejected 不再阻断。验证、接受和修复始终是三个不同阶段。
 
-金额预算、HTTP 或模型自主 child 调度和真实 Sandbox 进程执行尚未实现；schema v48 的严格 Sandbox Manifest、schema v49 的精确审批/重新提交/禁用候选、schema v50 的禁用态 Artifact 绑定、独立 fencing、取消与清理恢复、schema v51 的禁用态后端/输出预检、schema v52 的仅模拟后端证据与内存输出事务、schema v53 的固定本机端点只读 Docker 观测、schema v54 的确定性容器计划与假写事务、schema v55 默认关闭的 Docker 创建/核验/删除演练、schema v56 的可恢复预写意图、代际租约和 stage/cleanup 检查点、schema v57 的 descriptor-pinned、kernel-sealed 宿主输入捕获证据，以及 schema v58 的 daemon stage 前持久化捕获要求已经落地。v55-v58 仍不启动容器进程，v57 密封包也尚未由 daemon 消费。operator-only 显式 child schedule/continue、no-tool child turn、最多两个 child 的有界并发、一次 child repair、Coordinator、Run 工具预算、跨进程执行互斥，以及 root/child 精确跨进程主动取消均已落地。
+金额预算、HTTP 或模型自主 child 调度和真实 Sandbox 进程执行尚未实现；schema v48 的严格 Sandbox Manifest、schema v49 的精确审批/重新提交/禁用候选、schema v50 的禁用态 Artifact 绑定、独立 fencing、取消与清理恢复、schema v51 的禁用态后端/输出预检、schema v52 的仅模拟后端证据与内存输出事务、schema v53 的固定本机端点只读 Docker 观测、schema v54 的确定性容器计划与假写事务、schema v55 默认关闭的 Docker 创建/核验/删除演练、schema v56 的可恢复预写意图、代际租约和 stage/cleanup 检查点、schema v57 的 descriptor-pinned、kernel-sealed 宿主输入捕获证据、schema v58 的 daemon stage 前持久化捕获要求，以及 schema v59 的 daemon-owned、readback-verified、fully-cleaned 输入交接已经落地。v55-v59 仍不启动容器进程。operator-only 显式 child schedule/continue、no-tool child turn、最多两个 child 的有界并发、一次 child repair、Coordinator、Run 工具预算、跨进程执行互斥，以及 root/child 精确跨进程主动取消均已落地。
 
 P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作面与 `plan|deliver` 阶段；schema v42 增加严格三方向 `plan_delivery.v1` 提案与操作者幂等选择；schema v43 将操作者指令与非可信证据分离；schema v44 固化逐切片验证、审计和交接门禁；schema v45-v46 提供安全 turn 边界的 exactly-once 操作者队列、pending-only 取消和显式 drain；schema v47 再从父 Run 固定选择中为每个 Specialist Attempt 派生最多一项、Code/Cyber 分离、metadata-only 可恢复的 Skill 指导。模式、提案、选择、文档、审计声明、排队、取消和 Skill 指导本身都不授予工具、网络、Shell、写文件或子 Agent 能力。
 
@@ -220,12 +220,13 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] v58 设计审计确认 Docker archive 写入与只读目标不兼容，因此没有通过放宽 `ReadonlyRootfs` 或输入可写性来“解决”交接；本切片不新增 archive、volume、start、exec、pull、build、export 或 Artifact 权限，v57 事实继续固定 `daemon_consumed=false`、`execution_evidence=false`。决策记录见 ADR 0018。
 - [x] v58 发布门禁通过全仓普通/race（158.1 秒/168.4 秒）、vet/staticcheck/module/govulncheck、严格 TypeScript、17 项前端测试、OpenAPI/构建/npm audit、仓库隐私/产物/进程/编码/链接扫描、Linux 交叉编译与隔离真实二进制 smoke。高频 domain/Store/Application/race 回归通过；审计修复 pending operation-key 恢复候选错误、不成对 flags、迁移后 direct-SQL 缺失 requirement 和 false requirement 零输入兼容性，未发现未解决高/中风险。
 - [x] v58 GitHub Actions run `29400696276` 已通过功能提交 `4b570f7`，Go/Linux 2 分 39 秒、TypeScript 23 秒。
-- [ ] schema v59 单独设计并实现 daemon-owned volume carrier：固定目的地上传、daemon 回读摘要、删除可写 carrier、以只读 volume 重新创建仍未启动的目标容器，并证明 crash/retry/cleanup/collision 收敛；完成前不得开放 start。
-- [ ] 完成 v59 后再单独实现并审计 per-run start/wait/kill/orphan 生命周期。
+- [x] schema v59 单独实现 daemon-owned local-volume carrier：四重显式确认、不可变 requirement、写前 intent、固定 `/cyberagent-input/bundle.tar`、精确 daemon 回读长度/摘要、删除可写 carrier、只读 volume 目标复核和全部资源删除。Manifest mount 保留区、exact crash residue、foreign collision、early-failure cleanup、第二代 lease 恢复、迁移/不可变/隐私与 Go/SQL completion gate 已覆盖；start/exec/export 权限仍为 false，决策见 ADR 0019。
+- [x] v59 增加 Linux opt-in real-daemon handoff harness；只接受已存在且满足 v55 profile 的精确 digest，不 pull、不 start，并断言 target/carrier/volume 最终全部不存在。本机 Windows 只完成 Linux test binary 交叉编译，真实运行仍待 Linux 环境。
+- [ ] schema v60 单独设计并审计 verified bundle 到 Manifest target 的 runtime input projection，以及 per-run start/wait/TERM/KILL/orphan 生命周期；不得把 v59 handoff 当作进程隔离证据。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
 - [ ] 网络默认关闭，后续仅允许显式 allowlist。
-- [ ] 支持真实执行、stdin、超时/kill、日志和原子 Output Artifact 导出；v51 只固定要求，v52 只验证输出假事务，v53 只读取元数据，v54 只编译并假写，v55-v56 只操作未启动容器，v57 只固定并密封 daemon 未消费的输入包，v58 只固定捕获要求，均未启用进程执行或生产 Artifact。
-- [ ] 将 v50 幂等清理扩展为真实运行中容器 orphan 检测/回收，并用独立生产证据逐项验证 v51 检查；v52 的 `simulated_pass`、v53 的 `production_observed`、v54 的 `compiled_not_applied`、v55-v56 的非启动 inspect/recovery、v57 的 sealed-but-unconsumed bundle 与 v58 的 durable requirement 都不计入进程隔离验证。
+- [ ] 支持真实执行、stdin、超时/kill、日志和原子 Output Artifact 导出；v51 只固定要求，v52 只验证输出假事务，v53 只读取元数据，v54 只编译并假写，v55-v56 只操作未启动容器，v57-v58 只固定本地输入，v59 只完成 never-started daemon handoff，均未启用进程执行或生产 Artifact。
+- [ ] 将 v50 幂等清理扩展为真实运行中容器 orphan 检测/回收，并用独立生产证据逐项验证 v51 检查；v52 的 `simulated_pass`、v53 的 `production_observed`、v54 的 `compiled_not_applied`、v55-v56 的非启动 inspect/recovery、v57-v58 的本地捕获事实与 v59 的 never-started handoff 都不计入进程隔离验证。
 - [x] 保留 Noop/Local 作为测试与开发接口；Local 当前明确禁用，不能作为旁路执行后端。
 
 验收标准：容器内不能越界读取宿主目录；取消能终止进程；重启后能识别并处理残留 Sandbox。

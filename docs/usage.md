@@ -345,14 +345,16 @@ cyberagent run sandbox observation-show <observation-id>
 cyberagent run sandbox docker-plan <observation-id> --manifest configs/sandbox-docker-simulation.example.json --operation-key sandbox-docker-plan-001 --confirm-fake-write
 cyberagent run sandbox docker-plans <run-id>
 cyberagent run sandbox docker-plan-show <plan-id>
-cyberagent run sandbox docker-rehearse <plan-id> --manifest configs/sandbox-docker-simulation.example.json --operation-key sandbox-docker-rehearsal-001 --confirm-daemon-write --stage-host-inputs --confirm-host-input-staging
+cyberagent run sandbox docker-rehearse <plan-id> --manifest configs/sandbox-docker-simulation.example.json --operation-key sandbox-docker-rehearsal-001 --confirm-daemon-write --stage-host-inputs --confirm-host-input-staging --handoff-host-inputs --confirm-host-input-handoff
 cyberagent run sandbox docker-rehearsals <run-id>
 cyberagent run sandbox docker-rehearsal-show <rehearsal-id>
 cyberagent run sandbox docker-attempts <run-id>
 cyberagent run sandbox docker-attempt-show <attempt-id>
-cyberagent run sandbox docker-attempt-resume <attempt-id> --manifest configs/sandbox-docker-simulation.example.json --confirm-daemon-write --stage-host-inputs --confirm-host-input-staging
+cyberagent run sandbox docker-attempt-resume <attempt-id> --manifest configs/sandbox-docker-simulation.example.json --confirm-daemon-write --stage-host-inputs --confirm-host-input-staging --handoff-host-inputs --confirm-host-input-handoff
 cyberagent run sandbox docker-host-inputs <run-id>
 cyberagent run sandbox docker-host-input-show <intent-id>
+cyberagent run sandbox docker-host-input-handoffs <run-id>
+cyberagent run sandbox docker-host-input-handoff-show <handoff-intent-id>
 ```
 
 `evidence` never contacts a daemon. It binds a canonical OCI image digest and separate simulated daemon/mount/network/secret/container/resource/termination/orphan/output fingerprints to the 16 v51 checks, but reports `trust_class=simulation_only`, `production_verified=0`, and `verified_checks=0`. `output-simulate` strictly validates and redacts fixture content, stages all slots, and commits only to an in-memory fake sink. A failure or cancellation rolls the fake transaction back to zero, and no production Artifact is created. The Store and Application revalidate the complete v48-v51 chain at both boundaries. CLI and events omit fixture bodies, locator fingerprints, raw paths, commands, Manifest content, container IDs, operation digests, and private leases. These commands test protocol behavior only; they cannot create or start a Docker container and cannot authorize real execution.
@@ -383,6 +385,12 @@ For a v58 attempt, `docker-attempt-resume` still requires the full Manifest and 
 
 Schema v58 does not add a Docker archive, volume, start, exec, pull, build, export, or Artifact endpoint. The sealed bundle remains local and `daemon_consumed=false`. A separately reviewed schema-v59 design must use a daemon-owned carrier, verify exact upload and readback bytes, remove the writable carrier, and recreate the never-started target with the verified carrier mounted read-only; making the target root or input writable is not an acceptable shortcut.
 
+Schema v59 implements that handoff as a separate opt-in boundary. `--handoff-host-inputs` is valid only together with `--stage-host-inputs`, `--confirm-host-input-staging`, `--confirm-host-input-handoff`, and the existing `--confirm-daemon-write`. The immutable handoff requirement is created with the attempt, and a write-ahead intent commits before any archive or volume call. Resume may omit the staging and handoff flag pairs after those required choices are durable; submitting only part of either pair is rejected before lease acquisition, and a durable false choice cannot be widened.
+
+Linux uses only the fixed local Unix socket and Docker API `1.40`. One deterministic, never-started carrier writes the sealed bytes to a daemon-owned local volume at `/cyberagent-input/bundle.tar`. Go reads that file back through Docker, verifies exact length and digest, removes the carrier and original stopped target, creates a never-started target with the volume read-only, verifies its complete configuration, then removes the target and volume. Manifest mounts may not overlap the reserved `/cyberagent-input` tree. Retry reconciles only exact request-owned residue; a foreign same-name container or volume is not modified. The target root and reviewed Manifest mounts never become writable.
+
+`docker-host-input-handoffs` and `docker-host-input-handoff-show` expose status, bounded daemon read/write counts, generation, readback/readonly/cleanup flags, and fingerprints. They omit source paths, raw content, descriptors, raw container IDs, carrier/volume names, socket details, raw operation keys, and private lease identities. A successful record means only `daemon_consumed=true`, `readback_verified=true`, and cleanup completed. Container start, process execution, output export, backend enablement, execution authority, and Artifact commit authority remain false.
+
 An optional real-daemon test is available only when an exact image is already present; it never pulls or creates anything:
 
 ```powershell
@@ -396,6 +404,13 @@ The v55 write rehearsal has a separate opt-in Linux test. The supplied digest mu
 ```powershell
 $env:CYBERAGENT_DOCKER_WRITE_TEST_IMAGE_DIGEST = "sha256:<already-present-volume-free-digest>"
 go test ./internal/sandbox -run TestDockerContainerWriteRealDaemonOptIn -count=1 -v
+```
+
+The same opt-in digest can exercise the schema-v59 archive/volume handoff. The image must also expose an empty inherited environment. The harness never pulls or starts a container and asserts that the target, carrier, and volume are all absent afterward:
+
+```powershell
+$env:CYBERAGENT_DOCKER_WRITE_TEST_IMAGE_DIGEST = "sha256:<already-present-volume-free-digest>"
+go test ./internal/sandbox -run TestDockerHostInputHandoffRealDaemonOptIn -count=1 -v
 ```
 
 ## Workspaces

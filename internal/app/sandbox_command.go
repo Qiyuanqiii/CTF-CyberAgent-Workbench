@@ -68,7 +68,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	if a.dockerObserver != nil {
@@ -79,6 +79,9 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	}
 	if a.hostInputStager != nil {
 		service.WithDockerHostInputStager(a.hostInputStager)
+	}
+	if a.hostInputHandoff != nil {
+		service.WithDockerHostInputHandoffTransport(a.hostInputHandoff)
 	}
 	switch args[0] {
 	case "prepare":
@@ -634,16 +637,21 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 			"seal descriptor-pinned read-only host inputs before container cleanup")
 		confirmedHostInputs := fs.Bool("confirm-host-input-staging", false,
 			"separately confirm bounded local host input reads and in-memory sealing")
+		handoffHostInputs := fs.Bool("handoff-host-inputs", false,
+			"handoff the sealed bundle through a temporary Docker volume carrier")
+		confirmedHandoff := fs.Bool("confirm-host-input-handoff", false,
+			"separately confirm bounded Docker archive and volume writes")
 		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
 			"manifest": true, "operation-key": true, "operator": true,
 			"confirm-daemon-write": false, "stage-host-inputs": false,
 			"confirm-host-input-staging": false,
+			"handoff-host-inputs":        false, "confirm-host-input-handoff": false,
 		})); err != nil {
 			return err
 		}
 		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" ||
 			strings.TrimSpace(*operationKey) == "" {
-			return errors.New("usage: cyberagent run sandbox docker-rehearse <plan-id> --manifest <manifest.json> --operation-key <key> --confirm-daemon-write [--stage-host-inputs --confirm-host-input-staging] [--operator <id>]")
+			return errors.New("usage: cyberagent run sandbox docker-rehearse <plan-id> --manifest <manifest.json> --operation-key <key> --confirm-daemon-write [--stage-host-inputs --confirm-host-input-staging [--handoff-host-inputs --confirm-host-input-handoff]] [--operator <id>]")
 		}
 		if !*confirmed {
 			return apperror.New(apperror.CodeFailedPrecondition,
@@ -652,6 +660,11 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		if *stageHostInputs && !*confirmedHostInputs {
 			return apperror.New(apperror.CodeFailedPrecondition,
 				"Docker host input staging requires --confirm-host-input-staging")
+		}
+		if *handoffHostInputs && (!*stageHostInputs || !*confirmedHostInputs ||
+			!*confirmedHandoff) {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker host input handoff requires staging and both explicit confirmations")
 		}
 		manifest, err := readSandboxManifest(*manifestPath)
 		if err != nil {
@@ -664,11 +677,17 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		if *stageHostInputs && a.hostInputStager == nil {
 			service.WithDockerHostInputStager(sandbox.NewLocalDockerHostInputStager())
 		}
+		if *handoffHostInputs && a.hostInputHandoff == nil {
+			service.WithDockerHostInputHandoffTransport(
+				sandbox.NewLocalDockerHostInputHandoffTransport())
+		}
 		value, err := service.RehearseDockerContainer(ctx,
 			application.RehearseDockerContainerRequest{PlanID: fs.Arg(0),
 				Manifest: manifest, OperationKey: *operationKey, RequestedBy: *operator,
 				OperatorConfirmed: true, StageHostInputs: *stageHostInputs,
-				OperatorConfirmedHostInputStaging: *confirmedHostInputs})
+				OperatorConfirmedHostInputStaging: *confirmedHostInputs,
+				HandoffHostInputs:                 *handoffHostInputs,
+				OperatorConfirmedHostInputHandoff: *confirmedHandoff})
 		if err != nil {
 			return err
 		}
@@ -695,9 +714,11 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 			adopted := value.Stage != nil && value.Stage.Result.ExistingContainerAdopted
 			hostInputRequired := value.HostInputRequirement != nil &&
 				value.HostInputRequirement.Required
-			fmt.Fprintf(a.out, "%s\tplan=%s\tstatus=%s\tgeneration=%d\tfailures=%d\tadopted=%t\thost_input_required=%t\tcontainer_started=false\tprocess_executed=false\texecution_authorized=false\tcreated_at=%s\n",
+			handoffRequired := value.HostInputHandoffRequirement != nil &&
+				value.HostInputHandoffRequirement.Required
+			fmt.Fprintf(a.out, "%s\tplan=%s\tstatus=%s\tgeneration=%d\tfailures=%d\tadopted=%t\thost_input_required=%t\thost_input_handoff_required=%t\tcontainer_started=false\tprocess_executed=false\texecution_authorized=false\tcreated_at=%s\n",
 				value.Intent.ID, value.Intent.PlanID, value.Status, value.Lease.Generation,
-				len(value.Failures), adopted, hostInputRequired,
+				len(value.Failures), adopted, hostInputRequired, handoffRequired,
 				value.Intent.CreatedAt.Format(timeFormatRFC3339Nano))
 		}
 		return nil
@@ -725,14 +746,19 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 			"resume descriptor-pinned host input staging before completion")
 		confirmedHostInputs := fs.Bool("confirm-host-input-staging", false,
 			"separately confirm bounded local host input reads and in-memory sealing")
+		handoffHostInputs := fs.Bool("handoff-host-inputs", false,
+			"resume the durable Docker volume carrier handoff")
+		confirmedHandoff := fs.Bool("confirm-host-input-handoff", false,
+			"separately confirm bounded Docker archive and volume recovery writes")
 		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
 			"manifest": true, "operator": true, "confirm-daemon-write": false,
 			"stage-host-inputs": false, "confirm-host-input-staging": false,
+			"handoff-host-inputs": false, "confirm-host-input-handoff": false,
 		})); err != nil {
 			return err
 		}
 		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" {
-			return errors.New("usage: cyberagent run sandbox docker-attempt-resume <attempt-id> --manifest <manifest.json> --confirm-daemon-write [--stage-host-inputs --confirm-host-input-staging] [--operator <id>]")
+			return errors.New("usage: cyberagent run sandbox docker-attempt-resume <attempt-id> --manifest <manifest.json> --confirm-daemon-write [--stage-host-inputs --confirm-host-input-staging [--handoff-host-inputs --confirm-host-input-handoff]] [--operator <id>]")
 		}
 		if !*confirmed {
 			return apperror.New(apperror.CodeFailedPrecondition,
@@ -741,6 +767,11 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		if *stageHostInputs && !*confirmedHostInputs {
 			return apperror.New(apperror.CodeFailedPrecondition,
 				"Docker host input staging resume requires --confirm-host-input-staging")
+		}
+		if *handoffHostInputs && (!*stageHostInputs || !*confirmedHostInputs ||
+			!*confirmedHandoff) {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker host input handoff resume requires staging and both explicit confirmations")
 		}
 		manifest, err := readSandboxManifest(*manifestPath)
 		if err != nil {
@@ -753,11 +784,17 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		if a.hostInputStager == nil {
 			service.WithDockerHostInputStager(sandbox.NewLocalDockerHostInputStager())
 		}
+		if *handoffHostInputs && a.hostInputHandoff == nil {
+			service.WithDockerHostInputHandoffTransport(
+				sandbox.NewLocalDockerHostInputHandoffTransport())
+		}
 		value, err := service.ResumeDockerContainerRehearsal(ctx,
 			application.ResumeDockerContainerRequest{AttemptID: fs.Arg(0),
 				Manifest: manifest, RequestedBy: *operator, OperatorConfirmed: true,
 				StageHostInputs:                   *stageHostInputs,
-				OperatorConfirmedHostInputStaging: *confirmedHostInputs})
+				OperatorConfirmedHostInputStaging: *confirmedHostInputs,
+				HandoffHostInputs:                 *handoffHostInputs,
+				OperatorConfirmedHostInputHandoff: *confirmedHandoff})
 		if err != nil {
 			return err
 		}
@@ -806,6 +843,52 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 			return err
 		}
 		printSandboxDockerHostInputStaging(a, value)
+		return nil
+	case "docker-host-input-handoffs":
+		fs := newFlagSet("run sandbox docker-host-input-handoffs", a.errOut)
+		limit := fs.Int("limit", 100, "maximum Docker host input handoff records")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-host-input-handoffs <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDockerHostInputHandoffs(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no Docker host input handoff records")
+			return nil
+		}
+		for _, value := range values {
+			status := "pending"
+			generation, daemonReads, daemonWrites := int64(0), 0, 0
+			if value.Handoff != nil {
+				status = value.Handoff.Result.Status
+				generation = value.Handoff.LeaseGeneration
+				daemonReads = value.Handoff.Result.DaemonReadCount
+				daemonWrites = value.Handoff.Result.DaemonWriteCount
+			}
+			fmt.Fprintf(a.out, "%s\tattempt=%s\tplan=%s\tstatus=%s\tgeneration=%d\tdaemon_reads=%d\tdaemon_writes=%d\tdaemon_consumed=%t\tcontainer_started=false\tprocess_executed=false\texecution_authorized=false\tcreated_at=%s\n",
+				value.Intent.ID, value.Intent.AttemptID, value.Intent.PlanID, status, generation,
+				daemonReads, daemonWrites, value.Handoff != nil,
+				value.Intent.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "docker-host-input-handoff-show":
+		fs := newFlagSet("run sandbox docker-host-input-handoff-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-host-input-handoff-show <intent-id>")
+		}
+		value, err := service.GetDockerHostInputHandoff(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxDockerHostInputHandoff(a, value)
 		return nil
 	case "docker-rehearsals":
 		fs := newFlagSet("run sandbox docker-rehearsals", a.errOut)
@@ -1097,12 +1180,21 @@ func printSandboxDockerContainerAttempt(a *App,
 		hostInputRequired = value.HostInputRequirement.Required
 		hostInputRequirementFingerprint = value.HostInputRequirement.RequirementFingerprint
 	}
-	fmt.Fprintf(a.out, "docker_attempt: %s\ndocker_plan: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nstatus: %s\nendpoint_class: %s\nintent_fingerprint: %s\nrequest_fingerprint: %s\nauthority_fingerprint: %s\nspec_fingerprint: %s\nplan_fingerprint: %s\nhost_input_requirement_durable: %t\nhost_input_required: %t\nhost_input_requirement_fingerprint: %s\nnetwork_mode: %s\nenvironment_bindings: %d\nsecret_references: %d\nlease_generation: %d\nlease_status: %s\nfailures: %d\ncontrol_count: %d\nexisting_container_adopted: %t\ncontainer_removed_now: %t\ncontainer_already_absent: %t\ncontainer_started: false\nprocess_executed: false\nimage_pulled: false\noutput_exported: false\nproduction_verified: false\nbackend_enabled: false\nexecution_authorized: false\nartifact_commit_authorized: false\nrehearsal: %s\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\ntook_over: %t\n",
+	handoffRequired, handoffRequirementDurable := false, false
+	handoffRequirementFingerprint := ""
+	if value.HostInputHandoffRequirement != nil {
+		handoffRequirementDurable = true
+		handoffRequired = value.HostInputHandoffRequirement.Required
+		handoffRequirementFingerprint =
+			value.HostInputHandoffRequirement.RequirementFingerprint
+	}
+	fmt.Fprintf(a.out, "docker_attempt: %s\ndocker_plan: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nstatus: %s\nendpoint_class: %s\nintent_fingerprint: %s\nrequest_fingerprint: %s\nauthority_fingerprint: %s\nspec_fingerprint: %s\nplan_fingerprint: %s\nhost_input_requirement_durable: %t\nhost_input_required: %t\nhost_input_requirement_fingerprint: %s\nhost_input_handoff_requirement_durable: %t\nhost_input_handoff_required: %t\nhost_input_handoff_requirement_fingerprint: %s\nnetwork_mode: %s\nenvironment_bindings: %d\nsecret_references: %d\nlease_generation: %d\nlease_status: %s\nfailures: %d\ncontrol_count: %d\nexisting_container_adopted: %t\ncontainer_removed_now: %t\ncontainer_already_absent: %t\ncontainer_started: false\nprocess_executed: false\nimage_pulled: false\noutput_exported: false\nproduction_verified: false\nbackend_enabled: false\nexecution_authorized: false\nartifact_commit_authorized: false\nrehearsal: %s\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\ntook_over: %t\n",
 		intent.ID, intent.PlanID, intent.RunID, intent.MissionID, intent.WorkspaceID,
 		intent.ProtocolVersion, value.Status, intent.EndpointClass, intent.IntentFingerprint,
 		intent.RequestFingerprint, intent.AuthorityFingerprint, intent.SpecFingerprint,
 		intent.PlanFingerprint, hostInputRequirementDurable, hostInputRequired,
-		hostInputRequirementFingerprint, intent.NetworkMode, intent.EnvironmentCount,
+		hostInputRequirementFingerprint, handoffRequirementDurable, handoffRequired,
+		handoffRequirementFingerprint, intent.NetworkMode, intent.EnvironmentCount,
 		intent.SecretReferenceCount, value.Lease.Generation, value.Lease.Status,
 		len(value.Failures), controlCount, adopted, removedNow, alreadyAbsent,
 		rehearsalID, intent.RequestedBy,
@@ -1165,6 +1257,42 @@ func printSandboxDockerHostInputStaging(a *App,
 		regularFiles, directories, entries, sourceBytes, artifactBytes, bundleBytes,
 		sourceDigest, artifactDigest, bundleDigest, reportFingerprint,
 		descriptorPinned, symlinkFree, kernelSealed, intent.RequestedBy,
+		createdAt.Format(timeFormatRFC3339Nano), value.Replayed)
+}
+
+func printSandboxDockerHostInputHandoff(a *App,
+	value sandbox.DockerHostInputHandoffRecord,
+) {
+	intent := value.Intent
+	handoffID, status, endpointClass := "", "pending", ""
+	leaseGeneration := int64(0)
+	daemonReads, daemonWrites, reconciled := 0, 0, 0
+	requestFingerprint, readbackDigest, transportFingerprint := "", "", ""
+	createdAt := intent.CreatedAt
+	completed := value.Handoff != nil
+	if completed {
+		handoff := value.Handoff
+		result := handoff.Result
+		handoffID, status, endpointClass = handoff.ID, result.Status, result.EndpointClass
+		leaseGeneration = handoff.LeaseGeneration
+		daemonReads, daemonWrites = result.DaemonReadCount, result.DaemonWriteCount
+		reconciled = result.ReconciledResourceCount
+		requestFingerprint, readbackDigest = result.RequestFingerprint, result.ReadbackDigest
+		transportFingerprint = result.TransportFingerprint
+		createdAt = handoff.CreatedAt
+	}
+	fmt.Fprintf(a.out, "docker_host_input_handoff_intent: %s\ndocker_host_input_handoff: %s\nattempt: %s\ndocker_plan: %s\nrun: %s\nmission: %s\nworkspace: %s\nintent_protocol: %s\nhandoff_protocol: %s\nstatus: %s\nendpoint_class: %s\noperation_key_digest: %s\nattempt_intent_fingerprint: %s\ncontainer_id_fingerprint: %s\ncapture_requirement_fingerprint: %s\nhandoff_requirement_fingerprint: %s\nstaging_fingerprint: %s\nbundle_report_fingerprint: %s\nbundle_digest: %s\nbundle_bytes: %d\nauthority_fingerprint: %s\nspec_fingerprint: %s\nplan_fingerprint: %s\nlease_generation: %d\nrequest_fingerprint: %s\nreadback_digest: %s\ntransport_fingerprint: %s\ndaemon_reads: %d\ndaemon_writes: %d\nreconciled_resources: %d\ndaemon_consumed: %t\nreadback_verified: %t\nfinal_mount_read_only: %t\ncarrier_removed: %t\nfinal_container_removed: %t\nvolume_removed: %t\ncleanup_confirmed: %t\ncontainer_started: false\nprocess_executed: false\noutput_exported: false\nraw_content_retained: false\nproduction_execution_submitted: false\nproduction_verified: false\nbackend_enabled: false\nexecution_authorized: false\nartifact_commit_authorized: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\n",
+		intent.ID, handoffID, intent.AttemptID, intent.PlanID, intent.RunID,
+		intent.MissionID, intent.WorkspaceID, intent.ProtocolVersion,
+		sandbox.DockerHostInputHandoffProtocolVersion, status, endpointClass,
+		intent.OperationKeyDigest, intent.AttemptIntentFingerprint,
+		intent.ContainerIDFingerprint, intent.CaptureRequirementFingerprint,
+		intent.HandoffRequirementFingerprint, intent.StagingFingerprint,
+		intent.BundleReportFingerprint, intent.BundleDigest, intent.BundleBytes,
+		intent.AuthorityFingerprint, intent.SpecFingerprint, intent.PlanFingerprint,
+		leaseGeneration, requestFingerprint, readbackDigest, transportFingerprint,
+		daemonReads, daemonWrites, reconciled, completed, completed, completed, completed,
+		completed, completed, completed, intent.RequestedBy,
 		createdAt.Format(timeFormatRFC3339Nano), value.Replayed)
 }
 

@@ -1,7 +1,10 @@
 package application
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -26,12 +29,35 @@ type recoveringDockerWriteTransport struct {
 }
 
 type recordingDockerHostInputStager struct {
-	probeCalls int
-	stageCalls int
-	request    sandbox.HostInputBundleRequest
-	probeErr   error
-	stageErr   error
-	mutate     func(*sandbox.HostInputBundleReport)
+	probeCalls   int
+	stageCalls   int
+	captureCalls int
+	request      sandbox.HostInputBundleRequest
+	probeErr     error
+	stageErr     error
+	mutate       func(*sandbox.HostInputBundleReport)
+	lastBundle   *recordingHostInputBundle
+}
+
+type recordingHostInputBundle struct {
+	*bytes.Reader
+	report sandbox.HostInputBundleReport
+	closed bool
+}
+
+func (bundle *recordingHostInputBundle) Report() sandbox.HostInputBundleReport {
+	return bundle.report
+}
+
+func (bundle *recordingHostInputBundle) Close() error {
+	bundle.closed = true
+	return nil
+}
+
+type recordingDockerHostInputHandoffTransport struct {
+	calls   int
+	request sandbox.DockerHostInputHandoffRequest
+	err     error
 }
 
 func (stager *recordingDockerHostInputStager) Probe(_ context.Context, _ string) error {
@@ -47,17 +73,59 @@ func (stager *recordingDockerHostInputStager) Stage(_ context.Context,
 	if stager.stageErr != nil {
 		return sandbox.HostInputBundleReport{}, stager.stageErr
 	}
+	return stager.report(request, strings.Repeat("b", 64), 4096)
+}
+
+func (stager *recordingDockerHostInputStager) Capture(_ context.Context,
+	request sandbox.HostInputBundleRequest,
+) (sandbox.HostInputBundle, error) {
+	stager.captureCalls++
+	stager.request = request
+	if stager.stageErr != nil {
+		return nil, stager.stageErr
+	}
+	content := bytes.Repeat([]byte("v59-sealed-bundle\n"), 256)
+	digest := sha256.Sum256(content)
+	report, err := stager.report(request, hex.EncodeToString(digest[:]), int64(len(content)))
+	if err != nil {
+		return nil, err
+	}
+	bundle := &recordingHostInputBundle{Reader: bytes.NewReader(content), report: report}
+	stager.lastBundle = bundle
+	return bundle, nil
+}
+
+func (stager *recordingDockerHostInputStager) report(request sandbox.HostInputBundleRequest,
+	bundleDigest string, bundleBytes int64,
+) (sandbox.HostInputBundleReport, error) {
 	report, err := sandbox.NewHostInputBundleReport(sandbox.HostInputBundleMeasurements{
 		ReadOnlyMountCount: request.ReadOnlyMountCount(), ArtifactCount: len(request.Artifacts),
 		DirectoryCount: request.ReadOnlyMountCount(), ArtifactBytes: request.ArtifactBytes(),
-		BundleBytes: 4096, SourceSnapshotDigest: strings.Repeat("a", 64),
+		BundleBytes: bundleBytes, SourceSnapshotDigest: strings.Repeat("a", 64),
 		ArtifactPayloadDigest: request.ArtifactPayloadDigest(),
-		BundleDigest:          strings.Repeat("b", 64),
+		BundleDigest:          bundleDigest,
 	}, time.Now().UTC())
 	if err == nil && stager.mutate != nil {
 		stager.mutate(&report)
 	}
 	return report, err
+}
+
+func (transport *recordingDockerHostInputHandoffTransport) Endpoint() sandbox.DockerObservationEndpoint {
+	endpoint, _ := sandbox.NewDockerObservationEndpoint(sandbox.DockerObservationEndpointLocalUnix)
+	return endpoint
+}
+
+func (transport *recordingDockerHostInputHandoffTransport) Handoff(_ context.Context,
+	request sandbox.DockerHostInputHandoffRequest, _ sandbox.HostInputBundle,
+) (sandbox.DockerHostInputHandoffResult, error) {
+	transport.calls++
+	transport.request = request
+	if transport.err != nil {
+		return sandbox.DockerHostInputHandoffResult{}, transport.err
+	}
+	return sandbox.NewDockerHostInputHandoffResult(transport.Endpoint(), request,
+		strings.Repeat("e", 64), 9, 8, 0)
 }
 
 func (transport *recoveringDockerWriteTransport) Endpoint() sandbox.DockerObservationEndpoint {
@@ -351,6 +419,159 @@ func TestDockerHostInputStagingRequiresSeparateConfirmationAndPersistsMetadataOn
 			strings.Contains(event.PayloadJSON, stager.request.WorkspaceRoot) {
 			t.Fatalf("host input staging event leaked a host path: %#v", event)
 		}
+	}
+}
+
+func TestDockerHostInputHandoffRequiresConfirmationPersistsAndReplays(t *testing.T) {
+	ctx := context.Background()
+	st, run, root := newSandboxManifestTestRuntime(t, ctx)
+	service := NewSandboxManifestService(st, policy.NewDefaultChecker())
+	manifest, observation := prepareDockerContainerPlanAuthority(t, ctx, service, run.ID,
+		root, "docker-host-input-handoff", "docker_rehearsal_operator")
+	plan, err := service.CompileDockerContainerPlan(ctx, CompileDockerContainerPlanRequest{
+		ObservationID: observation.ID, Manifest: manifest,
+		OperationKey: "docker-host-input-handoff-plan",
+		RequestedBy:  "docker_rehearsal_operator",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTransport := &countingDockerWriteTransport{}
+	stager := &recordingDockerHostInputStager{}
+	handoffTransport := &recordingDockerHostInputHandoffTransport{}
+	service.WithDockerContainerWriteTransport(writeTransport).
+		WithDockerHostInputStager(stager).
+		WithDockerHostInputHandoffTransport(handoffTransport)
+	request := RehearseDockerContainerRequest{PlanID: plan.ID, Manifest: manifest,
+		OperationKey: "docker-host-input-handoff-operation",
+		RequestedBy:  "docker_rehearsal_operator", OperatorConfirmed: true,
+		StageHostInputs: true, OperatorConfirmedHostInputStaging: true,
+		HandoffHostInputs: true}
+	if _, err := service.RehearseDockerContainer(ctx, request); apperror.CodeOf(err) != apperror.CodeFailedPrecondition ||
+		writeTransport.calls != 0 || stager.probeCalls != 0 || handoffTransport.calls != 0 {
+		t.Fatalf("host input handoff did not require independent confirmation: %v", err)
+	}
+	request.OperatorConfirmedHostInputHandoff = true
+	rehearsal, err := service.RehearseDockerContainer(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rehearsal.Replayed || writeTransport.calls != 1 || writeTransport.cleanupCalls != 1 ||
+		stager.probeCalls != 1 || stager.stageCalls != 0 || stager.captureCalls != 1 ||
+		stager.lastBundle == nil || !stager.lastBundle.closed || handoffTransport.calls != 1 ||
+		handoffTransport.request.BundleReport.BundleDigest == "" {
+		t.Fatalf("host input handoff execution diverged: rehearsal=%#v write=%#v stager=%#v handoff=%#v",
+			rehearsal, writeTransport, stager, handoffTransport)
+	}
+	records, err := service.ListDockerHostInputHandoffs(ctx, run.ID, 10)
+	if err != nil || len(records) != 1 || records[0].Handoff == nil ||
+		!records[0].Handoff.Result.DaemonConsumed ||
+		!records[0].Handoff.Result.ReadbackVerified ||
+		!records[0].Handoff.Result.FinalMountReadOnly ||
+		!records[0].Handoff.Result.CleanupConfirmed ||
+		records[0].Handoff.Result.ContainerStarted ||
+		records[0].Handoff.Result.ProcessExecuted ||
+		records[0].Handoff.Result.OutputExported ||
+		records[0].Handoff.Result.ExecutionAuthorized ||
+		records[0].Handoff.Result.ArtifactCommitAuthorized {
+		t.Fatalf("host input handoff ledger widened authority: %#v err=%v", records, err)
+	}
+	loaded, err := service.GetDockerHostInputHandoff(ctx, records[0].Intent.ID)
+	if err != nil || loaded.Handoff == nil ||
+		loaded.Handoff.HandoffFingerprint != records[0].Handoff.HandoffFingerprint {
+		t.Fatalf("load host input handoff: %#v err=%v", loaded, err)
+	}
+	replay := request
+	replay.StageHostInputs = false
+	replay.OperatorConfirmedHostInputStaging = false
+	replay.HandoffHostInputs = false
+	replay.OperatorConfirmedHostInputHandoff = false
+	replayed, err := service.RehearseDockerContainer(ctx, replay)
+	if err != nil || !replayed.Replayed || writeTransport.calls != 1 ||
+		stager.captureCalls != 1 || handoffTransport.calls != 1 {
+		t.Fatalf("durable host input handoff replay repeated side effects: %#v err=%v",
+			replayed, err)
+	}
+	events, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if strings.Contains(event.PayloadJSON, root) ||
+			strings.Contains(event.PayloadJSON, sandbox.DockerHostInputCarrierDestination) {
+			t.Fatalf("host input handoff event leaked a host path or daemon destination: %#v", event)
+		}
+	}
+}
+
+func TestDockerHostInputHandoffFailureResumesFromDurableIntent(t *testing.T) {
+	ctx := context.Background()
+	st, run, root := newSandboxManifestTestRuntime(t, ctx)
+	service := NewSandboxManifestService(st, policy.NewDefaultChecker())
+	manifest, observation := prepareDockerContainerPlanAuthority(t, ctx, service, run.ID,
+		root, "docker-host-input-handoff-recovery", "docker_rehearsal_operator")
+	plan, err := service.CompileDockerContainerPlan(ctx, CompileDockerContainerPlanRequest{
+		ObservationID: observation.ID, Manifest: manifest,
+		OperationKey: "docker-host-input-handoff-recovery-plan",
+		RequestedBy:  "docker_rehearsal_operator",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTransport := &countingDockerWriteTransport{}
+	stager := &recordingDockerHostInputStager{}
+	handoffTransport := &recordingDockerHostInputHandoffTransport{
+		err: errors.New("temporary daemon handoff failure"),
+	}
+	service.WithDockerContainerWriteTransport(writeTransport).
+		WithDockerHostInputStager(stager).
+		WithDockerHostInputHandoffTransport(handoffTransport)
+	request := RehearseDockerContainerRequest{PlanID: plan.ID, Manifest: manifest,
+		OperationKey: "docker-host-input-handoff-recovery-operation",
+		RequestedBy:  "docker_rehearsal_operator", OperatorConfirmed: true,
+		StageHostInputs: true, OperatorConfirmedHostInputStaging: true,
+		HandoffHostInputs: true, OperatorConfirmedHostInputHandoff: true}
+	if _, err := service.RehearseDockerContainer(ctx, request); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("temporary handoff failure was accepted: %v", err)
+	}
+	attempts, err := service.ListDockerContainerRehearsalAttempts(ctx, run.ID, 10)
+	if err != nil || len(attempts) != 1 || attempts[0].Stage == nil ||
+		attempts[0].Cleanup != nil || attempts[0].Completion != nil ||
+		len(attempts[0].Failures) != 1 || !attempts[0].Failures[0].Retryable ||
+		attempts[0].Lease.Status != sandbox.DockerContainerAttemptLeaseReleased ||
+		stager.captureCalls != 1 || stager.lastBundle == nil || !stager.lastBundle.closed ||
+		handoffTransport.calls != 1 || writeTransport.cleanupCalls != 0 {
+		t.Fatalf("failed handoff was not durably resumable: attempts=%#v err=%v", attempts, err)
+	}
+	records, err := service.ListDockerHostInputHandoffs(ctx, run.ID, 10)
+	if err != nil || len(records) != 1 || records[0].Handoff != nil {
+		t.Fatalf("failed handoff did not preserve a write-ahead intent: %#v err=%v", records, err)
+	}
+	handoffTransport.err = nil
+	recovery := request
+	recovery.StageHostInputs = false
+	recovery.OperatorConfirmedHostInputStaging = false
+	recovery.HandoffHostInputs = false
+	recovery.OperatorConfirmedHostInputHandoff = false
+	rehearsal, err := service.RehearseDockerContainer(ctx, recovery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rehearsal.Replayed || writeTransport.calls != 1 || writeTransport.cleanupCalls != 1 ||
+		stager.captureCalls != 2 || handoffTransport.calls != 2 {
+		t.Fatalf("handoff recovery repeated stage or missed retry: rehearsal=%#v write=%#v stager=%#v handoff=%#v",
+			rehearsal, writeTransport, stager, handoffTransport)
+	}
+	attempts, err = service.ListDockerContainerRehearsalAttempts(ctx, run.ID, 10)
+	if err != nil || len(attempts) != 1 || attempts[0].Completion == nil ||
+		attempts[0].Lease.Generation != 2 || len(attempts[0].Failures) != 1 ||
+		attempts[0].Status != sandbox.DockerContainerAttemptStatusCompleted {
+		t.Fatalf("handoff recovery did not complete on lease takeover: %#v err=%v", attempts, err)
+	}
+	records, err = service.ListDockerHostInputHandoffs(ctx, run.ID, 10)
+	if err != nil || len(records) != 1 || records[0].Handoff == nil ||
+		records[0].Handoff.LeaseGeneration != 2 {
+		t.Fatalf("handoff recovery did not commit generation two: %#v err=%v", records, err)
 	}
 }
 

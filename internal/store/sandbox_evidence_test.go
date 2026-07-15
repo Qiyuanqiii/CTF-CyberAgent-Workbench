@@ -464,7 +464,7 @@ func removeSchemaV57ForTestStatements() []string {
 }
 
 func removeSchemaV58ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV59ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_docker_host_input_requirement_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_host_input_requirement_update_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_attempt_completion_requires_host_input_requirement`,
@@ -478,5 +478,33 @@ func removeSchemaV58ForTestStatements() []string {
 		`DROP TRIGGER trg_sandbox_docker_host_input_requirement_legacy_insert_immutable`,
 		`DROP TABLE sandbox_docker_host_input_requirement_legacy_attempts`,
 		`DELETE FROM schema_migrations WHERE version = 58`,
+	}...)
+}
+
+func removeSchemaV59ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_intent_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_intent_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_requirement_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_requirement_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_attempt_completion_requires_host_input_handoff`,
+		`DROP TRIGGER trg_sandbox_docker_attempt_cleanup_requires_host_input_handoff`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_insert`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_intent_insert`,
+		`DROP TRIGGER trg_sandbox_docker_attempt_stage_requires_handoff_requirement`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_requirement_insert`,
+		`DROP INDEX idx_sandbox_docker_host_input_handoffs_run_created`,
+		`DROP TABLE sandbox_docker_host_input_handoffs`,
+		`DROP INDEX idx_sandbox_docker_host_input_handoff_intents_run_created`,
+		`DROP TABLE sandbox_docker_host_input_handoff_intents`,
+		`DROP INDEX idx_sandbox_docker_host_input_handoff_requirements_run_created`,
+		`DROP TABLE sandbox_docker_host_input_handoff_requirements`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_legacy_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_legacy_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_legacy_insert_immutable`,
+		`DROP TABLE sandbox_docker_host_input_handoff_legacy_attempts`,
+		`DELETE FROM schema_migrations WHERE version = 59`,
 	}
 }

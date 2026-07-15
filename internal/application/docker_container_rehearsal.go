@@ -22,6 +22,8 @@ type RehearseDockerContainerRequest struct {
 	OperatorConfirmed                 bool
 	StageHostInputs                   bool
 	OperatorConfirmedHostInputStaging bool
+	HandoffHostInputs                 bool
+	OperatorConfirmedHostInputHandoff bool
 }
 
 func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
@@ -122,6 +124,43 @@ func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
 				"Docker host input staging confirmation requires staging to be enabled")
 		}
 	}
+	effectiveHandoffHostInputs := request.HandoffHostInputs
+	var handoffRequirement *sandbox.DockerHostInputHandoffRequirement
+	if durableAttempt != nil && durableAttempt.HostInputHandoffRequirement != nil {
+		value := *durableAttempt.HostInputHandoffRequirement
+		handoffRequirement = &value
+	}
+	if request.HandoffHostInputs && !request.OperatorConfirmedHostInputHandoff {
+		return sandbox.DockerContainerRehearsal{}, apperror.New(
+			apperror.CodeFailedPrecondition,
+			"Docker host input handoff requires separate explicit operator confirmation")
+	}
+	if !request.HandoffHostInputs && request.OperatorConfirmedHostInputHandoff {
+		return sandbox.DockerContainerRehearsal{}, apperror.New(apperror.CodeInvalidArgument,
+			"Docker host input handoff confirmation requires handoff to be enabled")
+	}
+	if request.HandoffHostInputs &&
+		(!request.StageHostInputs || !request.OperatorConfirmedHostInputStaging) {
+		return sandbox.DockerContainerRehearsal{}, apperror.New(
+			apperror.CodeFailedPrecondition,
+			"Docker host input handoff requires confirmed descriptor staging")
+	}
+	if handoffRequirement != nil {
+		if !handoffRequirement.Required &&
+			(request.HandoffHostInputs || request.OperatorConfirmedHostInputHandoff) {
+			return sandbox.DockerContainerRehearsal{}, apperror.New(apperror.CodeConflict,
+				"Docker host input handoff requirement cannot be widened during replay")
+		}
+		effectiveHandoffHostInputs = handoffRequirement.Required
+		if effectiveHandoffHostInputs && !effectiveStageHostInputs {
+			return sandbox.DockerContainerRehearsal{}, apperror.New(apperror.CodeConflict,
+				"Docker host input handoff lost its durable capture requirement")
+		}
+	} else if durableAttempt != nil &&
+		(request.HandoffHostInputs || request.OperatorConfirmedHostInputHandoff) {
+		return sandbox.DockerContainerRehearsal{}, apperror.New(apperror.CodeConflict,
+			"legacy Docker attempt cannot widen into daemon host input handoff")
+	}
 	manifest, err := sandbox.NewNoopRunner().ValidateManifest(ctx, request.Manifest)
 	if err != nil {
 		return sandbox.DockerContainerRehearsal{}, apperror.Wrap(apperror.CodeInvalidArgument,
@@ -134,6 +173,8 @@ func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
 	}
 	hostInputOperationKeyDigest := runmutation.Fingerprint(
 		"sandbox_docker_host_input_staging_operation.v1", keyDigest)
+	hostInputHandoffOperationKeyDigest := runmutation.Fingerprint(
+		"sandbox_docker_host_input_handoff_operation.v1", keyDigest)
 	if durableAttempt != nil && !effectiveStageHostInputs {
 		record, found, stagingErr := s.store.GetDockerHostInputStagingByAttempt(ctx,
 			durableAttempt.Intent.ID)
@@ -144,6 +185,18 @@ func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
 			return sandbox.DockerContainerRehearsal{}, apperror.New(
 				apperror.CodeFailedPrecondition,
 				"Docker attempt has pending host input staging and requires explicit resume confirmation")
+		}
+	}
+	if durableAttempt != nil && !effectiveHandoffHostInputs {
+		record, found, handoffErr := s.store.GetDockerHostInputHandoffByAttempt(ctx,
+			durableAttempt.Intent.ID)
+		if handoffErr != nil {
+			return sandbox.DockerContainerRehearsal{}, apperror.Normalize(handoffErr)
+		}
+		if found && record.Handoff == nil {
+			return sandbox.DockerContainerRehearsal{}, apperror.New(
+				apperror.CodeFailedPrecondition,
+				"Docker attempt has pending host input handoff and requires explicit resume confirmation")
 		}
 	}
 	if existing, found, lookupErr := s.store.GetDockerContainerRehearsalOperation(ctx,
@@ -159,6 +212,17 @@ func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
 			if !staged || record.Staging == nil {
 				return sandbox.DockerContainerRehearsal{}, apperror.New(apperror.CodeConflict,
 					"completed Docker rehearsal has no matching host input staging evidence")
+			}
+		}
+		if effectiveHandoffHostInputs {
+			record, handedOff, handoffErr := s.store.GetDockerHostInputHandoffByOperation(ctx,
+				hostInputHandoffOperationKeyDigest)
+			if handoffErr != nil {
+				return sandbox.DockerContainerRehearsal{}, apperror.Normalize(handoffErr)
+			}
+			if !handedOff || record.Handoff == nil {
+				return sandbox.DockerContainerRehearsal{}, apperror.New(apperror.CodeConflict,
+					"completed Docker rehearsal has no matching host input handoff evidence")
 			}
 		}
 		return s.replayDockerContainerRehearsal(ctx, planID, requestedBy,
@@ -290,6 +354,25 @@ func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
 			}
 		}
 	}
+	if effectiveHandoffHostInputs {
+		if s.hostInputHandoff == nil {
+			return sandbox.DockerContainerRehearsal{}, apperror.New(
+				apperror.CodeFailedPrecondition, "Docker host input handoff transport is required")
+		}
+		provider, ok := s.hostInputStager.(sandbox.DockerHostInputBundleProvider)
+		if !ok || provider == nil {
+			return sandbox.DockerContainerRehearsal{}, apperror.New(
+				apperror.CodeFailedPrecondition,
+				"Docker host input handoff requires a sealed bundle provider")
+		}
+		handoffEndpoint := s.hostInputHandoff.Endpoint()
+		if handoffEndpoint.Validate() != nil || handoffEndpoint.Class != endpoint.Class ||
+			handoffEndpoint.Fingerprint != endpoint.Fingerprint {
+			return sandbox.DockerContainerRehearsal{}, apperror.New(
+				apperror.CodeFailedPrecondition,
+				"Docker host input handoff endpoint changed from the staged endpoint")
+		}
+	}
 	now := time.Now().UTC()
 	intent, err := sandbox.NewDockerContainerAttemptIntent(
 		idgen.New("sandbox-docker-attempt"), keyDigest, plan, writeRequest, endpoint,
@@ -307,8 +390,16 @@ func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
 			return sandbox.DockerContainerRehearsal{}, apperror.Wrap(apperror.CodeInternal,
 				"Docker host input requirement assembly failed", requirementErr)
 		}
+		handoffRequirement, requirementErr := sandbox.NewDockerHostInputHandoffRequirement(
+			intent, plan, requirement, effectiveHandoffHostInputs,
+			request.OperatorConfirmedHostInputHandoff)
+		if requirementErr != nil {
+			return sandbox.DockerContainerRehearsal{}, apperror.Wrap(apperror.CodeInternal,
+				"Docker host input handoff requirement assembly failed", requirementErr)
+		}
 		acquisition, err = s.store.BeginDockerContainerRehearsalAttempt(ctx, intent,
-			requirement, ownerID, sandbox.DefaultDockerContainerAttemptLeaseTTL)
+			requirement, ownerID, sandbox.DefaultDockerContainerAttemptLeaseTTL,
+			handoffRequirement)
 	} else {
 		if intent.IntentFingerprint != durableAttempt.Intent.IntentFingerprint ||
 			intent.RequestFingerprint != durableAttempt.Intent.RequestFingerprint ||
@@ -325,7 +416,9 @@ func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
 	}
 	hostInputs := dockerHostInputStagingExecution{
 		enabled: effectiveStageHostInputs, operationKeyDigest: hostInputOperationKeyDigest,
-		manifest: manifest, authority: authority,
+		handoffEnabled:            effectiveHandoffHostInputs,
+		handoffOperationKeyDigest: hostInputHandoffOperationKeyDigest,
+		manifest:                  manifest, authority: authority,
 	}
 	return s.executeDockerContainerRehearsalAttempt(ctx, acquisition, plan, spec, writeRequest,
 		hostInputs)
@@ -338,6 +431,8 @@ type ResumeDockerContainerRequest struct {
 	OperatorConfirmed                 bool
 	StageHostInputs                   bool
 	OperatorConfirmedHostInputStaging bool
+	HandoffHostInputs                 bool
+	OperatorConfirmedHostInputHandoff bool
 }
 
 func (s *SandboxManifestService) ResumeDockerContainerRehearsal(ctx context.Context,
@@ -348,14 +443,18 @@ func (s *SandboxManifestService) ResumeDockerContainerRehearsal(ctx context.Cont
 		RequestedBy: request.RequestedBy, OperatorConfirmed: request.OperatorConfirmed,
 		StageHostInputs:                   request.StageHostInputs,
 		OperatorConfirmedHostInputStaging: request.OperatorConfirmedHostInputStaging,
+		HandoffHostInputs:                 request.HandoffHostInputs,
+		OperatorConfirmedHostInputHandoff: request.OperatorConfirmedHostInputHandoff,
 	})
 }
 
 type dockerHostInputStagingExecution struct {
-	enabled            bool
-	operationKeyDigest string
-	manifest           sandbox.Manifest
-	authority          sandboxPreflightAuthority
+	enabled                   bool
+	operationKeyDigest        string
+	handoffEnabled            bool
+	handoffOperationKeyDigest string
+	manifest                  sandbox.Manifest
+	authority                 sandboxPreflightAuthority
 }
 
 func (s *SandboxManifestService) executeDockerContainerRehearsalAttempt(ctx context.Context,
@@ -410,7 +509,22 @@ func (s *SandboxManifestService) executeDockerContainerRehearsalAttempt(ctx cont
 		}
 		attempt = stored
 	}
-	if err := s.ensureDockerHostInputStaging(ctx, attempt, plan, hostInputs); err != nil {
+	staging, bundle, err := s.ensureDockerHostInputStaging(ctx, attempt, plan, hostInputs)
+	if bundle != nil {
+		defer func() { _ = bundle.Close() }()
+	}
+	if err == nil {
+		err = s.ensureDockerHostInputHandoff(ctx, attempt, plan, writeRequest,
+			hostInputs, staging, bundle)
+	}
+	if err != nil && hostInputs.handoffEnabled {
+		s.recordDockerContainerAttemptFailure(attempt,
+			sandbox.DockerContainerAttemptFailureStage, err)
+		return sandbox.DockerContainerRehearsal{}, apperror.Wrap(
+			apperror.CodeFailedPrecondition,
+			"Docker host input handoff remains resumable after failure", err)
+	}
+	if err != nil {
 		cleanupCtx, cancelCleanup := context.WithTimeout(context.Background(), 30*time.Second)
 		cleaned, cleanupErr := s.ensureDockerContainerAttemptCleanup(cleanupCtx, attempt,
 			writeRequest, endpoint)
@@ -419,15 +533,14 @@ func (s *SandboxManifestService) executeDockerContainerRehearsalAttempt(ctx cont
 			s.recordDockerContainerAttemptFailure(attempt,
 				sandbox.DockerContainerAttemptFailureCleanup, cleanupErr)
 			return sandbox.DockerContainerRehearsal{}, apperror.Wrap(
-				apperror.CodeFailedPrecondition, "Docker host input staging and cleanup failed",
+				apperror.CodeFailedPrecondition, "Docker host input preparation and cleanup failed",
 				errors.Join(err, cleanupErr))
 		}
 		s.recordDockerContainerAttemptFailure(cleaned,
 			sandbox.DockerContainerAttemptFailureStage, err)
 		return sandbox.DockerContainerRehearsal{}, apperror.Wrap(
-			apperror.CodeFailedPrecondition, "Docker host input staging failed", err)
+			apperror.CodeFailedPrecondition, "Docker host input preparation failed", err)
 	}
-	var err error
 	attempt, err = s.ensureDockerContainerAttemptCleanup(ctx, attempt, writeRequest, endpoint)
 	if err != nil {
 		s.recordDockerContainerAttemptFailure(attempt,
@@ -475,34 +588,33 @@ func (s *SandboxManifestService) executeDockerContainerRehearsalAttempt(ctx cont
 func (s *SandboxManifestService) ensureDockerHostInputStaging(ctx context.Context,
 	attempt sandbox.DockerContainerRehearsalAttempt, plan sandbox.DockerContainerPlan,
 	request dockerHostInputStagingExecution,
-) error {
+) (sandbox.DockerHostInputStagingRecord, sandbox.HostInputBundle, error) {
 	if attempt.HostInputRequirement != nil &&
 		attempt.HostInputRequirement.Required != request.enabled {
-		return apperror.New(apperror.CodeConflict,
+		return sandbox.DockerHostInputStagingRecord{}, nil, apperror.New(apperror.CodeConflict,
 			"Docker host input execution changed the durable requirement")
 	}
 	record, found, err := s.store.GetDockerHostInputStagingByAttempt(ctx, attempt.Intent.ID)
 	if err != nil {
-		return err
+		return sandbox.DockerHostInputStagingRecord{}, nil, err
 	}
 	if found {
 		if !dockerHostInputStagingMatchesAttempt(record, attempt, plan,
 			request.operationKeyDigest) {
-			return apperror.New(apperror.CodeConflict,
+			return sandbox.DockerHostInputStagingRecord{}, nil, apperror.New(apperror.CodeConflict,
 				"Docker host input staging record no longer matches the attempt")
 		}
-		if record.Staging != nil {
-			return nil
-		}
 		if !request.enabled {
-			return apperror.New(apperror.CodeFailedPrecondition,
+			return sandbox.DockerHostInputStagingRecord{}, nil, apperror.New(
+				apperror.CodeFailedPrecondition,
 				"Docker attempt has pending host input staging and requires explicit resume confirmation")
 		}
 	} else if !request.enabled {
-		return nil
+		return sandbox.DockerHostInputStagingRecord{}, nil, nil
 	}
 	if s.hostInputStager == nil {
-		return apperror.New(apperror.CodeFailedPrecondition,
+		return sandbox.DockerHostInputStagingRecord{}, nil, apperror.New(
+			apperror.CodeFailedPrecondition,
 			"Docker host input stager is required")
 	}
 	if !found {
@@ -510,57 +622,228 @@ func (s *SandboxManifestService) ensureDockerHostInputStaging(ctx context.Contex
 			idgen.New("sandbox-docker-host-input-intent"), request.operationKeyDigest,
 			attempt, plan, request.manifest, attempt.Intent.RequestedBy, time.Now().UTC())
 		if intentErr != nil {
-			return apperror.Wrap(apperror.CodeInternal,
+			return sandbox.DockerHostInputStagingRecord{}, nil, apperror.Wrap(
+				apperror.CodeInternal,
 				"Docker host input staging intent assembly failed", intentErr)
 		}
 		record, _, err = s.store.PrepareDockerHostInputStagingIntent(ctx, intent,
 			attempt.Lease)
 		if err != nil {
-			return err
+			return sandbox.DockerHostInputStagingRecord{}, nil, err
 		}
 		if !dockerHostInputStagingMatchesAttempt(record, attempt, plan,
 			request.operationKeyDigest) {
-			return apperror.New(apperror.CodeConflict,
+			return sandbox.DockerHostInputStagingRecord{}, nil, apperror.New(
+				apperror.CodeConflict,
 				"Docker host input staging intent replay changed")
 		}
 	}
-	if record.Staging != nil {
-		return nil
+	if request.handoffEnabled && record.Staging != nil {
+		handoff, handoffFound, handoffErr := s.store.GetDockerHostInputHandoffByAttempt(ctx,
+			attempt.Intent.ID)
+		if handoffErr != nil {
+			return sandbox.DockerHostInputStagingRecord{}, nil, handoffErr
+		}
+		if handoffFound && handoff.Handoff != nil {
+			return record, nil, nil
+		}
 	}
 	bundleRequest, err := s.dockerHostInputBundleRequest(ctx, request.authority,
 		request.manifest)
 	if err != nil {
-		return err
+		return sandbox.DockerHostInputStagingRecord{}, nil, err
 	}
-	report, err := s.hostInputStager.Stage(ctx, bundleRequest)
+	var bundle sandbox.HostInputBundle
+	var report sandbox.HostInputBundleReport
+	if request.handoffEnabled {
+		provider, ok := s.hostInputStager.(sandbox.DockerHostInputBundleProvider)
+		if !ok {
+			return sandbox.DockerHostInputStagingRecord{}, nil, apperror.New(
+				apperror.CodeFailedPrecondition,
+				"Docker host input handoff requires a sealed bundle provider")
+		}
+		bundle, err = provider.Capture(ctx, bundleRequest)
+		if err == nil && bundle != nil {
+			report = bundle.Report()
+		} else if err == nil {
+			err = errors.New("sealed bundle provider returned a nil bundle")
+		}
+	} else if record.Staging == nil {
+		report, err = s.hostInputStager.Stage(ctx, bundleRequest)
+	} else {
+		return record, nil, nil
+	}
 	if err != nil {
-		return err
+		return sandbox.DockerHostInputStagingRecord{}, bundle, err
 	}
 	if report.Validate() != nil ||
 		report.ReadOnlyMountCount != bundleRequest.ReadOnlyMountCount() ||
 		report.ArtifactCount != len(bundleRequest.Artifacts) ||
 		report.ArtifactBytes != bundleRequest.ArtifactBytes() ||
 		report.ArtifactPayloadDigest != bundleRequest.ArtifactPayloadDigest() {
-		return apperror.New(apperror.CodeFailedPrecondition,
+		return sandbox.DockerHostInputStagingRecord{}, bundle, apperror.New(
+			apperror.CodeFailedPrecondition,
 			"Docker host input stager returned mismatched input evidence")
+	}
+	if record.Staging != nil {
+		if record.Staging.Report.ReportFingerprint != report.ReportFingerprint ||
+			record.Staging.Report.BundleDigest != report.BundleDigest ||
+			record.Staging.Report.BundleBytes != report.BundleBytes {
+			return sandbox.DockerHostInputStagingRecord{}, bundle, apperror.New(
+				apperror.CodeConflict,
+				"recaptured Docker host input bundle changed after restart")
+		}
+		return record, bundle, nil
 	}
 	value, err := sandbox.NewDockerHostInputStaging(
 		idgen.New("sandbox-docker-host-input-staging"), record.Intent,
 		attempt.Lease.Generation, report, time.Now().UTC())
 	if err != nil {
-		return apperror.Wrap(apperror.CodeFailedPrecondition,
+		return sandbox.DockerHostInputStagingRecord{}, bundle, apperror.Wrap(
+			apperror.CodeFailedPrecondition,
 			"Docker host input staging report is invalid", err)
 	}
 	record, _, err = s.store.RecordDockerHostInputStaging(ctx, value, attempt.Lease)
 	if err != nil {
-		return err
+		return sandbox.DockerHostInputStagingRecord{}, bundle, err
 	}
 	if record.Staging == nil || !dockerHostInputStagingMatchesAttempt(record, attempt,
 		plan, request.operationKeyDigest) {
-		return apperror.New(apperror.CodeConflict,
+		return sandbox.DockerHostInputStagingRecord{}, bundle, apperror.New(
+			apperror.CodeConflict,
 			"Docker host input staging commit changed")
 	}
+	return record, bundle, nil
+}
+
+func (s *SandboxManifestService) ensureDockerHostInputHandoff(ctx context.Context,
+	attempt sandbox.DockerContainerRehearsalAttempt, plan sandbox.DockerContainerPlan,
+	writeRequest sandbox.DockerContainerWriteRequest, request dockerHostInputStagingExecution,
+	staging sandbox.DockerHostInputStagingRecord, bundle sandbox.HostInputBundle,
+) error {
+	if attempt.HostInputHandoffRequirement != nil &&
+		attempt.HostInputHandoffRequirement.Required != request.handoffEnabled {
+		return apperror.New(apperror.CodeConflict,
+			"Docker host input handoff changed the durable requirement")
+	}
+	record, found, err := s.store.GetDockerHostInputHandoffByAttempt(ctx, attempt.Intent.ID)
+	if err != nil {
+		return err
+	}
+	if found {
+		if !dockerHostInputHandoffMatchesAttempt(record, attempt, plan, staging,
+			request.handoffOperationKeyDigest) {
+			return apperror.New(apperror.CodeConflict,
+				"Docker host input handoff record no longer matches the attempt")
+		}
+		if record.Handoff != nil {
+			return nil
+		}
+		if !request.handoffEnabled {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker attempt has pending host input handoff and requires explicit resume confirmation")
+		}
+	} else if !request.handoffEnabled {
+		return nil
+	}
+	if s.hostInputHandoff == nil || bundle == nil || staging.Staging == nil {
+		return apperror.New(apperror.CodeFailedPrecondition,
+			"Docker host input handoff requires transport, staging evidence, and a sealed bundle")
+	}
+	if !found {
+		intent, intentErr := sandbox.NewDockerHostInputHandoffIntent(
+			idgen.New("sandbox-docker-host-input-handoff-intent"),
+			request.handoffOperationKeyDigest, attempt, plan, staging, time.Now().UTC())
+		if intentErr != nil {
+			return apperror.Wrap(apperror.CodeInternal,
+				"Docker host input handoff intent assembly failed", intentErr)
+		}
+		record, _, err = s.store.PrepareDockerHostInputHandoffIntent(ctx, intent,
+			attempt.Lease)
+		if err != nil {
+			return err
+		}
+		if !dockerHostInputHandoffMatchesAttempt(record, attempt, plan, staging,
+			request.handoffOperationKeyDigest) {
+			return apperror.New(apperror.CodeConflict,
+				"Docker host input handoff intent replay changed")
+		}
+	}
+	if record.Handoff != nil {
+		return nil
+	}
+	handoffRequest, err := sandbox.NewDockerHostInputHandoffRequest(record.Intent,
+		writeRequest, attempt.Stage.Result, staging.Staging.Report)
+	if err != nil {
+		return apperror.Wrap(apperror.CodeInternal,
+			"Docker host input handoff request assembly failed", err)
+	}
+	result, err := s.hostInputHandoff.Handoff(ctx, handoffRequest, bundle)
+	if err != nil {
+		return err
+	}
+	endpoint := s.hostInputHandoff.Endpoint()
+	if result.Validate() != nil || result.EndpointClass != endpoint.Class ||
+		result.EndpointFingerprint != endpoint.Fingerprint ||
+		result.RequestFingerprint != handoffRequest.RequestFingerprint ||
+		result.IntentFingerprint != record.Intent.IntentFingerprint ||
+		result.BundleReportFingerprint != staging.Staging.Report.ReportFingerprint ||
+		result.BundleDigest != staging.Staging.Report.BundleDigest ||
+		!result.DaemonConsumed || !result.ReadbackVerified || !result.FinalMountReadOnly ||
+		result.ContainerStarted || result.ProcessExecuted || result.OutputExported ||
+		result.ProductionExecutionSubmitted || result.ProductionVerified ||
+		result.BackendEnabled || result.ExecutionAuthorized ||
+		result.ArtifactCommitAuthorized {
+		return apperror.New(apperror.CodeFailedPrecondition,
+			"Docker host input handoff transport returned an unsupported authority claim")
+	}
+	value, err := sandbox.NewDockerHostInputHandoff(
+		idgen.New("sandbox-docker-host-input-handoff"), record.Intent,
+		attempt.Lease.Generation, result, time.Now().UTC())
+	if err != nil {
+		return apperror.Wrap(apperror.CodeFailedPrecondition,
+			"Docker host input handoff result is invalid", err)
+	}
+	record, _, err = s.store.RecordDockerHostInputHandoff(ctx, value, attempt.Lease)
+	if err != nil {
+		return err
+	}
+	if record.Handoff == nil || !dockerHostInputHandoffMatchesAttempt(record, attempt,
+		plan, staging, request.handoffOperationKeyDigest) {
+		return apperror.New(apperror.CodeConflict,
+			"Docker host input handoff commit changed")
+	}
 	return nil
+}
+
+func dockerHostInputHandoffMatchesAttempt(record sandbox.DockerHostInputHandoffRecord,
+	attempt sandbox.DockerContainerRehearsalAttempt, plan sandbox.DockerContainerPlan,
+	staging sandbox.DockerHostInputStagingRecord, operationKeyDigest string,
+) bool {
+	intent := record.Intent
+	if record.Validate() != nil || attempt.Stage == nil || staging.Staging == nil ||
+		intent.AttemptID != attempt.Intent.ID || intent.PlanID != plan.ID ||
+		intent.RunID != plan.RunID || intent.MissionID != plan.MissionID ||
+		intent.WorkspaceID != plan.WorkspaceID || intent.OperationKeyDigest != operationKeyDigest ||
+		intent.AttemptIntentFingerprint != attempt.Intent.IntentFingerprint ||
+		intent.ContainerIDFingerprint != attempt.Stage.Result.ContainerIDFingerprint ||
+		attempt.HostInputRequirement == nil || attempt.HostInputHandoffRequirement == nil ||
+		intent.CaptureRequirementFingerprint !=
+			attempt.HostInputRequirement.RequirementFingerprint ||
+		intent.HandoffRequirementFingerprint !=
+			attempt.HostInputHandoffRequirement.RequirementFingerprint ||
+		intent.StagingIntentID != staging.Intent.ID || intent.StagingID != staging.Staging.ID ||
+		intent.StagingFingerprint != staging.Staging.StagingFingerprint ||
+		intent.BundleReportFingerprint != staging.Staging.Report.ReportFingerprint ||
+		intent.BundleDigest != staging.Staging.Report.BundleDigest ||
+		intent.BundleBytes != staging.Staging.Report.BundleBytes ||
+		intent.AuthorityFingerprint != plan.AuthorityFingerprint ||
+		intent.SpecFingerprint != plan.SpecFingerprint ||
+		intent.PlanFingerprint != plan.PlanFingerprint || intent.RequestedBy != plan.RequestedBy ||
+		intent.PreparedGeneration > attempt.Lease.Generation {
+		return false
+	}
+	return record.Handoff == nil || record.Handoff.LeaseGeneration <= attempt.Lease.Generation
 }
 
 func (s *SandboxManifestService) dockerHostInputBundleRequest(ctx context.Context,
@@ -695,6 +978,16 @@ func (s *SandboxManifestService) recordDockerContainerAttemptFailure(
 }
 
 func dockerContainerAttemptFailureMetadata(err error) (string, bool) {
+	if code := sandbox.DockerHostInputHandoffErrorCode(err); code != "" {
+		switch code {
+		case sandbox.DockerHostInputHandoffErrorUnsafeCollision,
+			sandbox.DockerHostInputHandoffErrorReadbackMismatch,
+			sandbox.DockerHostInputHandoffErrorInvalidBundle:
+			return sandbox.DockerContainerAttemptFailureCheckpoint, false
+		default:
+			return sandbox.DockerContainerAttemptFailureCheckpoint, true
+		}
+	}
 	if code := sandbox.DockerHostInputStagingErrorCode(err); code != "" {
 		switch code {
 		case sandbox.DockerHostInputStagingErrorUnsafeSource,
@@ -787,6 +1080,28 @@ func (s *SandboxManifestService) ListDockerHostInputStagings(ctx context.Context
 			"Docker host input staging store is required")
 	}
 	values, err := s.store.ListDockerHostInputStagings(ctx, strings.TrimSpace(runID), limit)
+	return values, apperror.Normalize(err)
+}
+
+func (s *SandboxManifestService) GetDockerHostInputHandoff(ctx context.Context,
+	id string,
+) (sandbox.DockerHostInputHandoffRecord, error) {
+	if s == nil || s.store == nil {
+		return sandbox.DockerHostInputHandoffRecord{}, apperror.New(
+			apperror.CodeFailedPrecondition, "Docker host input handoff store is required")
+	}
+	value, err := s.store.GetDockerHostInputHandoff(ctx, strings.TrimSpace(id))
+	return value, apperror.Normalize(err)
+}
+
+func (s *SandboxManifestService) ListDockerHostInputHandoffs(ctx context.Context,
+	runID string, limit int,
+) ([]sandbox.DockerHostInputHandoffRecord, error) {
+	if s == nil || s.store == nil {
+		return nil, apperror.New(apperror.CodeFailedPrecondition,
+			"Docker host input handoff store is required")
+	}
+	values, err := s.store.ListDockerHostInputHandoffs(ctx, strings.TrimSpace(runID), limit)
 	return values, apperror.Normalize(err)
 }
 

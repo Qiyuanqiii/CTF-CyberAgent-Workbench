@@ -47,6 +47,41 @@ type pinnedHostInputEntry struct {
 	digest      string
 }
 
+type sealedHostInputBundle struct {
+	file   *os.File
+	report HostInputBundleReport
+}
+
+func (bundle *sealedHostInputBundle) Read(data []byte) (int, error) {
+	if bundle == nil || bundle.file == nil {
+		return 0, os.ErrClosed
+	}
+	return bundle.file.Read(data)
+}
+
+func (bundle *sealedHostInputBundle) Seek(offset int64, whence int) (int64, error) {
+	if bundle == nil || bundle.file == nil {
+		return 0, os.ErrClosed
+	}
+	return bundle.file.Seek(offset, whence)
+}
+
+func (bundle *sealedHostInputBundle) Report() HostInputBundleReport {
+	if bundle == nil {
+		return HostInputBundleReport{}
+	}
+	return bundle.report
+}
+
+func (bundle *sealedHostInputBundle) Close() error {
+	if bundle == nil || bundle.file == nil {
+		return nil
+	}
+	err := bundle.file.Close()
+	bundle.file = nil
+	return err
+}
+
 func NewLocalDockerHostInputStager() DockerHostInputStager {
 	return &linuxDockerHostInputStager{}
 }
@@ -78,16 +113,31 @@ func (stager *linuxDockerHostInputStager) Probe(ctx context.Context,
 func (stager *linuxDockerHostInputStager) Stage(ctx context.Context,
 	request HostInputBundleRequest,
 ) (HostInputBundleReport, error) {
-	if err := ctx.Err(); err != nil {
+	bundle, err := stager.Capture(ctx, request)
+	if err != nil {
 		return HostInputBundleReport{}, err
 	}
+	report := bundle.Report()
+	if closeErr := bundle.Close(); closeErr != nil {
+		return HostInputBundleReport{}, newDockerHostInputStagingError(
+			DockerHostInputStagingErrorSealFailed)
+	}
+	return report, report.Validate()
+}
+
+func (stager *linuxDockerHostInputStager) Capture(ctx context.Context,
+	request HostInputBundleRequest,
+) (HostInputBundle, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if err := request.Validate(); err != nil {
-		return HostInputBundleReport{}, err
+		return nil, err
 	}
 	normalized, _ := NormalizeManifest(request.Manifest)
 	rootFD, err := openHostInputRoot(request.WorkspaceRoot)
 	if err != nil {
-		return HostInputBundleReport{}, err
+		return nil, err
 	}
 	defer unix.Close(rootFD)
 
@@ -107,33 +157,33 @@ func (stager *linuxDockerHostInputStager) Stage(ctx context.Context,
 			continue
 		}
 		if err := ctx.Err(); err != nil {
-			return HostInputBundleReport{}, err
+			return nil, err
 		}
 		readOnlyOrdinal++
 		archiveRoot := fmt.Sprintf("mounts/%03d", readOnlyOrdinal)
 		fd, openErr := openHostInputAt(rootFD, mount.Source)
 		if openErr != nil {
-			return HostInputBundleReport{}, fmt.Errorf("pin read-only mount %d: %w",
+			return nil, fmt.Errorf("pin read-only mount %d: %w",
 				readOnlyOrdinal, openErr)
 		}
 		if walkErr := pinHostInputTree(ctx, fd, archiveRoot, 0, &entries); walkErr != nil {
-			return HostInputBundleReport{}, fmt.Errorf("pin read-only mount %d: %w",
+			return nil, fmt.Errorf("pin read-only mount %d: %w",
 				readOnlyOrdinal, walkErr)
 		}
 	}
 	if len(entries)+len(request.Artifacts) > MaxHostInputBundleEntries {
-		return HostInputBundleReport{}, newDockerHostInputStagingError(
+		return nil, newDockerHostInputStagingError(
 			DockerHostInputStagingErrorResourceLimit)
 	}
 	if stager != nil && stager.afterPin != nil {
 		stager.afterPin()
 	}
 
-	report, err := bundlePinnedHostInputs(ctx, entries, request.Artifacts, readOnlyOrdinal)
+	bundle, err := bundlePinnedHostInputs(ctx, entries, request.Artifacts, readOnlyOrdinal)
 	if err != nil {
-		return HostInputBundleReport{}, err
+		return nil, err
 	}
-	return report, report.Validate()
+	return bundle, nil
 }
 
 func openHostInputRoot(workspaceRoot string) (int, error) {
@@ -311,12 +361,17 @@ func readBoundedHostInputDirectory(ctx context.Context, file *os.File,
 
 func bundlePinnedHostInputs(ctx context.Context, entries []pinnedHostInputEntry,
 	artifacts []HostInputArtifact, readOnlyMountCount int,
-) (HostInputBundleReport, error) {
+) (HostInputBundle, error) {
 	file, err := createSealableHostInputMemfd()
 	if err != nil {
-		return HostInputBundleReport{}, err
+		return nil, err
 	}
-	defer file.Close()
+	keepOpen := false
+	defer func() {
+		if !keepOpen {
+			_ = file.Close()
+		}
+	}()
 	bundleHash := sha256.New()
 	written := &countingWriter{writer: io.MultiWriter(file, bundleHash)}
 	tarWriter := tar.NewWriter(written)
@@ -326,12 +381,12 @@ func bundlePinnedHostInputs(ctx context.Context, entries []pinnedHostInputEntry,
 	for index := range entries {
 		if err := ctx.Err(); err != nil {
 			_ = tarWriter.Close()
-			return HostInputBundleReport{}, err
+			return nil, err
 		}
 		entry := &entries[index]
 		if err := verifyPinnedHostInputStat(entry); err != nil {
 			_ = tarWriter.Close()
-			return HostInputBundleReport{}, err
+			return nil, err
 		}
 		header := &tar.Header{
 			Name: entry.archiveName, Mode: 0o555, ModTime: time.Unix(0, 0).UTC(),
@@ -349,14 +404,14 @@ func bundlePinnedHostInputs(ctx context.Context, entries []pinnedHostInputEntry,
 			content, readErr := readPinnedHostInputFile(ctx, entry)
 			if readErr != nil {
 				_ = tarWriter.Close()
-				return HostInputBundleReport{}, readErr
+				return nil, readErr
 			}
 			entry.content = content
 			entry.digest = hashHostInputBytes(content)
 			sourceBytes += int64(len(content))
 			if sourceBytes > MaxHostInputSourceBytes {
 				_ = tarWriter.Close()
-				return HostInputBundleReport{}, newDockerHostInputStagingError(
+				return nil, newDockerHostInputStagingError(
 					DockerHostInputStagingErrorResourceLimit)
 			}
 			header.Typeflag = tar.TypeReg
@@ -365,12 +420,12 @@ func bundlePinnedHostInputs(ctx context.Context, entries []pinnedHostInputEntry,
 		}
 		if err := tarWriter.WriteHeader(header); err != nil {
 			_ = tarWriter.Close()
-			return HostInputBundleReport{}, hostInputBundleWriteError(err)
+			return nil, hostInputBundleWriteError(err)
 		}
 		if len(entry.content) > 0 {
 			if _, err := tarWriter.Write(entry.content); err != nil {
 				_ = tarWriter.Close()
-				return HostInputBundleReport{}, hostInputBundleWriteError(err)
+				return nil, hostInputBundleWriteError(err)
 			}
 		}
 		sourceParts = append(sourceParts, fingerprint("sandbox_host_input_archive_path.v1",
@@ -382,7 +437,7 @@ func bundlePinnedHostInputs(ctx context.Context, entries []pinnedHostInputEntry,
 	for _, artifact := range artifacts {
 		if err := ctx.Err(); err != nil {
 			_ = tarWriter.Close()
-			return HostInputBundleReport{}, err
+			return nil, err
 		}
 		name := fmt.Sprintf("artifacts/%03d", artifact.Ordinal)
 		header := &tar.Header{
@@ -392,29 +447,29 @@ func bundlePinnedHostInputs(ctx context.Context, entries []pinnedHostInputEntry,
 		}
 		if err := tarWriter.WriteHeader(header); err != nil {
 			_ = tarWriter.Close()
-			return HostInputBundleReport{}, hostInputBundleWriteError(err)
+			return nil, hostInputBundleWriteError(err)
 		}
 		if _, err := io.WriteString(tarWriter, artifact.Content); err != nil {
 			_ = tarWriter.Close()
-			return HostInputBundleReport{}, hostInputBundleWriteError(err)
+			return nil, hostInputBundleWriteError(err)
 		}
 		artifactBytes += artifact.SizeBytes
 	}
 	if err := tarWriter.Close(); err != nil {
-		return HostInputBundleReport{}, hostInputBundleWriteError(err)
+		return nil, hostInputBundleWriteError(err)
 	}
 	if written.count < 1 || written.count > MaxHostInputBundleBytes {
-		return HostInputBundleReport{}, newDockerHostInputStagingError(
+		return nil, newDockerHostInputStagingError(
 			DockerHostInputStagingErrorResourceLimit)
 	}
 	if err := sealHostInputMemfd(file); err != nil {
-		return HostInputBundleReport{}, err
+		return nil, err
 	}
 	bundleDigest := hex.EncodeToString(bundleHash.Sum(nil))
 	if err := verifySealedHostInputMemfd(file, written.count, bundleDigest); err != nil {
-		return HostInputBundleReport{}, err
+		return nil, err
 	}
-	return NewHostInputBundleReport(HostInputBundleMeasurements{
+	report, err := NewHostInputBundleReport(HostInputBundleMeasurements{
 		ReadOnlyMountCount: readOnlyMountCount, ArtifactCount: len(artifacts),
 		RegularFileCount: regularFiles, DirectoryCount: directories,
 		SourceBytes: sourceBytes, ArtifactBytes: artifactBytes, BundleBytes: written.count,
@@ -422,6 +477,14 @@ func bundlePinnedHostInputs(ctx context.Context, entries []pinnedHostInputEntry,
 		ArtifactPayloadDigest: hostInputArtifactPayloadDigest(artifacts),
 		BundleDigest:          bundleDigest,
 	}, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return nil, newDockerHostInputStagingError(DockerHostInputStagingErrorSealFailed)
+	}
+	keepOpen = true
+	return &sealedHostInputBundle{file: file, report: report}, nil
 }
 
 func hostInputBundleWriteError(err error) error {

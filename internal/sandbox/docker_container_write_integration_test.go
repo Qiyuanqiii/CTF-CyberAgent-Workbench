@@ -78,9 +78,130 @@ func TestDockerContainerWriteRealDaemonOptIn(t *testing.T) {
 	}
 }
 
+func TestDockerHostInputHandoffRealDaemonOptIn(t *testing.T) {
+	imageDigest := strings.TrimSpace(os.Getenv(dockerWriteIntegrationImageEnv))
+	if imageDigest == "" {
+		t.Skip("set " + dockerWriteIntegrationImageEnv + " to a pre-existing Linux image digest")
+	}
+	if !ValidOCIImageDigest(imageDigest) {
+		t.Fatalf("%s must be an exact sha256 image digest", dockerWriteIntegrationImageEnv)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
+	writeRequest, plan, manifest, workspaceRoot := newDockerWriteIntegrationFixture(
+		t, ctx, imageDigest)
+	writeTransport, ok := NewLocalDockerContainerWriteTransport().(dockerEngineContainerWriteTransport)
+	if !ok {
+		t.Fatal("fixed local Docker write transport is unavailable")
+	}
+	stageResult, err := writeTransport.Stage(ctx, writeRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := writeTransport.Endpoint()
+	attemptIntent, err := NewDockerContainerAttemptIntent("docker-handoff-integration-attempt",
+		strings.Repeat("a", 64), plan, writeRequest, endpoint, plan.RequestedBy,
+		time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	captureRequirement, err := NewDockerHostInputRequirement(attemptIntent, plan, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoffRequirement, err := NewDockerHostInputHandoffRequirement(attemptIntent, plan,
+		captureRequirement, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease := DockerContainerAttemptLease{AttemptID: attemptIntent.ID,
+		LeaseID: "docker-handoff-integration-lease", OwnerID: "integration_operator",
+		Generation: 1, Status: DockerContainerAttemptLeaseActive,
+		AcquiredAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute)}
+	stage, err := NewDockerContainerAttemptStage(attemptIntent.ID, 1, stageResult,
+		time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt := DockerContainerRehearsalAttempt{Intent: attemptIntent,
+		HostInputRequirement:        &captureRequirement,
+		HostInputHandoffRequirement: &handoffRequirement,
+		Status:                      DockerContainerAttemptStatusStaged, Lease: lease, Stage: &stage}
+	stagingIntent, err := NewDockerHostInputStagingIntent(
+		"docker-handoff-integration-staging-intent", strings.Repeat("b", 64),
+		attempt, plan, manifest, plan.RequestedBy, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, ok := NewLocalDockerHostInputStager().(DockerHostInputBundleProvider)
+	if !ok {
+		t.Fatal("local Docker host input stager cannot retain a sealed bundle")
+	}
+	bundle, err := provider.Capture(ctx, HostInputBundleRequest{
+		WorkspaceRoot: workspaceRoot, Manifest: manifest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bundle.Close()
+	report := bundle.Report()
+	stagingValue, err := NewDockerHostInputStaging("docker-handoff-integration-staging",
+		stagingIntent, 1, report, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging := DockerHostInputStagingRecord{Intent: stagingIntent, Staging: &stagingValue}
+	handoffIntent, err := NewDockerHostInputHandoffIntent(
+		"docker-handoff-integration-intent", strings.Repeat("f", 64),
+		attempt, plan, staging, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoffRequest, err := NewDockerHostInputHandoffRequest(handoffIntent, writeRequest,
+		stageResult, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoffTransport, ok := NewLocalDockerHostInputHandoffTransport().(dockerEngineContainerWriteTransport)
+	if !ok {
+		t.Fatal("fixed local Docker handoff transport is unavailable")
+	}
+	t.Cleanup(func() {
+		_ = handoffTransport.cleanupDockerHostInputHandoff(handoffRequest)
+	})
+	result, err := handoffTransport.Handoff(ctx, handoffRequest, bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Validate() != nil || !result.DaemonConsumed || !result.ReadbackVerified ||
+		!result.FinalMountReadOnly || !result.CleanupConfirmed || result.ContainerStarted ||
+		result.ProcessExecuted || result.OutputExported {
+		t.Fatalf("real daemon handoff escaped its boundary: %#v", result)
+	}
+	if _, found, err := writeTransport.inspect(ctx,
+		writeRequest.Spec.ContainerName); err != nil || found {
+		t.Fatalf("real daemon handoff left a target: found=%t err=%v", found, err)
+	}
+	if _, found, err := handoffTransport.inspectDockerHostInputContainer(ctx,
+		handoffRequest.CarrierName); err != nil || found {
+		t.Fatalf("real daemon handoff left a carrier: found=%t err=%v", found, err)
+	}
+	if _, found, err := handoffTransport.inspectDockerHostInputVolume(ctx,
+		handoffRequest); err != nil || found {
+		t.Fatalf("real daemon handoff left a volume: found=%t err=%v", found, err)
+	}
+}
+
 func newDockerWriteIntegrationRequest(t *testing.T, ctx context.Context,
 	imageDigest string,
 ) DockerContainerWriteRequest {
+	request, _, _, _ := newDockerWriteIntegrationFixture(t, ctx, imageDigest)
+	return request
+}
+
+func newDockerWriteIntegrationFixture(t *testing.T, ctx context.Context,
+	imageDigest string,
+) (DockerContainerWriteRequest, DockerContainerPlan, Manifest, string) {
 	t.Helper()
 	manifest := dockerContainerCompilerManifest()
 	manifest.Network = NetworkScope{Mode: "disabled"}
@@ -127,6 +248,15 @@ func newDockerWriteIntegrationRequest(t *testing.T, ctx context.Context,
 	if err != nil {
 		t.Fatal(err)
 	}
+	transaction, err := NewInMemoryDockerWriteTransaction().Simulate(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := NewDockerContainerPlan("docker-plan-integration", observation, spec,
+		transaction, observation.RequestedBy, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
 	root := t.TempDir()
 	for _, name := range []string{"output", "src"} {
 		if err := os.MkdirAll(filepath.Join(root, name), 0o755); err != nil {
@@ -137,5 +267,5 @@ func newDockerWriteIntegrationRequest(t *testing.T, ctx context.Context,
 	if err != nil {
 		t.Fatal(err)
 	}
-	return request
+	return request, plan, normalized, root
 }
