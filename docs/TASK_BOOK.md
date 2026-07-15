@@ -20,7 +20,7 @@ V2 的 99% 在 P0/P1 基础上完成了可恢复 Supervisor、预算、严格生
 
 P8 已推进到 schema v37：v35 将完成的 Fan-out execution 确定性投影为通用 `draft` Finding、不可变 `model_assertion` Evidence 和 `finding_report.v1` Report；v36 增加同 Run 冻结 Artifact Evidence、一次性 operator `validated/rejected` 决定和复核命令；v37 再以独立事实完成 `validated -> accepted -> fixed`，要求接受后新建且不可复用的 remediation Artifact Evidence。SARIF 只输出 `validated/accepted` 未解决项，默认 validated/high CI 门禁同样阻断二者，fixed/rejected 不再阻断。验证、接受和修复始终是三个不同阶段。
 
-金额预算、HTTP 或模型自主 child 调度和真实 Sandbox 执行尚未实现；schema v48 的严格 Sandbox Manifest、schema v49 的精确审批/重新提交/禁用候选、schema v50 的禁用态 Artifact 绑定、独立 fencing、取消与清理恢复、schema v51 的禁用态后端/输出预检、schema v52 的仅模拟后端证据与内存输出事务、schema v53 的固定本机端点只读 Docker 观测，以及 schema v54 的确定性容器计划与假写事务已经落地。operator-only 显式 child schedule/continue、no-tool child turn、最多两个 child 的有界并发、一次 child repair、Coordinator、Run 工具预算、跨进程执行互斥，以及 root/child 精确跨进程主动取消均已落地。
+金额预算、HTTP 或模型自主 child 调度和真实 Sandbox 进程执行尚未实现；schema v48 的严格 Sandbox Manifest、schema v49 的精确审批/重新提交/禁用候选、schema v50 的禁用态 Artifact 绑定、独立 fencing、取消与清理恢复、schema v51 的禁用态后端/输出预检、schema v52 的仅模拟后端证据与内存输出事务、schema v53 的固定本机端点只读 Docker 观测、schema v54 的确定性容器计划与假写事务，以及 schema v55 默认关闭的 Docker 创建/核验/删除演练已经落地。v55 会执行有界 daemon 写入，但容器进程从不启动。operator-only 显式 child schedule/continue、no-tool child turn、最多两个 child 的有界并发、一次 child repair、Coordinator、Run 工具预算、跨进程执行互斥，以及 root/child 精确跨进程主动取消均已落地。
 
 P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作面与 `plan|deliver` 阶段；schema v42 增加严格三方向 `plan_delivery.v1` 提案与操作者幂等选择；schema v43 将操作者指令与非可信证据分离；schema v44 固化逐切片验证、审计和交接门禁；schema v45-v46 提供安全 turn 边界的 exactly-once 操作者队列、pending-only 取消和显式 drain；schema v47 再从父 Run 固定选择中为每个 Specialist Attempt 派生最多一项、Code/Cyber 分离、metadata-only 可恢复的 Skill 指导。模式、提案、选择、文档、审计声明、排队、取消和 Skill 指导本身都不授予工具、网络、Shell、写文件或子 Agent 能力。
 
@@ -178,7 +178,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 
 ## P6：真实 Sandbox
 
-状态：进行中；schema v48 Manifest、v49 审批候选、v50 禁用生命周期、v51 禁用后端/输出预检、v52 仅模拟证据/输出事务、v53 固定端点只读 Docker 观测和 v54 确定性容器计划/假写事务已完成，真实执行未开放
+状态：进行中；schema v48 Manifest、v49 审批候选、v50 禁用生命周期、v51 禁用后端/输出预检、v52 仅模拟证据/输出事务、v53 固定端点只读 Docker 观测、v54 确定性容器计划/假写事务和 v55 未启动容器写演练已完成，真实进程执行未开放
 
 - [x] 定义严格 `sandbox_manifest.v1`、Mount、NetworkScope、ResourceLimit、环境、输入/输出、超时与取消宽限，并提供 Noop 校验和 CLI 检查。
 - [x] schema v48 持久化 metadata-only preparation/validation/operation，精确绑定 Run/Mission/Workspace/Scope/Policy/可选审批；摘要幂等重放与跨 Store 并发收敛。
@@ -202,11 +202,17 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] schema v54 定义确定性 Docker container-spec 编译器，在任何真实 daemon 写调用前固定 non-root、只读根/输入、唯一可写输出、private mount、network default-deny/精确 allowlist、临时 secret、resource/time/kill、orphan 和停止后导出约束。
 - [x] schema v54 增加纯内存七步 fake write transaction 与失败/崩溃/取消零提交证明；Application/SQLite 重验 v48-v53，计划、事件和 CLI 不保留命令、路径、目标、环境值、secret 引用或容器身份，所有生产能力固定为 false。
 - [x] `run sandbox docker-plan|docker-plans|docker-plan-show` 要求显式 `--confirm-fake-write`，同意图重放不重复假写，跨 Store 收敛；真实 Docker 写 API、生产 Artifact 和执行授权仍不可达。
-- [ ] 在独立发布门禁后引入最小 Go Docker 执行 transport，实现 per-run 容器生命周期；不得把 v53 只读 transport 扩展成隐式写接口。
+- [x] schema v55 引入与 v53 observer 隔离、默认关闭的最小 Go Docker 写 transport；Linux 固定本机 socket 和 API `1.40`，闭合白名单只有精确 image/container inspect、create 和固定 `v=1` 匿名卷清理的 non-forced delete，不接受环境端点、TCP、任意 socket、代理、重定向、pull、start、exec、attach、日志、导出、卷管理或通用请求。
+- [x] `run sandbox docker-rehearse|docker-rehearsals|docker-rehearsal-show` 要求显式 `--confirm-daemon-write` 和精确当前 v54 计划，只接受无网络/无环境/无密钥 profile；create 前核对本地 RepoDigest 并拒绝镜像声明 `VOLUME`，再创建摘要镜像的未启动容器，精确核验后删除。
+- [x] v55 重新核验 v48-v54 全链，拒绝 symlink/越界/非普通 mount 源和不完全匹配的名称碰撞；仅精确且未启动的旧演练容器可回收，失败、取消或 create 响应不确定时用独立 context 重新 inspect 且绝不盲删，同意图重放不访问 daemon，双 Store 并发收敛，持久化/事件/CLI 不保留原始容器 ID、宿主路径、命令、环境值、密钥、socket 或完整规格。
+- [x] v55 固定 `container_never_started`、`process_never_executed`、`image_never_pulled`、`output_never_exported` 为 true，并固定生产执行、验证、后端启用、执行授权和 Artifact 授权为 false；提供默认跳过、只接受已存在摘要且禁止 pull 的 Linux opt-in 集成测试。
+- [x] v55 最终本地发布门禁通过全仓普通/race、静态分析、模块/漏洞、17 项前端测试、OpenAPI/构建/audit、仓库隐私扫描、diff 和隔离真实二进制 smoke；审计修复未知 create 结果回收、禁止盲删、镜像声明卷副作用及 attachment/device/port/capability 核验，未发现未解决高/中风险。
+- [ ] schema v56 增加首个 daemon 写入前的持久化 attempt/intent 与崩溃恢复账本，以精确 authority label 收敛 create 后、结果提交前的进程崩溃窗口；接管/重放不得重复创建或删除无关容器。
+- [ ] 在任何容器 start 前解决宿主 mount 的 TOCTOU，优先使用 Linux descriptor-pinned 路径或 daemon-side immutable staging；随后单独实现并审计 per-run start/wait/kill/orphan 生命周期。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
 - [ ] 网络默认关闭，后续仅允许显式 allowlist。
-- [ ] 支持真实执行、stdin、超时/kill、日志和原子 Output Artifact 导出；v51 只固定要求，v52 只验证输出假事务，v53 只读取元数据，v54 只编译并假写，均未启用生产能力。
-- [ ] 将 v50 幂等清理扩展为真实容器 orphan 检测/回收，并用独立生产证据逐项验证 v51 检查；v52 的 `simulated_pass`、v53 的 `production_observed` 与 v54 的 `compiled_not_applied` 都不计入生产控制验证。
+- [ ] 支持真实执行、stdin、超时/kill、日志和原子 Output Artifact 导出；v51 只固定要求，v52 只验证输出假事务，v53 只读取元数据，v54 只编译并假写，v55 只操作未启动容器，均未启用进程执行或生产 Artifact。
+- [ ] 将 v50 幂等清理扩展为真实运行中容器 orphan 检测/回收，并用独立生产证据逐项验证 v51 检查；v52 的 `simulated_pass`、v53 的 `production_observed`、v54 的 `compiled_not_applied` 与 v55 的非启动 inspect 都不计入进程隔离验证。
 - [x] 保留 Noop/Local 作为测试与开发接口；Local 当前明确禁用，不能作为旁路执行后端。
 
 验收标准：容器内不能越界读取宿主目录；取消能终止进程；重启后能识别并处理残留 Sandbox。

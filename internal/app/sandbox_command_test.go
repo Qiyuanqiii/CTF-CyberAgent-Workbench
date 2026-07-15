@@ -21,6 +21,7 @@ var sandboxEvidenceIDPattern = regexp.MustCompile(`sandbox-evidence-[0-9]{14}-[a
 var sandboxOutputSimulationIDPattern = regexp.MustCompile(`sandbox-output-sim-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerObservationIDPattern = regexp.MustCompile(`sandbox-docker-observation-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerPlanIDPattern = regexp.MustCompile(`sandbox-docker-plan-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxDockerRehearsalIDPattern = regexp.MustCompile(`sandbox-docker-rehearsal-[0-9]{14}-[a-f0-9]{12}`)
 
 type cliDockerPlanObservationTransport struct {
 	imageDigest string
@@ -65,6 +66,35 @@ func executeTestCommandWithDockerObserver(t *testing.T, observer sandbox.DockerP
 	var errOut bytes.Buffer
 	code := executeContextWithConfig(context.Background(), args, &out, &errOut, func(app *App) {
 		app.dockerObserver = observer
+	})
+	return out.String(), errOut.String(), code
+}
+
+type cliDockerWriteTransport struct {
+	calls int
+}
+
+func (transport *cliDockerWriteTransport) Endpoint() sandbox.DockerObservationEndpoint {
+	endpoint, _ := sandbox.NewDockerObservationEndpoint(sandbox.DockerObservationEndpointLocalUnix)
+	return endpoint
+}
+
+func (transport *cliDockerWriteTransport) Rehearse(_ context.Context,
+	request sandbox.DockerContainerWriteRequest,
+) (sandbox.DockerContainerWriteResult, error) {
+	transport.calls++
+	return sandbox.NewDockerContainerWriteResult(transport.Endpoint(), request,
+		strings.Repeat("c", 64), 0)
+}
+
+func executeTestCommandWithDockerWriteTransport(t *testing.T,
+	transport sandbox.DockerContainerWriteTransport, args ...string,
+) (string, string, int) {
+	t.Helper()
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	code := executeContextWithConfig(context.Background(), args, &out, &errOut, func(app *App) {
+		app.dockerWriteTransport = transport
 	})
 	return out.String(), errOut.String(), code
 }
@@ -567,6 +597,68 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		strings.Contains(shown, "scripts") || strings.Contains(shown, "report.json") ||
 		strings.Contains(shown, "private-host") {
 		t.Fatalf("Docker plan show leaked data: output=%s stderr=%s code=%d", shown, stderr, code)
+	}
+	if _, stderr, code := executeTestCommand(t, "run", "sandbox", "docker-rehearse",
+		planID, "--manifest", manifestPath,
+		"--operation-key", "docker-rehearsal-cli"); code != 4 ||
+		!strings.Contains(stderr, "requires --confirm-daemon-write") {
+		t.Fatalf("Docker rehearsal skipped explicit daemon-write confirmation: stderr=%s code=%d",
+			stderr, code)
+	}
+	emptyRehearsals, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-rehearsals", runID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(emptyRehearsals, "no Docker container rehearsals") {
+		t.Fatalf("unconfirmed daemon write left a rehearsal: output=%s stderr=%s code=%d",
+			emptyRehearsals, stderr, code)
+	}
+	writer := &cliDockerWriteTransport{}
+	rehearsed, stderr, code := executeTestCommandWithDockerWriteTransport(t, writer,
+		"run", "sandbox", "docker-rehearse", planID, "--manifest", manifestPath,
+		"--operation-key", "docker-rehearsal-cli", "--confirm-daemon-write")
+	if code != 0 || stderr != "" || writer.calls != 1 ||
+		!strings.Contains(rehearsed, "status: container_config_rehearsed_removed") ||
+		!strings.Contains(rehearsed, "endpoint_class: local_unix") ||
+		!strings.Contains(rehearsed, "daemon_writes: 2") ||
+		!strings.Contains(rehearsed, "container_started: false") ||
+		!strings.Contains(rehearsed, "process_executed: false") ||
+		!strings.Contains(rehearsed, "production_execution_submitted: false") ||
+		!strings.Contains(rehearsed, "execution_authorized: false") ||
+		strings.Contains(rehearsed, "scripts") || strings.Contains(rehearsed, "/workspace") ||
+		strings.Contains(rehearsed, strings.Repeat("c", 64)) {
+		t.Fatalf("unexpected Docker rehearsal output=%s stderr=%s code=%d calls=%d",
+			rehearsed, stderr, code, writer.calls)
+	}
+	rehearsalID := sandboxDockerRehearsalIDPattern.FindString(rehearsed)
+	if rehearsalID == "" {
+		t.Fatalf("missing Docker rehearsal id: %s", rehearsed)
+	}
+	rehearsalReplay, stderr, code := executeTestCommandWithDockerWriteTransport(t, writer,
+		"run", "sandbox", "docker-rehearse", planID, "--manifest", manifestPath,
+		"--operation-key", "docker-rehearsal-cli", "--confirm-daemon-write")
+	if code != 0 || stderr != "" || writer.calls != 1 ||
+		!strings.Contains(rehearsalReplay, "docker_rehearsal: "+rehearsalID) ||
+		!strings.Contains(rehearsalReplay, "replayed: true") {
+		t.Fatalf("Docker rehearsal replay contacted transport: output=%s stderr=%s code=%d calls=%d",
+			rehearsalReplay, stderr, code, writer.calls)
+	}
+	rehearsalList, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-rehearsals", runID)
+	if code != 0 || stderr != "" || !strings.Contains(rehearsalList, rehearsalID) ||
+		!strings.Contains(rehearsalList, "daemon_writes=2") ||
+		!strings.Contains(rehearsalList, "container_started=false") {
+		t.Fatalf("Docker rehearsal list failed: output=%s stderr=%s code=%d",
+			rehearsalList, stderr, code)
+	}
+	rehearsalShown, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-rehearsal-show", rehearsalID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(rehearsalShown, "write_transport_steps:") ||
+		!strings.Contains(rehearsalShown, "remove_container") ||
+		strings.Contains(rehearsalShown, "report.json") ||
+		strings.Contains(rehearsalShown, strings.Repeat("c", 64)) {
+		t.Fatalf("Docker rehearsal show leaked data: output=%s stderr=%s code=%d",
+			rehearsalShown, stderr, code)
 	}
 }
 

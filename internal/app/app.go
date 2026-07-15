@@ -48,15 +48,16 @@ type envAnthropicProviderConfig struct {
 }
 
 type App struct {
-	home           string
-	out            io.Writer
-	errOut         io.Writer
-	store          *store.SQLiteStore
-	router         *llm.Router
-	checker        policy.Checker
-	kernel         *agent.Kernel
-	calls          *application.ActiveCallRegistry
-	dockerObserver sandbox.DockerProductionObserver
+	home                 string
+	out                  io.Writer
+	errOut               io.Writer
+	store                *store.SQLiteStore
+	router               *llm.Router
+	checker              policy.Checker
+	kernel               *agent.Kernel
+	calls                *application.ActiveCallRegistry
+	dockerObserver       sandbox.DockerProductionObserver
+	dockerWriteTransport sandbox.DockerContainerWriteTransport
 }
 
 func Execute(args []string, out io.Writer, errOut io.Writer) int {

@@ -273,6 +273,7 @@ type sandboxPreflightAuthority struct {
 	lifecycle sandbox.Lifecycle
 	run       domain.Run
 	mission   domain.Mission
+	rootPath  string
 }
 
 func (s *SandboxManifestService) revalidateSandboxPreflightAuthority(ctx context.Context,
@@ -347,7 +348,8 @@ func (s *SandboxManifestService) revalidateSandboxPreflightAuthority(ctx context
 		return sandboxPreflightAuthority{}, apperror.New(apperror.CodeFailedPrecondition,
 			"sandbox disabled backend handshake changed")
 	}
-	return sandboxPreflightAuthority{lifecycle: lifecycle, run: run, mission: mission}, nil
+	return sandboxPreflightAuthority{lifecycle: lifecycle, run: run, mission: mission,
+		rootPath: rootPath}, nil
 }
 
 func (s *SandboxManifestService) replayBackendEvidence(ctx context.Context,

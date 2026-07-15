@@ -111,6 +111,7 @@ const (
 	SandboxOutputSimulationRecordedEvent     = "sandbox.output_simulation_recorded"
 	SandboxDockerObservationRecordedEvent    = "sandbox.docker_observation_recorded"
 	SandboxDockerContainerPlanRecordedEvent  = "sandbox.docker_container_plan_recorded"
+	SandboxDockerRehearsalRecordedEvent      = "sandbox.docker_container_rehearsal_recorded"
 	AgentProtocolRepairRequestedEvent        = "agent.protocol_repair_requested"
 	AgentProtocolRepairStartedEvent          = "agent.protocol_repair_started"
 	AgentProtocolRepairCompletedEvent        = "agent.protocol_repair_completed"

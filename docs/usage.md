@@ -345,6 +345,9 @@ cyberagent run sandbox observation-show <observation-id>
 cyberagent run sandbox docker-plan <observation-id> --manifest configs/sandbox-docker-simulation.example.json --operation-key sandbox-docker-plan-001 --confirm-fake-write
 cyberagent run sandbox docker-plans <run-id>
 cyberagent run sandbox docker-plan-show <plan-id>
+cyberagent run sandbox docker-rehearse <plan-id> --manifest configs/sandbox-docker-simulation.example.json --operation-key sandbox-docker-rehearsal-001 --confirm-daemon-write
+cyberagent run sandbox docker-rehearsals <run-id>
+cyberagent run sandbox docker-rehearsal-show <rehearsal-id>
 ```
 
 `evidence` never contacts a daemon. It binds a canonical OCI image digest and separate simulated daemon/mount/network/secret/container/resource/termination/orphan/output fingerprints to the 16 v51 checks, but reports `trust_class=simulation_only`, `production_verified=0`, and `verified_checks=0`. `output-simulate` strictly validates and redacts fixture content, stages all slots, and commits only to an in-memory fake sink. A failure or cancellation rolls the fake transaction back to zero, and no production Artifact is created. The Store and Application revalidate the complete v48-v51 chain at both boundaries. CLI and events omit fixture bodies, locator fingerprints, raw paths, commands, Manifest content, container IDs, operation digests, and private leases. These commands test protocol behavior only; they cannot create or start a Docker container and cannot authorize real execution.
@@ -355,12 +358,23 @@ An observation records `observation_complete`, `daemon_unavailable`, or `image_u
 
 Schema v54 `docker-plan` requires the exact `--confirm-fake-write` flag and accepts only `observation_complete`. It resupplies the Manifest and revalidates the entire v48-v53 chain before compiling a deterministic in-memory container specification. The compiler fixes non-root execution, read-only root and inputs, one writable output mount, private propagation, network default deny or exact managed allowlisting, ephemeral secrets, resource/time/kill limits, and orphan reconciliation identity. Sixteen plan controls remain `compiled_not_applied`, and the seven reconcile/create/start/wait/stop/export/remove steps run only in an in-memory fake transaction. Failure, simulated crash, or cancellation commits no fake result; success still reports zero daemon writes and no backend contact, execution, export, or production Artifact authority. Durable rows and CLI output omit commands, arguments, paths, network targets, environment values, secret references, labels, and container names. No v54 command mutates Docker.
 
+Schema v55 `docker-rehearse` is the first command that may perform real Docker writes, so it is default-disabled in the Application service and requires exact `--confirm-daemon-write`. It accepts only a current v54 plan whose profile has no network, environment binding, or secret. Linux uses fixed `/var/run/docker.sock` and API `1.40`; Windows returns unsupported. The closed transport permits exact image/container inspection, create, and a non-forced delete with fixed anonymous-volume cleanup. It ignores `DOCKER_HOST` and has no TCP, caller socket, pull, start, exec, attach, logs, export, volume management, image build, or generic request operation.
+
+Before create, the already-present image RepoDigest must match the plan and the image must declare no `VOLUME`. The transport creates one stopped digest-pinned container, verifies attachment/device/port settings plus non-root, read-only root, no-new-privileges, drop-all capabilities, resource limits, network none, and private mounts, then removes it. Cancellation, failure, and uncertain create responses use an independent bounded re-inspection and only delete an exact authority match. Same-key replay returns before transport access. A normal successful fact records three reads and two writes, or three writes after removing one exact stale rehearsal container. It still records process execution, image pull, output export, production verification, backend enablement, execution authority, and Artifact authority as false.
+
 An optional real-daemon test is available only when an exact image is already present; it never pulls or creates anything:
 
 ```powershell
 $env:CYBERAGENT_DOCKER_READONLY_INTEGRATION = "1"
 $env:CYBERAGENT_DOCKER_READONLY_IMAGE_DIGEST = "sha256:<already-present-digest>"
 go test ./internal/sandbox -run TestLocalDockerReadOnlyObservationIntegration -count=1 -v
+```
+
+The v55 write rehearsal has a separate opt-in Linux test. The supplied digest must already be present, match a RepoDigest, and declare no `VOLUME`; the test never pulls or starts it:
+
+```powershell
+$env:CYBERAGENT_DOCKER_WRITE_TEST_IMAGE_DIGEST = "sha256:<already-present-volume-free-digest>"
+go test ./internal/sandbox -run TestDockerContainerWriteRealDaemonOptIn -count=1 -v
 ```
 
 ## Workspaces

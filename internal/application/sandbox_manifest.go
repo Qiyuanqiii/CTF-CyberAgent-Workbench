@@ -93,16 +93,22 @@ type SandboxManifestStore interface {
 		operation sandbox.DockerContainerPlanOperation) (sandbox.DockerContainerPlan, bool, error)
 	GetDockerContainerPlan(ctx context.Context, id string) (sandbox.DockerContainerPlan, error)
 	ListDockerContainerPlans(ctx context.Context, runID string, limit int) ([]sandbox.DockerContainerPlan, error)
+	GetDockerContainerRehearsalOperation(ctx context.Context, keyDigest string) (sandbox.DockerContainerRehearsalOperation, bool, error)
+	CreateDockerContainerRehearsal(ctx context.Context, rehearsal sandbox.DockerContainerRehearsal,
+		operation sandbox.DockerContainerRehearsalOperation) (sandbox.DockerContainerRehearsal, bool, error)
+	GetDockerContainerRehearsal(ctx context.Context, id string) (sandbox.DockerContainerRehearsal, error)
+	ListDockerContainerRehearsals(ctx context.Context, runID string, limit int) ([]sandbox.DockerContainerRehearsal, error)
 }
 
 type SandboxManifestService struct {
-	store          SandboxManifestStore
-	checker        policy.Checker
-	inspector      sandbox.BackendInspector
-	evidenceClient sandbox.BackendEvidenceClient
-	outputHarness  sandbox.OutputSimulationHarness
-	dockerObserver sandbox.DockerProductionObserver
-	dockerWriter   sandbox.DockerContainerTransactionHarness
+	store                SandboxManifestStore
+	checker              policy.Checker
+	inspector            sandbox.BackendInspector
+	evidenceClient       sandbox.BackendEvidenceClient
+	outputHarness        sandbox.OutputSimulationHarness
+	dockerObserver       sandbox.DockerProductionObserver
+	dockerWriter         sandbox.DockerContainerTransactionHarness
+	dockerWriteTransport sandbox.DockerContainerWriteTransport
 }
 
 type PrepareSandboxManifestRequest struct {
@@ -122,8 +128,18 @@ func NewSandboxManifestService(store SandboxManifestStore,
 		outputHarness:  sandbox.NewInMemoryOutputHarness(),
 		dockerObserver: sandbox.NewReadOnlyDockerProductionObserver(
 			sandbox.NewLocalDockerReadOnlyTransport()),
-		dockerWriter: sandbox.NewInMemoryDockerWriteTransaction(),
+		dockerWriter:         sandbox.NewInMemoryDockerWriteTransaction(),
+		dockerWriteTransport: sandbox.NewUnavailableDockerContainerWriteTransport(),
 	}
+}
+
+func (s *SandboxManifestService) WithDockerContainerWriteTransport(
+	transport sandbox.DockerContainerWriteTransport,
+) *SandboxManifestService {
+	if s != nil && transport != nil {
+		s.dockerWriteTransport = transport
+	}
+	return s
 }
 
 func (s *SandboxManifestService) WithDockerContainerTransactionHarness(
