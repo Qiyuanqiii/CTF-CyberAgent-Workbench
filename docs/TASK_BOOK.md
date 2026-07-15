@@ -206,7 +206,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] `run sandbox docker-rehearse|docker-rehearsals|docker-rehearsal-show` 要求显式 `--confirm-daemon-write` 和精确当前 v54 计划，只接受无网络/无环境/无密钥 profile；create 前核对本地 RepoDigest 并拒绝镜像声明 `VOLUME`，再创建摘要镜像的未启动容器，精确核验后删除。
 - [x] v55 重新核验 v48-v54 全链，拒绝 symlink/越界/非普通 mount 源和不完全匹配的名称碰撞；仅精确且未启动的旧演练容器可回收，失败、取消或 create 响应不确定时用独立 context 重新 inspect 且绝不盲删，同意图重放不访问 daemon，双 Store 并发收敛，持久化/事件/CLI 不保留原始容器 ID、宿主路径、命令、环境值、密钥、socket 或完整规格。
 - [x] v55 固定 `container_never_started`、`process_never_executed`、`image_never_pulled`、`output_never_exported` 为 true，并固定生产执行、验证、后端启用、执行授权和 Artifact 授权为 false；提供默认跳过、只接受已存在摘要且禁止 pull 的 Linux opt-in 集成测试。
-- [x] v55 最终本地发布门禁通过全仓普通/race、静态分析、模块/漏洞、17 项前端测试、OpenAPI/构建/audit、仓库隐私扫描、diff 和隔离真实二进制 smoke；审计修复未知 create 结果回收、禁止盲删、镜像声明卷副作用及 attachment/device/port/capability 核验，未发现未解决高/中风险。
+- [x] v55 最终本地发布门禁通过全仓普通/race、静态分析、模块/漏洞、17 项前端测试、OpenAPI/构建/audit、仓库隐私扫描、diff 和隔离真实二进制 smoke；审计修复未知 create 结果回收、禁止盲删、镜像声明卷副作用及 attachment/device/port/capability 核验，未发现未解决高/中风险；GitHub Actions run `29382661971` 通过。
 - [ ] schema v56 增加首个 daemon 写入前的持久化 attempt/intent 与崩溃恢复账本，以精确 authority label 收敛 create 后、结果提交前的进程崩溃窗口；接管/重放不得重复创建或删除无关容器。
 - [ ] 在任何容器 start 前解决宿主 mount 的 TOCTOU，优先使用 Linux descriptor-pinned 路径或 daemon-side immutable staging；随后单独实现并审计 per-run start/wait/kill/orphan 生命周期。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
