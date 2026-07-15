@@ -630,6 +630,8 @@ Application 在 v56 stage 后、cleanup 前持久化 v57 intent，并绑定 oper
 
 定向测试已覆盖独立确认、默认关闭、自定义 stager 报告复核、rename/replace/delete/symlink/hard-link/FIFO/单文件 mount、有界目录枚举、取消、确定性重放、失败清理、重启/第二代 lease 恢复、stale generation fencing、completion SQL 门禁、不可变 SQL、路径/正文隐私和 v56 原地迁移。最终全仓普通/race 分别用时 155.0 秒/168.1 秒；应用 staging 10 轮、双 Store 独立 ID 并发 20 轮及 race 10 轮通过。vet、零告警 staticcheck、module verify、零可达漏洞 govulncheck、17 项前端测试、OpenAPI 无漂移、生产构建、零漏洞 npm audit、凭据/运行产物/进程入口扫描、diff 与隔离真实二进制 schema-v57 smoke 均通过。Linux test binary 交叉编译通过；`openat2`/seal 运行测试由 GitHub Actions 执行。本轮审计补强了公开报告构造器、Artifact payload/字节二次复核、根路径父级 symlink 拒绝、stage→intent 时间顺序、超限错误语义、歧义确认、单文件报告约束、目录摘要稳定性、特殊文件预打开阻塞、有界分批目录读取、分块取消、随机 ID 语义收敛和漏确认不消耗 failure/lease。未发现未解决高/中风险。密封包当前没有交给 Docker daemon，持久事实固定 `daemon_consumed=false`、`execution_evidence=false`，因此 v57 只关闭 descriptor-capture 内的路径偷换，不证明未来容器实际消费了这些字节。架构完成度暂保持约 98%，产品可用度约 45-50%。
 
+首次 GitHub Actions run `29395980413` 仅暴露 Linux 单文件测试夹具与 Manifest 工作目录覆盖规则冲突，生产实现未失败。夹具已改为一个目录 mount 覆盖工作目录并增加独立单文件 mount，真实验证 `directory_count < read_only_mount_count`；run `29396264276` 已通过提交 `8719dff`，Go/Linux 3 分 55 秒，TypeScript 23 秒。
+
 Docker/Local 真实进程执行继续关闭，直到 v51 每项检查都有独立可复核的生产证据，且 Sandbox input handoff、资源、网络、取消与原子 Artifact 导出全部通过单独审计；v52 的模拟通过、v53 的元数据观测、v54 的编译/假写、v55-v56 的未启动容器演练/恢复和 v57 的 daemon-unconsumed sealed bundle 都不能满足该要求。已知低风险恢复缺口是：v57 opt-in 选择尚未在 v56 stage 前持久化，若进程恰好在 stage checkpoint 后、v57 intent 前退出，恢复时遗漏 staging flags 可能完成可选的 v56-only 演练；它不会启动容器或扩权。下一切片 schema v58 必须先关闭该窗口，再完成 daemon-owned immutable input handoff，仍不开放 start。
 
 ## 八、仓库同步与恢复约定

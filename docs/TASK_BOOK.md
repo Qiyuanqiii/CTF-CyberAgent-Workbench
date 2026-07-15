@@ -214,6 +214,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] v56 定向测试覆盖未知 create 后恢复、单次 create、already-absent、无关同名保护、释放/过期接管、旧 generation fencing、双 Store 竞态、原子 v55/v56 completion、隐私、不可变 SQL、v55 升级和 CLI。全仓普通/race、vet/staticcheck、模块/漏洞、17 项前端测试、OpenAPI/构建/audit、仓库隐私/链接/编码扫描、diff 和隔离真实二进制 smoke 均通过；高频 transport/Store/Application 恢复回归通过。GitHub Actions run `29388724727` 已通过功能提交 `e1710bb`，Go 与 TypeScript 作业分别用时 2 分 32 秒和 23 秒。
 - [x] schema v57 增加独立宿主输入捕获门禁：Linux 使用 `openat2` 固定工作区根与只读树，`RESOLVE_NO_XDEV` 禁止跨挂载点，`O_PATH` 在内容打开前拒绝 FIFO/特殊文件；目录和单文件 mount 均支持，symlink/magic-link/hard-link 与资源越界失败关闭。重新核对 descriptor 后生成确定性 tar，在 sealed `memfd` 中复读校验，并把 metadata-only evidence 绑定当前 v56 attempt、计划、container-ID 指纹、输入摘要和 lease generation。
 - [x] v57 的 intent/result、事件与 CLI 保持路径/正文/fd/raw container ID/私有 lease 不落库；SQL 禁止 pending intent 绕过 completion，失败先清理停止容器，接管恢复不重复 create。随机 row ID 不参与语义指纹，跨 Store 独立重试收敛；漏交恢复确认在 acquire 前拒绝且不消耗 failure slot。定向测试覆盖 rename/replace/delete/symlink/hard-link/FIFO/单文件、有界目录枚举、取消、重放、generation fencing、迁移和隐私；全仓普通/race、静态/漏洞、前端与隔离二进制门禁通过。
+- [x] v57 GitHub Actions run `29396264276` 已通过提交 `8719dff`，Go/Linux 3 分 55 秒、TypeScript 23 秒。首次 run `29395980413` 仅暴露单文件测试夹具未覆盖目录工作路径，修复为合法目录+单文件混合 mount 后 Linux 运行测试通过，生产实现未变。
 - [ ] schema v58 先把“必须捕获宿主输入”的选择持久化到 v56 daemon stage 之前，再设计并实现 daemon-owned immutable handoff，让 Docker 实际消费 v57 固定的字节且不放宽只读根/输入、固定端点和闭合 API；在 handoff 证据完成前，v57 必须保持 `daemon_consumed=false`、`execution_evidence=false`。
 - [ ] 完成 v58 后再单独实现并审计 per-run start/wait/kill/orphan 生命周期。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
