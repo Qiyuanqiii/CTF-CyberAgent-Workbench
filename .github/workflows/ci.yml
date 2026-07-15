@@ -48,4 +48,14 @@ jobs:
       - run: npm run check:api
       - run: npm test
       - run: npm run build
-      - run: npm audit --audit-level=high
+      - name: Audit dependencies
+        run: |
+          for attempt in 1 2 3; do
+            if npm audit --audit-level=high; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 5))
+            fi
+          done
+          exit 1

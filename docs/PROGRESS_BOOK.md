@@ -688,6 +688,8 @@ cleanup 需要独立的 `--confirm-resource-cleanup` 与 `--confirm-daemon-write
 
 v62 最终本地门禁通过：全仓普通/race 分别用时 313.6 秒/329.6 秒；vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、严格 TypeScript、8 个文件 17 项前端测试、OpenAPI 无漂移、production build、零漏洞 npm audit、仓库隐私/禁止能力/编码/Markdown 扫描、diff、Linux sandbox test binary 交叉编译和隔离真实二进制 schema-v62 smoke 均为绿色；Sandbox/Store/Application/CLI 高频回归分别通过 20/15/10/10 轮。GitHub Actions run `29444398815` 已通过功能提交 `d250d32`，Go/Linux 与 TypeScript 作业分别用时 2 分 35 秒和 20 秒。本机仍无法执行 Linux real-daemon opt-in 链，因此 start gate 保持关闭。
 
+随后纯文档 run `29444664401` 在 `npm ci` 已报告零漏洞后遇到 npm registry advisory endpoint 临时故障，并被 GitHub runner 错误保留为 in-progress。CI 的高危依赖审计现增加最多三次有界重试；真实高危结果仍会连续失败并阻断，单次 registry 抖动不再制造假红灯。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
