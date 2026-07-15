@@ -693,9 +693,11 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		}
 		for _, value := range values {
 			adopted := value.Stage != nil && value.Stage.Result.ExistingContainerAdopted
-			fmt.Fprintf(a.out, "%s\tplan=%s\tstatus=%s\tgeneration=%d\tfailures=%d\tadopted=%t\tcontainer_started=false\tprocess_executed=false\texecution_authorized=false\tcreated_at=%s\n",
+			hostInputRequired := value.HostInputRequirement != nil &&
+				value.HostInputRequirement.Required
+			fmt.Fprintf(a.out, "%s\tplan=%s\tstatus=%s\tgeneration=%d\tfailures=%d\tadopted=%t\thost_input_required=%t\tcontainer_started=false\tprocess_executed=false\texecution_authorized=false\tcreated_at=%s\n",
 				value.Intent.ID, value.Intent.PlanID, value.Status, value.Lease.Generation,
-				len(value.Failures), adopted,
+				len(value.Failures), adopted, hostInputRequired,
 				value.Intent.CreatedAt.Format(timeFormatRFC3339Nano))
 		}
 		return nil
@@ -748,7 +750,7 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 			service.WithDockerContainerWriteTransport(
 				sandbox.NewLocalDockerContainerWriteTransport())
 		}
-		if *stageHostInputs && a.hostInputStager == nil {
+		if a.hostInputStager == nil {
 			service.WithDockerHostInputStager(sandbox.NewLocalDockerHostInputStager())
 		}
 		value, err := service.ResumeDockerContainerRehearsal(ctx,
@@ -1088,11 +1090,19 @@ func printSandboxDockerContainerAttempt(a *App,
 	if value.Completion != nil {
 		rehearsalID = value.Completion.RehearsalID
 	}
-	fmt.Fprintf(a.out, "docker_attempt: %s\ndocker_plan: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nstatus: %s\nendpoint_class: %s\nintent_fingerprint: %s\nrequest_fingerprint: %s\nauthority_fingerprint: %s\nspec_fingerprint: %s\nplan_fingerprint: %s\nnetwork_mode: %s\nenvironment_bindings: %d\nsecret_references: %d\nlease_generation: %d\nlease_status: %s\nfailures: %d\ncontrol_count: %d\nexisting_container_adopted: %t\ncontainer_removed_now: %t\ncontainer_already_absent: %t\ncontainer_started: false\nprocess_executed: false\nimage_pulled: false\noutput_exported: false\nproduction_verified: false\nbackend_enabled: false\nexecution_authorized: false\nartifact_commit_authorized: false\nrehearsal: %s\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\ntook_over: %t\n",
+	hostInputRequired, hostInputRequirementDurable := false, false
+	hostInputRequirementFingerprint := ""
+	if value.HostInputRequirement != nil {
+		hostInputRequirementDurable = true
+		hostInputRequired = value.HostInputRequirement.Required
+		hostInputRequirementFingerprint = value.HostInputRequirement.RequirementFingerprint
+	}
+	fmt.Fprintf(a.out, "docker_attempt: %s\ndocker_plan: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nstatus: %s\nendpoint_class: %s\nintent_fingerprint: %s\nrequest_fingerprint: %s\nauthority_fingerprint: %s\nspec_fingerprint: %s\nplan_fingerprint: %s\nhost_input_requirement_durable: %t\nhost_input_required: %t\nhost_input_requirement_fingerprint: %s\nnetwork_mode: %s\nenvironment_bindings: %d\nsecret_references: %d\nlease_generation: %d\nlease_status: %s\nfailures: %d\ncontrol_count: %d\nexisting_container_adopted: %t\ncontainer_removed_now: %t\ncontainer_already_absent: %t\ncontainer_started: false\nprocess_executed: false\nimage_pulled: false\noutput_exported: false\nproduction_verified: false\nbackend_enabled: false\nexecution_authorized: false\nartifact_commit_authorized: false\nrehearsal: %s\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\ntook_over: %t\n",
 		intent.ID, intent.PlanID, intent.RunID, intent.MissionID, intent.WorkspaceID,
 		intent.ProtocolVersion, value.Status, intent.EndpointClass, intent.IntentFingerprint,
 		intent.RequestFingerprint, intent.AuthorityFingerprint, intent.SpecFingerprint,
-		intent.PlanFingerprint, intent.NetworkMode, intent.EnvironmentCount,
+		intent.PlanFingerprint, hostInputRequirementDurable, hostInputRequired,
+		hostInputRequirementFingerprint, intent.NetworkMode, intent.EnvironmentCount,
 		intent.SecretReferenceCount, value.Lease.Generation, value.Lease.Status,
 		len(value.Failures), controlCount, adopted, removedNow, alreadyAbsent,
 		rehearsalID, intent.RequestedBy,

@@ -334,9 +334,13 @@ func TestDockerHostInputStagingRequiresSeparateConfirmationAndPersistsMetadataOn
 		loaded.Staging.StagingFingerprint != records[0].Staging.StagingFingerprint {
 		t.Fatalf("load host input staging: %#v err=%v", loaded, err)
 	}
-	replayed, err := service.RehearseDockerContainer(ctx, request)
+	replayRequest := request
+	replayRequest.StageHostInputs = false
+	replayRequest.OperatorConfirmedHostInputStaging = false
+	replayed, err := service.RehearseDockerContainer(ctx, replayRequest)
 	if err != nil || !replayed.Replayed || transport.calls != 1 || stager.stageCalls != 1 {
-		t.Fatalf("host input staging replay repeated side effects: %#v err=%v", replayed, err)
+		t.Fatalf("durable host input requirement replay repeated side effects: %#v err=%v",
+			replayed, err)
 	}
 	events, err := st.ListRunEvents(ctx, run.ID)
 	if err != nil {
@@ -350,7 +354,48 @@ func TestDockerHostInputStagingRequiresSeparateConfirmationAndPersistsMetadataOn
 	}
 }
 
-func TestDockerHostInputStagingMismatchCleansAndResumesWithoutAnotherCreate(t *testing.T) {
+func TestDockerHostInputRequirementCannotWidenCompletedAttempt(t *testing.T) {
+	ctx := context.Background()
+	st, run, root := newSandboxManifestTestRuntime(t, ctx)
+	service := NewSandboxManifestService(st, policy.NewDefaultChecker())
+	manifest, observation := prepareDockerContainerPlanAuthority(t, ctx, service, run.ID,
+		root, "docker-host-input-no-widen", "docker_rehearsal_operator")
+	plan, err := service.CompileDockerContainerPlan(ctx, CompileDockerContainerPlanRequest{
+		ObservationID: observation.ID, Manifest: manifest,
+		OperationKey: "docker-host-input-no-widen-plan",
+		RequestedBy:  "docker_rehearsal_operator",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &countingDockerWriteTransport{}
+	stager := &recordingDockerHostInputStager{}
+	service.WithDockerContainerWriteTransport(transport).WithDockerHostInputStager(stager)
+	request := RehearseDockerContainerRequest{PlanID: plan.ID, Manifest: manifest,
+		OperationKey: "docker-host-input-no-widen-operation",
+		RequestedBy:  "docker_rehearsal_operator", OperatorConfirmed: true}
+	if _, err := service.RehearseDockerContainer(ctx, request); err != nil {
+		t.Fatal(err)
+	}
+	request.StageHostInputs = true
+	request.OperatorConfirmedHostInputStaging = true
+	if _, err := service.RehearseDockerContainer(ctx, request); apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("completed attempt widened a durable false host input requirement: %v", err)
+	}
+	if transport.calls != 1 || transport.cleanupCalls != 1 ||
+		stager.probeCalls != 0 || stager.stageCalls != 0 {
+		t.Fatalf("requirement widening reached a side effect: transport=%#v stager=%#v",
+			transport, stager)
+	}
+	attempts, err := service.ListDockerContainerRehearsalAttempts(ctx, run.ID, 10)
+	if err != nil || len(attempts) != 1 || attempts[0].HostInputRequirement == nil ||
+		attempts[0].HostInputRequirement.Required ||
+		attempts[0].HostInputRequirement.OperatorConfirmed {
+		t.Fatalf("durable false host input requirement changed: %#v err=%v", attempts, err)
+	}
+}
+
+func TestDockerHostInputStagingMismatchCleansAndResumesByOperationWithoutAnotherCreate(t *testing.T) {
 	ctx := context.Background()
 	st, run, root := newSandboxManifestTestRuntime(t, ctx)
 	service := NewSandboxManifestService(st, policy.NewDefaultChecker())
@@ -379,6 +424,9 @@ func TestDockerHostInputStagingMismatchCleansAndResumesWithoutAnotherCreate(t *t
 	attempts, err := service.ListDockerContainerRehearsalAttempts(ctx, run.ID, 10)
 	if err != nil || len(attempts) != 1 || attempts[0].Stage == nil ||
 		attempts[0].Cleanup == nil || len(attempts[0].Failures) != 1 ||
+		attempts[0].HostInputRequirement == nil ||
+		!attempts[0].HostInputRequirement.Required ||
+		!attempts[0].HostInputRequirement.OperatorConfirmed ||
 		attempts[0].Lease.Status != sandbox.DockerContainerAttemptLeaseReleased ||
 		transport.calls != 1 || transport.cleanupCalls != 1 {
 		t.Fatalf("failed host input staging was not safely recoverable: %#v err=%v", attempts, err)
@@ -388,31 +436,35 @@ func TestDockerHostInputStagingMismatchCleansAndResumesWithoutAnotherCreate(t *t
 		t.Fatalf("failed host input staging did not preserve pending intent: %#v err=%v",
 			records, err)
 	}
-	if _, err := service.ResumeDockerContainerRehearsal(ctx,
-		ResumeDockerContainerRequest{AttemptID: attempts[0].Intent.ID, Manifest: manifest,
-			RequestedBy: "docker_rehearsal_operator", OperatorConfirmed: true}); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
-		t.Fatalf("pending host input staging resumed without explicit confirmation: %v", err)
+	stager.mutate = nil
+	ambiguous := request
+	ambiguous.OperatorConfirmedHostInputStaging = false
+	if _, err := service.RehearseDockerContainer(ctx, ambiguous); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("durable requirement accepted an unmatched staging flag pair: %v", err)
 	}
 	unchanged, err := service.ListDockerContainerRehearsalAttempts(ctx, run.ID, 10)
-	if err != nil || len(unchanged) != 1 || len(unchanged[0].Failures) != 1 ||
-		unchanged[0].Lease.Generation != 1 ||
-		unchanged[0].Lease.Status != sandbox.DockerContainerAttemptLeaseReleased ||
-		transport.calls != 1 || transport.cleanupCalls != 1 || stager.stageCalls != 1 {
-		t.Fatalf("omitted host input confirmation consumed recovery state: %#v err=%v",
-			unchanged, err)
+	if err != nil || len(unchanged) != 1 || unchanged[0].Lease.Generation != 1 ||
+		len(unchanged[0].Failures) != 1 || transport.calls != 1 || stager.stageCalls != 1 {
+		t.Fatalf("ambiguous replay consumed durable recovery state: %#v err=%v", unchanged, err)
 	}
-	stager.mutate = nil
-	rehearsal, err := service.ResumeDockerContainerRehearsal(ctx,
-		ResumeDockerContainerRequest{AttemptID: attempts[0].Intent.ID, Manifest: manifest,
-			RequestedBy: "docker_rehearsal_operator", OperatorConfirmed: true,
-			StageHostInputs: true, OperatorConfirmedHostInputStaging: true})
+	recovery := request
+	recovery.StageHostInputs = false
+	recovery.OperatorConfirmedHostInputStaging = false
+	rehearsal, err := service.RehearseDockerContainer(ctx, recovery)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rehearsal.Replayed || transport.calls != 1 || transport.cleanupCalls != 1 ||
 		stager.stageCalls != 2 {
-		t.Fatalf("host input staging recovery repeated Docker mutation: rehearsal=%#v transport=%#v stager=%#v",
+		t.Fatalf("operation-key host input recovery repeated Docker mutation: rehearsal=%#v transport=%#v stager=%#v",
 			rehearsal, transport, stager)
+	}
+	resumedAttempts, err := service.ListDockerContainerRehearsalAttempts(ctx, run.ID, 10)
+	if err != nil || len(resumedAttempts) != 1 || len(resumedAttempts[0].Failures) != 1 ||
+		resumedAttempts[0].Lease.Generation != 2 ||
+		resumedAttempts[0].Status != sandbox.DockerContainerAttemptStatusCompleted {
+		t.Fatalf("durable host input requirement did not drive recovery: %#v err=%v",
+			resumedAttempts, err)
 	}
 	records, err = service.ListDockerHostInputStagings(ctx, run.ID, 10)
 	if err != nil || len(records) != 1 || records[0].Staging == nil ||

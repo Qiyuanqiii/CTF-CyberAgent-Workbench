@@ -36,14 +36,6 @@ func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
 		return sandbox.DockerContainerRehearsal{}, apperror.New(apperror.CodeFailedPrecondition,
 			"Docker container rehearsal requires explicit operator confirmation")
 	}
-	if request.StageHostInputs && !request.OperatorConfirmedHostInputStaging {
-		return sandbox.DockerContainerRehearsal{}, apperror.New(apperror.CodeFailedPrecondition,
-			"Docker host input staging requires separate explicit operator confirmation")
-	}
-	if !request.StageHostInputs && request.OperatorConfirmedHostInputStaging {
-		return sandbox.DockerContainerRehearsal{}, apperror.New(apperror.CodeInvalidArgument,
-			"Docker host input staging confirmation requires staging to be enabled")
-	}
 	var durableAttempt *sandbox.DockerContainerRehearsalAttempt
 	planID, requestedBy := "", strings.TrimSpace(request.RequestedBy)
 	keyDigest := ""
@@ -74,6 +66,62 @@ func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
 		keyDigest = runmutation.Fingerprint(
 			"sandbox_docker_container_rehearsal_operation.v1", planID, operationKey)
 	}
+	effectiveStageHostInputs := request.StageHostInputs
+	var requirement *sandbox.DockerHostInputRequirement
+	if durableAttempt != nil && durableAttempt.HostInputRequirement != nil {
+		value := *durableAttempt.HostInputRequirement
+		requirement = &value
+	} else if durableAttempt == nil {
+		value, found, requirementErr := s.store.GetDockerHostInputRequirementByOperation(ctx,
+			keyDigest)
+		if requirementErr != nil {
+			return sandbox.DockerContainerRehearsal{}, apperror.Normalize(requirementErr)
+		}
+		if found {
+			attempt, attemptErr := s.store.GetDockerContainerRehearsalAttempt(ctx, value.AttemptID)
+			if attemptErr != nil {
+				return sandbox.DockerContainerRehearsal{}, apperror.Normalize(attemptErr)
+			}
+			if attempt.HostInputRequirement == nil ||
+				attempt.HostInputRequirement.RequirementFingerprint != value.RequirementFingerprint ||
+				attempt.Intent.PlanID != planID ||
+				attempt.Intent.OperationKeyDigest != keyDigest ||
+				attempt.Intent.RequestedBy != requestedBy {
+				return sandbox.DockerContainerRehearsal{}, apperror.New(apperror.CodeConflict,
+					"Docker host input requirement no longer matches its attempt")
+			}
+			durableAttempt = &attempt
+			value = *attempt.HostInputRequirement
+			requirement = &value
+		}
+	}
+	if requirement != nil {
+		if request.StageHostInputs && !request.OperatorConfirmedHostInputStaging {
+			return sandbox.DockerContainerRehearsal{}, apperror.New(
+				apperror.CodeFailedPrecondition,
+				"Docker host input staging requires separate explicit operator confirmation")
+		}
+		if !request.StageHostInputs && request.OperatorConfirmedHostInputStaging {
+			return sandbox.DockerContainerRehearsal{}, apperror.New(apperror.CodeInvalidArgument,
+				"Docker host input staging confirmation requires staging to be enabled")
+		}
+		if !requirement.Required &&
+			(request.StageHostInputs || request.OperatorConfirmedHostInputStaging) {
+			return sandbox.DockerContainerRehearsal{}, apperror.New(apperror.CodeConflict,
+				"Docker host input requirement cannot be widened during replay")
+		}
+		effectiveStageHostInputs = requirement.Required
+	} else {
+		if request.StageHostInputs && !request.OperatorConfirmedHostInputStaging {
+			return sandbox.DockerContainerRehearsal{}, apperror.New(
+				apperror.CodeFailedPrecondition,
+				"Docker host input staging requires separate explicit operator confirmation")
+		}
+		if !request.StageHostInputs && request.OperatorConfirmedHostInputStaging {
+			return sandbox.DockerContainerRehearsal{}, apperror.New(apperror.CodeInvalidArgument,
+				"Docker host input staging confirmation requires staging to be enabled")
+		}
+	}
 	manifest, err := sandbox.NewNoopRunner().ValidateManifest(ctx, request.Manifest)
 	if err != nil {
 		return sandbox.DockerContainerRehearsal{}, apperror.Wrap(apperror.CodeInvalidArgument,
@@ -86,7 +134,7 @@ func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
 	}
 	hostInputOperationKeyDigest := runmutation.Fingerprint(
 		"sandbox_docker_host_input_staging_operation.v1", keyDigest)
-	if durableAttempt != nil && !request.StageHostInputs {
+	if durableAttempt != nil && !effectiveStageHostInputs {
 		record, found, stagingErr := s.store.GetDockerHostInputStagingByAttempt(ctx,
 			durableAttempt.Intent.ID)
 		if stagingErr != nil {
@@ -102,7 +150,7 @@ func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
 		keyDigest); lookupErr != nil {
 		return sandbox.DockerContainerRehearsal{}, apperror.Normalize(lookupErr)
 	} else if found {
-		if request.StageHostInputs {
+		if effectiveStageHostInputs {
 			record, staged, stagingErr := s.store.GetDockerHostInputStagingByOperation(ctx,
 				hostInputOperationKeyDigest)
 			if stagingErr != nil {
@@ -225,7 +273,7 @@ func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
 		return sandbox.DockerContainerRehearsal{}, apperror.New(apperror.CodeFailedPrecondition,
 			"Docker write transport endpoint is outside the fixed local boundary")
 	}
-	if request.StageHostInputs {
+	if effectiveStageHostInputs {
 		record, found, stagingErr := s.store.GetDockerHostInputStagingByOperation(ctx,
 			hostInputOperationKeyDigest)
 		if stagingErr != nil {
@@ -253,8 +301,14 @@ func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
 	ownerID := idgen.New("sandbox-docker-attempt-owner")
 	var acquisition sandbox.DockerContainerAttemptAcquisition
 	if durableAttempt == nil {
+		requirement, requirementErr := sandbox.NewDockerHostInputRequirement(intent, plan,
+			effectiveStageHostInputs, request.OperatorConfirmedHostInputStaging)
+		if requirementErr != nil {
+			return sandbox.DockerContainerRehearsal{}, apperror.Wrap(apperror.CodeInternal,
+				"Docker host input requirement assembly failed", requirementErr)
+		}
 		acquisition, err = s.store.BeginDockerContainerRehearsalAttempt(ctx, intent,
-			ownerID, sandbox.DefaultDockerContainerAttemptLeaseTTL)
+			requirement, ownerID, sandbox.DefaultDockerContainerAttemptLeaseTTL)
 	} else {
 		if intent.IntentFingerprint != durableAttempt.Intent.IntentFingerprint ||
 			intent.RequestFingerprint != durableAttempt.Intent.RequestFingerprint ||
@@ -270,7 +324,7 @@ func (s *SandboxManifestService) RehearseDockerContainer(ctx context.Context,
 		return sandbox.DockerContainerRehearsal{}, apperror.Normalize(err)
 	}
 	hostInputs := dockerHostInputStagingExecution{
-		enabled: request.StageHostInputs, operationKeyDigest: hostInputOperationKeyDigest,
+		enabled: effectiveStageHostInputs, operationKeyDigest: hostInputOperationKeyDigest,
 		manifest: manifest, authority: authority,
 	}
 	return s.executeDockerContainerRehearsalAttempt(ctx, acquisition, plan, spec, writeRequest,
@@ -422,6 +476,11 @@ func (s *SandboxManifestService) ensureDockerHostInputStaging(ctx context.Contex
 	attempt sandbox.DockerContainerRehearsalAttempt, plan sandbox.DockerContainerPlan,
 	request dockerHostInputStagingExecution,
 ) error {
+	if attempt.HostInputRequirement != nil &&
+		attempt.HostInputRequirement.Required != request.enabled {
+		return apperror.New(apperror.CodeConflict,
+			"Docker host input execution changed the durable requirement")
+	}
 	record, found, err := s.store.GetDockerHostInputStagingByAttempt(ctx, attempt.Intent.ID)
 	if err != nil {
 		return err

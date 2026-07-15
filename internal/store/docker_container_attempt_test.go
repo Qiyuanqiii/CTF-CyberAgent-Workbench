@@ -21,14 +21,15 @@ func TestDockerContainerAttemptStagesCleansAndCompletesAtomically(t *testing.T) 
 	st, run, root := openSandboxManifestStore(t, ctx)
 	intent, plan, spec, request := newDockerContainerAttemptStoreIntent(t, ctx, st,
 		run.ID, root, "docker-attempt-complete")
-	acquired, err := st.BeginDockerContainerRehearsalAttempt(ctx, intent,
+	requirement := newDockerContainerAttemptRequirement(t, intent, plan, false)
+	acquired, err := st.BeginDockerContainerRehearsalAttempt(ctx, intent, requirement,
 		"docker_attempt_owner", time.Minute)
 	if err != nil || acquired.Replayed || acquired.TookOver ||
 		acquired.Attempt.Status != sandbox.DockerContainerAttemptStatusPrepared ||
 		acquired.Attempt.Lease.Generation != 1 {
 		t.Fatalf("begin Docker attempt: value=%#v err=%v", acquired, err)
 	}
-	if _, err := st.BeginDockerContainerRehearsalAttempt(ctx, intent,
+	if _, err := st.BeginDockerContainerRehearsalAttempt(ctx, intent, requirement,
 		"other_docker_attempt_owner", time.Minute); apperror.CodeOf(err) != apperror.CodeConflict {
 		t.Fatalf("active Docker attempt lease was not exclusive: %v", err)
 	}
@@ -149,9 +150,10 @@ func TestDockerContainerAttemptStagesCleansAndCompletesAtomically(t *testing.T) 
 func TestDockerContainerAttemptFailureReleaseAndExpiredTakeoverAreFenced(t *testing.T) {
 	ctx := context.Background()
 	st, run, root := openSandboxManifestStore(t, ctx)
-	intent, _, _, request := newDockerContainerAttemptStoreIntent(t, ctx, st,
+	intent, plan, _, request := newDockerContainerAttemptStoreIntent(t, ctx, st,
 		run.ID, root, "docker-attempt-failure")
-	first, err := st.BeginDockerContainerRehearsalAttempt(ctx, intent,
+	requirement := newDockerContainerAttemptRequirement(t, intent, plan, false)
+	first, err := st.BeginDockerContainerRehearsalAttempt(ctx, intent, requirement,
 		"docker_attempt_owner_one", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +176,7 @@ func TestDockerContainerAttemptFailureReleaseAndExpiredTakeoverAreFenced(t *test
 		len(failed.Failures) != 1 {
 		t.Fatalf("record Docker attempt failure: value=%#v err=%v", failed, err)
 	}
-	second, err := st.BeginDockerContainerRehearsalAttempt(ctx, intent,
+	second, err := st.BeginDockerContainerRehearsalAttempt(ctx, intent, requirement,
 		"docker_attempt_owner_two", sandbox.MinDockerContainerAttemptLeaseTTL)
 	if err != nil || second.TookOver || second.Attempt.Lease.Generation != 2 {
 		t.Fatalf("reacquire released Docker attempt: value=%#v err=%v", second, err)
@@ -195,7 +197,7 @@ func TestDockerContainerAttemptFailureReleaseAndExpiredTakeoverAreFenced(t *test
 		t.Fatal(err)
 	}
 	time.Sleep(sandbox.MinDockerContainerAttemptLeaseTTL + 100*time.Millisecond)
-	third, err := st.BeginDockerContainerRehearsalAttempt(ctx, intent,
+	third, err := st.BeginDockerContainerRehearsalAttempt(ctx, intent, requirement,
 		"docker_attempt_owner_three", time.Minute)
 	if err != nil || !third.TookOver || third.Attempt.Lease.Generation != 3 {
 		t.Fatalf("take over expired Docker attempt: value=%#v err=%v", third, err)
@@ -213,9 +215,10 @@ func TestDockerContainerAttemptFailureReleaseAndExpiredTakeoverAreFenced(t *test
 func TestDockerContainerAttemptFailureLedgerExhaustionBlocksFurtherAcquisition(t *testing.T) {
 	ctx := context.Background()
 	st, run, root := openSandboxManifestStore(t, ctx)
-	intent, _, _, _ := newDockerContainerAttemptStoreIntent(t, ctx, st,
+	intent, plan, _, _ := newDockerContainerAttemptStoreIntent(t, ctx, st,
 		run.ID, root, "docker-attempt-failure-limit")
-	acquisition, err := st.BeginDockerContainerRehearsalAttempt(ctx, intent,
+	requirement := newDockerContainerAttemptRequirement(t, intent, plan, false)
+	acquisition, err := st.BeginDockerContainerRehearsalAttempt(ctx, intent, requirement,
 		idgen.New("docker-attempt-owner"), time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -261,8 +264,9 @@ func TestDockerContainerAttemptConcurrentStoresAdmitOneLease(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "docker-attempt-concurrent.db")
 	firstStore, run, root := openSandboxManifestStoreAt(t, ctx, path)
 	t.Cleanup(func() { _ = firstStore.Close() })
-	intent, _, _, _ := newDockerContainerAttemptStoreIntent(t, ctx, firstStore,
+	intent, plan, _, _ := newDockerContainerAttemptStoreIntent(t, ctx, firstStore,
 		run.ID, root, "docker-attempt-concurrent")
+	requirement := newDockerContainerAttemptRequirement(t, intent, plan, false)
 	secondStore, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
@@ -280,7 +284,7 @@ func TestDockerContainerAttemptConcurrentStoresAdmitOneLease(t *testing.T) {
 			defer group.Done()
 			<-start
 			results[index], errorsFound[index] = stores[index].BeginDockerContainerRehearsalAttempt(
-				ctx, intent, owners[index], time.Minute)
+				ctx, intent, requirement, owners[index], time.Minute)
 		}(index)
 	}
 	close(start)
@@ -460,4 +464,16 @@ func newDockerContainerAttemptStoreIntent(t *testing.T, ctx context.Context,
 		t.Fatal(err)
 	}
 	return intent, plan, spec, request
+}
+
+func newDockerContainerAttemptRequirement(t *testing.T,
+	intent sandbox.DockerContainerAttemptIntent, plan sandbox.DockerContainerPlan,
+	required bool,
+) sandbox.DockerHostInputRequirement {
+	t.Helper()
+	requirement, err := sandbox.NewDockerHostInputRequirement(intent, plan, required, required)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return requirement
 }

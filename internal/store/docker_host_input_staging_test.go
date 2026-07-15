@@ -314,6 +314,14 @@ func newStagedDockerHostInputAttempt(t *testing.T, ctx context.Context, st *SQLi
 ) (sandbox.DockerContainerRehearsalAttempt, sandbox.DockerContainerPlan,
 	sandbox.DockerContainerSpec, sandbox.DockerContainerWriteRequest, sandbox.Manifest) {
 	t.Helper()
+	return newStagedDockerHostInputAttemptWithRequirement(t, ctx, st, runID, root, prefix, true)
+}
+
+func newStagedDockerHostInputAttemptWithRequirement(t *testing.T, ctx context.Context,
+	st *SQLiteStore, runID, root, prefix string, required bool,
+) (sandbox.DockerContainerRehearsalAttempt, sandbox.DockerContainerPlan,
+	sandbox.DockerContainerSpec, sandbox.DockerContainerWriteRequest, sandbox.Manifest) {
+	t.Helper()
 	for _, name := range []string{"src", "output"} {
 		if err := os.MkdirAll(filepath.Join(root, name), 0o755); err != nil {
 			t.Fatal(err)
@@ -347,7 +355,11 @@ func newStagedDockerHostInputAttempt(t *testing.T, ctx context.Context, st *SQLi
 	if err != nil {
 		t.Fatal(err)
 	}
-	acquired, err := st.BeginDockerContainerRehearsalAttempt(ctx, intent,
+	requirement, err := sandbox.NewDockerHostInputRequirement(intent, plan, required, required)
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired, err := st.BeginDockerContainerRehearsalAttempt(ctx, intent, requirement,
 		"docker_host_input_owner", time.Minute)
 	if err != nil {
 		t.Fatal(err)

@@ -731,6 +731,7 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 	if code != 0 || stderr != "" ||
 		!strings.Contains(attemptList, "status=rehearsal_completed") ||
 		!strings.Contains(attemptList, "generation=1") ||
+		!strings.Contains(attemptList, "host_input_required=true") ||
 		!strings.Contains(attemptList, "container_started=false") {
 		t.Fatalf("Docker attempt list failed: output=%s stderr=%s code=%d",
 			attemptList, stderr, code)
@@ -746,6 +747,8 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		!strings.Contains(attemptShown, "environment_empty") ||
 		!strings.Contains(attemptShown, "execution_evidence=false") ||
 		!strings.Contains(attemptShown, "lease_status: released") ||
+		!strings.Contains(attemptShown, "host_input_requirement_durable: true") ||
+		!strings.Contains(attemptShown, "host_input_required: true") ||
 		strings.Contains(attemptShown, "/workspace") ||
 		strings.Contains(attemptShown, strings.Repeat("c", 64)) {
 		t.Fatalf("Docker attempt show leaked data: output=%s stderr=%s code=%d",
@@ -763,8 +766,7 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 	rehearsalReplay, stderr, code := executeTestCommandWithDockerInputStaging(t, writer,
 		hostInputStager,
 		"run", "sandbox", "docker-rehearse", planID, "--manifest", manifestPath,
-		"--operation-key", "docker-rehearsal-cli", "--confirm-daemon-write",
-		"--stage-host-inputs", "--confirm-host-input-staging")
+		"--operation-key", "docker-rehearsal-cli", "--confirm-daemon-write")
 	if code != 0 || stderr != "" || writer.calls != 1 || hostInputStager.stageCalls != 1 ||
 		!strings.Contains(rehearsalReplay, "docker_rehearsal: "+rehearsalID) ||
 		!strings.Contains(rehearsalReplay, "replayed: true") {

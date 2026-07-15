@@ -27,11 +27,15 @@ const dockerContainerAttemptIntentSelect = `SELECT id, plan_id, observation_id, 
 	FROM sandbox_docker_container_rehearsal_attempts`
 
 func (s *SQLiteStore) BeginDockerContainerRehearsalAttempt(ctx context.Context,
-	intent sandbox.DockerContainerAttemptIntent, ownerID string, ttl time.Duration,
+	intent sandbox.DockerContainerAttemptIntent,
+	requirement sandbox.DockerHostInputRequirement, ownerID string, ttl time.Duration,
 ) (sandbox.DockerContainerAttemptAcquisition, error) {
-	if err := intent.Validate(); err != nil {
+	if err := intent.Validate(); err != nil || requirement.Validate() != nil ||
+		requirement.AttemptID != intent.ID ||
+		requirement.AttemptIntentFingerprint != intent.IntentFingerprint ||
+		requirement.OperationKeyDigest != intent.OperationKeyDigest {
 		return sandbox.DockerContainerAttemptAcquisition{}, apperror.Wrap(
-			apperror.CodeInvalidArgument, "Docker container attempt intent is invalid", err)
+			apperror.CodeInvalidArgument, "Docker container attempt intent or host input requirement is invalid", err)
 	}
 	ownerID = strings.TrimSpace(ownerID)
 	if !domain.ValidAgentID(ownerID) || strings.ContainsRune(ownerID, 0) ||
@@ -59,7 +63,10 @@ func (s *SQLiteStore) BeginDockerContainerRehearsalAttempt(ctx context.Context,
 	if found {
 		if existing.Intent.IntentFingerprint != intent.IntentFingerprint ||
 			existing.Intent.PlanID != intent.PlanID ||
-			existing.Intent.RequestedBy != intent.RequestedBy {
+			existing.Intent.RequestedBy != intent.RequestedBy ||
+			existing.HostInputRequirement == nil ||
+			existing.HostInputRequirement.RequirementFingerprint !=
+				requirement.RequirementFingerprint {
 			return sandbox.DockerContainerAttemptAcquisition{}, apperror.New(
 				apperror.CodeConflict, "Docker attempt operation key was used for different intent")
 		}
@@ -89,6 +96,9 @@ func (s *SQLiteStore) BeginDockerContainerRehearsalAttempt(ctx context.Context,
 	if err := insertDockerContainerAttemptIntentTx(ctx, tx, intent); err != nil {
 		return sandbox.DockerContainerAttemptAcquisition{}, err
 	}
+	if err := insertDockerHostInputRequirementTx(ctx, tx, requirement, intent); err != nil {
+		return sandbox.DockerContainerAttemptAcquisition{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO sandbox_docker_container_attempt_leases
 		(attempt_id, lease_id, owner_id, generation, status, acquired_at, expires_at,
 		released_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`, lease.AttemptID, lease.LeaseID,
@@ -104,11 +114,23 @@ func (s *SQLiteStore) BeginDockerContainerRehearsalAttempt(ctx context.Context,
 		}); err != nil {
 		return sandbox.DockerContainerAttemptAcquisition{}, err
 	}
+	if err := appendDockerContainerAttemptEvent(ctx, tx, intent,
+		events.SandboxDockerHostInputRequirementEvent, requirement.CreatedAt, map[string]any{
+			"required": requirement.Required, "operator_confirmed": requirement.OperatorConfirmed,
+			"read_only_mount_count": requirement.ReadOnlyMountCount,
+			"input_artifact_count":  requirement.InputArtifactCount,
+			"before_daemon_stage":   true, "daemon_consumed": false,
+			"container_started": false, "process_executed": false,
+			"execution_authorized": false,
+		}); err != nil {
+		return sandbox.DockerContainerAttemptAcquisition{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return sandbox.DockerContainerAttemptAcquisition{}, err
 	}
 	attempt := sandbox.DockerContainerRehearsalAttempt{Intent: intent,
-		Status: sandbox.DockerContainerAttemptStatusPrepared, Lease: lease}
+		HostInputRequirement: &requirement,
+		Status:               sandbox.DockerContainerAttemptStatusPrepared, Lease: lease}
 	return sandbox.DockerContainerAttemptAcquisition{Attempt: attempt}, attempt.Validate()
 }
 
@@ -518,6 +540,17 @@ func (s *SQLiteStore) CompleteDockerContainerRehearsalAttempt(ctx context.Contex
 		return sandbox.DockerContainerRehearsal{}, false, apperror.New(
 			apperror.CodeFailedPrecondition, "Docker container attempt cleanup is not durable")
 	}
+	if attempt.HostInputRequirement != nil && attempt.HostInputRequirement.Required {
+		record, found, err := getDockerHostInputStagingByAttempt(ctx, tx, attempt.Intent.ID)
+		if err != nil {
+			return sandbox.DockerContainerRehearsal{}, false, err
+		}
+		if !found || record.Staging == nil {
+			return sandbox.DockerContainerRehearsal{}, false, apperror.New(
+				apperror.CodeFailedPrecondition,
+				"Required Docker host input staging is incomplete")
+		}
+	}
 	if err := requireCurrentDockerContainerAttemptLease(attempt.Lease, expected,
 		time.Now().UTC()); err != nil {
 		return sandbox.DockerContainerRehearsal{}, false, err
@@ -701,6 +734,11 @@ func getDockerContainerRehearsalAttempt(ctx context.Context, queryer sandboxLife
 		}
 		return sandbox.DockerContainerRehearsalAttempt{}, err
 	}
+	requirement, requirementFound, err := getDockerHostInputRequirementByAttempt(ctx,
+		queryer, id)
+	if err != nil {
+		return sandbox.DockerContainerRehearsalAttempt{}, err
+	}
 	lease, err := getDockerContainerAttemptLease(ctx, queryer, id)
 	if err != nil {
 		return sandbox.DockerContainerRehearsalAttempt{}, err
@@ -723,6 +761,9 @@ func getDockerContainerRehearsalAttempt(ctx context.Context, queryer sandboxLife
 	}
 	attempt := sandbox.DockerContainerRehearsalAttempt{Intent: intent,
 		Status: sandbox.DockerContainerAttemptStatusPrepared, Lease: lease, Failures: failures}
+	if requirementFound {
+		attempt.HostInputRequirement = &requirement
+	}
 	if found {
 		attempt.Stage = &stage
 		attempt.Status = sandbox.DockerContainerAttemptStatusStaged

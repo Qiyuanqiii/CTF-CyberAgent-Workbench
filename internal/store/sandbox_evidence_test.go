@@ -447,7 +447,7 @@ func removeSchemaV56ForTestStatements() []string {
 }
 
 func removeSchemaV57ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV58ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_docker_host_input_staging_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_host_input_staging_update_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_host_input_staging_intent_delete_immutable`,
@@ -460,5 +460,23 @@ func removeSchemaV57ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_docker_host_input_staging_intents_run_created`,
 		`DROP TABLE sandbox_docker_host_input_staging_intents`,
 		`DELETE FROM schema_migrations WHERE version = 57`,
+	}...)
+}
+
+func removeSchemaV58ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_docker_host_input_requirement_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_requirement_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_attempt_completion_requires_host_input_requirement`,
+		`DROP TRIGGER trg_sandbox_docker_attempt_stage_requires_host_input_requirement`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_requirement_staging_compatibility`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_requirement_insert`,
+		`DROP INDEX idx_sandbox_docker_host_input_requirements_run_created`,
+		`DROP TABLE sandbox_docker_host_input_requirements`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_requirement_legacy_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_requirement_legacy_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_requirement_legacy_insert_immutable`,
+		`DROP TABLE sandbox_docker_host_input_requirement_legacy_attempts`,
+		`DELETE FROM schema_migrations WHERE version = 58`,
 	}
 }

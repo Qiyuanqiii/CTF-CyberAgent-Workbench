@@ -99,7 +99,8 @@ type SandboxManifestStore interface {
 	GetDockerContainerRehearsal(ctx context.Context, id string) (sandbox.DockerContainerRehearsal, error)
 	ListDockerContainerRehearsals(ctx context.Context, runID string, limit int) ([]sandbox.DockerContainerRehearsal, error)
 	BeginDockerContainerRehearsalAttempt(ctx context.Context,
-		intent sandbox.DockerContainerAttemptIntent, ownerID string,
+		intent sandbox.DockerContainerAttemptIntent,
+		requirement sandbox.DockerHostInputRequirement, ownerID string,
 		ttl time.Duration) (sandbox.DockerContainerAttemptAcquisition, error)
 	AcquireDockerContainerRehearsalAttempt(ctx context.Context, attemptID, requestedBy,
 		ownerID string, ttl time.Duration) (sandbox.DockerContainerAttemptAcquisition, error)
@@ -137,6 +138,10 @@ type SandboxManifestStore interface {
 		planID string) (sandbox.DockerHostInputStagingRecord, bool, error)
 	ListDockerHostInputStagings(ctx context.Context, runID string,
 		limit int) ([]sandbox.DockerHostInputStagingRecord, error)
+	GetDockerHostInputRequirement(ctx context.Context,
+		attemptID string) (sandbox.DockerHostInputRequirement, bool, error)
+	GetDockerHostInputRequirementByOperation(ctx context.Context,
+		operationKeyDigest string) (sandbox.DockerHostInputRequirement, bool, error)
 }
 
 type SandboxManifestService struct {
