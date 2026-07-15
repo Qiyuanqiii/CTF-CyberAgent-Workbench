@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"cyberagent-workbench/internal/sandbox"
 )
@@ -23,6 +24,7 @@ var sandboxDockerObservationIDPattern = regexp.MustCompile(`sandbox-docker-obser
 var sandboxDockerPlanIDPattern = regexp.MustCompile(`sandbox-docker-plan-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerAttemptIDPattern = regexp.MustCompile(`sandbox-docker-attempt-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerRehearsalIDPattern = regexp.MustCompile(`sandbox-docker-rehearsal-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxDockerHostInputIntentIDPattern = regexp.MustCompile(`sandbox-docker-host-input-intent-[0-9]{14}-[a-f0-9]{12}`)
 
 type cliDockerPlanObservationTransport struct {
 	imageDigest string
@@ -75,6 +77,29 @@ type cliDockerWriteTransport struct {
 	calls int
 }
 
+type cliDockerHostInputStager struct {
+	probeCalls int
+	stageCalls int
+}
+
+func (stager *cliDockerHostInputStager) Probe(context.Context, string) error {
+	stager.probeCalls++
+	return nil
+}
+
+func (stager *cliDockerHostInputStager) Stage(_ context.Context,
+	request sandbox.HostInputBundleRequest,
+) (sandbox.HostInputBundleReport, error) {
+	stager.stageCalls++
+	return sandbox.NewHostInputBundleReport(sandbox.HostInputBundleMeasurements{
+		ReadOnlyMountCount: request.ReadOnlyMountCount(), ArtifactCount: len(request.Artifacts),
+		DirectoryCount: request.ReadOnlyMountCount(), ArtifactBytes: request.ArtifactBytes(),
+		BundleBytes: 4096, SourceSnapshotDigest: strings.Repeat("a", 64),
+		ArtifactPayloadDigest: request.ArtifactPayloadDigest(),
+		BundleDigest:          strings.Repeat("b", 64),
+	}, time.Now().UTC())
+}
+
 func (transport *cliDockerWriteTransport) Endpoint() sandbox.DockerObservationEndpoint {
 	endpoint, _ := sandbox.NewDockerObservationEndpoint(sandbox.DockerObservationEndpointLocalUnix)
 	return endpoint
@@ -110,6 +135,20 @@ func executeTestCommandWithDockerWriteTransport(t *testing.T,
 	var errOut bytes.Buffer
 	code := executeContextWithConfig(context.Background(), args, &out, &errOut, func(app *App) {
 		app.dockerWriteTransport = transport
+	})
+	return out.String(), errOut.String(), code
+}
+
+func executeTestCommandWithDockerInputStaging(t *testing.T,
+	transport sandbox.DockerContainerWriteTransport, stager sandbox.DockerHostInputStager,
+	args ...string,
+) (string, string, int) {
+	t.Helper()
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	code := executeContextWithConfig(context.Background(), args, &out, &errOut, func(app *App) {
+		app.dockerWriteTransport = transport
+		app.hostInputStager = stager
 	})
 	return out.String(), errOut.String(), code
 }
@@ -628,10 +667,23 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 			emptyRehearsals, stderr, code)
 	}
 	writer := &cliDockerWriteTransport{}
-	rehearsed, stderr, code := executeTestCommandWithDockerWriteTransport(t, writer,
+	hostInputStager := &cliDockerHostInputStager{}
+	if _, stderr, code := executeTestCommandWithDockerInputStaging(t, writer,
+		hostInputStager, "run", "sandbox", "docker-rehearse", planID,
+		"--manifest", manifestPath, "--operation-key", "docker-rehearsal-cli",
+		"--confirm-daemon-write", "--stage-host-inputs"); code != 4 ||
+		!strings.Contains(stderr, "requires --confirm-host-input-staging") ||
+		writer.calls != 0 || hostInputStager.probeCalls != 0 {
+		t.Fatalf("Docker host input staging skipped separate confirmation: stderr=%s code=%d",
+			stderr, code)
+	}
+	rehearsed, stderr, code := executeTestCommandWithDockerInputStaging(t, writer,
+		hostInputStager,
 		"run", "sandbox", "docker-rehearse", planID, "--manifest", manifestPath,
-		"--operation-key", "docker-rehearsal-cli", "--confirm-daemon-write")
-	if code != 0 || stderr != "" || writer.calls != 1 ||
+		"--operation-key", "docker-rehearsal-cli", "--confirm-daemon-write",
+		"--stage-host-inputs", "--confirm-host-input-staging")
+	if code != 0 || stderr != "" || writer.calls != 1 || hostInputStager.probeCalls != 1 ||
+		hostInputStager.stageCalls != 1 ||
 		!strings.Contains(rehearsed, "status: container_config_rehearsed_removed") ||
 		!strings.Contains(rehearsed, "endpoint_class: local_unix") ||
 		!strings.Contains(rehearsed, "daemon_writes: 2") ||
@@ -647,6 +699,32 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 	rehearsalID := sandboxDockerRehearsalIDPattern.FindString(rehearsed)
 	if rehearsalID == "" {
 		t.Fatalf("missing Docker rehearsal id: %s", rehearsed)
+	}
+	hostInputList, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-host-inputs", runID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(hostInputList, "status=host_inputs_descriptor_sealed") ||
+		!strings.Contains(hostInputList, "daemon_consumed=false") ||
+		!strings.Contains(hostInputList, "process_executed=false") ||
+		strings.Contains(hostInputList, "scripts") || strings.Contains(hostInputList, home) {
+		t.Fatalf("Docker host input list leaked data: output=%s stderr=%s code=%d",
+			hostInputList, stderr, code)
+	}
+	hostInputIntentID := sandboxDockerHostInputIntentIDPattern.FindString(hostInputList)
+	if hostInputIntentID == "" {
+		t.Fatalf("missing Docker host input intent id: %s", hostInputList)
+	}
+	hostInputShown, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-host-input-show", hostInputIntentID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(hostInputShown, "descriptor_pinned: true") ||
+		!strings.Contains(hostInputShown, "kernel_sealed: true") ||
+		!strings.Contains(hostInputShown, "raw_content_persisted: false") ||
+		!strings.Contains(hostInputShown, "daemon_consumed: false") ||
+		!strings.Contains(hostInputShown, "execution_authorized: false") ||
+		strings.Contains(hostInputShown, "scripts") || strings.Contains(hostInputShown, home) {
+		t.Fatalf("Docker host input show leaked data: output=%s stderr=%s code=%d",
+			hostInputShown, stderr, code)
 	}
 	attemptList, stderr, code := executeTestCommand(t, "run", "sandbox",
 		"docker-attempts", runID)
@@ -682,10 +760,12 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		t.Fatalf("Docker attempt-id resume failed: output=%s stderr=%s code=%d calls=%d",
 			resumed, stderr, code, writer.calls)
 	}
-	rehearsalReplay, stderr, code := executeTestCommandWithDockerWriteTransport(t, writer,
+	rehearsalReplay, stderr, code := executeTestCommandWithDockerInputStaging(t, writer,
+		hostInputStager,
 		"run", "sandbox", "docker-rehearse", planID, "--manifest", manifestPath,
-		"--operation-key", "docker-rehearsal-cli", "--confirm-daemon-write")
-	if code != 0 || stderr != "" || writer.calls != 1 ||
+		"--operation-key", "docker-rehearsal-cli", "--confirm-daemon-write",
+		"--stage-host-inputs", "--confirm-host-input-staging")
+	if code != 0 || stderr != "" || writer.calls != 1 || hostInputStager.stageCalls != 1 ||
 		!strings.Contains(rehearsalReplay, "docker_rehearsal: "+rehearsalID) ||
 		!strings.Contains(rehearsalReplay, "replayed: true") {
 		t.Fatalf("Docker rehearsal replay contacted transport: output=%s stderr=%s code=%d calls=%d",

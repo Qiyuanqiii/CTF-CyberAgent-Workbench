@@ -412,7 +412,7 @@ func removeSchemaV55ForTestStatements() []string {
 }
 
 func removeSchemaV56ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV57ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_docker_container_attempt_completion_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_container_attempt_completion_update_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_container_attempt_failure_delete_immutable`,
@@ -443,5 +443,22 @@ func removeSchemaV56ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_docker_container_attempts_run_created`,
 		`DROP TABLE sandbox_docker_container_rehearsal_attempts`,
 		`DELETE FROM schema_migrations WHERE version = 56`,
+	}...)
+}
+
+func removeSchemaV57ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_docker_host_input_staging_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_staging_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_staging_intent_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_staging_intent_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_attempt_completion_requires_host_input_staging`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_staging_insert`,
+		`DROP TRIGGER trg_sandbox_docker_host_input_staging_intent_insert`,
+		`DROP INDEX idx_sandbox_docker_host_input_stagings_run_created`,
+		`DROP TABLE sandbox_docker_host_input_stagings`,
+		`DROP INDEX idx_sandbox_docker_host_input_staging_intents_run_created`,
+		`DROP TABLE sandbox_docker_host_input_staging_intents`,
+		`DELETE FROM schema_migrations WHERE version = 57`,
 	}
 }

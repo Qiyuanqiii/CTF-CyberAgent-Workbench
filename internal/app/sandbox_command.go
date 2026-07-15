@@ -68,7 +68,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	if a.dockerObserver != nil {
@@ -76,6 +76,9 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	}
 	if a.dockerWriteTransport != nil {
 		service.WithDockerContainerWriteTransport(a.dockerWriteTransport)
+	}
+	if a.hostInputStager != nil {
+		service.WithDockerHostInputStager(a.hostInputStager)
 	}
 	switch args[0] {
 	case "prepare":
@@ -627,19 +630,28 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		operator := fs.String("operator", "cli_operator", "operator identity")
 		confirmed := fs.Bool("confirm-daemon-write", false,
 			"confirm bounded create-inspect-remove writes to the fixed local Docker socket")
+		stageHostInputs := fs.Bool("stage-host-inputs", false,
+			"seal descriptor-pinned read-only host inputs before container cleanup")
+		confirmedHostInputs := fs.Bool("confirm-host-input-staging", false,
+			"separately confirm bounded local host input reads and in-memory sealing")
 		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
 			"manifest": true, "operation-key": true, "operator": true,
-			"confirm-daemon-write": false,
+			"confirm-daemon-write": false, "stage-host-inputs": false,
+			"confirm-host-input-staging": false,
 		})); err != nil {
 			return err
 		}
 		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" ||
 			strings.TrimSpace(*operationKey) == "" {
-			return errors.New("usage: cyberagent run sandbox docker-rehearse <plan-id> --manifest <manifest.json> --operation-key <key> --confirm-daemon-write [--operator <id>]")
+			return errors.New("usage: cyberagent run sandbox docker-rehearse <plan-id> --manifest <manifest.json> --operation-key <key> --confirm-daemon-write [--stage-host-inputs --confirm-host-input-staging] [--operator <id>]")
 		}
 		if !*confirmed {
 			return apperror.New(apperror.CodeFailedPrecondition,
 				"Docker container rehearsal requires --confirm-daemon-write")
+		}
+		if *stageHostInputs && !*confirmedHostInputs {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker host input staging requires --confirm-host-input-staging")
 		}
 		manifest, err := readSandboxManifest(*manifestPath)
 		if err != nil {
@@ -649,10 +661,14 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 			service.WithDockerContainerWriteTransport(
 				sandbox.NewLocalDockerContainerWriteTransport())
 		}
+		if *stageHostInputs && a.hostInputStager == nil {
+			service.WithDockerHostInputStager(sandbox.NewLocalDockerHostInputStager())
+		}
 		value, err := service.RehearseDockerContainer(ctx,
 			application.RehearseDockerContainerRequest{PlanID: fs.Arg(0),
 				Manifest: manifest, OperationKey: *operationKey, RequestedBy: *operator,
-				OperatorConfirmed: true})
+				OperatorConfirmed: true, StageHostInputs: *stageHostInputs,
+				OperatorConfirmedHostInputStaging: *confirmedHostInputs})
 		if err != nil {
 			return err
 		}
@@ -703,17 +719,26 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		operator := fs.String("operator", "cli_operator", "operator identity")
 		confirmed := fs.Bool("confirm-daemon-write", false,
 			"confirm bounded recovery writes to the fixed local Docker socket")
+		stageHostInputs := fs.Bool("stage-host-inputs", false,
+			"resume descriptor-pinned host input staging before completion")
+		confirmedHostInputs := fs.Bool("confirm-host-input-staging", false,
+			"separately confirm bounded local host input reads and in-memory sealing")
 		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
 			"manifest": true, "operator": true, "confirm-daemon-write": false,
+			"stage-host-inputs": false, "confirm-host-input-staging": false,
 		})); err != nil {
 			return err
 		}
 		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" {
-			return errors.New("usage: cyberagent run sandbox docker-attempt-resume <attempt-id> --manifest <manifest.json> --confirm-daemon-write [--operator <id>]")
+			return errors.New("usage: cyberagent run sandbox docker-attempt-resume <attempt-id> --manifest <manifest.json> --confirm-daemon-write [--stage-host-inputs --confirm-host-input-staging] [--operator <id>]")
 		}
 		if !*confirmed {
 			return apperror.New(apperror.CodeFailedPrecondition,
 				"Docker container attempt resume requires --confirm-daemon-write")
+		}
+		if *stageHostInputs && !*confirmedHostInputs {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker host input staging resume requires --confirm-host-input-staging")
 		}
 		manifest, err := readSandboxManifest(*manifestPath)
 		if err != nil {
@@ -723,13 +748,62 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 			service.WithDockerContainerWriteTransport(
 				sandbox.NewLocalDockerContainerWriteTransport())
 		}
+		if *stageHostInputs && a.hostInputStager == nil {
+			service.WithDockerHostInputStager(sandbox.NewLocalDockerHostInputStager())
+		}
 		value, err := service.ResumeDockerContainerRehearsal(ctx,
 			application.ResumeDockerContainerRequest{AttemptID: fs.Arg(0),
-				Manifest: manifest, RequestedBy: *operator, OperatorConfirmed: true})
+				Manifest: manifest, RequestedBy: *operator, OperatorConfirmed: true,
+				StageHostInputs:                   *stageHostInputs,
+				OperatorConfirmedHostInputStaging: *confirmedHostInputs})
 		if err != nil {
 			return err
 		}
 		printSandboxDockerContainerRehearsal(a, value)
+		return nil
+	case "docker-host-inputs":
+		fs := newFlagSet("run sandbox docker-host-inputs", a.errOut)
+		limit := fs.Int("limit", 100, "maximum Docker host input staging records")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-host-inputs <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDockerHostInputStagings(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no Docker host input staging records")
+			return nil
+		}
+		for _, value := range values {
+			status := "pending"
+			generation := int64(0)
+			if value.Staging != nil {
+				status = value.Staging.Status
+				generation = value.Staging.LeaseGeneration
+			}
+			fmt.Fprintf(a.out, "%s\tattempt=%s\tplan=%s\tstatus=%s\tgeneration=%d\tread_only_mounts=%d\tinput_artifacts=%d\tdaemon_consumed=false\tcontainer_started=false\tprocess_executed=false\texecution_authorized=false\tcreated_at=%s\n",
+				value.Intent.ID, value.Intent.AttemptID, value.Intent.PlanID, status, generation,
+				value.Intent.ReadOnlyMountCount, value.Intent.InputArtifactCount,
+				value.Intent.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "docker-host-input-show":
+		fs := newFlagSet("run sandbox docker-host-input-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-host-input-show <intent-id>")
+		}
+		value, err := service.GetDockerHostInputStaging(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxDockerHostInputStaging(a, value)
 		return nil
 	case "docker-rehearsals":
 		fs := newFlagSet("run sandbox docker-rehearsals", a.errOut)
@@ -1039,6 +1113,49 @@ func printSandboxDockerContainerAttempt(a *App,
 				failure.CreatedAt.Format(timeFormatRFC3339Nano))
 		}
 	}
+}
+
+func printSandboxDockerHostInputStaging(a *App,
+	value sandbox.DockerHostInputStagingRecord,
+) {
+	intent := value.Intent
+	status, stagingID, source, trustClass := "pending", "", "", ""
+	leaseGeneration := int64(0)
+	regularFiles, directories, entries := 0, 0, 0
+	var sourceBytes, artifactBytes, bundleBytes int64
+	sourceDigest, artifactDigest, bundleDigest, reportFingerprint := "", "", "", ""
+	descriptorPinned, symlinkFree, kernelSealed := false, false, false
+	createdAt := intent.CreatedAt
+	if value.Staging != nil {
+		staging := value.Staging
+		status, stagingID, source, trustClass = staging.Status, staging.ID, staging.Source,
+			staging.TrustClass
+		leaseGeneration = staging.LeaseGeneration
+		report := staging.Report
+		regularFiles, directories, entries = report.RegularFileCount,
+			report.DirectoryCount, report.EntryCount
+		sourceBytes, artifactBytes, bundleBytes = report.SourceBytes,
+			report.ArtifactBytes, report.BundleBytes
+		sourceDigest, artifactDigest, bundleDigest = report.SourceSnapshotDigest,
+			report.ArtifactPayloadDigest, report.BundleDigest
+		reportFingerprint = report.ReportFingerprint
+		descriptorPinned, symlinkFree, kernelSealed = report.DescriptorPinned,
+			report.SymlinkFree, report.KernelSealed
+		createdAt = staging.CreatedAt
+	}
+	fmt.Fprintf(a.out, "docker_host_input_intent: %s\ndocker_host_input_staging: %s\nattempt: %s\ndocker_plan: %s\nrun: %s\nmission: %s\nworkspace: %s\nintent_protocol: %s\nstaging_protocol: %s\nsource: %s\ntrust_class: %s\nstatus: %s\noperation_key_digest: %s\nattempt_intent_fingerprint: %s\ncontainer_id_fingerprint: %s\nmanifest_fingerprint: %s\nmount_binding_fingerprint: %s\ninput_artifact_digest: %s\nauthority_fingerprint: %s\nspec_fingerprint: %s\nplan_fingerprint: %s\nread_only_mounts: %d\ninput_artifacts: %d\nlease_generation: %d\nregular_files: %d\ndirectories: %d\nentries: %d\nsource_bytes: %d\nartifact_bytes: %d\nbundle_bytes: %d\nsource_snapshot_digest: %s\nartifact_payload_digest: %s\nbundle_digest: %s\nreport_fingerprint: %s\ndescriptor_pinned: %t\nsymlink_free: %t\nkernel_sealed: %t\nsource_paths_retained: false\nraw_content_persisted: false\ndaemon_consumed: false\ncontainer_started: false\nprocess_executed: false\nexecution_evidence: false\nproduction_verified: false\nbackend_enabled: false\nexecution_authorized: false\nartifact_commit_authorized: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\n",
+		intent.ID, stagingID, intent.AttemptID, intent.PlanID, intent.RunID,
+		intent.MissionID, intent.WorkspaceID, intent.ProtocolVersion,
+		sandbox.DockerHostInputStagingProtocolVersion, source, trustClass, status,
+		intent.OperationKeyDigest, intent.AttemptIntentFingerprint,
+		intent.ContainerIDFingerprint, intent.ManifestFingerprint,
+		intent.MountBindingFingerprint, intent.InputArtifactDigest,
+		intent.AuthorityFingerprint, intent.SpecFingerprint, intent.PlanFingerprint,
+		intent.ReadOnlyMountCount, intent.InputArtifactCount, leaseGeneration,
+		regularFiles, directories, entries, sourceBytes, artifactBytes, bundleBytes,
+		sourceDigest, artifactDigest, bundleDigest, reportFingerprint,
+		descriptorPinned, symlinkFree, kernelSealed, intent.RequestedBy,
+		createdAt.Format(timeFormatRFC3339Nano), value.Replayed)
 }
 
 func printSandboxLifecycle(a *App, value sandbox.Lifecycle) {

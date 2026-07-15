@@ -58,6 +58,7 @@ type App struct {
 	calls                *application.ActiveCallRegistry
 	dockerObserver       sandbox.DockerProductionObserver
 	dockerWriteTransport sandbox.DockerContainerWriteTransport
+	hostInputStager      sandbox.DockerHostInputStager
 }
 
 func Execute(args []string, out io.Writer, errOut io.Writer) int {

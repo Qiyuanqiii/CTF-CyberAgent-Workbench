@@ -119,6 +119,8 @@ const (
 	SandboxDockerAttemptCleanupEvent         = "sandbox.docker_attempt_cleanup_confirmed"
 	SandboxDockerAttemptFailedEvent          = "sandbox.docker_attempt_failed"
 	SandboxDockerAttemptCompletedEvent       = "sandbox.docker_attempt_completed"
+	SandboxDockerHostInputIntentEvent        = "sandbox.docker_host_input_intent_prepared"
+	SandboxDockerHostInputStagedEvent        = "sandbox.docker_host_input_staged"
 	AgentProtocolRepairRequestedEvent        = "agent.protocol_repair_requested"
 	AgentProtocolRepairStartedEvent          = "agent.protocol_repair_started"
 	AgentProtocolRepairCompletedEvent        = "agent.protocol_repair_completed"

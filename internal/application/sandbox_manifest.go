@@ -121,6 +121,22 @@ type SandboxManifestStore interface {
 		id string) (sandbox.DockerContainerRehearsalAttempt, error)
 	ListDockerContainerRehearsalAttempts(ctx context.Context, runID string,
 		limit int) ([]sandbox.DockerContainerRehearsalAttempt, error)
+	PrepareDockerHostInputStagingIntent(ctx context.Context,
+		intent sandbox.DockerHostInputStagingIntent,
+		expected sandbox.DockerContainerAttemptLease) (sandbox.DockerHostInputStagingRecord, bool, error)
+	RecordDockerHostInputStaging(ctx context.Context,
+		value sandbox.DockerHostInputStaging,
+		expected sandbox.DockerContainerAttemptLease) (sandbox.DockerHostInputStagingRecord, bool, error)
+	GetDockerHostInputStaging(ctx context.Context,
+		id string) (sandbox.DockerHostInputStagingRecord, error)
+	GetDockerHostInputStagingByAttempt(ctx context.Context,
+		attemptID string) (sandbox.DockerHostInputStagingRecord, bool, error)
+	GetDockerHostInputStagingByOperation(ctx context.Context,
+		keyDigest string) (sandbox.DockerHostInputStagingRecord, bool, error)
+	GetDockerHostInputStagingByPlan(ctx context.Context,
+		planID string) (sandbox.DockerHostInputStagingRecord, bool, error)
+	ListDockerHostInputStagings(ctx context.Context, runID string,
+		limit int) ([]sandbox.DockerHostInputStagingRecord, error)
 }
 
 type SandboxManifestService struct {
@@ -132,6 +148,7 @@ type SandboxManifestService struct {
 	dockerObserver       sandbox.DockerProductionObserver
 	dockerWriter         sandbox.DockerContainerTransactionHarness
 	dockerWriteTransport sandbox.DockerContainerWriteTransport
+	hostInputStager      sandbox.DockerHostInputStager
 }
 
 type PrepareSandboxManifestRequest struct {
@@ -153,6 +170,7 @@ func NewSandboxManifestService(store SandboxManifestStore,
 			sandbox.NewLocalDockerReadOnlyTransport()),
 		dockerWriter:         sandbox.NewInMemoryDockerWriteTransaction(),
 		dockerWriteTransport: sandbox.NewUnavailableDockerContainerWriteTransport(),
+		hostInputStager:      sandbox.NewUnavailableDockerHostInputStager(),
 	}
 }
 
@@ -161,6 +179,15 @@ func (s *SandboxManifestService) WithDockerContainerWriteTransport(
 ) *SandboxManifestService {
 	if s != nil && transport != nil {
 		s.dockerWriteTransport = transport
+	}
+	return s
+}
+
+func (s *SandboxManifestService) WithDockerHostInputStager(
+	stager sandbox.DockerHostInputStager,
+) *SandboxManifestService {
+	if s != nil && stager != nil {
+		s.hostInputStager = stager
 	}
 	return s
 }

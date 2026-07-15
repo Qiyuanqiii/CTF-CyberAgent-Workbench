@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/policy"
@@ -22,6 +23,41 @@ type recoveringDockerWriteTransport struct {
 	stageCalls    int
 	createWrites  int
 	cleanupWrites int
+}
+
+type recordingDockerHostInputStager struct {
+	probeCalls int
+	stageCalls int
+	request    sandbox.HostInputBundleRequest
+	probeErr   error
+	stageErr   error
+	mutate     func(*sandbox.HostInputBundleReport)
+}
+
+func (stager *recordingDockerHostInputStager) Probe(_ context.Context, _ string) error {
+	stager.probeCalls++
+	return stager.probeErr
+}
+
+func (stager *recordingDockerHostInputStager) Stage(_ context.Context,
+	request sandbox.HostInputBundleRequest,
+) (sandbox.HostInputBundleReport, error) {
+	stager.stageCalls++
+	stager.request = request
+	if stager.stageErr != nil {
+		return sandbox.HostInputBundleReport{}, stager.stageErr
+	}
+	report, err := sandbox.NewHostInputBundleReport(sandbox.HostInputBundleMeasurements{
+		ReadOnlyMountCount: request.ReadOnlyMountCount(), ArtifactCount: len(request.Artifacts),
+		DirectoryCount: request.ReadOnlyMountCount(), ArtifactBytes: request.ArtifactBytes(),
+		BundleBytes: 4096, SourceSnapshotDigest: strings.Repeat("a", 64),
+		ArtifactPayloadDigest: request.ArtifactPayloadDigest(),
+		BundleDigest:          strings.Repeat("b", 64),
+	}, time.Now().UTC())
+	if err == nil && stager.mutate != nil {
+		stager.mutate(&report)
+	}
+	return report, err
 }
 
 func (transport *recoveringDockerWriteTransport) Endpoint() sandbox.DockerObservationEndpoint {
@@ -249,5 +285,138 @@ func TestDockerContainerRehearsalRecoversUncertainCreateWithoutCreatingTwice(t *
 		!attempts[0].Stage.Result.ExistingContainerAdopted ||
 		attempts[0].Stage.Result.ContainerCreatedNow {
 		t.Fatalf("Docker recovery ledger is invalid: attempts=%#v err=%v", attempts, err)
+	}
+}
+
+func TestDockerHostInputStagingRequiresSeparateConfirmationAndPersistsMetadataOnly(t *testing.T) {
+	ctx := context.Background()
+	st, run, root := newSandboxManifestTestRuntime(t, ctx)
+	service := NewSandboxManifestService(st, policy.NewDefaultChecker())
+	manifest, observation := prepareDockerContainerPlanAuthority(t, ctx, service, run.ID,
+		root, "docker-host-input", "docker_rehearsal_operator")
+	plan, err := service.CompileDockerContainerPlan(ctx, CompileDockerContainerPlanRequest{
+		ObservationID: observation.ID, Manifest: manifest,
+		OperationKey: "docker-host-input-plan", RequestedBy: "docker_rehearsal_operator",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &countingDockerWriteTransport{}
+	stager := &recordingDockerHostInputStager{}
+	service.WithDockerContainerWriteTransport(transport).WithDockerHostInputStager(stager)
+	request := RehearseDockerContainerRequest{PlanID: plan.ID, Manifest: manifest,
+		OperationKey: "docker-host-input-operation", RequestedBy: "docker_rehearsal_operator",
+		OperatorConfirmed: true, StageHostInputs: true}
+	if _, err := service.RehearseDockerContainer(ctx, request); apperror.CodeOf(err) != apperror.CodeFailedPrecondition || transport.calls != 0 ||
+		stager.probeCalls != 0 {
+		t.Fatalf("host input staging did not require independent confirmation: %v", err)
+	}
+	request.OperatorConfirmedHostInputStaging = true
+	rehearsal, err := service.RehearseDockerContainer(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rehearsal.Replayed || transport.calls != 1 || transport.cleanupCalls != 1 ||
+		stager.probeCalls != 1 || stager.stageCalls != 1 ||
+		stager.request.WorkspaceRoot != root || len(stager.request.Artifacts) != 0 {
+		t.Fatalf("host input staging execution diverged: rehearsal=%#v transport=%#v stager=%#v",
+			rehearsal, transport, stager)
+	}
+	records, err := service.ListDockerHostInputStagings(ctx, run.ID, 10)
+	if err != nil || len(records) != 1 || records[0].Staging == nil ||
+		records[0].Intent.PlanID != plan.ID || records[0].Staging.Report.DaemonConsumed ||
+		records[0].Staging.Report.ContainerStarted || records[0].Staging.Report.ProcessExecuted ||
+		records[0].Staging.ExecutionAuthorized {
+		t.Fatalf("host input staging ledger widened authority: %#v err=%v", records, err)
+	}
+	loaded, err := service.GetDockerHostInputStaging(ctx, records[0].Intent.ID)
+	if err != nil || loaded.Staging == nil ||
+		loaded.Staging.StagingFingerprint != records[0].Staging.StagingFingerprint {
+		t.Fatalf("load host input staging: %#v err=%v", loaded, err)
+	}
+	replayed, err := service.RehearseDockerContainer(ctx, request)
+	if err != nil || !replayed.Replayed || transport.calls != 1 || stager.stageCalls != 1 {
+		t.Fatalf("host input staging replay repeated side effects: %#v err=%v", replayed, err)
+	}
+	events, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if strings.Contains(event.PayloadJSON, root) ||
+			strings.Contains(event.PayloadJSON, stager.request.WorkspaceRoot) {
+			t.Fatalf("host input staging event leaked a host path: %#v", event)
+		}
+	}
+}
+
+func TestDockerHostInputStagingMismatchCleansAndResumesWithoutAnotherCreate(t *testing.T) {
+	ctx := context.Background()
+	st, run, root := newSandboxManifestTestRuntime(t, ctx)
+	service := NewSandboxManifestService(st, policy.NewDefaultChecker())
+	manifest, observation := prepareDockerContainerPlanAuthority(t, ctx, service, run.ID,
+		root, "docker-host-input-recovery", "docker_rehearsal_operator")
+	plan, err := service.CompileDockerContainerPlan(ctx, CompileDockerContainerPlanRequest{
+		ObservationID: observation.ID, Manifest: manifest,
+		OperationKey: "docker-host-input-recovery-plan",
+		RequestedBy:  "docker_rehearsal_operator",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &countingDockerWriteTransport{}
+	stager := &recordingDockerHostInputStager{mutate: func(report *sandbox.HostInputBundleReport) {
+		report.ArtifactBytes++
+	}}
+	service.WithDockerContainerWriteTransport(transport).WithDockerHostInputStager(stager)
+	request := RehearseDockerContainerRequest{PlanID: plan.ID, Manifest: manifest,
+		OperationKey: "docker-host-input-recovery-operation",
+		RequestedBy:  "docker_rehearsal_operator", OperatorConfirmed: true,
+		StageHostInputs: true, OperatorConfirmedHostInputStaging: true}
+	if _, err := service.RehearseDockerContainer(ctx, request); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("mismatched host input evidence was accepted: %v", err)
+	}
+	attempts, err := service.ListDockerContainerRehearsalAttempts(ctx, run.ID, 10)
+	if err != nil || len(attempts) != 1 || attempts[0].Stage == nil ||
+		attempts[0].Cleanup == nil || len(attempts[0].Failures) != 1 ||
+		attempts[0].Lease.Status != sandbox.DockerContainerAttemptLeaseReleased ||
+		transport.calls != 1 || transport.cleanupCalls != 1 {
+		t.Fatalf("failed host input staging was not safely recoverable: %#v err=%v", attempts, err)
+	}
+	records, err := service.ListDockerHostInputStagings(ctx, run.ID, 10)
+	if err != nil || len(records) != 1 || records[0].Staging != nil {
+		t.Fatalf("failed host input staging did not preserve pending intent: %#v err=%v",
+			records, err)
+	}
+	if _, err := service.ResumeDockerContainerRehearsal(ctx,
+		ResumeDockerContainerRequest{AttemptID: attempts[0].Intent.ID, Manifest: manifest,
+			RequestedBy: "docker_rehearsal_operator", OperatorConfirmed: true}); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("pending host input staging resumed without explicit confirmation: %v", err)
+	}
+	unchanged, err := service.ListDockerContainerRehearsalAttempts(ctx, run.ID, 10)
+	if err != nil || len(unchanged) != 1 || len(unchanged[0].Failures) != 1 ||
+		unchanged[0].Lease.Generation != 1 ||
+		unchanged[0].Lease.Status != sandbox.DockerContainerAttemptLeaseReleased ||
+		transport.calls != 1 || transport.cleanupCalls != 1 || stager.stageCalls != 1 {
+		t.Fatalf("omitted host input confirmation consumed recovery state: %#v err=%v",
+			unchanged, err)
+	}
+	stager.mutate = nil
+	rehearsal, err := service.ResumeDockerContainerRehearsal(ctx,
+		ResumeDockerContainerRequest{AttemptID: attempts[0].Intent.ID, Manifest: manifest,
+			RequestedBy: "docker_rehearsal_operator", OperatorConfirmed: true,
+			StageHostInputs: true, OperatorConfirmedHostInputStaging: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rehearsal.Replayed || transport.calls != 1 || transport.cleanupCalls != 1 ||
+		stager.stageCalls != 2 {
+		t.Fatalf("host input staging recovery repeated Docker mutation: rehearsal=%#v transport=%#v stager=%#v",
+			rehearsal, transport, stager)
+	}
+	records, err = service.ListDockerHostInputStagings(ctx, run.ID, 10)
+	if err != nil || len(records) != 1 || records[0].Staging == nil ||
+		records[0].Staging.LeaseGeneration != 2 {
+		t.Fatalf("host input staging recovery did not commit on takeover: %#v err=%v", records, err)
 	}
 }
