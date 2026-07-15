@@ -51,8 +51,10 @@ func TestLinuxDockerHostInputStagerRejectsSymlink(t *testing.T) {
 
 func TestLinuxDockerHostInputStagerSupportsSingleFileMount(t *testing.T) {
 	_, request := linuxHostInputFixture(t)
-	request.Manifest.Mounts[0].Source = "src/main.txt"
-	request.Manifest.Mounts[0].Target = "/workspace/main.txt"
+	request.Manifest.Mounts = []Mount{
+		{Source: "src/nested", Target: "/workspace", Access: MountReadOnly},
+		{Source: "src/main.txt", Target: "/inputs/main.txt", Access: MountReadOnly},
+	}
 	if err := request.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -60,8 +62,8 @@ func TestLinuxDockerHostInputStagerSupportsSingleFileMount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.ReadOnlyMountCount != 1 || report.RegularFileCount != 1 ||
-		report.DirectoryCount != 0 || report.EntryCount != 2 {
+	if report.ReadOnlyMountCount != 2 || report.RegularFileCount != 2 ||
+		report.DirectoryCount != 1 || report.EntryCount != 4 {
 		t.Fatalf("single-file host input mount measurements are invalid: %#v", report)
 	}
 }
