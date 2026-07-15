@@ -638,6 +638,8 @@ schema v58 durable pre-stage host-input requirement 切片已完成实现。Appl
 
 最终本地门禁全部通过：全仓普通/race 用时 158.1 秒/168.4 秒；vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、严格 TypeScript、8 个文件 17 项前端测试、OpenAPI 无漂移、生产构建、零漏洞 npm audit、凭据/运行产物/进程入口/乱码/Markdown 链接扫描、diff、Linux sandbox test binary 交叉编译和隔离真实二进制 schema-v58 workspace smoke 均为绿色。领域 requirement 50 轮、Store 收敛/缺失 requirement 30 轮、Application pending recovery/防扩权 20 轮及 Store/Application race 各 10 轮通过。审计修复了 pending operation-key 恢复误建候选 attempt、durable requirement 旁不成对显式 flags、迁移后 direct-SQL 新 attempt 缺失 requirement，以及 false requirement 零输入兼容性；未发现未解决高/中风险。Windows 本机没有 Docker，故 v59 Linux real-daemon handoff harness 未运行。
 
+GitHub Actions run `29400696276` 已通过功能提交 `4b570f7`，Go/Linux 2 分 39 秒，TypeScript 23 秒。
+
 本轮架构审计发现 Docker Engine archive 写入会拒绝 read-only rootfs/volume，因此 v58 没有把 v57 密封包直接 PUT 到目标容器，也没有将目标根或输入改为可写。archive、volume、start、exec、pull、build、export 与 Artifact 权限均未增加，`daemon_consumed=false`、`execution_evidence=false` 保持不变。ADR 0018 将下一切片拆为 schema v59：daemon-owned writable carrier、固定目的地上传、daemon readback 摘要核验、carrier 删除、以只读 volume 重建仍未启动目标容器，并要求 crash/retry/cleanup/collision 独立证明。架构完成度暂保持约 98%，产品可用度约 45-50%，因为本切片增强恢复安全而未开放新的终端用户执行能力。
 
 Docker/Local 真实进程执行继续关闭，直到 v51 每项检查都有独立可复核的生产证据，且 Sandbox input handoff、资源、网络、取消与原子 Artifact 导出全部通过单独审计；v52 的模拟通过、v53 的元数据观测、v54 的编译/假写、v55-v56 的未启动容器演练/恢复、v57 的 daemon-unconsumed sealed bundle 和 v58 的 durable requirement 都不能满足该要求。下一切片 schema v59 只实现并审计 daemon-owned immutable handoff，仍不开放 start。

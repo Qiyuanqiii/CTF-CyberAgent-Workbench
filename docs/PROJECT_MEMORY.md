@@ -86,6 +86,8 @@ The v58 audit rejected direct archive upload into the read-only target: Docker r
 
 Final local gates pass: full ordinary/race suites took 158.1s/168.4s; vet, zero-warning staticcheck, module verification/tidy diff, zero-finding govulncheck, strict TypeScript, 17 tests in 8 frontend files, OpenAPI generation, production build, zero-vulnerability npm audit, repository privacy/artifact/process/encoding/Markdown scans, Linux sandbox test-binary cross-compilation, diff checks, and isolated schema-v58 real-binary workspace smoke are green. Domain requirement tests passed 50 repetitions, Store convergence/missing-requirement tests 30, Application pending-recovery/no-widen tests 20, and Store/Application race repetitions 10 each. The audit fixed pending operation-key recovery selecting a new candidate, unmatched explicit flags beside a durable requirement, direct-SQL post-migration attempts without requirements, and false-requirement zero-input compatibility. No unresolved high/medium issue is known. Linux real-daemon handoff evidence remains pending because this Windows host has no Docker.
 
+GitHub Actions run `29400696276` passed feature commit `4b570f7` with Go/Linux in 2m39s and TypeScript in 23s.
+
 GitHub Actions run `29396264276` passed commit `8719dff` with Go/Linux in 3m55s and TypeScript in 23s, providing the Linux runtime proof. The preceding run `29395980413` failed only because the single-file test fixture no longer covered its directory working path; the corrected mixed directory/file fixture now exercises the intended report constraint.
 
 ## Next Slice

@@ -219,6 +219,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] v58 恢复以持久事实为准：required attempt 即使不重交 staging flags 也会完成 v57 捕获，false requirement 不能随后扩权；Go/SQL 双层阻止 required 无证据 completion、false requirement staging、跨 attempt/plan 复用、更新或删除。legacy v57 attempt 不回填虚构意图并保留兼容行为。迁移、不可变性、隐私、并发收敛、operation replay、崩溃恢复与 CLI 定向测试已覆盖。
 - [x] v58 设计审计确认 Docker archive 写入与只读目标不兼容，因此没有通过放宽 `ReadonlyRootfs` 或输入可写性来“解决”交接；本切片不新增 archive、volume、start、exec、pull、build、export 或 Artifact 权限，v57 事实继续固定 `daemon_consumed=false`、`execution_evidence=false`。决策记录见 ADR 0018。
 - [x] v58 发布门禁通过全仓普通/race（158.1 秒/168.4 秒）、vet/staticcheck/module/govulncheck、严格 TypeScript、17 项前端测试、OpenAPI/构建/npm audit、仓库隐私/产物/进程/编码/链接扫描、Linux 交叉编译与隔离真实二进制 smoke。高频 domain/Store/Application/race 回归通过；审计修复 pending operation-key 恢复候选错误、不成对 flags、迁移后 direct-SQL 缺失 requirement 和 false requirement 零输入兼容性，未发现未解决高/中风险。
+- [x] v58 GitHub Actions run `29400696276` 已通过功能提交 `4b570f7`，Go/Linux 2 分 39 秒、TypeScript 23 秒。
 - [ ] schema v59 单独设计并实现 daemon-owned volume carrier：固定目的地上传、daemon 回读摘要、删除可写 carrier、以只读 volume 重新创建仍未启动的目标容器，并证明 crash/retry/cleanup/collision 收敛；完成前不得开放 start。
 - [ ] 完成 v59 后再单独实现并审计 per-run start/wait/kill/orphan 生命周期。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
