@@ -161,6 +161,17 @@ type SandboxManifestStore interface {
 		keyDigest string) (sandbox.DockerHostInputHandoffRecord, bool, error)
 	ListDockerHostInputHandoffs(ctx context.Context, runID string,
 		limit int) ([]sandbox.DockerHostInputHandoffRecord, error)
+	GetDockerRuntimeInputProjectionOperation(ctx context.Context,
+		keyDigest string) (sandbox.DockerRuntimeInputProjectionOperation, bool, error)
+	CreateDockerRuntimeInputProjectionPlan(ctx context.Context,
+		plan sandbox.DockerRuntimeInputProjectionPlan,
+		operation sandbox.DockerRuntimeInputProjectionOperation) (sandbox.DockerRuntimeInputProjectionPlan, bool, error)
+	GetDockerRuntimeInputProjectionPlan(ctx context.Context,
+		id string) (sandbox.DockerRuntimeInputProjectionPlan, error)
+	GetDockerRuntimeInputProjectionPlanByHandoff(ctx context.Context,
+		handoffID string) (sandbox.DockerRuntimeInputProjectionPlan, bool, error)
+	ListDockerRuntimeInputProjectionPlans(ctx context.Context, runID string,
+		limit int) ([]sandbox.DockerRuntimeInputProjectionPlan, error)
 }
 
 type SandboxManifestService struct {

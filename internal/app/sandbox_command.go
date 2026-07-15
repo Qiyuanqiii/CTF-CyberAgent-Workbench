@@ -68,7 +68,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-runtime-input-plan|docker-runtime-input-plans|docker-runtime-input-plan-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	if a.dockerObserver != nil {
@@ -890,6 +890,81 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		}
 		printSandboxDockerHostInputHandoff(a, value)
 		return nil
+	case "docker-runtime-input-plan":
+		fs := newFlagSet("run sandbox docker-runtime-input-plan", a.errOut)
+		manifestPath := fs.String("manifest", "", "resupplied Docker sandbox manifest JSON file")
+		operationKey := fs.String("operation-key", "", "stable Docker runtime input projection operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		confirmed := fs.Bool("confirm-runtime-input-plan", false,
+			"confirm bounded local recapture and in-memory projection compilation")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"manifest": true, "operation-key": true, "operator": true,
+			"confirm-runtime-input-plan": false,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" ||
+			strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox docker-runtime-input-plan <handoff-intent-id> --manifest <manifest.json> --operation-key <key> --confirm-runtime-input-plan [--operator <id>]")
+		}
+		if !*confirmed {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker runtime input projection requires --confirm-runtime-input-plan")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		if a.hostInputStager == nil {
+			service.WithDockerHostInputStager(sandbox.NewLocalDockerHostInputStager())
+		}
+		value, err := service.PlanDockerRuntimeInputs(ctx,
+			application.PlanDockerRuntimeInputsRequest{HandoffIntentID: fs.Arg(0),
+				Manifest: manifest, OperationKey: *operationKey, RequestedBy: *operator,
+				OperatorConfirmed: true})
+		if err != nil {
+			return err
+		}
+		printSandboxDockerRuntimeInputProjection(a, value)
+		return nil
+	case "docker-runtime-input-plans":
+		fs := newFlagSet("run sandbox docker-runtime-input-plans", a.errOut)
+		limit := fs.Int("limit", 100, "maximum Docker runtime input projection plans")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-runtime-input-plans <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDockerRuntimeInputProjectionPlans(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no Docker runtime input projection plans")
+			return nil
+		}
+		for _, value := range values {
+			fmt.Fprintf(a.out, "%s\thandoff=%s\tplan=%s\tstatus=%s\tprojections=%d\tdirectory_roots=%d\tfile_roots=%d\toperator_confirmed=true\tdaemon_applied=false\tcontainer_started=false\tprocess_executed=false\texecution_authorized=false\tcreated_at=%s\n",
+				value.ID, value.HandoffID, value.ContainerPlanID, value.Status,
+				value.ProjectionCount, value.DirectoryRootCount, value.FileRootCount,
+				value.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "docker-runtime-input-plan-show":
+		fs := newFlagSet("run sandbox docker-runtime-input-plan-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-runtime-input-plan-show <projection-id>")
+		}
+		value, err := service.GetDockerRuntimeInputProjectionPlan(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxDockerRuntimeInputProjection(a, value)
+		return nil
 	case "docker-rehearsals":
 		fs := newFlagSet("run sandbox docker-rehearsals", a.errOut)
 		limit := fs.Int("limit", 100, "maximum Docker container rehearsals")
@@ -1294,6 +1369,36 @@ func printSandboxDockerHostInputHandoff(a *App,
 		daemonReads, daemonWrites, reconciled, completed, completed, completed, completed,
 		completed, completed, completed, intent.RequestedBy,
 		createdAt.Format(timeFormatRFC3339Nano), value.Replayed)
+}
+
+func printSandboxDockerRuntimeInputProjection(a *App,
+	value sandbox.DockerRuntimeInputProjectionPlan,
+) {
+	fmt.Fprintf(a.out, "docker_runtime_input_plan: %s\ndocker_host_input_handoff: %s\ndocker_host_input_handoff_intent: %s\nattempt: %s\ndocker_plan: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nstatus: %s\ntrust_class: %s\noperation_key_digest: %s\nmanifest_fingerprint: %s\nmount_binding_fingerprint: %s\ninput_artifact_digest: %s\nauthority_fingerprint: %s\nspec_fingerprint: %s\ncontainer_plan_fingerprint: %s\nhandoff_fingerprint: %s\nhandoff_transport_fingerprint: %s\nbundle_report_fingerprint: %s\nbundle_digest: %s\nbundle_bytes: %d\nread_only_mounts: %d\ninput_artifacts: %d\nprojections: %d\ndirectory_roots: %d\nfile_roots: %d\nentries: %d\ncontent_bytes: %d\nprojection_bytes: %d\nprojection_set_fingerprint: %s\nrequest_fingerprint: %s\nprojection_fingerprint: %s\noperator_confirmed: %t\nexact_target_binding: %t\nall_volumes_read_only: %t\nall_volumes_no_copy: %t\nbundle_recaptured: %t\nbundle_digest_matched: %t\nraw_targets_stored: false\nraw_volume_names_stored: false\nraw_content_stored: false\ndaemon_contacted: false\ndaemon_applied: false\ncontainer_started: false\nprocess_executed: false\noutput_exported: false\nproduction_execution_submitted: false\nproduction_verified: false\nbackend_enabled: false\nexecution_authorized: false\nartifact_commit_authorized: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\n",
+		value.ID, value.HandoffID, value.HandoffIntentID, value.AttemptID,
+		value.ContainerPlanID, value.RunID, value.MissionID, value.WorkspaceID,
+		value.ProtocolVersion, value.Status, value.TrustClass, value.OperationKeyDigest,
+		value.ManifestFingerprint, value.MountBindingFingerprint,
+		value.InputArtifactDigest, value.AuthorityFingerprint, value.SpecFingerprint,
+		value.ContainerPlanFingerprint, value.HandoffFingerprint,
+		value.HandoffTransportFingerprint, value.BundleReportFingerprint,
+		value.BundleDigest, value.BundleBytes, value.ReadOnlyMountCount,
+		value.InputArtifactCount, value.ProjectionCount, value.DirectoryRootCount,
+		value.FileRootCount, value.TotalEntryCount, value.TotalContentBytes,
+		value.TotalProjectionBytes, value.ProjectionSetFingerprint,
+		value.RequestFingerprint, value.ProjectionFingerprint, value.OperatorConfirmed,
+		value.ExactTargetBinding, value.AllVolumesReadOnly, value.AllVolumesNoCopy,
+		value.BundleRecaptured, value.BundleDigestMatched, value.RequestedBy,
+		value.CreatedAt.Format(timeFormatRFC3339Nano), value.Replayed)
+	fmt.Fprintln(a.out, "projection_items:")
+	for _, item := range value.Items {
+		fmt.Fprintf(a.out, "%d\tkind=%s\tmanifest_mount_ordinal=%d\tentries=%d\tregular_files=%d\tdirectories=%d\tcontent_bytes=%d\tarchive_bytes=%d\ttarget_fingerprint=%s\tarchive_root_fingerprint=%s\tvolume_name_fingerprint=%s\tcontent_digest=%s\tarchive_digest=%s\troot_directory=true\tread_only=true\texact_target=true\tno_copy=true\tdaemon_applied=false\tcontainer_started=false\tprocess_executed=false\n",
+			item.Ordinal, item.Kind, item.ManifestMountOrdinal, item.EntryCount,
+			item.RegularFileCount, item.DirectoryCount, item.ContentBytes,
+			item.ProjectionArchiveBytes, item.TargetFingerprint,
+			item.ArchiveRootFingerprint, item.VolumeNameFingerprint,
+			item.ContentDigest, item.ProjectionArchiveDigest)
+	}
 }
 
 func printSandboxLifecycle(a *App, value sandbox.Lifecycle) {

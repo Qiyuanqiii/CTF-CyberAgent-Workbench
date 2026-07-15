@@ -125,6 +125,7 @@ const (
 	SandboxDockerHostInputHandoffRequirementEvent = "sandbox.docker_host_input_handoff_requirement_recorded"
 	SandboxDockerHostInputHandoffIntentEvent      = "sandbox.docker_host_input_handoff_intent_prepared"
 	SandboxDockerHostInputHandoffEvent            = "sandbox.docker_host_input_handoff_completed"
+	SandboxDockerRuntimeInputProjectionEvent      = "sandbox.docker_runtime_input_projection_planned"
 	AgentProtocolRepairRequestedEvent             = "agent.protocol_repair_requested"
 	AgentProtocolRepairStartedEvent               = "agent.protocol_repair_started"
 	AgentProtocolRepairCompletedEvent             = "agent.protocol_repair_completed"

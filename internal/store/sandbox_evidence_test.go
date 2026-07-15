@@ -482,7 +482,7 @@ func removeSchemaV58ForTestStatements() []string {
 }
 
 func removeSchemaV59ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV60ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_update_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_intent_delete_immutable`,
@@ -506,5 +506,28 @@ func removeSchemaV59ForTestStatements() []string {
 		`DROP TRIGGER trg_sandbox_docker_host_input_handoff_legacy_insert_immutable`,
 		`DROP TABLE sandbox_docker_host_input_handoff_legacy_attempts`,
 		`DELETE FROM schema_migrations WHERE version = 59`,
+	}...)
+}
+
+func removeSchemaV60ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_operation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_operation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_completion_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_completion_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_item_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_item_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_plan_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_plan_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_operation_insert`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_completion_insert`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_item_insert`,
+		`DROP TRIGGER trg_sandbox_docker_runtime_input_projection_plan_insert`,
+		`DROP TABLE sandbox_docker_runtime_input_projection_operations`,
+		`DROP TABLE sandbox_docker_runtime_input_projection_completions`,
+		`DROP TABLE sandbox_docker_runtime_input_projection_items`,
+		`DROP INDEX idx_sandbox_docker_runtime_input_projection_plans_run_created`,
+		`DROP TABLE sandbox_docker_runtime_input_projection_plans`,
+		`DELETE FROM schema_migrations WHERE version = 60`,
 	}
 }

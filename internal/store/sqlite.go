@@ -281,6 +281,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 57, Name: "descriptor sealed Docker host input staging", Statements: sandboxDockerHostInputStagingStatements},
 		{Version: 58, Name: "durable pre-stage Docker host input requirement", Statements: sandboxDockerHostInputRequirementStatements},
 		{Version: 59, Name: "recoverable Docker daemon host input handoff", Statements: sandboxDockerHostInputHandoffStatements},
+		{Version: 60, Name: "deterministic Docker runtime input projection plan", Statements: sandboxDockerRuntimeInputProjectionStatements},
 	})
 }
 

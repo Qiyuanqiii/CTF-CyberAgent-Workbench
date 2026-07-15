@@ -1,12 +1,17 @@
 package app
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +31,7 @@ var sandboxDockerAttemptIDPattern = regexp.MustCompile(`sandbox-docker-attempt-[
 var sandboxDockerRehearsalIDPattern = regexp.MustCompile(`sandbox-docker-rehearsal-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerHostInputIntentIDPattern = regexp.MustCompile(`sandbox-docker-host-input-intent-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerHostInputHandoffIntentIDPattern = regexp.MustCompile(`sandbox-docker-host-input-handoff-intent-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxDockerRuntimeInputPlanIDPattern = regexp.MustCompile(`sandbox-docker-runtime-input-plan-[0-9]{14}-[a-f0-9]{12}`)
 
 type cliDockerPlanObservationTransport struct {
 	imageDigest string
@@ -111,32 +117,87 @@ func (stager *cliDockerHostInputStager) Stage(_ context.Context,
 	request sandbox.HostInputBundleRequest,
 ) (sandbox.HostInputBundleReport, error) {
 	stager.stageCalls++
-	return stager.report(request)
+	_, report, err := stager.bundle(request)
+	return report, err
 }
 
 func (stager *cliDockerHostInputStager) Capture(_ context.Context,
 	request sandbox.HostInputBundleRequest,
 ) (sandbox.HostInputBundle, error) {
 	stager.captureCalls++
-	report, err := stager.report(request)
+	data, report, err := stager.bundle(request)
 	if err != nil {
 		return nil, err
 	}
-	bundle := &cliHostInputBundle{Reader: bytes.NewReader(make([]byte, 4096)), report: report}
+	bundle := &cliHostInputBundle{Reader: bytes.NewReader(data), report: report}
 	stager.lastBundle = bundle
 	return bundle, nil
 }
 
-func (stager *cliDockerHostInputStager) report(
+func (stager *cliDockerHostInputStager) bundle(
 	request sandbox.HostInputBundleRequest,
-) (sandbox.HostInputBundleReport, error) {
-	return sandbox.NewHostInputBundleReport(sandbox.HostInputBundleMeasurements{
+) ([]byte, sandbox.HostInputBundleReport, error) {
+	var output bytes.Buffer
+	writer := tar.NewWriter(&output)
+	sourceParts := []string{"sandbox_host_input_source_snapshot.v1",
+		strconv.Itoa(request.ReadOnlyMountCount())}
+	mountOrdinal := 0
+	for _, mount := range request.Manifest.Mounts {
+		if mount.Access != sandbox.MountReadOnly {
+			continue
+		}
+		mountOrdinal++
+		name := fmt.Sprintf("mounts/%03d", mountOrdinal)
+		header := &tar.Header{Name: name + "/", Typeflag: tar.TypeDir, Mode: 0o555,
+			Uid: 65532, Gid: 65532, ModTime: time.Unix(0, 0).UTC(),
+			AccessTime: time.Unix(0, 0).UTC(), ChangeTime: time.Unix(0, 0).UTC(),
+			Format: tar.FormatPAX}
+		if err := writer.WriteHeader(header); err != nil {
+			return nil, sandbox.HostInputBundleReport{}, err
+		}
+		sourceParts = append(sourceParts,
+			cliRuntimeInputFingerprint("sandbox_host_input_archive_path.v1", name),
+			strconv.Itoa(int(tar.TypeDir)), "0",
+			cliRuntimeInputFingerprint("sandbox_host_input_directory.v1", name))
+	}
+	for index, artifact := range request.Artifacts {
+		content := []byte(artifact.Content)
+		header := &tar.Header{Name: fmt.Sprintf("artifacts/%03d", index+1),
+			Typeflag: tar.TypeReg, Mode: 0o444, Size: int64(len(content)),
+			Uid: 65532, Gid: 65532, ModTime: time.Unix(0, 0).UTC(),
+			AccessTime: time.Unix(0, 0).UTC(), ChangeTime: time.Unix(0, 0).UTC(),
+			Format: tar.FormatPAX}
+		if err := writer.WriteHeader(header); err != nil {
+			return nil, sandbox.HostInputBundleReport{}, err
+		}
+		if _, err := writer.Write(content); err != nil {
+			return nil, sandbox.HostInputBundleReport{}, err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, sandbox.HostInputBundleReport{}, err
+	}
+	digest := sha256.Sum256(output.Bytes())
+	report, err := sandbox.NewHostInputBundleReport(sandbox.HostInputBundleMeasurements{
 		ReadOnlyMountCount: request.ReadOnlyMountCount(), ArtifactCount: len(request.Artifacts),
 		DirectoryCount: request.ReadOnlyMountCount(), ArtifactBytes: request.ArtifactBytes(),
-		BundleBytes: 4096, SourceSnapshotDigest: strings.Repeat("a", 64),
+		BundleBytes:           int64(output.Len()),
+		SourceSnapshotDigest:  cliRuntimeInputFingerprint(sourceParts...),
 		ArtifactPayloadDigest: request.ArtifactPayloadDigest(),
-		BundleDigest:          strings.Repeat("b", 64),
+		BundleDigest:          hex.EncodeToString(digest[:]),
 	}, time.Now().UTC())
+	return append([]byte(nil), output.Bytes()...), report, err
+}
+
+func cliRuntimeInputFingerprint(parts ...string) string {
+	hash := sha256.New()
+	for _, part := range parts {
+		value := []byte(part)
+		_, _ = fmt.Fprintf(hash, "%d:", len(value))
+		_, _ = hash.Write(value)
+		_, _ = hash.Write([]byte{'|'})
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func (transport *cliDockerHostInputHandoffTransport) Endpoint() sandbox.DockerObservationEndpoint {
@@ -837,6 +898,73 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		t.Fatalf("Docker host input handoff show leaked data: output=%s stderr=%s code=%d",
 			handoffShown, stderr, code)
 	}
+	if _, stderr, code := executeTestCommandWithDockerInputStaging(t, writer,
+		hostInputStager, "run", "sandbox", "docker-runtime-input-plan", handoffIntentID,
+		"--manifest", manifestPath, "--operation-key", "docker-runtime-input-cli"); code != 4 || !strings.Contains(stderr, "requires --confirm-runtime-input-plan") ||
+		hostInputStager.captureCalls != 1 {
+		t.Fatalf("Docker runtime input plan skipped confirmation: stderr=%s code=%d", stderr, code)
+	}
+	emptyRuntimePlans, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-runtime-input-plans", runID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(emptyRuntimePlans, "no Docker runtime input projection plans") {
+		t.Fatalf("unconfirmed runtime input plan left state: output=%s stderr=%s code=%d",
+			emptyRuntimePlans, stderr, code)
+	}
+	runtimePlanned, stderr, code := executeTestCommandWithDockerInputStaging(t, writer,
+		hostInputStager, "run", "sandbox", "docker-runtime-input-plan", handoffIntentID,
+		"--manifest", manifestPath, "--operation-key", "docker-runtime-input-cli",
+		"--confirm-runtime-input-plan")
+	if code != 0 || stderr != "" || hostInputStager.captureCalls != 2 ||
+		hostInputStager.lastBundle == nil || !hostInputStager.lastBundle.closed ||
+		!strings.Contains(runtimePlanned, "status: compiled_not_applied") ||
+		!strings.Contains(runtimePlanned, "operator_confirmed: true") ||
+		!strings.Contains(runtimePlanned, "exact_target_binding: true") ||
+		!strings.Contains(runtimePlanned, "all_volumes_read_only: true") ||
+		!strings.Contains(runtimePlanned, "raw_targets_stored: false") ||
+		!strings.Contains(runtimePlanned, "daemon_contacted: false") ||
+		!strings.Contains(runtimePlanned, "daemon_applied: false") ||
+		!strings.Contains(runtimePlanned, "process_executed: false") ||
+		!strings.Contains(runtimePlanned, "execution_authorized: false") ||
+		strings.Contains(runtimePlanned, "scripts") ||
+		strings.Contains(runtimePlanned, "/workspace") || strings.Contains(runtimePlanned, home) ||
+		strings.Contains(runtimePlanned, "cyberagent-runtime-") {
+		t.Fatalf("runtime input plan leaked data or widened authority: output=%s stderr=%s code=%d",
+			runtimePlanned, stderr, code)
+	}
+	runtimePlanID := sandboxDockerRuntimeInputPlanIDPattern.FindString(runtimePlanned)
+	if runtimePlanID == "" {
+		t.Fatalf("missing Docker runtime input plan id: %s", runtimePlanned)
+	}
+	runtimeReplay, stderr, code := executeTestCommandWithDockerInputStaging(t, writer,
+		hostInputStager, "run", "sandbox", "docker-runtime-input-plan", handoffIntentID,
+		"--manifest", manifestPath, "--operation-key", "docker-runtime-input-cli",
+		"--confirm-runtime-input-plan")
+	if code != 0 || stderr != "" || hostInputStager.captureCalls != 2 ||
+		!strings.Contains(runtimeReplay, "docker_runtime_input_plan: "+runtimePlanID) ||
+		!strings.Contains(runtimeReplay, "replayed: true") {
+		t.Fatalf("runtime input plan replay recaptured data: output=%s stderr=%s code=%d",
+			runtimeReplay, stderr, code)
+	}
+	runtimeList, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-runtime-input-plans", runID)
+	if code != 0 || stderr != "" || !strings.Contains(runtimeList, runtimePlanID) ||
+		!strings.Contains(runtimeList, "status=compiled_not_applied") ||
+		!strings.Contains(runtimeList, "daemon_applied=false") ||
+		strings.Contains(runtimeList, "/workspace") || strings.Contains(runtimeList, home) {
+		t.Fatalf("runtime input plan list leaked data: output=%s stderr=%s code=%d",
+			runtimeList, stderr, code)
+	}
+	runtimeShown, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-runtime-input-plan-show", runtimePlanID)
+	if code != 0 || stderr != "" || !strings.Contains(runtimeShown, "projection_items:") ||
+		!strings.Contains(runtimeShown, "root_directory=true") ||
+		!strings.Contains(runtimeShown, "read_only=true") ||
+		strings.Contains(runtimeShown, "scripts") || strings.Contains(runtimeShown, "/workspace") ||
+		strings.Contains(runtimeShown, home) || strings.Contains(runtimeShown, "cyberagent-runtime-") {
+		t.Fatalf("runtime input plan show leaked data: output=%s stderr=%s code=%d",
+			runtimeShown, stderr, code)
+	}
 	attemptList, stderr, code := executeTestCommand(t, "run", "sandbox",
 		"docker-attempts", runID)
 	if code != 0 || stderr != "" ||
@@ -881,7 +1009,7 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		hostInputStager,
 		"run", "sandbox", "docker-rehearse", planID, "--manifest", manifestPath,
 		"--operation-key", "docker-rehearsal-cli", "--confirm-daemon-write")
-	if code != 0 || stderr != "" || writer.calls != 1 || hostInputStager.captureCalls != 1 ||
+	if code != 0 || stderr != "" || writer.calls != 1 || hostInputStager.captureCalls != 2 ||
 		handoffTransport.calls != 1 ||
 		!strings.Contains(rehearsalReplay, "docker_rehearsal: "+rehearsalID) ||
 		!strings.Contains(rehearsalReplay, "replayed: true") {
