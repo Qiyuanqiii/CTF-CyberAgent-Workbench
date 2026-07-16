@@ -706,6 +706,12 @@ v63 最终本地门禁通过：最终代码全仓普通/race 分别用时 196.9 
 
 本切片没有 migration，schema 仍为 v63；五个内置 Skill 仍是唯一可被 Run 选择的产品 Skill。用户 Registry、`skill import/installed/remove`、外部 Run 选择以及 Desktop/HTTP 上传均未开放。按最新产品优先级，下一切片改为 schema v64 content-addressed 用户 Skill Registry 与不可变安装/卸载账本；原 P6 机器生成 Linux real-daemon 生产证据账本顺延至 schema v65 或以后，v63 的所有 Docker blocker 与 start 禁用状态完全不变。
 
+非 schema 的受保护删除守卫切片完成 Go Policy 加固。Shell 原始命令以及结构化 ScriptProcess/Sandbox executable/argv 会在任何审批前检查递归删除、绝对/`..`/通配目标、环境变量、命令替换、当前用户目录和常见 PowerShell、`cmd`、Python、Node 删除形式；命中后固定为 `critical` 永久拒绝，理由不包含实际主目录，逐次审批和 Session Grant 不能扩权。Policy 工具参数按键排序，避免 Go map 遍历影响安全决策指纹。README、日志、模型说明和 read-only 工具内容仍是非执行证据，不因出现示例命令而被赋予执行语义。
+
+定向审计先发现并修复 Node `require('fs').rmSync(...)` 与参数开头 `../` 的漏判，又修正了 PowerShell `-Force` 被紧凑 Unix flag 逻辑误认成递归删除的误报。Shell Gateway 测试证明永久拒绝无法被操作者批准并且不会产生 dry-run 输出；ScriptProcess 集成测试证明结构化删除意图以 `execution_mode=disabled` 终止。ADR 0025 明确该分类器只是纵深防御，不能识别任意间接脚本、构建钩子或编码载荷；未来真实执行仍必须用 OS/容器把宿主根设为不可见/只读，并通过 Go-owned typed workspace delete 完成受限删除。Local/container process 继续关闭，本切片无 migration、无新工具或文件副作用，schema 保持 v63，下一切片仍为 schema v64 Skill Registry。
+
+本切片最终本地门禁通过：最终全仓普通测试 197.0 秒、全仓 race 222.6 秒，新增三层安全链路 race 20 轮，Policy fuzz 约 40.6 万次，Policy/Gateway/Application 高频回归 100/50/50 轮；vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、严格 TypeScript、8 个文件 17 项前端测试、OpenAPI 无漂移、production build、零漏洞 npm audit，以及凭据/运行产物/乱码/Markdown 链接/diff 扫描全部通过。凭据模式只命中 6 个既有合成脱敏夹具；未发现未解决高/中风险。本机额外 Linux 交叉编译因宿主命令策略拒绝清理临时产物而未重复执行，不绕过该保护，推送后的 GitHub Linux CI 作为平台验证。
+
 本切片最终发布门禁通过：最终代码全仓普通/race 分别用时 239.4 秒/226.8 秒；vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、20 秒约 2645 万次 parser fuzz、`internal/skills` 78.5% 语句覆盖、parser 100 轮与 CLI 20 轮重复回归、严格 TypeScript、8 个文件 17 项前端测试、OpenAPI 无漂移、production build、零漏洞 npm audit，以及凭据/运行产物/乱码/Markdown 链接/diff 扫描全部通过。凭据扫描只命中既有脱敏测试中的合成 `sk-123...` 夹具。代码审计固定了 central-directory creator version 和 Deflate 精确耗尽，关闭有效压缩流后的隐藏载荷通道，替换测试中的弃用时间 API，并把文件系统 cause 包在稳定、无源路径回显的类型化 CLI 错误后；当前未发现未解决高/中风险。GitHub Actions run `29512332025` 已通过提交 `55b3fae`，Go/Linux 与 TypeScript 作业分别用时 3 分 4 秒和 20 秒。
 
 ## 八、仓库同步与恢复约定
@@ -714,4 +720,4 @@ v63 最终本地门禁通过：最终代码全仓普通/race 分别用时 196.9 
 
 每次完成一个开发切片后，依次执行功能复核、测试、代码与安全审计、项目记忆更新、Git 提交和 GitHub 推送。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0024-strict-inert-skill-package.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0025-protected-delete-command-guard.md`。

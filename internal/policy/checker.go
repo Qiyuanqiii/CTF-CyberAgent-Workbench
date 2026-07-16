@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	"cyberagent-workbench/internal/tools"
@@ -47,7 +48,8 @@ type Checker interface {
 }
 
 type DefaultChecker struct {
-	denyPatterns []*regexp.Regexp
+	denyPatterns    []*regexp.Regexp
+	protectedDelete protectedDeleteGuard
 }
 
 var agentDeliveryCheckpointMutation = regexp.MustCompile(
@@ -71,10 +73,13 @@ func NewDefaultChecker() DefaultChecker {
 	for _, phrase := range phrases {
 		patterns = append(patterns, regexp.MustCompile(phrase))
 	}
-	return DefaultChecker{denyPatterns: patterns}
+	return DefaultChecker{denyPatterns: patterns, protectedDelete: newProtectedDeleteGuard()}
 }
 
 func (c DefaultChecker) CheckText(context string, text string) Decision {
+	if isShellExecutionContext(context) && c.protectedDelete.BlocksRawCommand(text) {
+		return protectedDeleteDecision()
+	}
 	for _, pattern := range c.denyPatterns {
 		if pattern.MatchString(text) {
 			return Decision{
@@ -88,9 +93,18 @@ func (c DefaultChecker) CheckText(context string, text string) Decision {
 }
 
 func (c DefaultChecker) CheckToolCall(call tools.Call) Decision {
+	if c.protectedDelete.BlocksToolCall(call) {
+		return protectedDeleteDecision()
+	}
 	var parts []string
 	parts = append(parts, call.Name)
-	for k, v := range call.Args {
+	keys := make([]string, 0, len(call.Args))
+	for k := range call.Args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		v := call.Args[k]
 		parts = append(parts, k, v)
 	}
 	joined := strings.Join(parts, " ")

@@ -173,6 +173,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] schema v15 增加 `run_memory` action class、`work_item_create`/`note_create` 严格 schema、`structured_tool_operations` 摘要账本，以及 `tool schema/invoke` CLI；相同意图跨进程并发只创建一个实体。
 - [x] schema v16 将 Provider ToolCall arguments 映射为规范化 Gateway payload，以 Run/turn/工具/脱敏意图生成稳定 operation key；模型 call ID 不持久化，并实现有界、可恢复、白名单结构化工具循环。
 - [x] schema v30 增加 Supervisor-only `specialist_delegation_propose` 与独立 `agent_proposal` class；严格协议在预算前校验，语义越权作为有界错误回传，成功结果明确 `admission_authorized=false`，CLI 仅提供只读 proposal 检查。
+- [x] 非 schema 的 ADR 0025 受保护删除守卫在审批前永久拒绝递归、绝对/越界/通配、环境变量/命令替换目标及常见 PowerShell/`cmd`/Python/Node 删除形式；Shell、ScriptProcess、Sandbox 共用 Go Policy，非执行证据不扩权，真实进程仍保持关闭。
 
 验收标准：没有工具可以绕过 Scope、Policy、Approval 和 Event Store；旁路执行扫描为零。
 

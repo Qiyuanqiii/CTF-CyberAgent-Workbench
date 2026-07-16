@@ -97,6 +97,28 @@ func TestSandboxManifestServicePersistsPolicyDenialWithoutRawIntent(t *testing.T
 	}
 }
 
+func TestSandboxManifestServicePermanentlyDeniesProtectedDelete(t *testing.T) {
+	ctx := context.Background()
+	st, run, _ := newSandboxManifestTestRuntime(t, ctx)
+	service := NewSandboxManifestService(st, policy.NewDefaultChecker())
+	manifest := sandboxManifestTestFixture()
+	manifest.Command.Executable = "rm"
+	manifest.Command.Arguments = []string{"-rf", "$HOME"}
+	result, err := service.Prepare(ctx, PrepareSandboxManifestRequest{
+		RunID: run.ID, Manifest: manifest, OperationKey: "sandbox-protected-delete",
+		RequestedBy: "test_operator",
+	})
+	if apperror.CodeOf(err) != apperror.CodePolicyDenied || result.Preparation.ID == "" ||
+		result.Validation.PolicyAllowed || result.Validation.NeedsApproval ||
+		result.Validation.ApprovalStatus != sandbox.ApprovalNotApplicable || result.Validation.Risk != "critical" ||
+		result.Validation.BackendEnabled || result.Validation.ExecutionAuthorized {
+		t.Fatalf("protected Sandbox deletion was not permanently denied: %#v err=%v", result, err)
+	}
+	if _, err := service.RequestApproval(ctx, result.Preparation.ID, "test_operator"); apperror.CodeOf(err) != apperror.CodePolicyDenied {
+		t.Fatalf("approval request widened protected-delete denial: %v", err)
+	}
+}
+
 func TestSandboxManifestServiceRefusesScopeWideningAndMarksApprovalBoundary(t *testing.T) {
 	ctx := context.Background()
 	st, run, _ := newSandboxManifestTestRuntime(t, ctx)

@@ -432,6 +432,33 @@ func TestGatewayShellProposalApprovalAndPolicyDenial(t *testing.T) {
 	}
 }
 
+func TestGatewayProtectedDeleteCannotBeApproved(t *testing.T) {
+	ctx := context.Background()
+	store := newMemoryStore()
+	gateway := New(store, policy.NewDefaultChecker())
+	denied, err := gateway.Invoke(ctx, ToolCall{
+		Name: ShellTool, SessionID: "sess-protected-delete", WorkspaceID: "ws-protected-delete",
+		Arguments: map[string]string{"command": `rm -rf $HOME`}, RequestedBy: "root",
+	})
+	if err != nil || denied.Proposal == nil || denied.Proposal.Status != StatusDenied ||
+		denied.Decision.Allowed || denied.Decision.Approval != ApprovalNever || denied.Decision.Risk != "critical" {
+		t.Fatalf("protected deletion was not denied before approval: %#v err=%v", denied, err)
+	}
+	if _, err := gateway.Review(ctx, ReviewRequest{
+		Action: ReviewApprove, Tool: ShellTool, ProposalID: denied.Proposal.ID,
+		ReviewedBy: "operator", IdempotencyKey: "cannot-override-protected-delete",
+	}); err == nil {
+		t.Fatal("operator approval overrode a permanent protected-delete denial")
+	}
+	persisted, err := store.GetToolRun(ctx, denied.Proposal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != toolrun.StatusDenied || persisted.Stdout != "" || persisted.ExitCode != 0 {
+		t.Fatalf("denied protected deletion acquired an execution result: %#v", persisted)
+	}
+}
+
 func TestGatewayFileEditProposalApprovalAndAdapterCompatibility(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

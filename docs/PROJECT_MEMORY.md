@@ -37,8 +37,9 @@ Read in this order after a long context break:
 27. `docs/adr/0022-retained-runtime-input-resource-lifecycle.md`
 28. `docs/adr/0023-blocked-docker-start-gate-review.md`
 29. `docs/adr/0024-strict-inert-skill-package.md`
-30. `docs/DESKTOP_PLAN.md`
-31. `docs/SKILL_PACKAGE_PLAN.md`
+30. `docs/adr/0025-protected-delete-command-guard.md`
+31. `docs/DESKTOP_PLAN.md`
+32. `docs/SKILL_PACKAGE_PLAN.md`
 
 ## Current Baseline
 
@@ -52,6 +53,7 @@ Read in this order after a long context break:
 - Main languages: Go control plane, TypeScript React/Vite read console; Rust has not started.
 - Desktop status: no desktop binary or installer exists yet. D0 will evaluate a Wails shell around the existing React console while all business authority stays behind Go HTTP/SSE/OpenAPI; installer/registry/update work is deferred to D2. See `docs/DESKTOP_PLAN.md`.
 - Custom Skill status: the five embedded `skill.v1` guides remain the only product-loadable Skills. The strict deterministic `skill_package.v1` in-memory parser/fuzzer and metadata-only `skill package validate` CLI now exist, but validation is inert: there is no user `import/install/upload`, persistent user Registry, Run selection for external packages, or Desktop/HTTP upload endpoint. See ADR 0024 and `docs/SKILL_PACKAGE_PLAN.md`.
+- Protected-delete status: explicit recursive, absolute/traversing/wildcard, environment-derived, command-substituted, current-home, PowerShell/`cmd`, and common interpreter deletion intents are permanently denied before approval across Shell, ScriptProcess, and Sandbox Policy. This is defense in depth; Local/container process execution remains disabled and a future executor still requires OS/container isolation. See ADR 0025.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
 
@@ -65,6 +67,7 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 - `skill_package.v1` is accepted only as bounded untrusted input to a pure in-memory validator. Successful parsing never installs, selects, executes, persists, calls a Provider/network/tool, or grants declared tool dependencies; every preview authority bit remains false.
 - The 1/2/4/6 Fan-out pool is separate, read-only, tool-free, network-free, write-free, and creates no Agent.
 - Dangerous cyber commands remain permanently denied; approval cannot override permanent Policy denial.
+- Protected or unresolved deletion through executable Shell/ScriptProcess/Sandbox intent is a critical permanent denial. Non-executable evidence is not reclassified as a command, and passing the classifier can never authorize host execution.
 - External files, repository text, logs, web/mail, tool output, and memory are untrusted evidence with `instruction_authorized=false`; they never become system/assistant authority through persistence or compaction.
 - Shell and ScriptProcess approval paths are dry-run only. Real Local and container-process command execution is disabled.
 - `sandbox_manifest.v1`, `sandbox_execution_candidate.v1`, `sandbox_execution.v1`, `sandbox_preflight.v1`, `sandbox_backend_evidence.v1`, `sandbox_output_simulation.v1`, `sandbox_docker_observation.v1`, `sandbox_docker_container_plan.v1`, `sandbox_docker_container_rehearsal.v1`, `sandbox_docker_container_rehearsal_attempt.v1`, `sandbox_docker_host_input_staging.v1`, `sandbox_docker_host_input_requirement.v1`, the v59 handoff, v60 projection plan, v61 runtime-input application, v62 retained-resource lifecycle, and v63 start-gate review are evidence, preparation, cleanup, or design facts, never process-execution permits. Schemas v48-v63 fix execution, start, export, and production Artifact-commit capabilities to false even after exact operator approval.
@@ -146,6 +149,10 @@ The docs-only run `29444664401` exposed an npm-registry advisory-endpoint outage
 The first non-schema `skill_package.v1` slice adds a strict pure-memory ZIP parser, immutable metadata preview, canonical semantic fingerprint, raw archive digest, adversarial tests, and fuzzing. The only product entry is `skill package validate`: it performs a bounded regular-file read with symlink and identity-change rejection, prints no body/source path, creates no database, and keeps install, command, network, Provider, tool, and capability authority false. The accepted profile is exactly two ordered Deflate entries (`manifest.json`, `SKILL.md`) with fixed ZIP 2.0 data descriptors, zero metadata, no prefix/gaps/tail, a 64 KiB archive cap, bounded decompression/ratio, CRC/header agreement, and the existing strict `skill.v1` semantic checks. ADR 0024 records the boundary. This slice adds no migration, user Registry, import/install command, Run selection, or Desktop/HTTP upload.
 
 The final package-validation gate passed full ordinary/race suites in 239.4s/226.8s, vet, zero-warning staticcheck, module verification/tidy diff, zero-finding govulncheck, 20 seconds and about 26.45 million parser fuzz executions, 78.5% `internal/skills` statement coverage, 100 parser and 20 CLI repetitions, strict TypeScript, 17 frontend tests across 8 files, OpenAPI/build/npm audit, and credential/runtime-artifact/replacement-character/Markdown-link/diff scans. The audit pinned the central-directory creator version and exact Deflate-stream exhaustion to close hidden post-stream payloads, replaced a deprecated test fixture API, and wrapped filesystem causes behind stable path-free CLI errors. Synthetic redaction fixtures are the only key-pattern scan matches. No unresolved high/medium issue is known. GitHub Actions run `29512332025` passed commit `55b3fae` with Go/Linux in 3m4s and TypeScript in 20s.
+
+The non-schema protected-delete slice adds a path-free critical permanent Policy decision before approval for explicit recursive, absolute/traversing/wildcard, environment-derived, command-substituted, current-home, PowerShell/`cmd`, and common interpreter deletion forms. Raw Shell and decoded ScriptProcess/Sandbox intents share the guard; argument-map ordering is deterministic, ordinary evidence remains non-executable, and denied proposals cannot acquire a dry-run result through operator approval. The focused audit fixed Node `require('fs').rmSync(...)`, leading `../`, and PowerShell `-Force` classification edge cases. ADR 0025 records that this classifier is only defense in depth: opaque scripts/build tools require OS/container isolation, and Local/container process execution remains disabled. This slice adds no migration or authority; schema remains v63 and the planned Skill Registry remains v64.
+
+The final local gate passed the full ordinary suite in 197.0s and the full race suite in 222.6s, plus 20 repeated race runs across the Policy/Gateway/Application protected-delete paths, about 406,000 fuzz executions, 100/50/50 focused repetitions, vet, zero-warning staticcheck, module verification/tidy diff, zero-finding govulncheck, strict TypeScript, 17 frontend tests, OpenAPI/build/npm audit, and credential/runtime-artifact/replacement-character/Markdown-link/diff scans. The credential pattern scan found only six existing synthetic redaction fixtures. No unresolved high/medium issue is known. Local Linux cross-compilation was not repeated because the host command policy rejected the temporary-artifact cleanup command; GitHub Linux CI remains the platform proof after push.
 
 ## Next Slice
 

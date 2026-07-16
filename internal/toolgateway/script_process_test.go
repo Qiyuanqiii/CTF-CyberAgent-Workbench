@@ -78,3 +78,26 @@ func TestScriptProcessGatewayReviewCompletesOnlyAsDryRun(t *testing.T) {
 		t.Fatalf("script process approval was not a typed dry run: %#v err=%v", reviewed, err)
 	}
 }
+
+func TestScriptProcessGatewayPermanentlyDeniesProtectedDelete(t *testing.T) {
+	store := newMemoryStore()
+	gateway := New(store, nil)
+	outcome, err := gateway.ProposeScriptProcess(t.Context(), ToolCall{
+		Name: ScriptProcessTool, RunID: "run-delete", SessionID: "sess-delete", WorkspaceID: "ws-delete",
+		WorkspaceRoot: t.TempDir(), RequestedBy: "test",
+	}, ScriptProcessProposal{
+		Executable: "python", Arguments: []string{"-c", `import shutil; shutil.rmtree('/workspace')`},
+	})
+	if err != nil || outcome.Proposal == nil || outcome.Proposal.Status != StatusDenied ||
+		outcome.Decision.Allowed || outcome.Decision.Approval != ApprovalNever || outcome.Decision.Risk != "critical" ||
+		outcome.Execution != nil {
+		t.Fatalf("protected ScriptProcess deletion was not permanently denied: %#v err=%v", outcome, err)
+	}
+	process, err := store.GetScriptProcess(t.Context(), outcome.Proposal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if process.Status != "denied" || process.ExecutionMode != "disabled" || process.Stdout != "" {
+		t.Fatalf("denied ScriptProcess acquired execution state: %#v", process)
+	}
+}
