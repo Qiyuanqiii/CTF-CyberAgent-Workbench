@@ -554,7 +554,7 @@ func removeSchemaV61ForTestStatements() []string {
 }
 
 func removeSchemaV62ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV63ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_docker_runtime_input_application_lease_delete_immutable_v62`,
 		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_cleanup_lease_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_runtime_input_resource_cleanup_result_delete_immutable`,
@@ -578,5 +578,29 @@ func removeSchemaV62ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_docker_runtime_input_resource_inspections_run_created`,
 		`DROP TABLE sandbox_docker_runtime_input_resource_inspections`,
 		`DELETE FROM schema_migrations WHERE version = 62`,
+	}...)
+}
+
+func removeSchemaV63ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_docker_start_gate_review_operation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_start_gate_review_operation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_process_lifecycle_transition_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_process_lifecycle_transition_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_process_lifecycle_blueprint_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_process_lifecycle_blueprint_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_start_gate_review_check_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_start_gate_review_check_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_start_gate_review_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_start_gate_review_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_start_gate_review_operation_insert`,
+		`DROP TRIGGER trg_sandbox_docker_start_gate_review_insert`,
+		`DROP TABLE sandbox_docker_start_gate_review_operations`,
+		`DROP TABLE sandbox_docker_process_lifecycle_transitions`,
+		`DROP TABLE sandbox_docker_process_lifecycle_blueprints`,
+		`DROP TABLE sandbox_docker_start_gate_review_checks`,
+		`DROP INDEX idx_sandbox_docker_start_gate_reviews_run_created`,
+		`DROP TABLE sandbox_docker_start_gate_reviews`,
+		`DELETE FROM schema_migrations WHERE version = 63`,
 	}
 }

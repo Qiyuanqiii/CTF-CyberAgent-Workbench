@@ -230,7 +230,10 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] schema v62 为 v61 保留的 target/volumes 增加显式 metadata-only inspect 与 exact-owned cleanup/reconciliation 命令。检查不重捕获输入；完整 read-only/`NoCopy` 证明只在 target 与全部卷精确存在时成立。清理要求独立双确认、写前 intent、generation lease、全资源预检、foreign collision 零 DELETE、target 先删、最终全缺失复核，失败可释放并接管；迁移不虚构历史事实，决策见 ADR 0022。
 - [x] v62 定向 Sandbox/Store/Application/CLI/迁移/SQL/隐私/平台能力测试通过；审计同时固定 lease 不可删除和终态时间必须位于当前活跃租约窗。Linux opt-in harness 已延伸到 v62 inspection/cleanup，但本机 Windows 无 Docker，真实执行仍待 Linux 人工环境。
 - [x] v62 最终发布门禁通过全仓普通/race（313.6 秒/329.6 秒）、vet/staticcheck/module/govulncheck、严格 TypeScript、17 项前端测试、OpenAPI/构建/npm audit、仓库扫描、Linux 交叉编译、隔离二进制 smoke 与四层高频回归；GitHub Actions run `29444398815` 已通过功能提交 `d250d32`，未发现未解决高/中风险。
-- [ ] schema v63 先做 start gate 的设计与生产证据复核，再单独实现 per-run start/wait/TERM/KILL/orphan 生命周期；不得把 v59 handoff、v60 projection compilation、v61 never-started target 或 v62 cleanup 当作进程隔离证据。
+- [x] schema v63 已完成 design-only start-gate review：16 项 v51 检查固定映射为未验证阻塞项，11 条未来 per-Run start/wait/TERM/KILL/orphan 转换固定为未实现、未授权；结果只能是 `blocked/deny_start`，且无 daemon/input/process/output/Artifact 能力。决策见 ADR 0023。
+- [x] v63 定向 Sandbox/Store/Application/CLI/迁移/并发/SQL/隐私测试通过；幂等重放、跨 Store 收敛、迁移不伪造历史、全链复核和 false authority 投影均有覆盖。
+- [x] v63 最终本地发布门禁通过：全仓普通/race（196.9 秒/212.3 秒）、vet/staticcheck/module/govulncheck、TypeScript/OpenAPI/build/npm audit、仓库扫描、Linux 交叉编译、隔离 schema-v63 二进制 smoke 与 Sandbox/Store/Application/CLI 20/15/10/10 轮回归；未发现未解决高/中风险。
+- [ ] schema v64 建立机器生成的 Linux real-daemon 生产证据账本；只接受规范化 suite/environment/check digest，不接受操作者手写结论，不保存原始 daemon/resource/path 数据，也不授予 start。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
 - [ ] 网络默认关闭，后续仅允许显式 allowlist。
 - [ ] 支持真实执行、stdin、超时/kill、日志和原子 Output Artifact 导出；v51 只固定要求，v52 只验证输出假事务，v53 只读取元数据，v54 只编译并假写，v55-v56 只操作未启动容器，v57-v58 只固定本地输入，v59 只完成 never-started daemon handoff，v60 只编译 projection，v61 只应用只读卷并保留未启动 target，v62 只检查/清理资源，均未启用进程执行或生产 Artifact。
@@ -241,7 +244,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 
 ## P7：Skills 与 Profiles
 
-状态：进行中；只读 `skill.v1` Registry、schema v39 Run 选择、schema v40 root 上下文交付、schema v41 Go-owned Run 模式、schema v42 Plan 提案/操作者选择、schema v43 来源隔离、schema v44 Delivery 检查点门禁、schema v45-v46 操作者引导队列与控制，以及 schema v47 Specialist 最小 Skill 上下文已完成
+状态：进行中；只读 `skill.v1` Registry、schema v39 Run 选择、schema v40 root 上下文交付、schema v41 Go-owned Run 模式、schema v42 Plan 提案/操作者选择、schema v43 来源隔离、schema v44 Delivery 检查点门禁、schema v45-v46 操作者引导队列与控制，以及 schema v47 Specialist 最小 Skill 上下文已完成；自定义技能包导入/上传尚未实现，计划见 `docs/SKILL_PACKAGE_PLAN.md`
 
 - [x] 定义有界 `skill.v1` manifest：名称、版本、描述、Profile、工具依赖、内容路径、字节数、保守 token 上界与 SHA-256。
 - [x] 实现内嵌只读 Skill Registry、严格 JSON/UTF-8/路径/校验和验证，以及 `skill list/show/validate`；命令不创建运行数据库。
@@ -257,6 +260,13 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] schema v45 增加持久化操作者引导队列：Run 忙碌时按序接收追加要求，在安全 turn 边界投递且不打断活动工具调用；失败/重启重新准备、Session 消息原子提交、后续输入延后 finish/wait，HTTP/Web 只读且不公开正文或内部身份。
 - [x] schema v46 增加 pending-only 操作者取消账本、明确 idle/paused wake/drain 策略和普通 Session 跨进程幂等标识；禁止编辑、重排或取消 prepared 消息，模型/child/HTTP 不获得写入权限。
 - [x] schema v47 为每个 Specialist Attempt 从父 Run 固定选择派生最多一项 Skill；Code/Cyber 目录分离，`plan-delivery` 保持 root-only，assignment 不能选择或扩权，metadata-only 两阶段来源账本与首次模型调用原子绑定。
+- [ ] 固定 `skill_package.v1` 与威胁模型：第一版只允许单一严格 Manifest + UTF-8 Markdown，拒绝路径逃逸、链接、特殊文件、重复/大小写碰撞、ZIP bomb、尾随数据、脚本和安装钩子。
+- [ ] 实现纯 Go 包 parser/validator/fuzzer，以及 `skill package validate`；校验阶段不写磁盘、不联网、不调用模型或工具。
+- [ ] 实现 content-addressed 用户 Skill Registry、不可变安装/卸载账本、原子导入与恢复，以及 `skill import/installed/remove`；同名同版本异内容冲突，已被 Run 固定的版本不可删除。
+- [ ] 将外部包标记为 `operator_installed_untrusted`，要求显式安装与 Run 选择；工具声明不授予能力，交付继续经过 hash/Profile/预算/脱敏/来源复核。
+- [ ] 自定义 Code/Cyber Catalog 严格分离；Cyber 仅接收明确兼容的窄化 Skill，不自动继承 Code Catalog。
+- [ ] Desktop D1 由 Go 提供文件选择、metadata-only 风险预览和确认安装；TypeScript 不解压、不校验、不写 Registry。回环上传 API 使用独立 control token、Origin/Host、大小和幂等门禁。
+- [ ] 签名包、团队 Catalog、URL/Git 安装和 Marketplace 后置；签名只证明来源/完整性，不授予 Policy、Tool 或 Sandbox 权限。
 - [ ] CTF Skills 保留目录规范但暂不实现求解内容。
 
 验收标准：Skill 可测试、版本固定、来源可追踪；未分配 Skill 不进入 Agent 上下文，声明的工具依赖不产生授权。
@@ -284,7 +294,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 
 ## P9：TUI、Headless、API 与 TypeScript
 
-状态：部分完成；loopback-only `api.v1` 读取面、独立授权的 root/Specialist 活动调用取消、Go 生成的 OpenAPI 3.1 契约、有界 Run-event SSE、`headless.v1` NDJSON 与稳定终态退出码、持久事件驱动的 Run-first TUI、React/Vite Run/Agent/delegation/Fan-out/Finding 只读控制台及显式 Go 同源生产托管已落地
+状态：部分完成；loopback-only `api.v1` 读取面、独立授权的 root/Specialist 活动调用取消、Go 生成的 OpenAPI 3.1 契约、有界 Run-event SSE、`headless.v1` NDJSON 与稳定终态退出码、持久事件驱动的 Run-first TUI、React/Vite Run/Agent/delegation/Fan-out/Finding 只读控制台及显式 Go 同源生产托管已落地；Windows Desktop 分阶段路线已确定但尚未实现，计划见 `docs/DESKTOP_PLAN.md`
 
 可复用：Bubble Tea Session picker、消息区、工具审批和异步状态。
 
@@ -304,6 +314,11 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] 在 Go DTO/契约先行的前提下增加 Agent graph、delegation/Fan-out 与 Finding/Report 只读 Web 视图；列表有界分页，Fan-out 摘要查询不读取 raw report/digest/lease，生命周期 DTO 不公开私有 operator narrative 或 Artifact 正文。
 - [x] 在 Run detail、TUI 与 React 增加 schema v42 Plan/Delivery 只读投影；只显示有界方向/模块、选择与 WorkItem 映射，不公开 operation/lease/requester 内部身份，也不提供选择或阶段切换控件。
 - [x] 扩展 CLI/TUI/HTTP/Web/Headless 跨入口契约矩阵：固定 `running/paused/completed/failed/cancelled`、终态退出码与事件尾；以 53 条真实 Run/Session 验证 TUI 50 条截断和 HTTP 20/20/13 opaque-cursor 分页，并固定空集合及 Headless 从尾序号零事件续传。
+- [ ] Desktop D0：验证 Wails + 现有 React/Vite + Go HTTP/SSE/OpenAPI，建立 `cmd/cyberagent-desktop`、窗口生命周期、单实例、回环令牌和 CLI 并存契约；只做开发/便携只读壳，不做安装器、注册表、自启动、更新或后台服务。
+- [ ] Desktop D0 安全门：生产模式禁止远程导航/开发者工具，固定 CSP、外部链接、资源完整性和渲染进程权限；TS 不接触密钥、Shell、Docker、Scope 或工作区外文件。
+- [ ] Desktop D1（产品可用度约 65-70%）：通过 Go mutation API 增加 Run/Session、Plan、引导队列、审批、Diff 和 Skill 管理；关闭窗口不取消 Run，CLI/Desktop 并发与重启恢复通过审计。
+- [ ] Desktop D2（产品可用度约 75-80%）：发布便携 ZIP 与签名 MSIX，处理 WebView2 检测、per-user 安装、升级/降级、卸载、用户数据保留、SBOM、哈希与签名；自动更新另设门禁。
+- [ ] Desktop D3：企业 MSI、Store、远程环境、自定义协议、文件关联、自启动和后台服务按需独立立项，不在基础桌面端默认启用。
 - [ ] Monaco/xterm.js 只展示 Go 授权的编辑和终端会话。
 
 验收标准：CLI、TUI、CI、Web 对同一 Run 显示一致状态；关闭 UI 不会停止后台 Run。当前 golden 已固定五类 Run lifecycle、Run/Mission/Session/status、完整 event sequence/tail、Agent count、Headless 0/4/7 终态退出、TUI 截断、HTTP cursor、空页和零事件续传语义；前端测试同时固定终态徽标、opaque cursor 追加与 bearer 不进入 URL。

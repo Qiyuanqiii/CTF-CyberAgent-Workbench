@@ -35,6 +35,7 @@ var sandboxDockerRuntimeInputPlanIDPattern = regexp.MustCompile(`sandbox-docker-
 var sandboxDockerRuntimeInputApplicationIDPattern = regexp.MustCompile(`sandbox-docker-runtime-input-application-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerRuntimeInputResourceInspectionIDPattern = regexp.MustCompile(`sandbox-docker-runtime-input-resource-inspection-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerRuntimeInputResourceCleanupIDPattern = regexp.MustCompile(`sandbox-docker-runtime-input-resource-cleanup-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxDockerStartGateReviewIDPattern = regexp.MustCompile(`sandbox-docker-start-gate-review-[0-9]{14}-[a-f0-9]{12}`)
 
 type cliDockerPlanObservationTransport struct {
 	imageDigest string
@@ -1275,6 +1276,69 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		!strings.Contains(resourceCleanupResume, "replayed: true") {
 		t.Fatalf("completed runtime resource cleanup resume was not metadata-only: output=%s stderr=%s code=%d",
 			resourceCleanupResume, stderr, code)
+	}
+	if _, stderr, code := executeTestCommand(t, "run", "sandbox", "docker-start-gate-review",
+		resourceCleanupID, "--manifest", manifestPath, "--operation-key",
+		"docker-start-gate-review-cli"); code != 4 ||
+		!strings.Contains(stderr, "requires --confirm-design-review") || resourceCleanup.calls != 1 {
+		t.Fatalf("Docker start-gate review skipped confirmation: stderr=%s code=%d", stderr, code)
+	}
+	emptyStartGates, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-start-gate-reviews", runID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(emptyStartGates, "no Docker start-gate reviews") {
+		t.Fatalf("unconfirmed start-gate review left state: output=%s stderr=%s code=%d",
+			emptyStartGates, stderr, code)
+	}
+	startGateReviewed, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-start-gate-review", resourceCleanupID, "--manifest", manifestPath,
+		"--operation-key", "docker-start-gate-review-cli", "--confirm-design-review")
+	if code != 0 || stderr != "" || resourceCleanup.calls != 1 ||
+		!strings.Contains(startGateReviewed, "status: blocked") ||
+		!strings.Contains(startGateReviewed, "decision: deny_start") ||
+		!strings.Contains(startGateReviewed, "required_checks: 16") ||
+		!strings.Contains(startGateReviewed, "production_verified_checks: 0") ||
+		!strings.Contains(startGateReviewed, "start_gate_passed: false") ||
+		!strings.Contains(startGateReviewed, "lifecycle_implementation_present: false") ||
+		!strings.Contains(startGateReviewed, "wall_clock_supervision_unimplemented") ||
+		!strings.Contains(startGateReviewed, "generation_fenced_reconcile") ||
+		!strings.Contains(startGateReviewed, "raw_host_paths_stored: false") ||
+		strings.Contains(startGateReviewed, "/workspace") ||
+		strings.Contains(startGateReviewed, home) ||
+		strings.Contains(startGateReviewed, "cyberagent-runtime-") {
+		t.Fatalf("Docker start-gate review leaked data or widened authority: output=%s stderr=%s code=%d",
+			startGateReviewed, stderr, code)
+	}
+	startGateReviewID := sandboxDockerStartGateReviewIDPattern.FindString(startGateReviewed)
+	if startGateReviewID == "" {
+		t.Fatalf("missing Docker start-gate review id: %s", startGateReviewed)
+	}
+	startGateReplay, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-start-gate-review", resourceCleanupID, "--manifest", manifestPath,
+		"--operation-key", "docker-start-gate-review-cli", "--confirm-design-review")
+	if code != 0 || stderr != "" || resourceCleanup.calls != 1 ||
+		!strings.Contains(startGateReplay, "replayed: true") {
+		t.Fatalf("Docker start-gate replay was not metadata-only: output=%s stderr=%s code=%d",
+			startGateReplay, stderr, code)
+	}
+	startGateList, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-start-gate-reviews", runID)
+	if code != 0 || stderr != "" || !strings.Contains(startGateList, startGateReviewID) ||
+		!strings.Contains(startGateList, "decision=deny_start") ||
+		!strings.Contains(startGateList, "start_implemented=false") ||
+		strings.Contains(startGateList, "/workspace") || strings.Contains(startGateList, home) {
+		t.Fatalf("Docker start-gate list leaked data: output=%s stderr=%s code=%d",
+			startGateList, stderr, code)
+	}
+	startGateShown, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-start-gate-review-show", startGateReviewID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(startGateShown, "review_fingerprint:") ||
+		!strings.Contains(startGateShown, "artifact_commit_authorized: false") ||
+		!strings.Contains(startGateShown, "implemented=false") ||
+		strings.Contains(startGateShown, "/workspace") || strings.Contains(startGateShown, home) {
+		t.Fatalf("Docker start-gate show leaked data: output=%s stderr=%s code=%d",
+			startGateShown, stderr, code)
 	}
 	attemptList, stderr, code := executeTestCommand(t, "run", "sandbox",
 		"docker-attempts", runID)

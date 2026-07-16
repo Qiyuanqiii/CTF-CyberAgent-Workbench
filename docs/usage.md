@@ -413,6 +413,18 @@ Schema v62 separates retained-resource observation from deletion. `docker-runtim
 
 `docker-runtime-input-resource-cleanup` requires both `--confirm-resource-cleanup` and `--confirm-daemon-write`, plus a cleanup-eligible inspection. Go persists the immutable intent and generation lease before contacting the write transport. The transport preflights the target and every volume before any DELETE; a single foreign collision means zero DELETE. Otherwise it removes the target by its inspected ID, removes exact-owned volumes, and rechecks that all resources are absent. Typed failures release the lease and `cleanup-resume` can acquire a later generation. Completed operation-key replay and completed resume are metadata-only. List/show output omits resource names, raw IDs, host paths, sockets, raw operation keys, and private lease identities. v62 adds no start, exec, attach, pull, output export, backend, execution, or Artifact authority; Windows returns an explicit unsupported error.
 
+Schema v63 performs a metadata-only start-gate design review after completed v62 cleanup. It requires a resupplied Manifest, a stable operation key, and `--confirm-design-review`. The review maps all sixteen v51 threat checks to bounded v52-v62 evidence classes and explicit future blockers. It also freezes an eleven-transition start/wait/TERM/KILL/orphan blueprint with write-ahead ownership, generation fencing, cancellation fan-out, bounded logs, and orphan reconciliation. Every check remains insufficient and every transition remains unimplemented and unauthorized; the command never contacts Docker or captures input.
+
+```powershell
+cyberagent run sandbox docker-start-gate-review <cleanup-intent-id> `
+  --manifest configs/sandbox-manifest.example.json `
+  --operation-key <stable-key> --confirm-design-review
+cyberagent run sandbox docker-start-gate-reviews <run-id>
+cyberagent run sandbox docker-start-gate-review-show <review-id>
+```
+
+The only v63 outcome is `blocked/deny_start`. Output contains bounded evidence source codes, blocker codes, future gate names, and false authority bits. It omits resource names, raw container IDs, host paths, Manifest bodies, raw operation keys, and private ownership identities. A successful review records why start is still denied; it does not verify the Linux real-daemon chain and does not add start, wait, signal, logs, export, execution, or Artifact authority.
+
 An optional real-daemon test is available only when an exact image is already present; it never pulls or creates anything:
 
 ```powershell

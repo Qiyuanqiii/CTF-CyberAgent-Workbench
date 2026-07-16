@@ -165,6 +165,7 @@ const (
 	SandboxDockerRuntimeInputResourceCleanupTakenOverEvent = "sandbox.docker_runtime_input_resource_cleanup_taken_over"
 	SandboxDockerRuntimeInputResourceCleanupFailedEvent    = "sandbox.docker_runtime_input_resource_cleanup_failed"
 	SandboxDockerRuntimeInputResourceCleanupCompletedEvent = "sandbox.docker_runtime_input_resource_cleanup_completed"
+	SandboxDockerStartGateReviewedEvent                    = "sandbox.docker_start_gate_reviewed"
 )
 
 type Event struct {

@@ -140,16 +140,85 @@ func TestDockerRuntimeInputResourceLedgerIsReplayableFencedAndMetadataOnly(t *te
 	if err != nil || len(listedCleanups) != 1 || listedCleanups[0].Intent.ID != cleanupIntent.ID {
 		t.Fatalf("list cleanups: %#v err=%v", listedCleanups, err)
 	}
+	projection, err := st.GetDockerRuntimeInputProjectionPlan(ctx, application.Intent.ProjectionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	containerPlan, err := st.GetDockerContainerPlan(ctx, application.Intent.ContainerPlanID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight, err := st.GetSandboxDisabledPreflight(ctx, containerPlan.PreflightID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewBinding := sandbox.DockerStartGateReviewBinding{
+		CleanupIntentID: cleanupIntent.ID, CleanupResultID: result.ID,
+		ApplicationIntentID: application.Intent.ID, ApplicationResultID: application.Result.ID,
+		ProjectionID: projection.ID, ContainerPlanID: containerPlan.ID,
+		PreflightID: preflight.ID, RunID: application.Intent.RunID,
+		MissionID: application.Intent.MissionID, WorkspaceID: application.Intent.WorkspaceID,
+		ManifestFingerprint:      application.Intent.ManifestFingerprint,
+		ThreatModelFingerprint:   preflight.Handshake.ThreatModelFingerprint,
+		CleanupResultFingerprint: result.ResultFingerprint,
+		MaxLogBytes:              preflight.OutputPlan.MaxOutputBytes,
+	}
+	reviewKey := runmutation.Fingerprint(sandbox.DockerStartGateReviewOperationVersion,
+		cleanupIntent.ID, "start-gate-review")
+	review, err := sandbox.NewDockerStartGateReview(
+		idgen.New("sandbox-docker-start-gate-review"), reviewKey, cleanupIntent.RequestedBy,
+		reviewBinding, true, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewOperation, err := sandbox.NewDockerStartGateReviewOperation(reviewKey, review)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedReview, replayed, err := st.CreateDockerStartGateReview(ctx, review, reviewOperation)
+	if err != nil || replayed || storedReview.StartGatePassed ||
+		storedReview.BlockerCount != sandbox.MaxBackendChecks ||
+		storedReview.ContainerStartAuthorized || storedReview.ProcessExecutionAuthorized {
+		t.Fatalf("create start-gate review: %#v replayed=%t err=%v",
+			storedReview, replayed, err)
+	}
+	replayedReview, replayed, err := st.CreateDockerStartGateReview(ctx, review, reviewOperation)
+	if err != nil || !replayed || !replayedReview.Replayed || replayedReview.ID != review.ID {
+		t.Fatalf("replay start-gate review: %#v replayed=%t err=%v",
+			replayedReview, replayed, err)
+	}
+	loadedReview, err := st.GetDockerStartGateReview(ctx, review.ID)
+	if err != nil || loadedReview.ReviewFingerprint != review.ReviewFingerprint ||
+		len(loadedReview.Checks) != sandbox.MaxBackendChecks ||
+		len(loadedReview.Lifecycle.Transitions) != sandbox.DockerStartGateLifecycleTransitionCount {
+		t.Fatalf("load start-gate review: %#v err=%v", loadedReview, err)
+	}
+	reviewByCleanup, found, err := st.GetDockerStartGateReviewByCleanup(ctx, cleanupIntent.ID)
+	if err != nil || !found || reviewByCleanup.ID != review.ID {
+		t.Fatalf("load start-gate review by cleanup: %#v found=%t err=%v",
+			reviewByCleanup, found, err)
+	}
+	listedReviews, err := st.ListDockerStartGateReviews(ctx, run.ID, 10)
+	if err != nil || len(listedReviews) != 1 || listedReviews[0].ID != review.ID {
+		t.Fatalf("list start-gate reviews: %#v err=%v", listedReviews, err)
+	}
 
 	for _, mutation := range []string{
 		`UPDATE sandbox_docker_runtime_input_resource_inspections SET cleanup_eligible = 0 WHERE id = ?`,
 		`UPDATE sandbox_docker_runtime_input_resource_cleanup_intents SET process_execution_authorized = 1 WHERE id = ?`,
 		`DELETE FROM sandbox_docker_runtime_input_resource_cleanup_failures WHERE intent_id = ?`,
 		`UPDATE sandbox_docker_runtime_input_resource_cleanup_results SET target_absent = 0 WHERE intent_id = ?`,
+		`UPDATE sandbox_docker_start_gate_reviews SET start_gate_passed = 1 WHERE id = ?`,
+		`UPDATE sandbox_docker_start_gate_review_checks SET production_verified = 1 WHERE review_id = ?`,
+		`UPDATE sandbox_docker_process_lifecycle_blueprints SET implementation_present = 1 WHERE review_id = ?`,
+		`DELETE FROM sandbox_docker_process_lifecycle_transitions WHERE review_id = ?`,
 	} {
 		id := cleanupIntent.ID
 		if strings.Contains(mutation, "resource_inspections") {
 			id = inspection.ID
+		} else if strings.Contains(mutation, "start_gate") ||
+			strings.Contains(mutation, "process_lifecycle") {
+			id = review.ID
 		}
 		if _, err := st.db.ExecContext(ctx, mutation, id); err == nil ||
 			!strings.Contains(err.Error(), "cannot be") {
@@ -170,7 +239,8 @@ func TestDockerRuntimeInputResourceLedgerIsReplayableFencedAndMetadataOnly(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	foundInspected, foundPrepared, foundFailed, foundCompleted := false, false, false, false
+	foundInspected, foundPrepared, foundFailed, foundCompleted, foundStartGate :=
+		false, false, false, false, false
 	for _, event := range timeline {
 		switch event.Type {
 		case events.SandboxDockerRuntimeInputResourceInspectedEvent:
@@ -181,11 +251,121 @@ func TestDockerRuntimeInputResourceLedgerIsReplayableFencedAndMetadataOnly(t *te
 			foundFailed = true
 		case events.SandboxDockerRuntimeInputResourceCleanupCompletedEvent:
 			foundCompleted = true
+		case events.SandboxDockerStartGateReviewedEvent:
+			foundStartGate = true
 		}
 	}
-	if !foundInspected || !foundPrepared || !foundFailed || !foundCompleted {
-		t.Fatalf("resource lifecycle events missing: inspected=%t prepared=%t failed=%t completed=%t",
-			foundInspected, foundPrepared, foundFailed, foundCompleted)
+	if !foundInspected || !foundPrepared || !foundFailed || !foundCompleted || !foundStartGate {
+		t.Fatalf("resource lifecycle events missing: inspected=%t prepared=%t failed=%t completed=%t start_gate=%t",
+			foundInspected, foundPrepared, foundFailed, foundCompleted, foundStartGate)
+	}
+}
+
+func TestSchemaV63PreservesV62CleanupWithoutFabricatingStartGateReview(t *testing.T) {
+	ctx := context.Background()
+	databasePath := filepath.Join(t.TempDir(), "docker-start-gate-v62.db")
+	st, run, root := openSandboxManifestStoreAt(t, ctx, databasePath)
+	cleanup, application := prepareCompletedDockerRuntimeInputResourceCleanupForReviewTest(
+		t, ctx, st, run.ID, root, "start-gate-upgrade")
+	for _, statement := range removeSchemaV63ForTestStatements() {
+		if _, err := st.db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("remove schema v63 with %q: %v", statement, err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := Open(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = upgraded.Close() })
+	version, err := upgraded.SchemaVersion(ctx)
+	if err != nil || version != LatestSchemaVersion {
+		t.Fatalf("schema v63 upgrade version=%d err=%v", version, err)
+	}
+	if loaded, err := upgraded.GetDockerRuntimeInputApplication(ctx,
+		application.Intent.ID); err != nil || loaded.Result == nil {
+		t.Fatalf("schema v63 lost v61 application: %#v err=%v", loaded, err)
+	}
+	if loaded, err := upgraded.GetDockerRuntimeInputResourceCleanup(ctx,
+		cleanup.Intent.ID); err != nil || loaded.Result == nil {
+		t.Fatalf("schema v63 lost v62 cleanup: %#v err=%v", loaded, err)
+	}
+	reviews, err := upgraded.ListDockerStartGateReviews(ctx, run.ID, 10)
+	if err != nil || len(reviews) != 0 {
+		t.Fatalf("schema v63 fabricated start-gate reviews: %#v err=%v", reviews, err)
+	}
+}
+
+func TestDockerStartGateReviewConvergesAcrossStores(t *testing.T) {
+	ctx := context.Background()
+	databasePath := filepath.Join(t.TempDir(), "docker-start-gate-concurrency.db")
+	first, run, root := openSandboxManifestStoreAt(t, ctx, databasePath)
+	t.Cleanup(func() { _ = first.Close() })
+	cleanup, application := prepareCompletedDockerRuntimeInputResourceCleanupForReviewTest(
+		t, ctx, first, run.ID, root, "start-gate-concurrency")
+	projection, err := first.GetDockerRuntimeInputProjectionPlan(ctx, application.Intent.ProjectionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	containerPlan, err := first.GetDockerContainerPlan(ctx, application.Intent.ContainerPlanID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight, err := first.GetSandboxDisabledPreflight(ctx, containerPlan.PreflightID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding := sandbox.DockerStartGateReviewBinding{
+		CleanupIntentID: cleanup.Intent.ID, CleanupResultID: cleanup.Result.ID,
+		ApplicationIntentID: application.Intent.ID, ApplicationResultID: application.Result.ID,
+		ProjectionID: projection.ID, ContainerPlanID: containerPlan.ID,
+		PreflightID: preflight.ID, RunID: application.Intent.RunID,
+		MissionID: application.Intent.MissionID, WorkspaceID: application.Intent.WorkspaceID,
+		ManifestFingerprint:      application.Intent.ManifestFingerprint,
+		ThreatModelFingerprint:   preflight.Handshake.ThreatModelFingerprint,
+		CleanupResultFingerprint: cleanup.Result.ResultFingerprint,
+		MaxLogBytes:              preflight.OutputPlan.MaxOutputBytes,
+	}
+	second, err := Open(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = second.Close() })
+	key := runmutation.Fingerprint(sandbox.DockerStartGateReviewOperationVersion,
+		cleanup.Intent.ID, "concurrent-review")
+	type outcome struct {
+		value    sandbox.DockerStartGateReview
+		replayed bool
+		err      error
+	}
+	results := make(chan outcome, 2)
+	for _, current := range []*SQLiteStore{first, second} {
+		go func(current *SQLiteStore) {
+			review, buildErr := sandbox.NewDockerStartGateReview(
+				idgen.New("sandbox-docker-start-gate-review"), key,
+				cleanup.Intent.RequestedBy, binding, true, time.Now().UTC())
+			if buildErr != nil {
+				results <- outcome{err: buildErr}
+				return
+			}
+			operation, buildErr := sandbox.NewDockerStartGateReviewOperation(key, review)
+			if buildErr != nil {
+				results <- outcome{err: buildErr}
+				return
+			}
+			value, replayed, createErr := current.CreateDockerStartGateReview(
+				ctx, review, operation)
+			results <- outcome{value: value, replayed: replayed, err: createErr}
+		}(current)
+	}
+	firstResult, secondResult := <-results, <-results
+	if firstResult.err != nil || secondResult.err != nil ||
+		firstResult.value.ID != secondResult.value.ID ||
+		firstResult.replayed == secondResult.replayed {
+		t.Fatalf("concurrent reviews did not converge: first=%#v second=%#v",
+			firstResult, secondResult)
 	}
 }
 
@@ -263,6 +443,62 @@ func prepareCompletedDockerRuntimeInputApplicationForResourceTest(t *testing.T,
 	return application, descriptor
 }
 
+func prepareCompletedDockerRuntimeInputResourceCleanupForReviewTest(t *testing.T,
+	ctx context.Context, st *SQLiteStore, runID, root, key string,
+) (sandbox.DockerRuntimeInputResourceCleanupRecord,
+	sandbox.DockerRuntimeInputApplicationRecord,
+) {
+	t.Helper()
+	application, descriptor := prepareCompletedDockerRuntimeInputApplicationForResourceTest(
+		t, ctx, st, runID, root, key)
+	endpoint, _ := sandbox.NewDockerObservationEndpoint(sandbox.DockerObservationEndpointLocalUnix)
+	observation := sandbox.DockerRuntimeInputResourceObservation{
+		EndpointClass: endpoint.Class, EndpointFingerprint: endpoint.Fingerprint,
+		TargetState:      sandbox.DockerRuntimeInputResourceTargetOwned,
+		OwnedVolumeCount: len(descriptor.Mounts), DaemonReadCount: len(descriptor.Mounts) + 1,
+		ObservedAt: time.Now().UTC(),
+	}
+	inspection, err := sandbox.NewDockerRuntimeInputResourceInspection(
+		idgen.New("sandbox-docker-runtime-input-resource-inspection"),
+		runmutation.Fingerprint(sandbox.DockerRuntimeInputResourceInspectionOperationVersion,
+			application.Intent.ID, key+"-inspect"), application.Intent.RequestedBy,
+		application, descriptor, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inspection, _, err = st.RecordDockerRuntimeInputResourceInspection(ctx, inspection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, err := sandbox.NewDockerRuntimeInputResourceCleanupIntent(
+		idgen.New("sandbox-docker-runtime-input-resource-cleanup"),
+		runmutation.Fingerprint(sandbox.DockerRuntimeInputResourceCleanupOperationVersion,
+			inspection.ID, key+"-cleanup"), inspection, descriptor, endpoint, true, true,
+		inspection.RequestedBy, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	acquired, err := st.BeginDockerRuntimeInputResourceCleanup(ctx, intent,
+		"start_gate_cleanup_owner", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := len(descriptor.Mounts) + 1
+	result, err := sandbox.NewDockerRuntimeInputResourceCleanupResult(
+		idgen.New("sandbox-docker-runtime-input-resource-cleanup-result"), intent,
+		acquired.Record.Lease, descriptor, total, 0, total, 2*total, total,
+		time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, _, err := st.CompleteDockerRuntimeInputResourceCleanup(ctx, result,
+		acquired.Record.Lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return completed, application
+}
+
 func assertDockerRuntimeInputResourceSchemaPrivacy(t *testing.T, ctx context.Context,
 	st *SQLiteStore,
 ) {
@@ -271,7 +507,11 @@ func assertDockerRuntimeInputResourceSchemaPrivacy(t *testing.T, ctx context.Con
 		"sandbox_docker_runtime_input_resource_cleanup_intents",
 		"sandbox_docker_runtime_input_resource_cleanup_leases",
 		"sandbox_docker_runtime_input_resource_cleanup_failures",
-		"sandbox_docker_runtime_input_resource_cleanup_results"} {
+		"sandbox_docker_runtime_input_resource_cleanup_results",
+		"sandbox_docker_start_gate_reviews", "sandbox_docker_start_gate_review_checks",
+		"sandbox_docker_process_lifecycle_blueprints",
+		"sandbox_docker_process_lifecycle_transitions",
+		"sandbox_docker_start_gate_review_operations"} {
 		rows, err := st.db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
 		if err != nil {
 			t.Fatal(err)

@@ -419,6 +419,55 @@ func TestDockerRuntimeInputProjectionPlansPersistsReplaysAndDoesNotWidenAuthorit
 		t.Fatalf("runtime resource cleanup replay touched inputs or daemon: %#v err=%v",
 			replayedCleanup, err)
 	}
+	startGateRequest := ReviewDockerStartGateRequest{
+		CleanupIntentID: cleaned.Intent.ID, Manifest: manifest,
+		OperationKey: "docker-start-gate-review", RequestedBy: "runtime_input_operator",
+	}
+	if _, err := service.ReviewDockerStartGate(ctx, startGateRequest); apperror.CodeOf(err) != apperror.CodeFailedPrecondition ||
+		resourceCleanup.calls != 2 || resourceInspector.calls != 1 || stager.captureCalls != 4 {
+		t.Fatalf("start-gate review skipped confirmation or contacted a transport: %v", err)
+	}
+	startGateRequest.OperatorConfirmed = true
+	startGateReview, err := service.ReviewDockerStartGate(ctx, startGateRequest)
+	if err != nil || startGateReview.Replayed ||
+		startGateReview.Status != sandbox.DockerStartGateReviewStatusBlocked ||
+		startGateReview.Decision != sandbox.DockerStartGateReviewDecisionDeny ||
+		startGateReview.StartGatePassed || startGateReview.RealDaemonChainVerified ||
+		startGateReview.StartImplementationPresent ||
+		startGateReview.ContainerStartAuthorized || startGateReview.ProcessExecutionAuthorized ||
+		startGateReview.OutputExportAuthorized || startGateReview.ArtifactCommitAuthorized ||
+		len(startGateReview.Checks) != sandbox.MaxBackendChecks ||
+		len(startGateReview.Lifecycle.Transitions) != sandbox.DockerStartGateLifecycleTransitionCount ||
+		startGateReview.Lifecycle.ImplementationPresent ||
+		startGateReview.Lifecycle.DaemonMutationEnabled ||
+		resourceCleanup.calls != 2 || resourceInspector.calls != 1 || stager.captureCalls != 4 {
+		t.Fatalf("start-gate review widened authority or contacted a transport: %#v err=%v",
+			startGateReview, err)
+	}
+	replayedStartGate, err := service.ReviewDockerStartGate(ctx, startGateRequest)
+	if err != nil || !replayedStartGate.Replayed || replayedStartGate.ID != startGateReview.ID ||
+		resourceCleanup.calls != 2 || resourceInspector.calls != 1 || stager.captureCalls != 4 {
+		t.Fatalf("start-gate replay contacted a transport: %#v err=%v", replayedStartGate, err)
+	}
+	changedStartGate := startGateRequest
+	changedStartGate.Manifest.TimeoutSeconds++
+	if _, err := service.ReviewDockerStartGate(ctx, changedStartGate); apperror.CodeOf(err) != apperror.CodeConflict ||
+		resourceCleanup.calls != 2 || resourceInspector.calls != 1 || stager.captureCalls != 4 {
+		t.Fatalf("changed Manifest reused start-gate operation: %v", err)
+	}
+	secondStartGate := startGateRequest
+	secondStartGate.OperationKey = "docker-start-gate-review-second"
+	if _, err := service.ReviewDockerStartGate(ctx, secondStartGate); apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("cleanup accepted a second start-gate review: %v", err)
+	}
+	loadedStartGate, err := service.GetDockerStartGateReview(ctx, startGateReview.ID)
+	if err != nil || loadedStartGate.ReviewFingerprint != startGateReview.ReviewFingerprint {
+		t.Fatalf("load start-gate review: %#v err=%v", loadedStartGate, err)
+	}
+	listedStartGates, err := service.ListDockerStartGateReviews(ctx, run.ID, 10)
+	if err != nil || len(listedStartGates) != 1 || listedStartGates[0].ID != startGateReview.ID {
+		t.Fatalf("list start-gate reviews: %#v err=%v", listedStartGates, err)
+	}
 	resourceInspector.targetState = sandbox.DockerRuntimeInputResourceTargetForeign
 	unsafeRequest := inspectionRequest
 	unsafeRequest.OperationKey = "docker-runtime-input-resource-inspection-after-cleanup"

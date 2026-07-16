@@ -216,6 +216,15 @@ type SandboxManifestStore interface {
 		keyDigest string) (sandbox.DockerRuntimeInputResourceCleanupRecord, bool, error)
 	ListDockerRuntimeInputResourceCleanups(ctx context.Context, runID string,
 		limit int) ([]sandbox.DockerRuntimeInputResourceCleanupRecord, error)
+	GetDockerStartGateReviewOperation(ctx context.Context,
+		keyDigest string) (sandbox.DockerStartGateReviewOperation, bool, error)
+	CreateDockerStartGateReview(ctx context.Context, review sandbox.DockerStartGateReview,
+		operation sandbox.DockerStartGateReviewOperation) (sandbox.DockerStartGateReview, bool, error)
+	GetDockerStartGateReview(ctx context.Context, id string) (sandbox.DockerStartGateReview, error)
+	GetDockerStartGateReviewByCleanup(ctx context.Context,
+		cleanupIntentID string) (sandbox.DockerStartGateReview, bool, error)
+	ListDockerStartGateReviews(ctx context.Context, runID string,
+		limit int) ([]sandbox.DockerStartGateReview, error)
 }
 
 type SandboxManifestService struct {

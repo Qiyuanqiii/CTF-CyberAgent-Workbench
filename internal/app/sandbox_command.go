@@ -68,7 +68,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-runtime-input-plan|docker-runtime-input-plans|docker-runtime-input-plan-show|docker-runtime-input-apply|docker-runtime-input-apply-resume|docker-runtime-input-applications|docker-runtime-input-application-show|docker-runtime-input-resource-inspect|docker-runtime-input-resource-inspections|docker-runtime-input-resource-inspection-show|docker-runtime-input-resource-cleanup|docker-runtime-input-resource-cleanup-resume|docker-runtime-input-resource-cleanups|docker-runtime-input-resource-cleanup-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-runtime-input-plan|docker-runtime-input-plans|docker-runtime-input-plan-show|docker-runtime-input-apply|docker-runtime-input-apply-resume|docker-runtime-input-applications|docker-runtime-input-application-show|docker-runtime-input-resource-inspect|docker-runtime-input-resource-inspections|docker-runtime-input-resource-inspection-show|docker-runtime-input-resource-cleanup|docker-runtime-input-resource-cleanup-resume|docker-runtime-input-resource-cleanups|docker-runtime-input-resource-cleanup-show|docker-start-gate-review|docker-start-gate-reviews|docker-start-gate-review-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	if a.dockerObserver != nil {
@@ -1305,6 +1305,79 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		}
 		printSandboxDockerRuntimeInputResourceCleanup(a, value)
 		return nil
+	case "docker-start-gate-review":
+		fs := newFlagSet("run sandbox docker-start-gate-review", a.errOut)
+		manifestPath := fs.String("manifest", "", "resupplied Docker sandbox manifest JSON file")
+		operationKey := fs.String("operation-key", "", "stable Docker start-gate review operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		confirmed := fs.Bool("confirm-design-review", false,
+			"confirm metadata-only blocked Docker start-gate design review")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"manifest": true, "operation-key": true, "operator": true,
+			"confirm-design-review": false,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*manifestPath) == "" ||
+			strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox docker-start-gate-review <cleanup-intent-id> --manifest <manifest.json> --operation-key <key> --confirm-design-review [--operator <id>]")
+		}
+		if !*confirmed {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker start-gate design review requires --confirm-design-review")
+		}
+		manifest, err := readSandboxManifest(*manifestPath)
+		if err != nil {
+			return err
+		}
+		value, err := service.ReviewDockerStartGate(ctx,
+			application.ReviewDockerStartGateRequest{
+				CleanupIntentID: fs.Arg(0), Manifest: manifest,
+				OperationKey: *operationKey, RequestedBy: *operator,
+				OperatorConfirmed: true,
+			})
+		if err != nil {
+			return err
+		}
+		printSandboxDockerStartGateReview(a, value)
+		return nil
+	case "docker-start-gate-reviews":
+		fs := newFlagSet("run sandbox docker-start-gate-reviews", a.errOut)
+		limit := fs.Int("limit", 100, "maximum Docker start-gate reviews")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-start-gate-reviews <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDockerStartGateReviews(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no Docker start-gate reviews")
+			return nil
+		}
+		for _, value := range values {
+			fmt.Fprintf(a.out, "%s\tcleanup=%s\tstatus=%s\tdecision=%s\tblockers=%d\tproduction_verified=0\tstart_gate_passed=false\tstart_implemented=false\tcontainer_start_authorized=false\tprocess_execution_authorized=false\tcreated_at=%s\n",
+				value.ID, value.CleanupIntentID, value.Status, value.Decision,
+				value.BlockerCount, value.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "docker-start-gate-review-show":
+		fs := newFlagSet("run sandbox docker-start-gate-review-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-start-gate-review-show <review-id>")
+		}
+		value, err := service.GetDockerStartGateReview(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxDockerStartGateReview(a, value)
+		return nil
 	case "docker-rehearsals":
 		fs := newFlagSet("run sandbox docker-rehearsals", a.errOut)
 		limit := fs.Int("limit", 100, "maximum Docker container rehearsals")
@@ -1863,6 +1936,41 @@ func printSandboxDockerRuntimeInputResourceCleanup(a *App,
 				failure.Sequence, failure.Generation, failure.Code,
 				failure.FailureFingerprint, failure.CreatedAt.Format(timeFormatRFC3339Nano))
 		}
+	}
+}
+
+func printSandboxDockerStartGateReview(a *App, value sandbox.DockerStartGateReview) {
+	fmt.Fprintf(a.out, "docker_start_gate_review: %s\ndocker_runtime_input_resource_cleanup_intent: %s\ndocker_runtime_input_resource_cleanup_result: %s\ndocker_runtime_input_application_intent: %s\ndocker_runtime_input_application_result: %s\ndocker_runtime_input_projection: %s\ndocker_plan: %s\nsandbox_preflight: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nreviewed_through_schema: %d\nstatus: %s\ndecision: %s\ntrust_class: %s\noperation_key_digest: %s\nmanifest_fingerprint: %s\nthreat_model_fingerprint: %s\ncleanup_result_fingerprint: %s\nauthority_fingerprint: %s\nevidence_fingerprint: %s\nreview_fingerprint: %s\noperator_confirmed: true\nreal_daemon_chain_verified: false\nrequired_checks: %d\nproduction_verified_checks: %d\nsufficient_checks: %d\nblockers: %d\nstart_gate_passed: false\nstart_implementation_present: false\ncontainer_start_authorized: false\nprocess_execution_authorized: false\noutput_export_authorized: false\nartifact_commit_authorized: false\nraw_resource_names_stored: false\nraw_container_ids_stored: false\nraw_host_paths_stored: false\nmanifest_body_stored: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\n",
+		value.ID, value.CleanupIntentID, value.CleanupResultID,
+		value.ApplicationIntentID, value.ApplicationResultID, value.ProjectionID,
+		value.ContainerPlanID, value.PreflightID, value.RunID, value.MissionID,
+		value.WorkspaceID, value.ProtocolVersion, value.ReviewedThroughSchema,
+		value.Status, value.Decision, value.TrustClass, value.OperationKeyDigest,
+		value.ManifestFingerprint, value.ThreatModelFingerprint,
+		value.CleanupResultFingerprint, value.AuthorityFingerprint,
+		value.EvidenceFingerprint, value.ReviewFingerprint, value.RequiredCheckCount,
+		value.ProductionVerifiedCount, value.SufficientCheckCount, value.BlockerCount,
+		value.RequestedBy, value.CreatedAt.Format(timeFormatRFC3339Nano), value.Replayed)
+	fmt.Fprintln(a.out, "checks:")
+	for _, item := range value.Checks {
+		fmt.Fprintf(a.out, "%d\tname=%s\tevidence_class=%s\tevidence_source=%s\tproduction_verified=false\tsufficient_for_start=false\tblocker=%s\tfuture_gate=%s\n",
+			item.Ordinal, item.Name, item.EvidenceClass, item.EvidenceSource,
+			item.BlockerCode, item.FutureGate)
+	}
+	lifecycle := value.Lifecycle
+	fmt.Fprintf(a.out, "lifecycle_protocol: %s\nlifecycle_ownership: %s\nfixed_endpoint_required: %t\nwrite_ahead_required: %t\ngeneration_fenced: %t\ncancellation_fanout: %t\nbounded_logs: %t\nmax_log_bytes: %d\nwait_required: %t\ngraceful_then_forced_kill: %t\norphan_reconciliation: %t\nlifecycle_implementation_present: false\nlifecycle_daemon_mutation_enabled: false\nlifecycle_output_commit_authorized: false\nlifecycle_blueprint_fingerprint: %s\ntransitions:\n",
+		lifecycle.ProtocolVersion, lifecycle.OwnershipModel,
+		lifecycle.FixedEndpointRequired, lifecycle.WriteAheadRequired,
+		lifecycle.GenerationFenced, lifecycle.CancellationFanout,
+		lifecycle.BoundedLogs, lifecycle.MaxLogBytes, lifecycle.WaitRequired,
+		lifecycle.GracefulThenForcedKill, lifecycle.OrphanReconciliation,
+		lifecycle.BlueprintFingerprint)
+	for _, transition := range lifecycle.Transitions {
+		fmt.Fprintf(a.out, "%d\tfrom=%s\tto=%s\taction=%s\twrite_ahead=%t\tgeneration_fenced=%t\tdaemon_mutation=%t\tcancellation_fanout=%t\timplemented=false\tauthorized=false\n",
+			transition.Ordinal, transition.FromState, transition.ToState,
+			transition.Action, transition.WriteAheadRequired,
+			transition.GenerationFenced, transition.DaemonMutation,
+			transition.CancellationFanout)
 	}
 }
 
