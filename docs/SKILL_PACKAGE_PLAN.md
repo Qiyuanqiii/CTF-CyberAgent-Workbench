@@ -81,6 +81,7 @@ Desktop D1 阶段：
 - parser fuzz 在 20 秒内执行约 2645 万次且无崩溃；`internal/skills` 语句覆盖为 78.5%，parser 100 轮与 CLI 20 轮重复回归通过。
 - TypeScript/OpenAPI/production build、8 个文件 17 项前端测试、零漏洞 npm audit，以及凭据/运行产物/乱码/Markdown 链接/diff 扫描通过。
 - 审计已固定 ZIP creator version 与 Deflate 精确耗尽、关闭有效流后的隐藏载荷通道、移除弃用测试 API，并确保文件系统错误不回显操作者包路径；当前无已知未解决高/中风险。
+- GitHub Actions run `29512332025` 已通过功能提交 `55b3fae`；Go/Linux 与 TypeScript 作业分别用时 3 分 4 秒和 20 秒。
 
 ## 验收标准
 

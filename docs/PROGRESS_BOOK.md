@@ -706,7 +706,7 @@ v63 最终本地门禁通过：最终代码全仓普通/race 分别用时 196.9 
 
 本切片没有 migration，schema 仍为 v63；五个内置 Skill 仍是唯一可被 Run 选择的产品 Skill。用户 Registry、`skill import/installed/remove`、外部 Run 选择以及 Desktop/HTTP 上传均未开放。按最新产品优先级，下一切片改为 schema v64 content-addressed 用户 Skill Registry 与不可变安装/卸载账本；原 P6 机器生成 Linux real-daemon 生产证据账本顺延至 schema v65 或以后，v63 的所有 Docker blocker 与 start 禁用状态完全不变。
 
-本切片最终发布门禁通过：最终代码全仓普通/race 分别用时 239.4 秒/226.8 秒；vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、20 秒约 2645 万次 parser fuzz、`internal/skills` 78.5% 语句覆盖、parser 100 轮与 CLI 20 轮重复回归、严格 TypeScript、8 个文件 17 项前端测试、OpenAPI 无漂移、production build、零漏洞 npm audit，以及凭据/运行产物/乱码/Markdown 链接/diff 扫描全部通过。凭据扫描只命中既有脱敏测试中的合成 `sk-123...` 夹具。代码审计固定了 central-directory creator version 和 Deflate 精确耗尽，关闭有效压缩流后的隐藏载荷通道，替换测试中的弃用时间 API，并把文件系统 cause 包在稳定、无源路径回显的类型化 CLI 错误后；当前未发现未解决高/中风险。
+本切片最终发布门禁通过：最终代码全仓普通/race 分别用时 239.4 秒/226.8 秒；vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、20 秒约 2645 万次 parser fuzz、`internal/skills` 78.5% 语句覆盖、parser 100 轮与 CLI 20 轮重复回归、严格 TypeScript、8 个文件 17 项前端测试、OpenAPI 无漂移、production build、零漏洞 npm audit，以及凭据/运行产物/乱码/Markdown 链接/diff 扫描全部通过。凭据扫描只命中既有脱敏测试中的合成 `sk-123...` 夹具。代码审计固定了 central-directory creator version 和 Deflate 精确耗尽，关闭有效压缩流后的隐藏载荷通道，替换测试中的弃用时间 API，并把文件系统 cause 包在稳定、无源路径回显的类型化 CLI 错误后；当前未发现未解决高/中风险。GitHub Actions run `29512332025` 已通过提交 `55b3fae`，Go/Linux 与 TypeScript 作业分别用时 3 分 4 秒和 20 秒。
 
 ## 八、仓库同步与恢复约定
 

@@ -262,7 +262,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] schema v47 为每个 Specialist Attempt 从父 Run 固定选择派生最多一项 Skill；Code/Cyber 目录分离，`plan-delivery` 保持 root-only，assignment 不能选择或扩权，metadata-only 两阶段来源账本与首次模型调用原子绑定。
 - [x] ADR 0024 固定 `skill_package.v1` 与威胁模型：第一版只允许按顺序包含 `manifest.json` + UTF-8 `SKILL.md` 的确定性 ZIP，拒绝路径歧义、链接、特殊文件、重复/大小写碰撞、ZIP bomb、尾随数据、脚本和安装钩子。
 - [x] 实现纯 Go 包 parser/validator/fuzzer，以及 metadata-only `skill package validate`；校验阶段不写磁盘、不创建数据库、不联网、不调用模型或工具，并保持全部能力/安装授权位为 false。
-- [x] 包校验发布门禁通过最终全仓普通/race、vet/staticcheck/module/govulncheck、约 2645 万次 fuzz、78.5% Skills 覆盖、parser/CLI 高频回归、TypeScript/OpenAPI/build/npm audit 和仓库扫描；审计修复 creator version、Deflate 隐藏尾载荷、弃用测试 API 与错误路径回显，未发现未解决高/中风险。
+- [x] 包校验发布门禁通过最终全仓普通/race、vet/staticcheck/module/govulncheck、约 2645 万次 fuzz、78.5% Skills 覆盖、parser/CLI 高频回归、TypeScript/OpenAPI/build/npm audit 和仓库扫描；审计修复 creator version、Deflate 隐藏尾载荷、弃用测试 API 与错误路径回显，未发现未解决高/中风险。GitHub Actions run `29512332025` 已通过提交 `55b3fae`。
 - [ ] schema v64 实现 content-addressed 用户 Skill Registry、不可变安装/卸载账本、原子导入与恢复，以及 `skill import/installed/remove`；同名同版本异内容冲突，已被 Run 固定的版本不可删除。
 - [ ] 将外部包标记为 `operator_installed_untrusted`，要求显式安装与 Run 选择；工具声明不授予能力，交付继续经过 hash/Profile/预算/脱敏/来源复核。
 - [ ] 自定义 Code/Cyber Catalog 严格分离；Cyber 仅接收明确兼容的窄化 Skill，不自动继承 Code Catalog。
