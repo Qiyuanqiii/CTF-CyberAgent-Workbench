@@ -428,7 +428,7 @@ cyberagent run sandbox docker-start-gate-review-show <review-id>
 
 The only v63 outcome is `blocked/deny_start`. Output contains bounded evidence source codes, blocker codes, future gate names, and false authority bits. It omits resource names, raw container IDs, host paths, Manifest bodies, raw operation keys, and private ownership identities. A successful review records why start is still denied; it does not verify the Linux real-daemon chain and does not add start, wait, signal, logs, export, execution, or Artifact authority.
 
-Schema v65/v66 adds a non-authorizing production-evidence receipt plus a recoverable write-ahead attempt around collection:
+Schemas v65-v67 add a non-authorizing production-evidence receipt, a recoverable write-ahead attempt, and an explicitly opted-in Linux read-only daemon harness:
 
 ```powershell
 cyberagent run sandbox docker-production-evidence-capture <review-id> `
@@ -441,11 +441,21 @@ cyberagent run sandbox docker-production-evidence-attempt-resume <attempt-id> `
   --confirm-machine-capture
 ```
 
-`docker-production-evidence-capture` first commits an immutable attempt, digest-only operation, generation lease, and current-generation quiescent reconciliation checkpoint. Only then can it call the collector. A typed failure releases the lease, and resume acquires generation N+1 only after a release or expiry; stale generations cannot record reconciliation, failure, or evidence. Completion atomically binds the attempt result to the v65 receipt and its sixteen fixed items. New SQL enforcement rejects a v65 evidence operation without this result, while pre-v66 receipts remain readable without fabricated attempts.
+`docker-production-evidence-capture` first commits an immutable attempt, digest-only operation, generation lease, and current-generation quiescent reconciliation checkpoint. Only then can it call the collector. A typed failure releases the lease, and resume acquires generation N+1 only after a release or expiry; stale generations cannot record reconciliation, failure, or evidence. Completion atomically binds the attempt result to the v65 receipt and its sixteen fixed items. SQL rejects a v65 evidence operation without a matching v66 or v67 result, while pre-v66 receipts and in-flight v66 attempts remain readable without fabricated v67 state.
 
-The current product collector is intentionally inert. Windows records `unsupported_platform`; Linux without `CYBERAGENT_DOCKER_PRODUCTION_EVIDENCE=1` records `opt_in_required`; Linux with that opt-in still records `harness_pending`. The v66 reconciliation checkpoint reports zero daemon reads and zero known resources, which proves durable call ordering only and is not Docker resource verification. These commands expose bounded metadata but omit lease IDs/owners, raw errors, sockets, paths, image/resource/container identities, and daemon payloads. They do not contact Docker, start a process, export output, commit an Artifact, or authorize a future start.
+Windows records `unsupported_platform`, and Linux without `CYBERAGENT_DOCKER_PRODUCTION_EVIDENCE=1` records `opt_in_required`; neither path contacts a daemon. With explicit Linux opt-in, schema v67 persists a harness intent after the v66 zero-read checkpoint, performs one exact attempt-label container-list GET, requires an empty owned scope, persists daemon-aware reconciliation, and then GETs `_ping`, `version`, `info`, and the exact already-present image digest. Each call is bounded to four seconds and the complete attempt remains bounded to 30 seconds. The harness ignores `DOCKER_HOST`, never pulls, and exposes no create/start/exec/remove/delete method.
 
-An optional real-daemon test is available only when an exact image is already present; it never pulls or creates anything:
+The resulting sixteen items are all `observed_failed` with `production_verified_count=0`; they do not authorize start, process execution, output export, or Artifact commit. CLI output omits lease IDs/owners, raw errors, sockets, paths, image repository names, resource/container identities, and daemon payloads. A persisted v67 intent cannot fall back to the inert v66 result, and resume must repeat daemon-aware reconciliation under its new generation.
+
+The full v67 five-GET harness has a default-skipped Linux integration test. It requires an exact image already present in the local daemon and never pulls, creates, starts, or deletes anything:
+
+```powershell
+$env:CYBERAGENT_DOCKER_PRODUCTION_EVIDENCE = "1"
+$env:CYBERAGENT_DOCKER_READONLY_IMAGE_DIGEST = "sha256:<already-present-digest>"
+go test ./internal/sandbox -run TestDockerProductionEvidenceHarnessRealDaemonOptIn -count=1 -v
+```
+
+The lower-level generic read-only observer has a separate opt-in test:
 
 ```powershell
 $env:CYBERAGENT_DOCKER_READONLY_INTEGRATION = "1"

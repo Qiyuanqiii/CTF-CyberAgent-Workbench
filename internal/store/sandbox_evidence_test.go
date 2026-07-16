@@ -641,7 +641,7 @@ func removeSchemaV65ForTestStatements() []string {
 }
 
 func removeSchemaV66ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV67ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_result_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_result_update_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_failure_delete_immutable`,
@@ -669,5 +669,42 @@ func removeSchemaV66ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_docker_production_evidence_attempts_run_created`,
 		`DROP TABLE sandbox_docker_production_evidence_attempts`,
 		`DELETE FROM schema_migrations WHERE version = 66`,
+	}...)
+}
+
+func removeSchemaV67ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_harness_result_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_harness_result_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_harness_reconciliation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_harness_reconciliation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_harness_intent_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_harness_intent_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_v67_attempt_required`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_harness_blocks_v66_result`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_harness_result_insert`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_harness_reconciliation_insert`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_harness_intent_insert`,
+		`DROP TABLE sandbox_docker_production_evidence_harness_results`,
+		`DROP TABLE sandbox_docker_production_evidence_harness_reconciliations`,
+		`DROP TABLE sandbox_docker_production_evidence_harness_intents`,
+		`CREATE TRIGGER trg_sandbox_docker_production_evidence_v66_attempt_required
+			BEFORE INSERT ON sandbox_docker_production_evidence_operations
+			WHEN NOT EXISTS (
+				SELECT 1 FROM sandbox_docker_production_evidence_attempt_operations attempt_operation
+				JOIN sandbox_docker_production_evidence_attempt_results result
+					ON result.attempt_id = attempt_operation.attempt_id
+				WHERE attempt_operation.key_digest = NEW.key_digest
+					AND attempt_operation.request_fingerprint = NEW.request_fingerprint
+					AND attempt_operation.review_id = NEW.review_id
+					AND attempt_operation.run_id = NEW.run_id
+					AND attempt_operation.requested_by = NEW.requested_by
+					AND result.evidence_id = NEW.evidence_id
+					AND result.created_at = NEW.created_at
+			)
+			BEGIN
+				SELECT RAISE(ABORT, 'Docker production evidence requires a write-ahead attempt');
+			END`,
+		`DELETE FROM schema_migrations WHERE version = 67`,
 	}
 }

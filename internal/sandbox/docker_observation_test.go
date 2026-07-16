@@ -313,6 +313,52 @@ func TestDockerObservationTransportRejectsUntrustedHTTPResponses(t *testing.T) {
 	}
 }
 
+func TestDockerObservationTransportUsesExactEvidenceResourceFilter(t *testing.T) {
+	endpoint, _ := NewDockerObservationEndpoint(DockerObservationEndpointLocalUnix)
+	attemptID := "production-attempt"
+	requests := 0
+	transport, err := newDockerEngineReadOnlyTransport(dockerObservationDoerFunc(
+		func(request *http.Request) (*http.Response, error) {
+			requests++
+			if request.Method != http.MethodGet || request.URL.Path != "/containers/json" ||
+				request.Body != nil {
+				t.Fatalf("unexpected resource reconciliation request: %#v", request)
+			}
+			query := request.URL.Query()
+			if len(query) != 2 || query.Get("all") != "1" ||
+				query.Get("filters") != `{"label":["`+
+					DockerProductionEvidenceHarnessLabelKey+`=`+attemptID+`"]}` {
+				t.Fatalf("resource reconciliation query escaped its fixed filter: %q",
+					request.URL.RawQuery)
+			}
+			return dockerObservationHTTPResponse(request, http.StatusOK,
+				"application/json", `[]`), nil
+		}), endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := transport.ListProductionEvidenceResources(context.Background(), attemptID)
+	if err != nil || requests != 1 || inventory.OwnedResourceCount != 0 ||
+		inventory.DaemonReadCount != 1 || !inventory.RealDaemonContacted {
+		t.Fatalf("unexpected resource inventory: %#v requests=%d err=%v",
+			inventory, requests, err)
+	}
+
+	transport, err = newDockerEngineReadOnlyTransport(dockerObservationDoerFunc(
+		func(request *http.Request) (*http.Response, error) {
+			return dockerObservationHTTPResponse(request, http.StatusOK, "application/json",
+				`[{"Id":"container-id","Labels":{"`+
+					DockerProductionEvidenceHarnessLabelKey+`":"other-attempt"}}]`), nil
+		}), endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := transport.ListProductionEvidenceResources(context.Background(),
+		attemptID); DockerObservationErrorCode(err) != DockerObservationFailureInvalidResponse {
+		t.Fatalf("mismatched resource label was trusted: %v", err)
+	}
+}
+
 func dockerObservationHTTPResponse(request *http.Request, status int, contentType, body string,
 ) *http.Response {
 	response := &http.Response{StatusCode: status, Header: make(http.Header),

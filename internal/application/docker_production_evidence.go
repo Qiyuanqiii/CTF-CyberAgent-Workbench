@@ -80,7 +80,7 @@ func (s *SandboxManifestService) CaptureDockerProductionEvidence(ctx context.Con
 				apperror.CodeConflict,
 				"Docker production evidence attempt operation key changed request")
 		}
-		if existing.Result != nil {
+		if _, completed := existing.CompletedEvidenceID(); completed {
 			return s.replayDockerProductionEvidenceAttempt(ctx, existing)
 		}
 		acquired, acquireErr := s.store.AcquireDockerProductionEvidenceAttempt(ctx,
@@ -128,7 +128,7 @@ func (s *SandboxManifestService) CaptureDockerProductionEvidence(ctx context.Con
 	if err != nil {
 		return DockerProductionEvidenceCaptureResult{}, apperror.Normalize(err)
 	}
-	if acquired.Replayed && acquired.Record.Result != nil {
+	if _, completed := acquired.Record.CompletedEvidenceID(); acquired.Replayed && completed {
 		return s.replayDockerProductionEvidenceAttempt(ctx, acquired.Record)
 	}
 	return s.executeDockerProductionEvidenceAttempt(ctx, acquired)
@@ -164,7 +164,7 @@ func (s *SandboxManifestService) ResumeDockerProductionEvidence(ctx context.Cont
 		return DockerProductionEvidenceCaptureResult{}, apperror.New(
 			apperror.CodeConflict, "Docker production evidence resume authority changed")
 	}
-	if existing.Result != nil {
+	if _, completed := existing.CompletedEvidenceID(); completed {
 		return s.replayDockerProductionEvidenceAttempt(ctx, existing)
 	}
 	acquired, err := s.store.AcquireDockerProductionEvidenceAttempt(ctx,
@@ -179,7 +179,7 @@ func (s *SandboxManifestService) ResumeDockerProductionEvidence(ctx context.Cont
 func (s *SandboxManifestService) executeDockerProductionEvidenceAttempt(ctx context.Context,
 	acquired sandbox.DockerProductionEvidenceAttemptAcquisition,
 ) (DockerProductionEvidenceCaptureResult, error) {
-	if acquired.Replayed || acquired.Record.Result != nil {
+	if _, completed := acquired.Record.CompletedEvidenceID(); acquired.Replayed || completed {
 		return s.replayDockerProductionEvidenceAttempt(ctx, acquired.Record)
 	}
 	now := time.Now().UTC()
@@ -220,29 +220,134 @@ func (s *SandboxManifestService) executeDockerProductionEvidenceAttempt(ctx cont
 	}
 	captureCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
-	observation, err := s.productionEvidence.Capture(captureCtx, captureRequest)
+	review, err := s.loadDockerProductionEvidenceReview(ctx, record.Attempt.ReviewID,
+		record.Attempt.RequestedBy)
 	if err != nil {
 		return s.failDockerProductionEvidenceAttempt(record,
-			dockerProductionEvidenceAttemptFailureCode(err), err)
+			sandbox.DockerProductionEvidenceAttemptErrorPersistence, err)
 	}
-	if observation.RealDaemonContacted ||
-		observation.Status == sandbox.DockerProductionEvidenceStatusComplete {
-		return s.failDockerProductionEvidenceAttempt(record,
-			sandbox.DockerProductionEvidenceAttemptErrorUnsafeContact,
-			apperror.New(apperror.CodeFailedPrecondition,
-				"real-daemon evidence capture remains disabled after the write-ahead checkpoint"))
+	harness, supportsHarness := s.productionEvidence.(sandbox.DockerProductionEvidenceHarness)
+	useHarness := record.HarnessIntent != nil || (supportsHarness && harness.HarnessEnabled())
+	var harnessReconciliation *sandbox.DockerProductionEvidenceHarnessReconciliation
+	var observation sandbox.DockerProductionEvidenceObservation
+	if useHarness {
+		if !supportsHarness || !harness.HarnessEnabled() {
+			return s.failDockerProductionEvidenceAttempt(record,
+				sandbox.DockerProductionEvidenceAttemptErrorCollector,
+				apperror.New(apperror.CodeFailedPrecondition,
+					"Docker production evidence harness requires Linux and explicit opt-in"))
+		}
+		plan, loadErr := s.store.GetDockerContainerPlan(captureCtx, review.ContainerPlanID)
+		if loadErr != nil {
+			return s.failDockerProductionEvidenceAttempt(record,
+				sandbox.DockerProductionEvidenceAttemptErrorPersistence,
+				apperror.Normalize(loadErr))
+		}
+		expectedIntent, buildErr := sandbox.NewDockerProductionEvidenceHarnessIntent(
+			record.Attempt, review, plan, time.Now().UTC())
+		if buildErr != nil {
+			return s.failDockerProductionEvidenceAttempt(record,
+				sandbox.DockerProductionEvidenceAttemptErrorInvalidResponse,
+				apperror.Wrap(apperror.CodeInternal,
+					"build Docker production evidence harness intent", buildErr))
+		}
+		if record.HarnessIntent == nil {
+			prepared, _, prepareErr := s.store.PrepareDockerProductionEvidenceHarnessIntent(
+				captureCtx, expectedIntent, record.Lease)
+			if prepareErr != nil {
+				return s.failDockerProductionEvidenceAttempt(record,
+					sandbox.DockerProductionEvidenceAttemptErrorPersistence,
+					apperror.Normalize(prepareErr))
+			}
+			record = prepared
+		} else if record.HarnessIntent.IntentFingerprint !=
+			expectedIntent.IntentFingerprint {
+			return s.failDockerProductionEvidenceAttempt(record,
+				sandbox.DockerProductionEvidenceAttemptErrorInvalidResponse,
+				apperror.New(apperror.CodeConflict,
+					"Docker production evidence harness immutable plan changed"))
+		}
+		intent := record.HarnessIntent
+		if intent == nil {
+			return s.failDockerProductionEvidenceAttempt(record,
+				sandbox.DockerProductionEvidenceAttemptErrorPersistence,
+				apperror.New(apperror.CodeInternal,
+					"Docker production evidence harness intent was not durable"))
+		}
+		harnessRequest := sandbox.DockerProductionEvidenceHarnessRequest{
+			DockerProductionEvidenceCaptureRequest: captureRequest,
+			ImageDigest:                            intent.ImageDigest, IntentFingerprint: intent.IntentFingerprint,
+			ControlReconciliationFingerprint: current.ReconciliationFingerprint,
+		}
+		if existing, found := record.CurrentHarnessReconciliation(); found {
+			harnessReconciliation = &existing
+		} else {
+			inventory, reconcileErr := harness.ReconcileHarness(captureCtx, harnessRequest)
+			if reconcileErr != nil {
+				return s.failDockerProductionEvidenceAttempt(record,
+					dockerProductionEvidenceAttemptFailureCode(reconcileErr), reconcileErr)
+			}
+			built, buildErr := sandbox.NewDockerProductionEvidenceHarnessReconciliation(
+				*intent, record.Lease, current, inventory, time.Now().UTC())
+			if buildErr != nil {
+				return s.failDockerProductionEvidenceAttempt(record,
+					sandbox.DockerProductionEvidenceAttemptErrorInvalidResponse,
+					apperror.Wrap(apperror.CodeInternal,
+						"build Docker production evidence harness reconciliation", buildErr))
+			}
+			reconciled, _, persistErr :=
+				s.store.RecordDockerProductionEvidenceHarnessReconciliation(
+					captureCtx, built, record.Lease)
+			if persistErr != nil {
+				return s.failDockerProductionEvidenceAttempt(record,
+					sandbox.DockerProductionEvidenceAttemptErrorPersistence,
+					apperror.Normalize(persistErr))
+			}
+			record = reconciled
+			currentHarness, found := record.CurrentHarnessReconciliation()
+			if !found || currentHarness.Generation != record.Lease.Generation {
+				return s.failDockerProductionEvidenceAttempt(record,
+					sandbox.DockerProductionEvidenceAttemptErrorPersistence,
+					apperror.New(apperror.CodeInternal,
+						"Docker production evidence harness reconciliation was not durable"))
+			}
+			harnessReconciliation = &currentHarness
+		}
+		observation, err = harness.CaptureHarness(captureCtx,
+			sandbox.DockerProductionEvidenceHarnessCaptureRequest{
+				DockerProductionEvidenceHarnessRequest: harnessRequest,
+				HarnessReconciliationFingerprint:       harnessReconciliation.ReconciliationFingerprint,
+			})
+		if err != nil {
+			return s.failDockerProductionEvidenceAttempt(record,
+				dockerProductionEvidenceAttemptFailureCode(err), err)
+		}
+		if !observation.RealDaemonContacted ||
+			observation.Status != sandbox.DockerProductionEvidenceStatusComplete {
+			return s.failDockerProductionEvidenceAttempt(record,
+				sandbox.DockerProductionEvidenceAttemptErrorInvalidResponse,
+				apperror.New(apperror.CodeInternal,
+					"Docker production evidence harness did not return a complete machine observation"))
+		}
+	} else {
+		observation, err = s.productionEvidence.Capture(captureCtx, captureRequest)
+		if err != nil {
+			return s.failDockerProductionEvidenceAttempt(record,
+				dockerProductionEvidenceAttemptFailureCode(err), err)
+		}
+		if observation.RealDaemonContacted ||
+			observation.Status == sandbox.DockerProductionEvidenceStatusComplete {
+			return s.failDockerProductionEvidenceAttempt(record,
+				sandbox.DockerProductionEvidenceAttemptErrorUnsafeContact,
+				apperror.New(apperror.CodeFailedPrecondition,
+					"real-daemon evidence capture requires the durable v67 harness"))
+		}
 	}
 	if err := observation.Validate(record.Attempt.AuthorityFingerprint); err != nil {
 		return s.failDockerProductionEvidenceAttempt(record,
 			sandbox.DockerProductionEvidenceAttemptErrorInvalidResponse,
 			apperror.Wrap(apperror.CodeInternal,
 				"validate Docker production evidence observation", err))
-	}
-	review, err := s.loadDockerProductionEvidenceReview(ctx, record.Attempt.ReviewID,
-		record.Attempt.RequestedBy)
-	if err != nil {
-		return s.failDockerProductionEvidenceAttempt(record,
-			sandbox.DockerProductionEvidenceAttemptErrorPersistence, err)
 	}
 	value, err := sandbox.NewDockerProductionEvidence(
 		idgen.New("sandbox-docker-production-evidence"), record.Attempt.OperationKeyDigest,
@@ -260,16 +365,33 @@ func (s *SandboxManifestService) executeDockerProductionEvidenceAttempt(ctx cont
 			apperror.Wrap(apperror.CodeInternal,
 				"build Docker production evidence operation", err))
 	}
-	result, err := sandbox.NewDockerProductionEvidenceAttemptResult(record.Attempt,
-		record.Lease, current, value)
-	if err != nil {
-		return s.failDockerProductionEvidenceAttempt(record,
-			sandbox.DockerProductionEvidenceAttemptErrorInvalidResponse,
-			apperror.Wrap(apperror.CodeInternal,
-				"build Docker production evidence attempt result", err))
+	var completed sandbox.DockerProductionEvidenceAttemptRecord
+	var stored sandbox.DockerProductionEvidence
+	var replayed bool
+	if useHarness {
+		result, buildErr := sandbox.NewDockerProductionEvidenceHarnessResult(
+			*record.HarnessIntent, record.Lease, *harnessReconciliation, value)
+		if buildErr != nil {
+			return s.failDockerProductionEvidenceAttempt(record,
+				sandbox.DockerProductionEvidenceAttemptErrorInvalidResponse,
+				apperror.Wrap(apperror.CodeInternal,
+					"build Docker production evidence harness result", buildErr))
+		}
+		completed, stored, replayed, err =
+			s.store.CompleteDockerProductionEvidenceHarnessAttempt(ctx,
+				value, operation, result, record.Lease)
+	} else {
+		result, buildErr := sandbox.NewDockerProductionEvidenceAttemptResult(record.Attempt,
+			record.Lease, current, value)
+		if buildErr != nil {
+			return s.failDockerProductionEvidenceAttempt(record,
+				sandbox.DockerProductionEvidenceAttemptErrorInvalidResponse,
+				apperror.Wrap(apperror.CodeInternal,
+					"build Docker production evidence attempt result", buildErr))
+		}
+		completed, stored, replayed, err = s.store.CompleteDockerProductionEvidenceAttempt(ctx,
+			value, operation, result, record.Lease)
 	}
-	completed, stored, replayed, err := s.store.CompleteDockerProductionEvidenceAttempt(ctx,
-		value, operation, result, record.Lease)
 	if err != nil {
 		recordCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_, recordErr := s.store.RecordDockerProductionEvidenceAttemptFailure(recordCtx,
@@ -329,12 +451,13 @@ func dockerProductionEvidenceAttemptFailureCode(err error) string {
 func (s *SandboxManifestService) replayDockerProductionEvidenceAttempt(ctx context.Context,
 	record sandbox.DockerProductionEvidenceAttemptRecord,
 ) (DockerProductionEvidenceCaptureResult, error) {
-	if record.Result == nil {
+	evidenceID, completed := record.CompletedEvidenceID()
+	if !completed {
 		return DockerProductionEvidenceCaptureResult{}, apperror.New(
 			apperror.CodeFailedPrecondition,
 			"Docker production evidence attempt has no committed evidence")
 	}
-	value, err := s.store.GetDockerProductionEvidence(ctx, record.Result.EvidenceID)
+	value, err := s.store.GetDockerProductionEvidence(ctx, evidenceID)
 	if err != nil {
 		return DockerProductionEvidenceCaptureResult{}, apperror.Normalize(err)
 	}

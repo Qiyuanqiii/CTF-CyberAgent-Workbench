@@ -383,13 +383,16 @@ func dockerProductionEvidenceAttemptResultFingerprint(value DockerProductionEvid
 }
 
 type DockerProductionEvidenceAttemptRecord struct {
-	Attempt         DockerProductionEvidenceAttempt
-	Lease           DockerProductionEvidenceAttemptLease
-	Reconciliations []DockerProductionEvidenceReconciliation
-	Failures        []DockerProductionEvidenceAttemptFailure
-	Result          *DockerProductionEvidenceAttemptResult
-	Replayed        bool
-	TookOver        bool
+	Attempt                DockerProductionEvidenceAttempt
+	Lease                  DockerProductionEvidenceAttemptLease
+	Reconciliations        []DockerProductionEvidenceReconciliation
+	Failures               []DockerProductionEvidenceAttemptFailure
+	Result                 *DockerProductionEvidenceAttemptResult
+	HarnessIntent          *DockerProductionEvidenceHarnessIntent
+	HarnessReconciliations []DockerProductionEvidenceHarnessReconciliation
+	HarnessResult          *DockerProductionEvidenceHarnessResult
+	Replayed               bool
+	TookOver               bool
 }
 
 func (value DockerProductionEvidenceAttemptRecord) Validate() error {
@@ -399,12 +402,15 @@ func (value DockerProductionEvidenceAttemptRecord) Validate() error {
 		return errors.New("docker production evidence attempt record is invalid")
 	}
 	previousGeneration := int64(0)
+	controlReconciliations := make(map[int64]string, len(value.Reconciliations))
 	for _, reconciliation := range value.Reconciliations {
 		if reconciliation.Validate() != nil || reconciliation.AttemptID != value.Attempt.ID ||
 			reconciliation.Generation <= previousGeneration || reconciliation.Generation > value.Lease.Generation {
 			return errors.New("docker production evidence reconciliation record is invalid")
 		}
 		previousGeneration = reconciliation.Generation
+		controlReconciliations[reconciliation.Generation] =
+			reconciliation.ReconciliationFingerprint
 	}
 	for index, failure := range value.Failures {
 		if failure.Validate() != nil || failure.AttemptID != value.Attempt.ID ||
@@ -412,8 +418,55 @@ func (value DockerProductionEvidenceAttemptRecord) Validate() error {
 			return errors.New("docker production evidence attempt failure sequence is invalid")
 		}
 	}
+	if value.HarnessIntent == nil {
+		if len(value.HarnessReconciliations) != 0 || value.HarnessResult != nil {
+			return errors.New("docker production evidence harness record has no intent")
+		}
+	} else {
+		if value.HarnessIntent.Validate() != nil ||
+			value.HarnessIntent.AttemptID != value.Attempt.ID ||
+			value.HarnessIntent.ReviewID != value.Attempt.ReviewID ||
+			value.HarnessIntent.RunID != value.Attempt.RunID ||
+			value.HarnessIntent.RequestedBy != value.Attempt.RequestedBy {
+			return errors.New("docker production evidence harness intent binding is invalid")
+		}
+		previousHarnessGeneration := int64(0)
+		for _, reconciliation := range value.HarnessReconciliations {
+			controlFingerprint, hasControl := controlReconciliations[reconciliation.Generation]
+			if reconciliation.Validate() != nil ||
+				reconciliation.AttemptID != value.Attempt.ID ||
+				reconciliation.IntentFingerprint != value.HarnessIntent.IntentFingerprint ||
+				!hasControl || reconciliation.ControlReconciliationFingerprint != controlFingerprint ||
+				reconciliation.Generation <= previousHarnessGeneration ||
+				reconciliation.Generation > value.Lease.Generation {
+				return errors.New("docker production evidence harness reconciliation record is invalid")
+			}
+			previousHarnessGeneration = reconciliation.Generation
+		}
+	}
+	if value.Result != nil && value.HarnessResult != nil {
+		return errors.New("docker production evidence attempt has multiple terminal results")
+	}
 	if value.Result == nil {
+		if value.HarnessResult == nil {
+			return nil
+		}
+		if value.HarnessIntent == nil || value.HarnessResult.Validate() != nil ||
+			value.HarnessResult.AttemptID != value.Attempt.ID ||
+			value.HarnessResult.IntentFingerprint != value.HarnessIntent.IntentFingerprint ||
+			value.HarnessResult.LeaseGeneration != value.Lease.Generation ||
+			value.Lease.Status != DockerProductionEvidenceAttemptLeaseReleased ||
+			len(value.HarnessReconciliations) == 0 ||
+			value.HarnessReconciliations[len(value.HarnessReconciliations)-1].Generation !=
+				value.HarnessResult.LeaseGeneration ||
+			value.HarnessReconciliations[len(value.HarnessReconciliations)-1].
+				ReconciliationFingerprint != value.HarnessResult.ReconciliationFingerprint {
+			return errors.New("docker production evidence harness result binding is invalid")
+		}
 		return nil
+	}
+	if value.HarnessIntent != nil {
+		return errors.New("docker production evidence harness attempt used an inert result")
 	}
 	if value.Result.Validate() != nil || value.Result.AttemptID != value.Attempt.ID ||
 		value.Result.LeaseGeneration != value.Lease.Generation ||
@@ -428,7 +481,7 @@ func (value DockerProductionEvidenceAttemptRecord) Validate() error {
 }
 
 func (value DockerProductionEvidenceAttemptRecord) StatusAt(now time.Time) string {
-	if value.Result != nil {
+	if value.Result != nil || value.HarnessResult != nil {
 		return "evidence_committed"
 	}
 	if value.Lease.ActiveAt(now) {
@@ -443,6 +496,16 @@ func (value DockerProductionEvidenceAttemptRecord) StatusAt(now time.Time) strin
 	return "pending"
 }
 
+func (value DockerProductionEvidenceAttemptRecord) CompletedEvidenceID() (string, bool) {
+	if value.Result != nil {
+		return value.Result.EvidenceID, true
+	}
+	if value.HarnessResult != nil {
+		return value.HarnessResult.EvidenceID, true
+	}
+	return "", false
+}
+
 func (value DockerProductionEvidenceAttemptRecord) CurrentReconciliation() (
 	DockerProductionEvidenceReconciliation, bool,
 ) {
@@ -452,6 +515,17 @@ func (value DockerProductionEvidenceAttemptRecord) CurrentReconciliation() (
 		}
 	}
 	return DockerProductionEvidenceReconciliation{}, false
+}
+
+func (value DockerProductionEvidenceAttemptRecord) CurrentHarnessReconciliation() (
+	DockerProductionEvidenceHarnessReconciliation, bool,
+) {
+	for index := len(value.HarnessReconciliations) - 1; index >= 0; index-- {
+		if value.HarnessReconciliations[index].Generation == value.Lease.Generation {
+			return value.HarnessReconciliations[index], true
+		}
+	}
+	return DockerProductionEvidenceHarnessReconciliation{}, false
 }
 
 type DockerProductionEvidenceAttemptAcquisition struct {

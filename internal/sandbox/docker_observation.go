@@ -309,6 +309,15 @@ func (transport UnavailableDockerReadOnlyTransport) InspectImage(ctx context.Con
 	return DockerImageInspection{}, newDockerObservationError(transport.code)
 }
 
+func (transport UnavailableDockerReadOnlyTransport) ListProductionEvidenceResources(
+	ctx context.Context, _ string,
+) (DockerProductionEvidenceHarnessInventory, error) {
+	if err := ctx.Err(); err != nil {
+		return DockerProductionEvidenceHarnessInventory{}, err
+	}
+	return DockerProductionEvidenceHarnessInventory{}, newDockerObservationError(transport.code)
+}
+
 type DockerObservationItem struct {
 	Ordinal        int
 	Name           string

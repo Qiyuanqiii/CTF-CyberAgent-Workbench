@@ -76,6 +76,48 @@ type recordingDockerProductionEvidenceCollector struct {
 	before        func(sandbox.DockerProductionEvidenceCaptureRequest)
 }
 
+type recordingDockerProductionEvidenceHarness struct {
+	reconcileCalls  int
+	captureCalls    int
+	beforeReconcile func(sandbox.DockerProductionEvidenceHarnessRequest)
+	beforeCapture   func(sandbox.DockerProductionEvidenceHarnessCaptureRequest)
+}
+
+func (*recordingDockerProductionEvidenceHarness) Capture(context.Context,
+	sandbox.DockerProductionEvidenceCaptureRequest,
+) (sandbox.DockerProductionEvidenceObservation, error) {
+	return sandbox.DockerProductionEvidenceObservation{},
+		fmt.Errorf("inert collector path must not run for an enabled harness")
+}
+
+func (*recordingDockerProductionEvidenceHarness) HarnessEnabled() bool { return true }
+
+func (collector *recordingDockerProductionEvidenceHarness) ReconcileHarness(
+	_ context.Context, request sandbox.DockerProductionEvidenceHarnessRequest,
+) (sandbox.DockerProductionEvidenceHarnessInventory, error) {
+	collector.reconcileCalls++
+	if collector.beforeReconcile != nil {
+		collector.beforeReconcile(request)
+	}
+	endpoint, err := sandbox.NewDockerObservationEndpoint(
+		sandbox.DockerObservationEndpointLocalUnix)
+	if err != nil {
+		return sandbox.DockerProductionEvidenceHarnessInventory{}, err
+	}
+	return sandbox.NewDockerProductionEvidenceHarnessInventory(endpoint, nil)
+}
+
+func (collector *recordingDockerProductionEvidenceHarness) CaptureHarness(
+	_ context.Context, request sandbox.DockerProductionEvidenceHarnessCaptureRequest,
+) (sandbox.DockerProductionEvidenceObservation, error) {
+	collector.captureCalls++
+	if collector.beforeCapture != nil {
+		collector.beforeCapture(request)
+	}
+	return sandbox.NewDockerProductionEvidenceHarnessObservation(
+		request.AuthorityFingerprint, strings.Repeat("9", 64))
+}
+
 func (collector *recordingDockerProductionEvidenceCollector) Capture(ctx context.Context,
 	request sandbox.DockerProductionEvidenceCaptureRequest,
 ) (sandbox.DockerProductionEvidenceObservation, error) {
@@ -586,6 +628,59 @@ func TestDockerRuntimeInputProjectionPlansPersistsReplaysAndDoesNotWidenAuthorit
 		productionCollector.calls != 3 {
 		t.Fatalf("production evidence attempt did not recover: %#v calls=%d err=%v",
 			resumedProductionEvidence, productionCollector.calls, err)
+	}
+	productionHarness := &recordingDockerProductionEvidenceHarness{}
+	productionHarness.beforeReconcile = func(
+		request sandbox.DockerProductionEvidenceHarnessRequest,
+	) {
+		record, loadErr := st.GetDockerProductionEvidenceAttempt(ctx, request.AttemptID)
+		if loadErr != nil || record.HarnessIntent == nil ||
+			record.HarnessIntent.IntentFingerprint != request.IntentFingerprint ||
+			len(record.Reconciliations) != 1 ||
+			len(record.HarnessReconciliations) != 0 {
+			t.Fatalf("harness reconciled before durable intent: %#v err=%v", record, loadErr)
+		}
+	}
+	productionHarness.beforeCapture = func(
+		request sandbox.DockerProductionEvidenceHarnessCaptureRequest,
+	) {
+		record, loadErr := st.GetDockerProductionEvidenceAttempt(ctx, request.AttemptID)
+		current, found := record.CurrentHarnessReconciliation()
+		if loadErr != nil || !found ||
+			current.ReconciliationFingerprint != request.HarnessReconciliationFingerprint ||
+			!current.RealDaemonContacted || current.DaemonReadCount != 1 ||
+			current.OwnedResourceCount != 0 {
+			t.Fatalf("harness captured before daemon-aware reconciliation: %#v err=%v",
+				record, loadErr)
+		}
+	}
+	service.WithDockerProductionEvidenceCollector(productionHarness)
+	harnessRequest := productionRequest
+	harnessRequest.OperationKey = "docker-production-evidence-linux-harness"
+	harnessEvidence, err := service.CaptureDockerProductionEvidence(ctx, harnessRequest)
+	if err != nil || !harnessEvidence.RealDaemonContacted ||
+		harnessEvidence.Status != sandbox.DockerProductionEvidenceStatusComplete ||
+		harnessEvidence.ObservedCount != sandbox.MaxBackendChecks ||
+		harnessEvidence.ProductionVerifiedCount != 0 ||
+		harnessEvidence.StartGatePassed || harnessEvidence.ContainerStartAuthorized ||
+		harnessEvidence.ProcessExecutionAuthorized || harnessEvidence.OutputExportAuthorized ||
+		harnessEvidence.ArtifactCommitAuthorized || harnessEvidence.Attempt.Result != nil ||
+		harnessEvidence.Attempt.HarnessIntent == nil ||
+		harnessEvidence.Attempt.HarnessResult == nil ||
+		len(harnessEvidence.Attempt.HarnessReconciliations) != 1 ||
+		productionHarness.reconcileCalls != 1 || productionHarness.captureCalls != 1 {
+		t.Fatalf("v67 harness widened authority or skipped checkpoints: %#v reconcile=%d capture=%d err=%v",
+			harnessEvidence, productionHarness.reconcileCalls,
+			productionHarness.captureCalls, err)
+	}
+	replayedHarnessEvidence, err := service.CaptureDockerProductionEvidence(ctx,
+		harnessRequest)
+	if err != nil || !replayedHarnessEvidence.Replayed ||
+		replayedHarnessEvidence.ID != harnessEvidence.ID ||
+		productionHarness.reconcileCalls != 1 || productionHarness.captureCalls != 1 {
+		t.Fatalf("v67 harness replay contacted daemon: %#v reconcile=%d capture=%d err=%v",
+			replayedHarnessEvidence, productionHarness.reconcileCalls,
+			productionHarness.captureCalls, err)
 	}
 	resourceInspector.targetState = sandbox.DockerRuntimeInputResourceTargetForeign
 	unsafeRequest := inspectionRequest

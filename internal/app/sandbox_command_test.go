@@ -1401,7 +1401,7 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		!strings.Contains(productionAttemptList, "status=evidence_committed") ||
 		!strings.Contains(productionAttemptList, "generation=1") ||
 		!strings.Contains(productionAttemptList, "reconciliations=1") ||
-		!strings.Contains(productionAttemptList, "real_daemon_contacted=false") ||
+		!strings.Contains(productionAttemptList, "real_daemon_contact_confirmed=false") ||
 		strings.Contains(productionAttemptList, "lease_id") ||
 		strings.Contains(productionAttemptList, "/workspace") ||
 		strings.Contains(productionAttemptList, home) {

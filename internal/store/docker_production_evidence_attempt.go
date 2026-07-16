@@ -153,7 +153,7 @@ func (s *SQLiteStore) AcquireDockerProductionEvidenceAttempt(ctx context.Context
 func acquireExistingDockerProductionEvidenceAttempt(ctx context.Context, tx *sql.Tx,
 	record sandbox.DockerProductionEvidenceAttemptRecord, ownerID string, ttl time.Duration,
 ) (sandbox.DockerProductionEvidenceAttemptAcquisition, error) {
-	if record.Result != nil {
+	if _, completed := record.CompletedEvidenceID(); completed {
 		if err := tx.Commit(); err != nil {
 			return sandbox.DockerProductionEvidenceAttemptAcquisition{}, err
 		}
@@ -201,7 +201,8 @@ func acquireExistingDockerProductionEvidenceAttempt(ctx context.Context, tx *sql
 		map[string]any{"lease_generation": next.Generation,
 			"previous_generation": previous.Generation, "took_over": tookOver,
 			"real_daemon_contact_authorized": false, "container_start_authorized": false,
-			"process_execution_authorized": false}); err != nil {
+			"read_only_daemon_contact_authorized": record.HarnessIntent != nil,
+			"process_execution_authorized":        false}); err != nil {
 		return sandbox.DockerProductionEvidenceAttemptAcquisition{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -244,7 +245,7 @@ func (s *SQLiteStore) RecordDockerProductionEvidenceReconciliation(ctx context.C
 	if err != nil {
 		return sandbox.DockerProductionEvidenceAttemptRecord{}, false, err
 	}
-	if record.Result != nil {
+	if _, completed := record.CompletedEvidenceID(); completed {
 		return sandbox.DockerProductionEvidenceAttemptRecord{}, false, apperror.New(
 			apperror.CodeConflict, "Completed Docker production evidence attempt cannot reconcile")
 	}
@@ -324,6 +325,11 @@ func (s *SQLiteStore) CompleteDockerProductionEvidenceAttempt(ctx context.Contex
 	if err != nil {
 		return sandbox.DockerProductionEvidenceAttemptRecord{}, sandbox.DockerProductionEvidence{}, false, err
 	}
+	if record.HarnessResult != nil {
+		return sandbox.DockerProductionEvidenceAttemptRecord{}, sandbox.DockerProductionEvidence{}, false,
+			apperror.New(apperror.CodeConflict,
+				"Docker production evidence attempt already completed through the harness")
+	}
 	if record.Result != nil {
 		if record.Result.ResultFingerprint != result.ResultFingerprint {
 			return sandbox.DockerProductionEvidenceAttemptRecord{}, sandbox.DockerProductionEvidence{}, false,
@@ -339,6 +345,11 @@ func (s *SQLiteStore) CompleteDockerProductionEvidenceAttempt(ctx context.Contex
 		}
 		record.Replayed, existing.Replayed = true, true
 		return record, existing, true, nil
+	}
+	if record.HarnessIntent != nil {
+		return sandbox.DockerProductionEvidenceAttemptRecord{}, sandbox.DockerProductionEvidence{}, false,
+			apperror.New(apperror.CodeConflict,
+				"Docker production evidence harness attempt cannot use an inert result")
 	}
 	if err := requireCurrentDockerProductionEvidenceAttemptLease(record.Lease, expected,
 		time.Now().UTC()); err != nil {
@@ -451,7 +462,7 @@ func (s *SQLiteStore) RecordDockerProductionEvidenceAttemptFailure(ctx context.C
 	if err != nil {
 		return sandbox.DockerProductionEvidenceAttemptRecord{}, err
 	}
-	if record.Result != nil {
+	if _, completed := record.CompletedEvidenceID(); completed {
 		return sandbox.DockerProductionEvidenceAttemptRecord{}, apperror.New(
 			apperror.CodeConflict, "Completed Docker production evidence attempt cannot fail")
 	}
@@ -492,11 +503,21 @@ func (s *SQLiteStore) RecordDockerProductionEvidenceAttemptFailure(ctx context.C
 		"Docker production evidence attempt lease changed before failure recording"); err != nil {
 		return sandbox.DockerProductionEvidenceAttemptRecord{}, err
 	}
+	daemonContactConfirmed := len(record.HarnessReconciliations) > 0
+	daemonContactState := "not_authorized"
+	if record.HarnessIntent != nil {
+		daemonContactState = "not_confirmed"
+	}
+	if daemonContactConfirmed {
+		daemonContactState = "confirmed"
+	}
 	if err := appendDockerProductionEvidenceAttemptEvent(ctx, tx, record.Attempt,
 		events.SandboxDockerProductionEvidenceAttemptFailedEvent, failure.CreatedAt,
 		map[string]any{"lease_generation": failure.Generation, "failure_code": failure.Code,
-			"real_daemon_contacted": false, "container_start_authorized": false,
-			"process_execution_authorized": false}); err != nil {
+			"real_daemon_contact_confirmed": daemonContactConfirmed,
+			"real_daemon_contact_state":     daemonContactState,
+			"container_start_authorized":    false,
+			"process_execution_authorized":  false}); err != nil {
 		return sandbox.DockerProductionEvidenceAttemptRecord{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -691,10 +712,32 @@ func getDockerProductionEvidenceAttempt(ctx context.Context, queryer sandboxLife
 	if err != nil {
 		return sandbox.DockerProductionEvidenceAttemptRecord{}, err
 	}
+	harnessIntent, hasHarnessIntent, err := getDockerProductionEvidenceHarnessIntent(
+		ctx, queryer, id)
+	if err != nil {
+		return sandbox.DockerProductionEvidenceAttemptRecord{}, err
+	}
+	harnessReconciliations, err := listDockerProductionEvidenceHarnessReconciliations(
+		ctx, queryer, id)
+	if err != nil {
+		return sandbox.DockerProductionEvidenceAttemptRecord{}, err
+	}
+	harnessResult, hasHarnessResult, err := getDockerProductionEvidenceHarnessResult(
+		ctx, queryer, id)
+	if err != nil {
+		return sandbox.DockerProductionEvidenceAttemptRecord{}, err
+	}
 	record := sandbox.DockerProductionEvidenceAttemptRecord{Attempt: attempt, Lease: lease,
-		Reconciliations: reconciliations, Failures: failures}
+		Reconciliations: reconciliations, Failures: failures,
+		HarnessReconciliations: harnessReconciliations}
 	if found {
 		record.Result = &result
+	}
+	if hasHarnessIntent {
+		record.HarnessIntent = &harnessIntent
+	}
+	if hasHarnessResult {
+		record.HarnessResult = &harnessResult
 	}
 	return record, record.Validate()
 }

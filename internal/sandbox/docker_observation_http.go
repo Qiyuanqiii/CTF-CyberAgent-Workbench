@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 )
 
@@ -144,16 +145,75 @@ func (transport dockerEngineReadOnlyTransport) InspectImage(ctx context.Context,
 	}, nil
 }
 
+func (transport dockerEngineReadOnlyTransport) ListProductionEvidenceResources(
+	ctx context.Context, attemptID string,
+) (DockerProductionEvidenceHarnessInventory, error) {
+	if validateStoredIdentity("Docker production evidence harness attempt", attemptID) != nil ||
+		transport.endpoint.Class != DockerObservationEndpointLocalUnix {
+		return DockerProductionEvidenceHarnessInventory{}, errors.New(
+			"docker production evidence harness resource query is invalid")
+	}
+	filterJSON, err := json.Marshal(map[string][]string{
+		"label": {DockerProductionEvidenceHarnessLabelKey + "=" + attemptID},
+	})
+	if err != nil {
+		return DockerProductionEvidenceHarnessInventory{}, newDockerObservationError(
+			DockerObservationFailureInvalidResponse)
+	}
+	query := url.Values{"all": {"1"}, "filters": {string(filterJSON)}}.Encode()
+	body, err := transport.getExact(ctx, "/containers/json", query, true)
+	if err != nil {
+		return DockerProductionEvidenceHarnessInventory{}, err
+	}
+	var payload []struct {
+		ID     string            `json:"Id"`
+		Labels map[string]string `json:"Labels"`
+	}
+	if err := decodeDockerObservationJSON(body, &payload); err != nil ||
+		len(payload) > MaxDockerProductionEvidenceHarnessResources {
+		return DockerProductionEvidenceHarnessInventory{}, newDockerObservationError(
+			DockerObservationFailureInvalidResponse)
+	}
+	fingerprints := make([]string, 0, len(payload))
+	seen := make(map[string]struct{}, len(payload))
+	for _, resource := range payload {
+		if !validObservationText(resource.ID, 256, false) ||
+			resource.Labels[DockerProductionEvidenceHarnessLabelKey] != attemptID {
+			return DockerProductionEvidenceHarnessInventory{}, newDockerObservationError(
+				DockerObservationFailureInvalidResponse)
+		}
+		if _, exists := seen[resource.ID]; exists {
+			return DockerProductionEvidenceHarnessInventory{}, newDockerObservationError(
+				DockerObservationFailureInvalidResponse)
+		}
+		seen[resource.ID] = struct{}{}
+		fingerprints = append(fingerprints, fingerprint(
+			"sandbox_docker_production_evidence_harness_resource.v1", resource.ID))
+	}
+	sort.Strings(fingerprints)
+	return NewDockerProductionEvidenceHarnessInventory(transport.endpoint, fingerprints)
+}
+
 func (transport dockerEngineReadOnlyTransport) get(ctx context.Context, path string,
 	wantJSON bool,
+) ([]byte, error) {
+	return transport.getExact(ctx, path, "", wantJSON)
+}
+
+func (transport dockerEngineReadOnlyTransport) getExact(ctx context.Context, path,
+	rawQuery string, wantJSON bool,
 ) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if !validDockerObservationGET(path, wantJSON) {
+	if !validDockerObservationGET(path, rawQuery, wantJSON) {
 		return nil, newDockerObservationError(DockerObservationFailureInvalidResponse)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker"+path, nil)
+	requestURL := "http://docker" + path
+	if rawQuery != "" {
+		requestURL += "?" + rawQuery
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		return nil, newDockerObservationError(DockerObservationFailureInvalidResponse)
 	}
@@ -173,7 +233,7 @@ func (transport dockerEngineReadOnlyTransport) get(ctx context.Context, path str
 	if response.Request == nil || response.Request.URL == nil ||
 		response.Request.Method != http.MethodGet || response.Request.URL.Scheme != "http" ||
 		response.Request.URL.Host != "docker" || response.Request.URL.Path != request.URL.Path ||
-		response.Request.URL.RawQuery != "" {
+		response.Request.URL.RawQuery != rawQuery {
 		return nil, newDockerObservationError(DockerObservationFailureInvalidResponse)
 	}
 	if response.StatusCode == http.StatusNotFound && strings.HasPrefix(path, "/images/") {
@@ -198,20 +258,44 @@ func (transport dockerEngineReadOnlyTransport) get(ctx context.Context, path str
 	return body, nil
 }
 
-func validDockerObservationGET(path string, wantJSON bool) bool {
+func validDockerObservationGET(path, rawQuery string, wantJSON bool) bool {
 	switch path {
 	case "/_ping":
-		return !wantJSON
+		return !wantJSON && rawQuery == ""
 	case "/version", "/info":
-		return wantJSON
+		return wantJSON && rawQuery == ""
+	case "/containers/json":
+		return wantJSON && validDockerProductionEvidenceResourceQuery(rawQuery)
 	default:
-		if !wantJSON || !strings.HasPrefix(path, "/images/") ||
+		if !wantJSON || rawQuery != "" || !strings.HasPrefix(path, "/images/") ||
 			!strings.HasSuffix(path, "/json") {
 			return false
 		}
 		digest := strings.TrimSuffix(strings.TrimPrefix(path, "/images/"), "/json")
 		return ValidOCIImageDigest(digest) && path == "/images/"+url.PathEscape(digest)+"/json"
 	}
+}
+
+func validDockerProductionEvidenceResourceQuery(rawQuery string) bool {
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil || len(values) != 2 || len(values["all"]) != 1 ||
+		values["all"][0] != "1" || len(values["filters"]) != 1 {
+		return false
+	}
+	data := []byte(values["filters"][0])
+	if !json.Valid(data) || rejectDuplicateDockerObservationJSON(data) != nil {
+		return false
+	}
+	var filters map[string][]string
+	if err := json.Unmarshal(data, &filters); err != nil || len(filters) != 1 ||
+		len(filters["label"]) != 1 {
+		return false
+	}
+	label := filters["label"][0]
+	prefix := DockerProductionEvidenceHarnessLabelKey + "="
+	return strings.HasPrefix(label, prefix) &&
+		validateStoredIdentity("Docker production evidence harness attempt",
+			strings.TrimPrefix(label, prefix)) == nil
 }
 
 func decodeDockerObservationJSON(data []byte, target any) error {

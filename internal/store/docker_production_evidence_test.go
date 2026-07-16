@@ -170,6 +170,188 @@ func TestDockerProductionEvidenceAttemptFailureRecoveryFencesStaleGeneration(t *
 	}
 }
 
+func TestDockerProductionEvidenceHarnessPersistsGETOnlyEvidenceAndRemainsImmutable(t *testing.T) {
+	ctx := context.Background()
+	st, run, root := openSandboxManifestStore(t, ctx)
+	review := prepareDockerProductionEvidenceReviewStoreFixture(
+		t, ctx, st, run.ID, root, "production-evidence-harness")
+	attempt := newDockerProductionEvidenceAttemptStoreFixture(t, review,
+		"production-evidence-harness-capture")
+	acquired, err := st.BeginDockerProductionEvidenceAttempt(ctx, attempt,
+		"harness-worker", sandbox.DefaultDockerProductionEvidenceAttemptLeaseTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := newDockerProductionEvidenceReconciliationStoreFixture(t, acquired.Record)
+	record, _, err := st.RecordDockerProductionEvidenceReconciliation(ctx, control,
+		acquired.Record.Lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := st.GetDockerContainerPlan(ctx, review.ContainerPlanID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, err := sandbox.NewDockerProductionEvidenceHarnessIntent(record.Attempt,
+		review, plan, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, replayed, err := st.PrepareDockerProductionEvidenceHarnessIntent(ctx,
+		intent, record.Lease)
+	if err != nil || replayed || record.HarnessIntent == nil {
+		t.Fatalf("prepare production evidence harness: %#v replayed=%t err=%v",
+			record, replayed, err)
+	}
+	inertEvidence, inertOperation, inertResult :=
+		newDockerProductionEvidenceCompletionStoreFixture(t, ctx, review, record)
+	if _, _, _, err := st.CompleteDockerProductionEvidenceAttempt(ctx, inertEvidence,
+		inertOperation, inertResult, record.Lease); apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("v67 harness intent fell back to the v66 result path: %v", err)
+	}
+	if _, err := st.db.ExecContext(ctx,
+		`UPDATE sandbox_docker_production_evidence_harness_intents
+		SET daemon_write_authorized = 1 WHERE attempt_id = ?`, attempt.ID); err == nil {
+		t.Fatal("Docker production evidence harness intent was mutable")
+	}
+	endpoint, _ := sandbox.NewDockerObservationEndpoint(
+		sandbox.DockerObservationEndpointLocalUnix)
+	inventory, err := sandbox.NewDockerProductionEvidenceHarnessInventory(endpoint, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	harnessReconciliation, err := sandbox.NewDockerProductionEvidenceHarnessReconciliation(
+		intent, record.Lease, control, inventory, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, replayed, err = st.RecordDockerProductionEvidenceHarnessReconciliation(ctx,
+		harnessReconciliation, record.Lease)
+	if err != nil || replayed || len(record.HarnessReconciliations) != 1 {
+		t.Fatalf("record production evidence harness reconciliation: %#v replayed=%t err=%v",
+			record, replayed, err)
+	}
+	observation, err := sandbox.NewDockerProductionEvidenceHarnessObservation(
+		review.AuthorityFingerprint, strings.Repeat("8", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	value, err := sandbox.NewDockerProductionEvidence(
+		idgen.New("sandbox-docker-production-evidence"), attempt.OperationKeyDigest,
+		review.RequestedBy, review, observation, true, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation, err := sandbox.NewDockerProductionEvidenceOperation(
+		attempt.OperationKeyDigest, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := sandbox.NewDockerProductionEvidenceHarnessResult(intent,
+		record.Lease, harnessReconciliation, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDockerProductionEvidenceHarnessResultTimeBoundBySQL(t, ctx, st, value, result)
+	completed, stored, replayed, err := st.CompleteDockerProductionEvidenceHarnessAttempt(
+		ctx, value, operation, result, record.Lease)
+	if err != nil || replayed || completed.Result != nil ||
+		completed.HarnessResult == nil ||
+		completed.Lease.Status != sandbox.DockerProductionEvidenceAttemptLeaseReleased ||
+		!stored.RealDaemonContacted || stored.ObservedCount != sandbox.MaxBackendChecks ||
+		stored.ProductionVerifiedCount != 0 || stored.StartGatePassed ||
+		stored.ContainerStartAuthorized || stored.ProcessExecutionAuthorized ||
+		stored.OutputExportAuthorized || stored.ArtifactCommitAuthorized {
+		t.Fatalf("complete production evidence harness: %#v evidence=%#v replayed=%t err=%v",
+			completed, stored, replayed, err)
+	}
+	loaded, err := st.GetDockerProductionEvidenceAttempt(ctx, attempt.ID)
+	if err != nil || loaded.HarnessIntent == nil || loaded.HarnessResult == nil ||
+		len(loaded.HarnessReconciliations) != 1 || loaded.Result != nil {
+		t.Fatalf("load production evidence harness attempt: %#v err=%v", loaded, err)
+	}
+	if _, err := st.db.ExecContext(ctx,
+		`DELETE FROM sandbox_docker_production_evidence_harness_reconciliations
+		WHERE attempt_id = ?`, attempt.ID); err == nil {
+		t.Fatal("Docker production evidence harness reconciliation was deletable")
+	}
+	if _, err := st.db.ExecContext(ctx,
+		`UPDATE sandbox_docker_production_evidence_harness_results
+		SET container_start_authorized = 1 WHERE attempt_id = ?`, attempt.ID); err == nil {
+		t.Fatal("Docker production evidence harness result was mutable")
+	}
+	replayedAttempt, replayedEvidence, replayed, err :=
+		st.CompleteDockerProductionEvidenceHarnessAttempt(ctx, value, operation, result,
+			acquired.Record.Lease)
+	if err != nil || !replayed || replayedAttempt.HarnessResult == nil ||
+		replayedEvidence.ID != stored.ID {
+		t.Fatalf("replay production evidence harness: %#v evidence=%#v replayed=%t err=%v",
+			replayedAttempt, replayedEvidence, replayed, err)
+	}
+	eventsForRun, err := st.ListRunEvents(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantEvents := map[string]bool{
+		"sandbox.docker_production_evidence_harness_prepared":   false,
+		"sandbox.docker_production_evidence_harness_reconciled": false,
+		"sandbox.docker_production_evidence_harness_completed":  false,
+	}
+	for _, event := range eventsForRun {
+		if _, ok := wantEvents[event.Type]; ok {
+			wantEvents[event.Type] = true
+		}
+	}
+	for eventType, found := range wantEvents {
+		if !found {
+			t.Fatalf("missing Docker production evidence harness event %s", eventType)
+		}
+	}
+}
+
+func TestSchemaV67PreservesInFlightV66AttemptWithoutFabricatingHarness(t *testing.T) {
+	ctx := context.Background()
+	databasePath := filepath.Join(t.TempDir(), "docker-production-evidence-v66.db")
+	st, run, root := openSandboxManifestStoreAt(t, ctx, databasePath)
+	review := prepareDockerProductionEvidenceReviewStoreFixture(
+		t, ctx, st, run.ID, root, "production-evidence-v67-upgrade")
+	attempt := newDockerProductionEvidenceAttemptStoreFixture(t, review,
+		"production-evidence-v67-upgrade-capture")
+	acquired, err := st.BeginDockerProductionEvidenceAttempt(ctx, attempt,
+		"upgrade-worker", sandbox.DefaultDockerProductionEvidenceAttemptLeaseTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := newDockerProductionEvidenceReconciliationStoreFixture(t, acquired.Record)
+	if _, _, err := st.RecordDockerProductionEvidenceReconciliation(ctx, control,
+		acquired.Record.Lease); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range removeSchemaV67ForTestStatements() {
+		if _, err := st.db.ExecContext(ctx, statement); err != nil {
+			_ = st.Close()
+			t.Fatalf("remove schema v67 with %q: %v", statement, err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := Open(databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = upgraded.Close() })
+	if version, err := upgraded.SchemaVersion(ctx); err != nil ||
+		version != LatestSchemaVersion {
+		t.Fatalf("schema v67 upgrade version=%d err=%v", version, err)
+	}
+	loaded, err := upgraded.GetDockerProductionEvidenceAttempt(ctx, attempt.ID)
+	if err != nil || loaded.HarnessIntent != nil || loaded.HarnessResult != nil ||
+		len(loaded.HarnessReconciliations) != 0 || len(loaded.Reconciliations) != 1 {
+		t.Fatalf("schema v67 fabricated a harness: %#v err=%v", loaded, err)
+	}
+}
+
 func TestDockerProductionEvidenceAttemptExpiredLeaseCanOnlyBeTakenOverByNextGeneration(t *testing.T) {
 	ctx := context.Background()
 	st, run, root := openSandboxManifestStore(t, ctx)
@@ -468,5 +650,51 @@ func assertDockerProductionEvidenceRequiresWriteAheadAttempt(t *testing.T,
 	}
 	if _, err := st.GetDockerProductionEvidence(ctx, value.ID); apperror.CodeOf(err) != apperror.CodeNotFound {
 		t.Fatalf("failed write-ahead bypass left evidence: %v", err)
+	}
+}
+
+func assertDockerProductionEvidenceHarnessResultTimeBoundBySQL(t *testing.T,
+	ctx context.Context, st *SQLiteStore, value sandbox.DockerProductionEvidence,
+	result sandbox.DockerProductionEvidenceHarnessResult,
+) {
+	t.Helper()
+	tx, err := st.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := insertDockerProductionEvidenceTx(ctx, tx, value); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range value.Items {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO sandbox_docker_production_evidence_items
+			(evidence_id, ordinal, name, probe_code, state, observed,
+			production_verified, sufficient_for_start, blocker_code, evidence_digest)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, item.Ordinal, item.Name,
+			item.ProbeCode, item.State, boolInt(item.Observed),
+			boolInt(item.ProductionVerified), boolInt(item.SufficientForStart),
+			item.BlockerCode, item.EvidenceDigest); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO sandbox_docker_production_evidence_harness_results
+		(attempt_id, evidence_id, protocol_version, status, lease_generation,
+		intent_fingerprint, reconciliation_fingerprint, evidence_capture_fingerprint,
+		daemon_read_count, probe_count, observed_count, production_verified_count,
+		real_daemon_contacted, daemon_write_authorized, container_start_authorized,
+		process_execution_authorized, output_export_authorized,
+		artifact_commit_authorized, result_fingerprint, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		result.AttemptID, result.EvidenceID, result.ProtocolVersion, result.Status,
+		result.LeaseGeneration, result.IntentFingerprint,
+		result.ReconciliationFingerprint, result.EvidenceCaptureFingerprint,
+		result.DaemonReadCount, result.ProbeCount, result.ObservedCount,
+		result.ProductionVerifiedCount, boolInt(result.RealDaemonContacted),
+		boolInt(result.DaemonWriteAuthorized), boolInt(result.ContainerStartAuthorized),
+		boolInt(result.ProcessExecutionAuthorized), boolInt(result.OutputExportAuthorized),
+		boolInt(result.ArtifactCommitAuthorized), result.ResultFingerprint,
+		ts(result.CreatedAt.Add(time.Millisecond))); err == nil {
+		t.Fatal("SQLite accepted a harness result timestamp not bound to its evidence")
 	}
 }

@@ -174,6 +174,9 @@ const (
 	SandboxDockerProductionEvidenceReconciledEvent         = "sandbox.docker_production_evidence_reconciled"
 	SandboxDockerProductionEvidenceAttemptFailedEvent      = "sandbox.docker_production_evidence_attempt_failed"
 	SandboxDockerProductionEvidenceAttemptCompletedEvent   = "sandbox.docker_production_evidence_attempt_completed"
+	SandboxDockerProductionEvidenceHarnessPreparedEvent    = "sandbox.docker_production_evidence_harness_prepared"
+	SandboxDockerProductionEvidenceHarnessReconciledEvent  = "sandbox.docker_production_evidence_harness_reconciled"
+	SandboxDockerProductionEvidenceHarnessCompletedEvent   = "sandbox.docker_production_evidence_harness_completed"
 )
 
 type Event struct {

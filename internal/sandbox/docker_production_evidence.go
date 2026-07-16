@@ -34,6 +34,8 @@ const (
 
 	DockerProductionEvidenceOptInEnv  = "CYBERAGENT_DOCKER_PRODUCTION_EVIDENCE"
 	MaxDockerProductionEvidencePerRun = 32
+
+	dockerProductionEvidenceHarnessCallTimeout = 4 * time.Second
 )
 
 var dockerProductionEvidenceProbeCodes = [...]string{
@@ -210,15 +212,224 @@ type DockerProductionEvidenceCollector interface {
 }
 
 type LocalDockerProductionEvidenceCollector struct {
-	platform string
-	arch     string
-	lookup   func(string) (string, bool)
+	platform  string
+	arch      string
+	lookup    func(string) (string, bool)
+	transport DockerProductionEvidenceHarnessTransport
 }
 
 func NewLocalDockerProductionEvidenceCollector() LocalDockerProductionEvidenceCollector {
+	readOnly := NewLocalDockerReadOnlyTransport()
+	transport, _ := readOnly.(DockerProductionEvidenceHarnessTransport)
 	return LocalDockerProductionEvidenceCollector{
 		platform: runtime.GOOS, arch: runtime.GOARCH, lookup: os.LookupEnv,
+		transport: transport,
 	}
+}
+
+func (collector LocalDockerProductionEvidenceCollector) HarnessEnabled() bool {
+	if collector.platform != DockerProductionEvidencePlatformLinux ||
+		collector.lookup == nil || collector.transport == nil {
+		return false
+	}
+	value, found := collector.lookup(DockerProductionEvidenceOptInEnv)
+	return found && strings.TrimSpace(value) == "1"
+}
+
+func (collector LocalDockerProductionEvidenceCollector) ReconcileHarness(ctx context.Context,
+	request DockerProductionEvidenceHarnessRequest,
+) (DockerProductionEvidenceHarnessInventory, error) {
+	if err := request.Validate(); err != nil {
+		return DockerProductionEvidenceHarnessInventory{}, err
+	}
+	if !collector.HarnessEnabled() {
+		return DockerProductionEvidenceHarnessInventory{}, errors.New(
+			"docker production evidence harness requires Linux and explicit opt-in")
+	}
+	if endpoint := collector.transport.Endpoint(); endpoint.Validate() != nil ||
+		endpoint.Class != request.EndpointClass ||
+		endpoint.Fingerprint != request.EndpointFingerprint {
+		return DockerProductionEvidenceHarnessInventory{}, errors.New(
+			"docker production evidence harness transport endpoint changed")
+	}
+	callCtx, cancel, err := dockerProductionEvidenceHarnessCallContext(ctx,
+		request.DeadlineAt)
+	if err != nil {
+		return DockerProductionEvidenceHarnessInventory{}, err
+	}
+	defer cancel()
+	inventory, err := collector.transport.ListProductionEvidenceResources(callCtx,
+		request.AttemptID)
+	if err != nil {
+		return DockerProductionEvidenceHarnessInventory{}, err
+	}
+	if inventory.Validate() != nil || inventory.OwnedResourceCount != 0 {
+		return DockerProductionEvidenceHarnessInventory{}, errors.New(
+			"docker production evidence harness found pre-existing owned resources")
+	}
+	return inventory, nil
+}
+
+func (collector LocalDockerProductionEvidenceCollector) CaptureHarness(ctx context.Context,
+	request DockerProductionEvidenceHarnessCaptureRequest,
+) (DockerProductionEvidenceObservation, error) {
+	if err := request.Validate(); err != nil {
+		return DockerProductionEvidenceObservation{}, err
+	}
+	if !collector.HarnessEnabled() {
+		return DockerProductionEvidenceObservation{}, errors.New(
+			"docker production evidence harness requires Linux and explicit opt-in")
+	}
+	endpoint := collector.transport.Endpoint()
+	if endpoint.Validate() != nil || endpoint.Class != request.EndpointClass ||
+		endpoint.Fingerprint != request.EndpointFingerprint {
+		return DockerProductionEvidenceObservation{}, errors.New(
+			"docker production evidence harness transport endpoint changed")
+	}
+	if err := collector.runDockerProductionEvidenceHarnessPing(ctx, request.DeadlineAt); err != nil {
+		return DockerProductionEvidenceObservation{}, err
+	}
+	version, err := collector.readDockerProductionEvidenceHarnessVersion(ctx,
+		request.DeadlineAt)
+	if err != nil {
+		return DockerProductionEvidenceObservation{}, err
+	}
+	info, err := collector.readDockerProductionEvidenceHarnessInfo(ctx, request.DeadlineAt)
+	if err != nil {
+		return DockerProductionEvidenceObservation{}, err
+	}
+	image, err := collector.readDockerProductionEvidenceHarnessImage(ctx,
+		request.DeadlineAt, request.ImageDigest)
+	if err != nil {
+		return DockerProductionEvidenceObservation{}, err
+	}
+	if version.OSType != DockerProductionEvidencePlatformLinux ||
+		info.OSType != DockerProductionEvidencePlatformLinux ||
+		image.OSType != DockerProductionEvidencePlatformLinux {
+		return DockerProductionEvidenceObservation{}, errors.New(
+			"docker production evidence harness requires a Linux daemon and image")
+	}
+	daemonIdentityFingerprint := fingerprint(
+		"sandbox_docker_production_evidence_daemon_identity.v1", version.APIVersion,
+		version.MinAPIVersion, version.EngineVersion, version.GitCommit,
+		version.OSType, version.Architecture, info.ID, info.ServerVersion,
+		info.OSType, info.Architecture)
+	capabilityFingerprint := fingerprint(
+		"sandbox_docker_production_evidence_capability.v1", info.Driver,
+		info.CgroupDriver, info.CgroupVersion, info.DefaultRuntime,
+		strconv.Itoa(info.NCPU), strconv.FormatInt(info.MemoryBytes, 10),
+		strconv.FormatBool(info.PidsLimit), strings.Join(info.SecurityOptions, "\x00"))
+	imageFingerprint := fingerprint(
+		"sandbox_docker_production_evidence_image.v1", request.ImageDigest,
+		image.ID, image.OSType, image.Architecture, strconv.FormatInt(image.SizeBytes, 10),
+		image.User, image.RootFSType, image.GraphDriver, strings.Join(image.RepoDigests, "\x00"))
+	environmentFingerprint := fingerprint(
+		"sandbox_docker_production_environment.v2", collector.platform, collector.arch,
+		request.EndpointFingerprint, request.IntentFingerprint,
+		request.ControlReconciliationFingerprint,
+		request.HarnessReconciliationFingerprint, daemonIdentityFingerprint,
+		capabilityFingerprint, imageFingerprint, DockerProductionEvidenceSuiteFingerprint())
+	return NewDockerProductionEvidenceHarnessObservation(request.AuthorityFingerprint,
+		environmentFingerprint)
+}
+
+func NewDockerProductionEvidenceHarnessObservation(authorityFingerprint,
+	environmentFingerprint string,
+) (DockerProductionEvidenceObservation, error) {
+	if !validDigest(authorityFingerprint) || !validDigest(environmentFingerprint) {
+		return DockerProductionEvidenceObservation{}, errors.New(
+			"docker production evidence harness observation fingerprint is invalid")
+	}
+	items := newObservedDockerProductionEvidenceItems(authorityFingerprint,
+		environmentFingerprint)
+	observation := DockerProductionEvidenceObservation{
+		Source:                 DockerProductionEvidenceSourceLocal,
+		TrustClass:             DockerProductionEvidenceTrustClass,
+		Status:                 DockerProductionEvidenceStatusComplete,
+		PlatformClass:          DockerProductionEvidencePlatformLinux,
+		EndpointClass:          DockerObservationEndpointLocalUnix,
+		SuiteFingerprint:       DockerProductionEvidenceSuiteFingerprint(),
+		EnvironmentFingerprint: environmentFingerprint,
+		RealDaemonContacted:    true, Items: items,
+	}
+	return observation, observation.Validate(authorityFingerprint)
+}
+
+func (collector LocalDockerProductionEvidenceCollector) runDockerProductionEvidenceHarnessPing(
+	ctx context.Context, deadline time.Time,
+) error {
+	callCtx, cancel, err := dockerProductionEvidenceHarnessCallContext(ctx, deadline)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	return collector.transport.Ping(callCtx)
+}
+
+func (collector LocalDockerProductionEvidenceCollector) readDockerProductionEvidenceHarnessVersion(
+	ctx context.Context, deadline time.Time,
+) (DockerDaemonVersion, error) {
+	callCtx, cancel, err := dockerProductionEvidenceHarnessCallContext(ctx, deadline)
+	if err != nil {
+		return DockerDaemonVersion{}, err
+	}
+	defer cancel()
+	value, err := collector.transport.Version(callCtx)
+	if err != nil {
+		return DockerDaemonVersion{}, err
+	}
+	if err := value.Validate(); err != nil {
+		return DockerDaemonVersion{}, err
+	}
+	return value, nil
+}
+
+func (collector LocalDockerProductionEvidenceCollector) readDockerProductionEvidenceHarnessInfo(
+	ctx context.Context, deadline time.Time,
+) (DockerDaemonInfo, error) {
+	callCtx, cancel, err := dockerProductionEvidenceHarnessCallContext(ctx, deadline)
+	if err != nil {
+		return DockerDaemonInfo{}, err
+	}
+	defer cancel()
+	value, err := collector.transport.Info(callCtx)
+	if err != nil {
+		return DockerDaemonInfo{}, err
+	}
+	return value.Normalize()
+}
+
+func (collector LocalDockerProductionEvidenceCollector) readDockerProductionEvidenceHarnessImage(
+	ctx context.Context, deadline time.Time, imageDigest string,
+) (DockerImageInspection, error) {
+	callCtx, cancel, err := dockerProductionEvidenceHarnessCallContext(ctx, deadline)
+	if err != nil {
+		return DockerImageInspection{}, err
+	}
+	defer cancel()
+	value, err := collector.transport.InspectImage(callCtx, imageDigest)
+	if err != nil {
+		return DockerImageInspection{}, err
+	}
+	return value.Normalize(imageDigest)
+}
+
+func dockerProductionEvidenceHarnessCallContext(ctx context.Context,
+	deadline time.Time,
+) (context.Context, context.CancelFunc, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	now := time.Now().UTC()
+	if !deadline.After(now) {
+		return nil, nil, context.DeadlineExceeded
+	}
+	callDeadline := now.Add(dockerProductionEvidenceHarnessCallTimeout)
+	if deadline.Before(callDeadline) {
+		callDeadline = deadline
+	}
+	callCtx, cancel := context.WithDeadline(ctx, callDeadline)
+	return callCtx, cancel, nil
 }
 
 func (collector LocalDockerProductionEvidenceCollector) Capture(ctx context.Context,
@@ -274,6 +485,25 @@ func newUnobservedDockerProductionEvidenceItems(authorityFingerprint,
 			Ordinal: check.Ordinal, Name: check.Name,
 			ProbeCode:   dockerProductionEvidenceProbeCodes[index],
 			State:       DockerProductionEvidenceStateNotObserved,
+			BlockerCode: dockerStartGateCheckSpecs[index].BlockerCode,
+		}
+		item.EvidenceDigest = dockerProductionEvidenceItemDigest(item,
+			authorityFingerprint, environmentFingerprint)
+		items[index] = item
+	}
+	return items
+}
+
+func newObservedDockerProductionEvidenceItems(authorityFingerprint,
+	environmentFingerprint string,
+) []DockerProductionEvidenceItem {
+	checks := RequiredBackendChecks()
+	items := make([]DockerProductionEvidenceItem, len(checks))
+	for index, check := range checks {
+		item := DockerProductionEvidenceItem{
+			Ordinal: check.Ordinal, Name: check.Name,
+			ProbeCode: dockerProductionEvidenceProbeCodes[index],
+			State:     DockerProductionEvidenceStateFailed, Observed: true,
 			BlockerCode: dockerStartGateCheckSpecs[index].BlockerCode,
 		}
 		item.EvidenceDigest = dockerProductionEvidenceItemDigest(item,
@@ -509,12 +739,12 @@ func DockerProductionEvidenceStatusDescription(status string) string {
 	case DockerProductionEvidenceStatusUnsupported:
 		return "production evidence capture requires Linux"
 	case DockerProductionEvidenceStatusOptIn:
-		return fmt.Sprintf("set %s=1 to request the future Linux harness",
+		return fmt.Sprintf("set %s=1 to authorize the bounded Linux read-only harness",
 			DockerProductionEvidenceOptInEnv)
 	case DockerProductionEvidenceStatusPending:
-		return "the Linux real-daemon harness is not enabled in this release"
+		return "read-only daemon contact was requested; the durable harness flow must perform it"
 	case DockerProductionEvidenceStatusComplete:
-		return "machine capture completed; independent start review is still required"
+		return "read-only machine capture completed; every start check remains blocked"
 	default:
 		return "unknown capture status"
 	}

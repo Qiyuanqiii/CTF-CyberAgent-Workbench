@@ -241,9 +241,20 @@ type SandboxManifestStore interface {
 	RecordDockerProductionEvidenceReconciliation(ctx context.Context,
 		value sandbox.DockerProductionEvidenceReconciliation,
 		expected sandbox.DockerProductionEvidenceAttemptLease) (sandbox.DockerProductionEvidenceAttemptRecord, bool, error)
+	PrepareDockerProductionEvidenceHarnessIntent(ctx context.Context,
+		value sandbox.DockerProductionEvidenceHarnessIntent,
+		expected sandbox.DockerProductionEvidenceAttemptLease) (sandbox.DockerProductionEvidenceAttemptRecord, bool, error)
+	RecordDockerProductionEvidenceHarnessReconciliation(ctx context.Context,
+		value sandbox.DockerProductionEvidenceHarnessReconciliation,
+		expected sandbox.DockerProductionEvidenceAttemptLease) (sandbox.DockerProductionEvidenceAttemptRecord, bool, error)
 	CompleteDockerProductionEvidenceAttempt(ctx context.Context,
 		value sandbox.DockerProductionEvidence, operation sandbox.DockerProductionEvidenceOperation,
 		result sandbox.DockerProductionEvidenceAttemptResult,
+		expected sandbox.DockerProductionEvidenceAttemptLease) (sandbox.DockerProductionEvidenceAttemptRecord,
+		sandbox.DockerProductionEvidence, bool, error)
+	CompleteDockerProductionEvidenceHarnessAttempt(ctx context.Context,
+		value sandbox.DockerProductionEvidence, operation sandbox.DockerProductionEvidenceOperation,
+		result sandbox.DockerProductionEvidenceHarnessResult,
 		expected sandbox.DockerProductionEvidenceAttemptLease) (sandbox.DockerProductionEvidenceAttemptRecord,
 		sandbox.DockerProductionEvidence, bool, error)
 	RecordDockerProductionEvidenceAttemptFailure(ctx context.Context, attemptID string,

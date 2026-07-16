@@ -1435,13 +1435,14 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		now := time.Now().UTC()
 		for _, value := range values {
 			evidenceID := "none"
-			if value.Result != nil {
-				evidenceID = value.Result.EvidenceID
+			if completedID, completed := value.CompletedEvidenceID(); completed {
+				evidenceID = completedID
 			}
-			fmt.Fprintf(a.out, "%s\treview=%s\tstatus=%s\tgeneration=%d\tlease_status=%s\treconciliations=%d\tfailures=%d\tevidence=%s\treal_daemon_contacted=false\tstart_authorized=false\tcreated_at=%s\n",
+			fmt.Fprintf(a.out, "%s\treview=%s\tstatus=%s\tgeneration=%d\tlease_status=%s\treconciliations=%d\tharness_reconciliations=%d\tfailures=%d\tevidence=%s\treal_daemon_contact_confirmed=%t\tstart_authorized=false\tcreated_at=%s\n",
 				value.Attempt.ID, value.Attempt.ReviewID, value.StatusAt(now),
 				value.Lease.Generation, value.Lease.Status, len(value.Reconciliations),
-				len(value.Failures), evidenceID,
+				len(value.HarnessReconciliations), len(value.Failures), evidenceID,
+				len(value.HarnessReconciliations) > 0,
 				value.Attempt.CreatedAt.Format(timeFormatRFC3339Nano))
 		}
 		return nil
@@ -2129,6 +2130,9 @@ func printSandboxDockerProductionEvidenceAttempt(a *App,
 	if value.Result != nil {
 		evidenceID = value.Result.EvidenceID
 		resultFingerprint = value.Result.ResultFingerprint
+	} else if value.HarnessResult != nil {
+		evidenceID = value.HarnessResult.EvidenceID
+		resultFingerprint = value.HarnessResult.ResultFingerprint
 	}
 	currentStatus := "none"
 	currentFingerprint := "none"
@@ -2136,7 +2140,22 @@ func printSandboxDockerProductionEvidenceAttempt(a *App,
 		currentStatus = current.Status
 		currentFingerprint = current.ReconciliationFingerprint
 	}
-	fmt.Fprintf(a.out, "docker_production_evidence_attempt: %s\ndocker_start_gate_review: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nstatus: %s\noperation_key_digest: %s\nrequest_fingerprint: %s\nreview_fingerprint: %s\nauthority_fingerprint: %s\nthreat_model_fingerprint: %s\nsuite_fingerprint: %s\nendpoint_class: %s\nendpoint_fingerprint: %s\ncapture_timeout_millis: %d\nlease_generation: %d\nlease_status: %s\nlease_active: %t\nreconciliations: %d\ncurrent_reconciliation_status: %s\ncurrent_reconciliation_fingerprint: %s\nfailures: %d\nevidence: %s\nresult_fingerprint: %s\noperator_confirmed: true\nreal_daemon_contact_authorized: false\nreal_daemon_contacted: false\ncontainer_start_authorized: false\nprocess_execution_authorized: false\noutput_export_authorized: false\nartifact_commit_authorized: false\nlease_identity_exposed: false\nraw_daemon_payload_stored: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\ntook_over: %t\n",
+	harnessStatus := "none"
+	harnessFingerprint := "none"
+	if current, found := value.CurrentHarnessReconciliation(); found {
+		harnessStatus = current.Status
+		harnessFingerprint = current.ReconciliationFingerprint
+	}
+	harnessPrepared := value.HarnessIntent != nil
+	realDaemonContacted := len(value.HarnessReconciliations) > 0
+	daemonContactState := "not_authorized"
+	if harnessPrepared {
+		daemonContactState = "not_confirmed"
+	}
+	if realDaemonContacted {
+		daemonContactState = "confirmed"
+	}
+	fmt.Fprintf(a.out, "docker_production_evidence_attempt: %s\ndocker_start_gate_review: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nstatus: %s\noperation_key_digest: %s\nrequest_fingerprint: %s\nreview_fingerprint: %s\nauthority_fingerprint: %s\nthreat_model_fingerprint: %s\nsuite_fingerprint: %s\nendpoint_class: %s\nendpoint_fingerprint: %s\ncapture_timeout_millis: %d\nlease_generation: %d\nlease_status: %s\nlease_active: %t\nreconciliations: %d\ncurrent_reconciliation_status: %s\ncurrent_reconciliation_fingerprint: %s\nharness_prepared: %t\nharness_reconciliations: %d\ncurrent_harness_reconciliation_status: %s\ncurrent_harness_reconciliation_fingerprint: %s\nfailures: %d\nevidence: %s\nresult_fingerprint: %s\noperator_confirmed: true\nreal_daemon_contact_authorized: false\nread_only_daemon_contact_authorized: %t\nreal_daemon_contact_confirmed: %t\nreal_daemon_contact_state: %s\ndaemon_write_authorized: false\ncontainer_start_authorized: false\nprocess_execution_authorized: false\noutput_export_authorized: false\nartifact_commit_authorized: false\nlease_identity_exposed: false\nraw_daemon_payload_stored: false\nraw_resource_identity_stored: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\ntook_over: %t\n",
 		value.Attempt.ID, value.Attempt.ReviewID, value.Attempt.RunID,
 		value.Attempt.MissionID, value.Attempt.WorkspaceID, value.Attempt.ProtocolVersion,
 		value.StatusAt(time.Now().UTC()), value.Attempt.OperationKeyDigest,
@@ -2145,8 +2164,10 @@ func printSandboxDockerProductionEvidenceAttempt(a *App,
 		value.Attempt.SuiteFingerprint, value.Attempt.EndpointClass,
 		value.Attempt.EndpointFingerprint, value.Attempt.CaptureTimeoutMillis,
 		value.Lease.Generation, value.Lease.Status, value.Lease.ActiveAt(time.Now().UTC()),
-		len(value.Reconciliations), currentStatus, currentFingerprint, len(value.Failures),
-		evidenceID, resultFingerprint, value.Attempt.RequestedBy,
+		len(value.Reconciliations), currentStatus, currentFingerprint, harnessPrepared,
+		len(value.HarnessReconciliations), harnessStatus,
+		harnessFingerprint, len(value.Failures), evidenceID, resultFingerprint,
+		harnessPrepared, realDaemonContacted, daemonContactState, value.Attempt.RequestedBy,
 		value.Attempt.CreatedAt.Format(timeFormatRFC3339Nano), value.Replayed, value.TookOver)
 	for _, failure := range value.Failures {
 		fmt.Fprintf(a.out, "%d\tcode=%s\tgeneration=%d\tcreated_at=%s\n",
