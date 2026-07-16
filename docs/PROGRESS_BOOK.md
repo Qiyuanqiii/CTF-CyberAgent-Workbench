@@ -746,7 +746,7 @@ schema v66 可恢复 Docker 生产证据 Attempt 切片已完成实现，任务 
 
 定向测试覆盖 collector 内可见的写前顺序、活动租约冲突、释放恢复、到期接管、stale-generation fencing、unsafe daemon-contact failure、generation-two completion、SQL 旁路拒绝、v65 升级、不变性、隐私和 replay 零重采集。ADR 0028 固化边界。当前 reconciliation 只记录零 daemon reads 与零 known resources，它证明 ownership/order 而不证明 Docker 生产资源状态；当前 Windows/Linux collector 仍是 inert implementation，没有运行真实 daemon harness、Docker start 或宿主进程。架构完成度保持约 98%，产品可用度保持约 45-50%，通用 Coding Agent 约 40%，Cyber 自动化约 20%。
 
-v66 最终本地门禁通过全仓普通/race（206.9 秒/230.3 秒）、vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、严格 TypeScript、9 个文件 21 项前端测试、OpenAPI/production build/npm audit、49 份 Markdown 文档链接、凭据/运行产物/乱码/进程入口/diff 扫描和隔离真实二进制 schema-v66 Workspace smoke。Domain/Store/Application/CLI 高频回归为 50/10/5/5 轮，关键 race 为 5/3/3 轮。审计修复 lease 行缺少 DELETE 禁止、direct-SQL release/takeover 时间线过宽，以及 capture list 尾随 `--limit` 无法解析三项问题；当前无未解决高/中风险。宿主受保护删除策略拒绝烟测目录的递归清理，目录留在系统临时根等待自动回收，无需人工操作。
+v66 最终本地门禁通过全仓普通/race（206.9 秒/230.3 秒）、vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、严格 TypeScript、9 个文件 21 项前端测试、OpenAPI/production build/npm audit、50 份 Markdown 文档链接、凭据/运行产物/乱码/进程入口/diff 扫描和隔离真实二进制 schema-v66 Workspace smoke。Domain/Store/Application/CLI 高频回归为 50/10/5/5 轮，关键 race 为 5/3/3 轮。审计修复 lease 行缺少 DELETE 禁止、direct-SQL release/takeover 时间线过宽，以及 capture list 尾随 `--limit` 无法解析三项问题；当前无未解决高/中风险。宿主受保护删除策略拒绝烟测目录的递归清理，目录留在系统临时根等待自动回收，无需人工操作。
 
 GitHub Actions run `29538732903` 已通过 v66 实现提交 `3e52b7d`：Go/Linux 作业 3 分 33 秒，TypeScript 作业 25 秒；Linux 全仓测试、vet、govulncheck 与前端完整门禁全部通过。
 
