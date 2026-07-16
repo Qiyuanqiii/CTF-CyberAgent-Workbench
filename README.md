@@ -116,6 +116,10 @@ Schema v64 adds the Go-owned `run_execution_profile.v1`. Every Run defaults to `
 
 Selection records intent, not permission. Schema v64 fixes `process_enabled`, `execution_authorized`, and `capability_grant` to `false`: `preview` maps to `NoopRunner`, `docker` still requires an independent Docker production start gate, and `local` still requires the unimplemented OS-sandbox gate. TypeScript submits only a profile ID and cannot choose the backend, filesystem/network scope, approval policy, or authority bits; child Agents cannot widen the parent Run profile.
 
+实现提交 `8378419` 已通过最终本地全仓测试、race/static/security/frontend 门禁，以及 GitHub Actions run `29523634340`；远端 Go/Linux job 用时 3 分钟，TypeScript job 用时 26 秒。审计未发现未解决的高危或中危问题，且没有运行真实 Docker start 或宿主机进程。
+
+Implementation commit `8378419` passed the final local full-suite, race, static, security, and frontend gates plus GitHub Actions run `29523634340`; the remote Go/Linux job completed in 3 minutes and TypeScript in 26 seconds. The audit found no unresolved high- or medium-severity issue and did not run a real Docker start or host process.
+
 ## 架构能力详解 / Architecture Details
 
 ### 中文详解

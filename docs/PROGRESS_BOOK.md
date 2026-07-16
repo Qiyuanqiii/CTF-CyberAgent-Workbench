@@ -720,9 +720,9 @@ schema v64 Run execution profile 切片已完成实现。每个新建 Run 在同
 
 React 控制台新增三段式执行环境控件和可选 distinct control token。两个 bearer 都只驻留页面内存，control token 不进入 URL、请求 body、browser storage 或 read 请求；界面只提交 profile enum 与稳定幂等键，Go/SQLite 再检查 Run 状态、lease 与闭合映射。无 control token、Run 非 created/paused、活动 lease 或当前同档位时按钮禁用。ADR 0026 固化了“选择是意图，不是权限”的边界。
 
-本轮定向测试覆盖 Domain 映射/篡改、schema v64 回填、SQL 不可变、幂等/冲突/lease、CLI、HTTP credential 分离/严格 JSON/OpenAPI live route、前端内存 token 与控件行为。最终代码全仓普通测试 211.7 秒通过；完整 race 196.9 秒通过，HTTP/Store/App v64 路径在最终 DTO 收窄后又通过定向 race。`go vet`、零告警 `staticcheck`、module verify/tidy diff、零可达漏洞 `govulncheck`、严格 TypeScript、9 个文件 21 项前端测试、production build、零漏洞 npm audit、OpenAPI/TypeScript 双次生成 SHA-256、README v1-v64 顺序、Markdown 链接、凭据/运行产物/乱码/diff 扫描和隔离真实 CLI smoke 均为绿色。烟测确认 Preview 默认值、Docker 门禁选择、同键重放、单条审计事件和零进程启动。
+本轮定向测试覆盖 Domain 映射/篡改、schema v64 回填、SQL 不可变、幂等/冲突/lease、CLI、HTTP credential 分离/严格 JSON/OpenAPI live route、前端内存 token 与控件行为。最终代码全仓普通测试 225.9 秒通过；完整 race 196.9 秒通过，HTTP/Store/App v64 路径在最终 DTO 收窄后又通过定向 race。`go vet`、零告警 `staticcheck`、module verify/tidy diff、零可达漏洞 `govulncheck`、严格 TypeScript、9 个文件 21 项前端测试、production build、零漏洞 npm audit、OpenAPI/TypeScript 双次生成 SHA-256、README v1-v64 顺序、Markdown 链接、凭据/运行产物/乱码/diff 扫描和隔离真实 CLI smoke 均为绿色。烟测确认 Preview 默认值、Docker 门禁选择、同键重放、单条审计事件和零进程启动。实现提交 `8378419` 的 GitHub Actions run `29523634340` 也已通过，Go/Linux 用时 3 分钟，TypeScript 用时 26 秒。
 
-代码审计修复三类低风险问题：共用 control body parser 不再返回 cancellation 专用误导文案；六处内部错误文本改为仓库要求的小写形式；HTTP/React profile DTO 删除不需要的 requester/reason 审计叙述，只在 SQLite/Event/CLI 保留。当前无未解决高/中风险。本轮未执行 Linux real-daemon harness，本机留下一个不受 Git 跟踪的系统临时烟测目录。架构完成度仍约 98%，产品可用度仍约 45-50%，因为用户现在可以预先表达执行环境，但真实进程仍关闭。原先预留给 Skill Registry 的 v64 已被本切片占用，Registry 顺延到 v65 或以后；GitHub CI 在推送后复核。
+代码审计修复三类低风险问题：共用 control body parser 不再返回 cancellation 专用误导文案；六处内部错误文本改为仓库要求的小写形式；HTTP/React profile DTO 删除不需要的 requester/reason 审计叙述，只在 SQLite/Event/CLI 保留。当前无未解决高/中风险。本轮未执行 Linux real-daemon harness，本机留下一个不受 Git 跟踪的系统临时烟测目录。架构完成度仍约 98%，产品可用度仍约 45-50%，因为用户现在可以预先表达执行环境，但真实进程仍关闭。原先预留给 Skill Registry 的 v64 已被本切片占用，Registry 顺延到 v65 或以后。
 
 ## 八、仓库同步与恢复约定
 
