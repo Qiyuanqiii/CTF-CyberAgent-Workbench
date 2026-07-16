@@ -87,5 +87,6 @@ Sandbox disabled-start tests remain the outer fail-closed layers.
 - Some opaque or highly dynamic cleanup commands may be rejected
   conservatively; safe deletion should move to a typed workspace tool rather
   than accumulate shell exceptions.
-- Schema v64 remains reserved for the separately planned content-addressed
-  external Skill Registry.
+- Schema v64 is now used by the independently reviewed Run execution-profile
+  selection control plane. The content-addressed external Skill Registry moves
+  to schema v65 or later.

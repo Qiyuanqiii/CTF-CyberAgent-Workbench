@@ -10,14 +10,15 @@ import { useConnectionStore } from "./state/connection";
 
 export default function App() {
   const token = useConnectionStore((state) => state.token);
+  const controlToken = useConnectionStore((state) => state.controlToken);
   if (!token) {
     return <ConnectionGate />;
   }
-  return <ConnectedWorkbench token={token} />;
+  return <ConnectedWorkbench token={token} controlToken={controlToken} />;
 }
 
-function ConnectedWorkbench({ token }: { token: string }) {
-  const client = useMemo(() => new CyberAgentClient(token), [token]);
+function ConnectedWorkbench({ token, controlToken }: { token: string; controlToken: string }) {
+  const client = useMemo(() => new CyberAgentClient(token, undefined, controlToken), [token, controlToken]);
   const queryClient = useQueryClient();
   const health = useConnectionStore((state) => state.health);
   const setHealth = useConnectionStore((state) => state.setHealth);

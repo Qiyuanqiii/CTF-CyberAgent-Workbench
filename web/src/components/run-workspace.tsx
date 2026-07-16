@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   Boxes,
   ClipboardList,
+  Container,
   Database,
   FileArchive,
   Gauge,
@@ -15,6 +16,8 @@ import {
   ScanSearch,
   ShieldAlert,
   StickyNote,
+  Terminal,
+  View,
   Wrench,
 } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
@@ -25,6 +28,8 @@ import type {
   OperatorSteeringQueueView,
   PlanDeliveryStateView,
   RunDetailView,
+  RunExecutionProfileControlView,
+  RunExecutionProfileView,
   SupervisorToolRoundView,
   WorkItemView,
 } from "../api/types";
@@ -121,7 +126,7 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
         ))}
       </nav>
       <div className="workspace-content">
-        {tab === "overview" && <RunOverview detail={detail} />}
+        {tab === "overview" && <RunOverview client={client} detail={detail} />}
         {tab === "agents" && <AgentGraphPanel client={client} runID={runID} />}
         {tab === "delegations" && <DelegationsPanel client={client} runID={runID} />}
         {tab === "fanout" && <FanoutPanel client={client} runID={runID} />}
@@ -162,7 +167,7 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
   );
 }
 
-function RunOverview({ detail }: { detail: RunDetailView }) {
+function RunOverview({ client, detail }: { client: CyberAgentClient; detail: RunDetailView }) {
   const checkpoint = detail.checkpoint;
   const usage = detail.tool_usage;
   const percent = usage.limit > 0 ? Math.min(100, Math.round((usage.consumed / usage.limit) * 100)) : 0;
@@ -189,6 +194,7 @@ function RunOverview({ detail }: { detail: RunDetailView }) {
           <KeyValue label="Created" value={formatDate(detail.run.created_at)} />
         </dl>
       </section>
+      <ExecutionProfilePanel client={client} detail={detail} />
       <section className="detail-section">
         <h2>执行状态</h2>
         <dl className="detail-grid">
@@ -212,6 +218,85 @@ function RunOverview({ detail }: { detail: RunDetailView }) {
       <OperatorSteeringPanel state={steering} />
       {detail.plan_delivery && <PlanDeliveryPanel state={detail.plan_delivery} />}
     </div>
+  );
+}
+
+const executionProfiles: Array<{
+  id: RunExecutionProfileView["profile"];
+  label: string;
+  detail: string;
+  icon: typeof View;
+}> = [
+  { id: "preview", label: "Preview", detail: "No process", icon: View },
+  { id: "docker", label: "Docker", detail: "Isolated gate", icon: Container },
+  { id: "local", label: "Host workspace", detail: "OS sandbox gate", icon: Terminal },
+];
+
+export function ExecutionProfilePanel({ client, detail }: {
+  client: CyberAgentClient;
+  detail: RunDetailView;
+}) {
+  const queryClient = useQueryClient();
+  const profile = detail.execution_profile;
+  const mutableStatus = detail.run.status === "created" || detail.run.status === "paused";
+  const mutable = client.hasControl && mutableStatus && !detail.execution_lease?.active;
+  const mutation = useMutation({
+    mutationFn: (target: RunExecutionProfileView["profile"]) => client.postControl<RunExecutionProfileControlView>(
+      `/runs/${encodeURIComponent(detail.run.id)}/execution-profile`,
+      { profile: target, reason: "web console execution profile selection" },
+      `web-execution-profile-${globalThis.crypto.randomUUID()}`,
+    ),
+    onSuccess: (result) => {
+      queryClient.setQueryData<RunDetailView>(["run", detail.run.id], (current) => current
+        ? { ...current, execution_profile: result.execution_profile }
+        : current);
+      void queryClient.invalidateQueries({ queryKey: ["run", detail.run.id, "events"] });
+    },
+  });
+  let boundary = "Selection is intent only";
+  if (!client.hasControl) {
+    boundary = "Read-only connection";
+  } else if (!mutableStatus) {
+    boundary = "Pause the Run before changing profile";
+  } else if (detail.execution_lease?.active) {
+    boundary = "Active execution lease";
+  }
+  return (
+    <section className="detail-section execution-profile-section">
+      <div className="section-heading">
+        <h2><Container aria-hidden="true" size={15} />Execution environment / 执行环境</h2>
+        <StatusBadge status={profile.risk_tier} />
+      </div>
+      <div aria-label="Run execution profile" className="execution-profile-segments" role="group">
+        {executionProfiles.map(({ id, label, detail: optionDetail, icon: Icon }) => (
+          <button
+            aria-pressed={profile.profile === id}
+            className={profile.profile === id ? "selected" : ""}
+            disabled={!mutable || mutation.isPending || profile.profile === id}
+            key={id}
+            onClick={() => mutation.mutate(id)}
+            title={`Select ${label}`}
+            type="button"
+          >
+            <Icon aria-hidden="true" size={16} />
+            <span><strong>{label}</strong><small>{optionDetail}</small></span>
+          </button>
+        ))}
+      </div>
+      <div className="execution-profile-boundary">
+        <span>{boundary}</span>
+        <span>Backend: {profile.backend}</span>
+        <span>Approval: {profile.approval_policy}</span>
+        <span>Gate: {profile.required_gate}</span>
+        <span>Process enabled: no</span>
+        <span>Execution authorized: no</span>
+      </div>
+      {mutation.isError && (
+        <div className="inline-warning" role="alert">
+          {mutation.error instanceof Error ? mutation.error.message : "Execution profile selection failed"}
+        </div>
+      )}
+    </section>
   );
 }
 

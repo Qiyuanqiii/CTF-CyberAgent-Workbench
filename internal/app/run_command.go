@@ -37,6 +37,8 @@ func (a *App) runCommand(ctx context.Context, args []string) error {
 		return a.runMode(ctx, service, args[1:])
 	case "phase":
 		return a.runPhase(ctx, service, args[1:])
+	case "execution-profile":
+		return a.runExecutionProfile(ctx, args[1:])
 	case "events":
 		return a.runEvents(ctx, service, args[1:])
 	case "step":
@@ -1376,6 +1378,52 @@ func (a *App) runPhase(ctx context.Context, service *application.RunService, arg
 		result.Mode.RunID, result.Mode.Surface, result.Mode.Phase, result.Mode.Revision,
 		result.Mode.PolicyVersion, result.Mode.RequestedBy, result.Replayed)
 	return nil
+}
+
+func (a *App) runExecutionProfile(ctx context.Context, args []string) error {
+	service := application.NewRunExecutionProfileService(a.store)
+	if len(args) == 1 {
+		profile, err := service.Current(ctx, args[0])
+		if err != nil {
+			return err
+		}
+		writeRunExecutionProfile(a.out, profile, false)
+		return nil
+	}
+	if len(args) == 0 || args[0] != "set" {
+		return errors.New("usage: cyberagent run execution-profile <run-id> | cyberagent run execution-profile set <run-id> preview|docker|local --operation-key <key> [--operator <id>] [--reason <text>]")
+	}
+	fs := newFlagSet("run execution-profile set", a.errOut)
+	operationKey := fs.String("operation-key", "", "stable execution-profile operation key")
+	operator := fs.String("operator", "cli_operator", "operator identity")
+	reason := fs.String("reason", "", "redacted selection reason")
+	if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+		"operation-key": true, "operator": true, "reason": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 || strings.TrimSpace(*operationKey) == "" {
+		return errors.New("usage: cyberagent run execution-profile set <run-id> preview|docker|local --operation-key <key> [--operator <id>] [--reason <text>]")
+	}
+	result, err := service.Change(ctx, application.ChangeRunExecutionProfileRequest{
+		RunID: fs.Arg(0), Profile: fs.Arg(1), OperationKey: *operationKey,
+		RequestedBy: *operator, Reason: *reason,
+	})
+	if err != nil {
+		return err
+	}
+	writeRunExecutionProfile(a.out, result.Profile, result.Replayed)
+	return nil
+}
+
+func writeRunExecutionProfile(out interface{ Write([]byte) (int, error) },
+	profile domain.RunExecutionProfileSnapshot, replayed bool,
+) {
+	fmt.Fprintf(out, "run: %s\nmission: %s\nprotocol: %s\nrevision: %d\nprofile: %s\nbackend: %s\napproval_policy: %s\nfilesystem_scope: %s\nnetwork_scope: %s\nrisk_tier: %s\nrequired_gate: %s\npolicy: %s\nrequested_by: %s\nreason: %s\ncreated_at: %s\nprocess_enabled: false\nexecution_authorized: false\ncapability_grant: false\nreplayed: %t\n",
+		profile.RunID, profile.MissionID, profile.ProtocolVersion, profile.Revision,
+		profile.Profile, profile.Backend, profile.ApprovalPolicy, profile.FilesystemScope,
+		profile.NetworkScope, profile.RiskTier, profile.RequiredGate, profile.PolicyVersion,
+		profile.RequestedBy, profile.Reason, profile.CreatedAt.Format(time.RFC3339Nano), replayed)
 }
 
 func (a *App) runEvents(ctx context.Context, service *application.RunService, args []string) error {

@@ -15,6 +15,7 @@ const (
 	RunCreatedEvent                               = "run.created"
 	RunModeSelectedEvent                          = "run.mode_selected"
 	RunPhaseChangedEvent                          = "run.phase_changed"
+	RunExecutionProfileSelectedEvent              = "run.execution_profile_selected"
 	RunStatusChangedEvent                         = "run.status_changed"
 	RunExecutionLeaseAcquiredEvent                = "run.execution_lease_acquired"
 	RunExecutionLeaseTakenOverEvent               = "run.execution_lease_taken_over"

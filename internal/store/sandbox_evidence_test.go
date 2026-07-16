@@ -582,7 +582,7 @@ func removeSchemaV62ForTestStatements() []string {
 }
 
 func removeSchemaV63ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV64ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_docker_start_gate_review_operation_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_start_gate_review_operation_update_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_process_lifecycle_transition_delete_immutable`,
@@ -602,5 +602,20 @@ func removeSchemaV63ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_docker_start_gate_reviews_run_created`,
 		`DROP TABLE sandbox_docker_start_gate_reviews`,
 		`DELETE FROM schema_migrations WHERE version = 63`,
+	}...)
+}
+
+func removeSchemaV64ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_run_execution_profile_operation_delete_immutable`,
+		`DROP TRIGGER trg_run_execution_profile_operation_update_immutable`,
+		`DROP TRIGGER trg_run_execution_profile_snapshot_delete_immutable`,
+		`DROP TRIGGER trg_run_execution_profile_snapshot_update_immutable`,
+		`DROP TRIGGER trg_run_execution_profile_operation_insert`,
+		`DROP TRIGGER trg_run_execution_profile_snapshot_insert`,
+		`DROP TABLE run_execution_profile_operations`,
+		`DROP INDEX idx_run_execution_profile_snapshots_run_revision`,
+		`DROP TABLE run_execution_profile_snapshots`,
+		`DELETE FROM schema_migrations WHERE version = 64`,
 	}
 }

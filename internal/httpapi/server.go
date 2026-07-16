@@ -44,6 +44,16 @@ type Store interface {
 	GetMission(ctx context.Context, id string) (domain.Mission, error)
 	GetRun(ctx context.Context, id string) (domain.Run, error)
 	GetRunMode(ctx context.Context, runID string) (domain.RunModeSnapshot, error)
+	GetRunExecutionProfile(ctx context.Context,
+		runID string) (domain.RunExecutionProfileSnapshot, error)
+	GetRunExecutionProfileSnapshot(ctx context.Context,
+		id string) (domain.RunExecutionProfileSnapshot, error)
+	GetRunExecutionProfileOperation(ctx context.Context,
+		keyDigest string) (domain.RunExecutionProfileOperation, bool, error)
+	TransitionRunExecutionProfile(ctx context.Context,
+		snapshot domain.RunExecutionProfileSnapshot,
+		operation domain.RunExecutionProfileOperation,
+		event events.Event) (domain.RunExecutionProfileSnapshot, bool, error)
 	GetRunBySession(ctx context.Context, sessionID string) (domain.Run, bool, error)
 	ListRuns(ctx context.Context, filter domain.RunFilter) ([]domain.Run, error)
 	ListRunEventsPage(ctx context.Context, runID string, offset int, limit int) ([]events.Event, error)
@@ -265,6 +275,10 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if uiRequest {
 		a.serveUI(tracked, request)
+		return
+	}
+	if runID, matched := matchRunExecutionProfileControlPath(request.URL.Path); matched {
+		a.serveRunExecutionProfileControl(tracked, request, requestID, runID)
 		return
 	}
 	if runID, agentID, matched := matchSpecialistModelCancellationPath(request.URL.Path); matched {

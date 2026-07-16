@@ -9,7 +9,8 @@ interface ConnectionState {
   selectedRunID: string;
   selectedSessionID: string;
   token: string;
-  connect: (token: string, health: HealthView) => void;
+  controlToken: string;
+  connect: (token: string, health: HealthView, controlToken?: string) => void;
   disconnect: () => void;
   selectRun: (runID: string) => void;
   selectSession: (sessionID: string) => void;
@@ -27,8 +28,9 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   ...initialSelection,
   health: null,
   token: "",
-  connect: (token, health) => set({ token, health }),
-  disconnect: () => set({ token: "", health: null, ...initialSelection }),
+  controlToken: "",
+  connect: (token, health, controlToken = "") => set({ token, health, controlToken }),
+  disconnect: () => set({ token: "", controlToken: "", health: null, ...initialSelection }),
   selectRun: (selectedRunID) => set({ selectedRunID, resourceKind: "run" }),
   selectSession: (selectedSessionID) => set({ selectedSessionID, resourceKind: "session" }),
   setHealth: (health) => set({ health }),

@@ -30,7 +30,7 @@
 ### D0：桌面基础验证（现在可做）
 
 - 建立 Wails 技术验证和 `cmd/cyberagent-desktop` 边界。
-- 嵌入现有 React 只读控制台，复用 Go 同源 API/SSE/OpenAPI。
+- 嵌入现有 React read-first 控制台，复用 Go 同源 API/SSE/OpenAPI；v64 档位选择仍只调用 Go control route。
 - 固定窗口生命周期、单实例策略、端口/令牌传递和 CLI 并存时的 SQLite/Run lease 行为。
 - 生产模式禁止远程导航和开发者工具，增加 CSP、资源完整性、窗口来源与外部链接边界测试。
 - 只输出开发版/便携测试二进制；不做安装器、注册表、自启动、自动更新、协议关联或后台服务。

@@ -11,6 +11,7 @@ import (
 
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
+	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/redact"
 	"cyberagent-workbench/internal/session"
 )
@@ -118,6 +119,15 @@ func createMissionRunTx(ctx context.Context, tx *sql.Tx, mission domain.Mission,
 		return err
 	}
 	if err := insertInitialRunModeSnapshotTx(ctx, tx, mode, run, mission); err != nil {
+		return err
+	}
+	executionProfile, err := domain.NewInitialRunExecutionProfileSnapshot(
+		idgen.New("run-exec-profile"), run, mission, "run_service",
+		"initial preview execution profile", run.CreatedAt)
+	if err != nil {
+		return err
+	}
+	if err := insertInitialRunExecutionProfileSnapshotTx(ctx, tx, executionProfile, run, mission); err != nil {
 		return err
 	}
 	for _, event := range initialEvents {

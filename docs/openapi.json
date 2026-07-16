@@ -3,7 +3,7 @@
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "info": {
     "title": "CyberAgent Workbench Local API",
-    "description": "Authenticated loopback-only API owned by the Go control plane. Read operations expose durable metadata; the separately authorized control capability only requests exact active-call cancellation.",
+    "description": "Authenticated loopback-only API owned by the Go control plane. Read operations expose durable metadata; the separately authorized control capability permits exact active-call cancellation and selection of a non-authorizing Run execution profile.",
     "version": "api.v1",
     "license": {
       "name": "Apache License 2.0",
@@ -615,7 +615,7 @@
         ],
         "responses": {
           "202": {
-            "description": "Cancellation request accepted or idempotently replayed",
+            "description": "Control request accepted or idempotently replayed",
             "content": {
               "application/json": {
                 "schema": {
@@ -822,7 +822,7 @@
         ],
         "responses": {
           "202": {
-            "description": "Cancellation request accepted or idempotently replayed",
+            "description": "Control request accepted or idempotently replayed",
             "content": {
               "application/json": {
                 "schema": {
@@ -1322,6 +1322,123 @@
         },
         "x-cyberagent-read-only": true,
         "x-cyberagent-streaming": true
+      }
+    },
+    "/api/v1/runs/{run_id}/execution-profile": {
+      "post": {
+        "operationId": "selectRunExecutionProfile",
+        "summary": "Select a Run execution profile",
+        "description": "Records operator intent for Preview, Docker, or local workspace execution. Selection never starts a process and never grants execution authority; backend-specific production gates remain mandatory.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque operation key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RunExecutionProfileControlView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunExecutionProfileControlRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
       }
     },
     "/api/v1/runs/{run_id}/fanout-plans": {
@@ -4492,6 +4609,9 @@
           "execution_lease": {
             "$ref": "#/components/schemas/RunExecutionLeaseView"
           },
+          "execution_profile": {
+            "$ref": "#/components/schemas/RunExecutionProfileView"
+          },
           "mission": {
             "$ref": "#/components/schemas/MissionView"
           },
@@ -4515,6 +4635,7 @@
           "run",
           "mission",
           "mode",
+          "execution_profile",
           "operator_steering",
           "tool_usage"
         ],
@@ -4608,6 +4729,147 @@
           "acquired_at",
           "renewed_at",
           "expires_at"
+        ],
+        "type": "object"
+      },
+      "RunExecutionProfileControlRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "profile": {
+            "enum": [
+              "preview",
+              "docker",
+              "local"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 1024,
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "type": "object"
+      },
+      "RunExecutionProfileControlView": {
+        "additionalProperties": false,
+        "properties": {
+          "execution_profile": {
+            "$ref": "#/components/schemas/RunExecutionProfileView"
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "execution_profile",
+          "replayed"
+        ],
+        "type": "object"
+      },
+      "RunExecutionProfileView": {
+        "additionalProperties": false,
+        "properties": {
+          "approval_policy": {
+            "enum": [
+              "none",
+              "always"
+            ],
+            "type": "string"
+          },
+          "backend": {
+            "enum": [
+              "noop",
+              "docker",
+              "local"
+            ],
+            "type": "string"
+          },
+          "capability_grant": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "execution_authorized": {
+            "type": "boolean"
+          },
+          "filesystem_scope": {
+            "enum": [
+              "none",
+              "workspace"
+            ],
+            "type": "string"
+          },
+          "network_scope": {
+            "enum": [
+              "disabled"
+            ],
+            "type": "string"
+          },
+          "policy_version": {
+            "enum": [
+              "execution_profile_policy.v1"
+            ],
+            "type": "string"
+          },
+          "process_enabled": {
+            "type": "boolean"
+          },
+          "profile": {
+            "enum": [
+              "preview",
+              "docker",
+              "local"
+            ],
+            "type": "string"
+          },
+          "protocol_version": {
+            "enum": [
+              "run_execution_profile.v1"
+            ],
+            "type": "string"
+          },
+          "required_gate": {
+            "enum": [
+              "none",
+              "docker_production_start_gate",
+              "local_os_sandbox_gate"
+            ],
+            "type": "string"
+          },
+          "revision": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "risk_tier": {
+            "enum": [
+              "minimal",
+              "elevated",
+              "high"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "revision",
+          "profile",
+          "backend",
+          "approval_policy",
+          "filesystem_scope",
+          "network_scope",
+          "risk_tier",
+          "required_gate",
+          "policy_version",
+          "created_at",
+          "process_enabled",
+          "execution_authorized",
+          "capability_grant"
         ],
         "type": "object"
       },

@@ -68,15 +68,18 @@ function parseStreamFrame(value: unknown, expectedRunID: string): RunEventStream
 
 export class CyberAgentClient {
   readonly baseURL: string;
+  readonly hasControl: boolean;
 
   constructor(
     private readonly token: string,
     baseURL = import.meta.env.VITE_API_BASE_URL || "/api/v1",
+    private readonly controlToken = "",
   ) {
     if (token.trim() === "") {
       throw new Error("A read bearer token is required");
     }
     this.baseURL = normalizeBaseURL(baseURL);
+    this.hasControl = controlToken.trim() !== "";
   }
 
   async health(signal?: AbortSignal): Promise<HealthView> {
@@ -100,6 +103,47 @@ export class CyberAgentClient {
         envelope.request_id);
     }
     return { items: envelope.data, page: envelope.page, requestID: envelope.request_id };
+  }
+
+  async postControl<T>(
+    path: string,
+    body: unknown,
+    idempotencyKey: string,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    if (!this.hasControl) {
+      throw new Error("A control bearer token is required for this operation");
+    }
+    if (idempotencyKey.trim() !== idempotencyKey || idempotencyKey.length < 16) {
+      throw new Error("A normalized idempotency key is required");
+    }
+    const response = await fetch(this.url(path), {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${this.controlToken}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify(body),
+      signal,
+      cache: "no-store",
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
+    });
+    const payload = await this.readJSON(response);
+    if (!response.ok) {
+      if (isErrorEnvelope(payload)) {
+        throw new APIRequestError(payload.error.message, payload.error.code, response.status, payload.request_id);
+      }
+      throw new APIRequestError("CyberAgent control request failed", "INVALID_RESPONSE", response.status,
+        response.headers.get("x-request-id") || "");
+    }
+    if (!isSuccessEnvelope<T>(payload)) {
+      throw new APIRequestError("CyberAgent API returned an invalid control envelope", "INVALID_RESPONSE",
+        response.status, response.headers.get("x-request-id") || "");
+    }
+    return payload.data;
   }
 
   async streamRunEvents(

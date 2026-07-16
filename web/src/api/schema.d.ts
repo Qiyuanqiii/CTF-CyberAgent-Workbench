@@ -284,6 +284,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/execution-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Select a Run execution profile
+         * @description Records operator intent for Preview, Docker, or local workspace execution. Selection never starts a process and never grants execution authority; backend-specific production gates remain mandatory.
+         */
+        post: operations["selectRunExecutionProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/fanout-plans": {
         parameters: {
             query?: never;
@@ -1040,6 +1060,7 @@ export interface components {
         RunDetailView: {
             checkpoint?: components["schemas"]["SupervisorCheckpointView"];
             execution_lease?: components["schemas"]["RunExecutionLeaseView"];
+            execution_profile: components["schemas"]["RunExecutionProfileView"];
             mission: components["schemas"]["MissionView"];
             mode: components["schemas"]["RunModeView"];
             operator_steering: components["schemas"]["OperatorSteeringQueueView"];
@@ -1072,6 +1093,42 @@ export interface components {
             renewed_at: string;
             /** @enum {string} */
             status: "active" | "released";
+        };
+        RunExecutionProfileControlRequestView: {
+            /** @enum {string} */
+            profile: "preview" | "docker" | "local";
+            reason?: string;
+        };
+        RunExecutionProfileControlView: {
+            execution_profile: components["schemas"]["RunExecutionProfileView"];
+            replayed: boolean;
+        };
+        RunExecutionProfileView: {
+            /** @enum {string} */
+            approval_policy: "none" | "always";
+            /** @enum {string} */
+            backend: "noop" | "docker" | "local";
+            capability_grant: boolean;
+            /** Format: date-time */
+            created_at: string;
+            execution_authorized: boolean;
+            /** @enum {string} */
+            filesystem_scope: "none" | "workspace";
+            /** @enum {string} */
+            network_scope: "disabled";
+            /** @enum {string} */
+            policy_version: "execution_profile_policy.v1";
+            process_enabled: boolean;
+            /** @enum {string} */
+            profile: "preview" | "docker" | "local";
+            /** @enum {string} */
+            protocol_version: "run_execution_profile.v1";
+            /** @enum {string} */
+            required_gate: "none" | "docker_production_start_gate" | "local_os_sandbox_gate";
+            /** Format: int64 */
+            revision: number;
+            /** @enum {string} */
+            risk_tier: "minimal" | "elevated" | "high";
         };
         RunModeView: {
             capability_grant: boolean;
@@ -1596,7 +1653,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Cancellation request accepted or idempotently replayed */
+            /** @description Control request accepted or idempotently replayed */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -1679,7 +1736,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Cancellation request accepted or idempotently replayed */
+            /** @description Control request accepted or idempotently replayed */
             202: {
                 headers: {
                     [name: string]: unknown;
@@ -1865,6 +1922,52 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    selectRunExecutionProfile: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque operation key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunExecutionProfileControlRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RunExecutionProfileControlView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];
         };

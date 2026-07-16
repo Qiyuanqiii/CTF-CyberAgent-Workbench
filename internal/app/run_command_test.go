@@ -108,6 +108,39 @@ func TestRunModeCLISelectsShowsAndChangesPhase(t *testing.T) {
 	}
 }
 
+func TestRunExecutionProfileCLISelectsWithoutGrantingExecution(t *testing.T) {
+	t.Setenv("CYBERAGENT_HOME", t.TempDir())
+	created, stderr, code := executeTestCommand(t, "run", "create",
+		"choose a bounded execution environment", "--max-turns", "2")
+	if code != 0 || stderr != "" {
+		t.Fatalf("run create output=%q stderr=%q code=%d", created, stderr, code)
+	}
+	runID := runIDPattern.FindString(created)
+	shown, stderr, code := executeTestCommand(t, "run", "execution-profile", runID)
+	if code != 0 || stderr != "" || !strings.Contains(shown, "profile: preview") ||
+		!strings.Contains(shown, "backend: noop") ||
+		!strings.Contains(shown, "process_enabled: false") ||
+		!strings.Contains(shown, "execution_authorized: false") {
+		t.Fatalf("unexpected initial profile output=%q stderr=%q code=%d", shown, stderr, code)
+	}
+	selected, stderr, code := executeTestCommand(t, "run", "execution-profile", "set",
+		runID, "docker", "--operation-key", "cli-execution-profile-0001",
+		"--reason", "prefer isolated execution")
+	if code != 0 || stderr != "" || !strings.Contains(selected, "profile: docker") ||
+		!strings.Contains(selected, "required_gate: docker_production_start_gate") ||
+		!strings.Contains(selected, "revision: 2") ||
+		!strings.Contains(selected, "replayed: false") ||
+		!strings.Contains(selected, "capability_grant: false") {
+		t.Fatalf("unexpected selected profile output=%q stderr=%q code=%d", selected, stderr, code)
+	}
+	replayed, stderr, code := executeTestCommand(t, "run", "execution-profile", "set",
+		runID, "docker", "--operation-key", "cli-execution-profile-0001",
+		"--reason", "prefer isolated execution")
+	if code != 0 || stderr != "" || !strings.Contains(replayed, "replayed: true") {
+		t.Fatalf("unexpected profile replay=%q stderr=%q code=%d", replayed, stderr, code)
+	}
+}
+
 func TestReportCheckRejectsOutputFormatBeforeLookup(t *testing.T) {
 	t.Setenv("CYBERAGENT_HOME", t.TempDir())
 	_, stderr, code := executeTestCommand(t, "report", "check",

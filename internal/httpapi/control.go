@@ -194,12 +194,12 @@ func validateJSONContentType(header http.Header) error {
 	values := header.Values("Content-Type")
 	if len(values) != 1 {
 		return apperror.New(apperror.CodeInvalidArgument,
-			"model cancellation requires one application/json Content-Type")
+			"control request requires one application/json Content-Type")
 	}
 	mediaType, parameters, err := mime.ParseMediaType(values[0])
 	if err != nil || mediaType != "application/json" || len(parameters) != 0 {
 		return apperror.New(apperror.CodeInvalidArgument,
-			"model cancellation Content-Type must be application/json")
+			"control request Content-Type must be application/json")
 	}
 	return nil
 }
@@ -223,22 +223,22 @@ func modelCancellationIdempotencyKey(header http.Header) (string, error) {
 
 func readBoundedControlBody(request *http.Request) ([]byte, error) {
 	if request.Body == nil || request.ContentLength == 0 {
-		return nil, apperror.New(apperror.CodeInvalidArgument, "model cancellation JSON body is required")
+		return nil, apperror.New(apperror.CodeInvalidArgument, "control request JSON body is required")
 	}
 	if request.ContentLength > MaxControlRequestBodyBytes {
 		return nil, apperror.New(apperror.CodeResourceExhausted,
-			"model cancellation request body exceeds its limit")
+			"control request body exceeds its limit")
 	}
 	body, err := io.ReadAll(io.LimitReader(request.Body, MaxControlRequestBodyBytes+1))
 	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeInvalidArgument, "read model cancellation request body", err)
+		return nil, apperror.Wrap(apperror.CodeInvalidArgument, "read control request body", err)
 	}
 	if len(body) == 0 {
-		return nil, apperror.New(apperror.CodeInvalidArgument, "model cancellation JSON body is required")
+		return nil, apperror.New(apperror.CodeInvalidArgument, "control request JSON body is required")
 	}
 	if len(body) > MaxControlRequestBodyBytes {
 		return nil, apperror.New(apperror.CodeResourceExhausted,
-			"model cancellation request body exceeds its limit")
+			"control request body exceeds its limit")
 	}
 	return body, nil
 }
@@ -250,7 +250,7 @@ func ensureJSONEOF(decoder *json.Decoder) error {
 		return nil
 	}
 	return apperror.New(apperror.CodeInvalidArgument,
-		"model cancellation body must contain exactly one JSON object")
+		"control request body must contain exactly one JSON object")
 }
 
 func modelCancellationView(result domain.ModelCancellationResult) ModelCancellationView {

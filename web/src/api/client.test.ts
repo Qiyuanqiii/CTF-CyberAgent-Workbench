@@ -94,6 +94,46 @@ describe("CyberAgentClient", () => {
     expect(secondInit.headers).toMatchObject({ Authorization: "Bearer read-secret" });
   });
 
+  it("keeps the optional control token in Authorization and out of URLs and bodies", async () => {
+    const responseEnvelope = {
+      version: "api.v1",
+      request_id: "req-profile",
+      data: { replayed: false, execution_profile: { profile: "docker" } },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(responseEnvelope), {
+      status: 202,
+      headers: { "Content-Type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret");
+
+    const result = await client.postControl<{ execution_profile: { profile: string } }>(
+      "/runs/run-1/execution-profile",
+      { profile: "docker" },
+      "web-execution-profile-test-0001",
+    );
+
+    expect(result.execution_profile.profile).toBe("docker");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/runs/run-1/execution-profile");
+    expect(url).not.toContain("control-secret");
+    expect(init.headers).toMatchObject({
+      Authorization: "Bearer control-secret",
+      "Content-Type": "application/json",
+      "Idempotency-Key": "web-execution-profile-test-0001",
+    });
+    expect(init.body).toBe(JSON.stringify({ profile: "docker" }));
+    expect(String(init.body)).not.toContain("control-secret");
+  });
+
+  it("does not expose control operations without a distinct control token", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const client = new CyberAgentClient("read-secret");
+    await expect(client.postControl("/runs/run-1/execution-profile", { profile: "docker" },
+      "web-execution-profile-test-0002")).rejects.toThrow("control bearer token");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("resumes SSE with Last-Event-ID and validates the matching cursor", async () => {
     const frame: RunEventStreamView = {
       version: "run-events.v1",

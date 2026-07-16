@@ -6,6 +6,7 @@ import { useConnectionStore } from "../state/connection";
 
 export function ConnectionGate() {
   const [token, setToken] = useState("");
+  const [controlToken, setControlToken] = useState("");
   const [error, setError] = useState("");
   const [connecting, setConnecting] = useState(false);
   const connect = useConnectionStore((state) => state.connect);
@@ -23,8 +24,9 @@ export function ConnectionGate() {
       const client = new CyberAgentClient(candidate);
       const health = await client.health();
       queryClient.clear();
-      connect(candidate, health);
+      connect(candidate, health, controlToken.trim());
       setToken("");
+      setControlToken("");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "无法连接 Go 控制面");
     } finally {
@@ -64,6 +66,22 @@ export function ConnectionGate() {
             {connecting ? <LoaderCircle aria-hidden="true" className="spin" size={18} /> : <ArrowRight aria-hidden="true" size={18} />}
           </button>
         </div>
+        <label className="field-label optional-token-label" htmlFor="control-token">
+          Control bearer token <span>optional</span>
+        </label>
+        <input
+          autoCapitalize="none"
+          autoComplete="off"
+          autoCorrect="off"
+          className="control-token-input"
+          id="control-token"
+          name="control-token"
+          onChange={(event) => setControlToken(event.target.value)}
+          placeholder="CYBERAGENT_API_CONTROL_TOKEN"
+          spellCheck={false}
+          type="password"
+          value={controlToken}
+        />
         {error && <div className="connection-error" role="alert">{error}</div>}
       </form>
     </main>

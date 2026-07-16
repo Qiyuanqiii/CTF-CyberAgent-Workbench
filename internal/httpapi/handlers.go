@@ -47,7 +47,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 			"event-stream", "openapi"}
 		if a.controlEnabled {
 			resources = append(resources, "model-cancellation-control",
-				"specialist-model-cancellation-control")
+				"specialist-model-cancellation-control", "execution-profile-control")
 		}
 		return IndexView{APIVersion: Version, AppVersion: a.appVersion, Resources: resources}, nil, nil
 	case "/api/v1/health":
@@ -195,12 +195,17 @@ func (a *API) run(request *http.Request, runID string) (any, *Page, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	executionProfile, err := a.store.GetRunExecutionProfile(request.Context(), run.ID)
+	if err != nil {
+		return nil, nil, err
+	}
 	usage, err := a.store.GetToolCallUsage(request.Context(), run.ID)
 	if err != nil {
 		return nil, nil, err
 	}
 	detail := RunDetailView{Run: runView(run), Mission: missionView(mission),
-		Mode: runModeView(mode), ToolUsage: toolUsageView(usage)}
+		Mode: runModeView(mode), ExecutionProfile: runExecutionProfileView(executionProfile),
+		ToolUsage: toolUsageView(usage)}
 	checkpoint, found, err := a.store.GetSupervisorCheckpoint(request.Context(), run.ID)
 	if err != nil {
 		return nil, nil, err

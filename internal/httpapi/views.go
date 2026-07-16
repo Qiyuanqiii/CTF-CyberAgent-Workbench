@@ -80,6 +80,23 @@ type RunModeView struct {
 	CapabilityGrant bool      `json:"capability_grant"`
 }
 
+type RunExecutionProfileView struct {
+	ProtocolVersion     string    `json:"protocol_version"`
+	Revision            int64     `json:"revision"`
+	Profile             string    `json:"profile"`
+	Backend             string    `json:"backend"`
+	ApprovalPolicy      string    `json:"approval_policy"`
+	FilesystemScope     string    `json:"filesystem_scope"`
+	NetworkScope        string    `json:"network_scope"`
+	RiskTier            string    `json:"risk_tier"`
+	RequiredGate        string    `json:"required_gate"`
+	PolicyVersion       string    `json:"policy_version"`
+	CreatedAt           time.Time `json:"created_at"`
+	ProcessEnabled      bool      `json:"process_enabled"`
+	ExecutionAuthorized bool      `json:"execution_authorized"`
+	CapabilityGrant     bool      `json:"capability_grant"`
+}
+
 type SupervisorCheckpointView struct {
 	RunID           string    `json:"run_id"`
 	NextTurn        int       `json:"next_turn"`
@@ -198,14 +215,15 @@ type PlanDeliveryStateView struct {
 }
 
 type RunDetailView struct {
-	Run          RunView                   `json:"run"`
-	Mission      MissionView               `json:"mission"`
-	Mode         RunModeView               `json:"mode"`
-	Checkpoint   *SupervisorCheckpointView `json:"checkpoint,omitempty"`
-	Lease        *RunExecutionLeaseView    `json:"execution_lease,omitempty"`
-	Steering     OperatorSteeringQueueView `json:"operator_steering"`
-	ToolUsage    ToolUsageView             `json:"tool_usage"`
-	PlanDelivery *PlanDeliveryStateView    `json:"plan_delivery,omitempty"`
+	Run              RunView                   `json:"run"`
+	Mission          MissionView               `json:"mission"`
+	Mode             RunModeView               `json:"mode"`
+	ExecutionProfile RunExecutionProfileView   `json:"execution_profile"`
+	Checkpoint       *SupervisorCheckpointView `json:"checkpoint,omitempty"`
+	Lease            *RunExecutionLeaseView    `json:"execution_lease,omitempty"`
+	Steering         OperatorSteeringQueueView `json:"operator_steering"`
+	ToolUsage        ToolUsageView             `json:"tool_usage"`
+	PlanDelivery     *PlanDeliveryStateView    `json:"plan_delivery,omitempty"`
 }
 
 type SessionView struct {
@@ -361,6 +379,23 @@ func runModeView(value domain.RunModeSnapshot) RunModeView {
 			AllowedTargets: append([]string{}, value.Scope.AllowedTargets...)},
 		PolicyVersion: value.PolicyVersion, RequestedBy: value.RequestedBy,
 		Reason: value.Reason, CreatedAt: value.CreatedAt, CapabilityGrant: false,
+	}
+}
+
+func runExecutionProfileView(
+	value domain.RunExecutionProfileSnapshot,
+) RunExecutionProfileView {
+	return RunExecutionProfileView{
+		ProtocolVersion: value.ProtocolVersion, Revision: value.Revision,
+		Profile: string(value.Profile), Backend: string(value.Backend),
+		ApprovalPolicy:  string(value.ApprovalPolicy),
+		FilesystemScope: string(value.FilesystemScope),
+		NetworkScope:    string(value.NetworkScope), RiskTier: string(value.RiskTier),
+		RequiredGate: string(value.RequiredGate), PolicyVersion: value.PolicyVersion,
+		CreatedAt:           value.CreatedAt,
+		ProcessEnabled:      value.ProcessEnabled,
+		ExecutionAuthorized: value.ExecutionAuthorized,
+		CapabilityGrant:     value.CapabilityGrant,
 	}
 }
 

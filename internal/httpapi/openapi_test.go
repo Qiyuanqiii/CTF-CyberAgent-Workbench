@@ -64,7 +64,9 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 			validControl := (path == ModelCancellationPathTemplate &&
 				item.Post.OperationID == "requestModelCancellation") ||
 				(path == SpecialistModelCancellationPathTemplate &&
-					item.Post.OperationID == "requestSpecialistModelCancellation")
+					item.Post.OperationID == "requestSpecialistModelCancellation") ||
+				(path == RunExecutionProfileControlPathTemplate &&
+					item.Post.OperationID == "selectRunExecutionProfile")
 			if !validControl ||
 				item.Post.ReadOnly || item.Post.Responses["202"] == nil || item.Post.RequestBody == nil ||
 				len(item.Post.Security) != 1 || item.Post.Security[0]["ControlBearerAuth"] == nil {
@@ -94,7 +96,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 	for path, item := range raw.Paths {
 		for method := range item {
 			if method != "get" && !((path == ModelCancellationPathTemplate ||
-				path == SpecialistModelCancellationPathTemplate) && method == "post") {
+				path == SpecialistModelCancellationPathTemplate ||
+				path == RunExecutionProfileControlPathTemplate) && method == "post") {
 				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
 			}
 		}
@@ -113,6 +116,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "FanoutExecutionShardView", "error_reason")
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "FindingArtifactEvidenceView", "note")
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "FindingArtifactEvidenceView", "attached_by")
+	assertOpenAPISchemaOmits(t, document.Components.Schemas, "RunExecutionProfileView", "requested_by")
+	assertOpenAPISchemaOmits(t, document.Components.Schemas, "RunExecutionProfileView", "reason")
 	assertOpenAPISchemaOptional(t, document.Components.Schemas, "AgentGraphView", "root_agent_id")
 }
 
@@ -136,6 +141,12 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 	fixture.api.eventStream = testEventStreamConfig(1, 100*time.Millisecond)
 	childRun, child, childAttempt, childModel :=
 		prepareOpenAPISpecialistCancellationTarget(t, fixture)
+	_, profileRun, err := application.NewRunService(fixture.store).Create(t.Context(),
+		application.CreateRunRequest{Goal: "OpenAPI execution profile target", Profile: "code",
+			Budget: domain.Budget{MaxTurns: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	replacements := map[string]string{
 		"{run_id}":       fixture.run.ID,
 		"{agent_id}":     child.ID,
@@ -153,6 +164,8 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		if spec.Path == SpecialistModelCancellationPathTemplate {
 			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", childRun.ID)
 			requestPath = strings.ReplaceAll(requestPath, "{agent_id}", child.ID)
+		} else if spec.Path == RunExecutionProfileControlPathTemplate {
+			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", profileRun.ID)
 		}
 		t.Run(spec.OperationID, func(t *testing.T) {
 			var response *httptest.ResponseRecorder
@@ -161,14 +174,17 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 				expectedStatus = http.StatusNotFound
 			}
 			if spec.Control {
-				attemptID := fixture.checkpoint.AttemptID
-				modelAttempt := 1
-				if spec.Path == SpecialistModelCancellationPathTemplate {
-					attemptID = childAttempt.ID
-					modelAttempt = childModel.Number
+				body := `{"profile":"docker"}`
+				if spec.Path != RunExecutionProfileControlPathTemplate {
+					attemptID := fixture.checkpoint.AttemptID
+					modelAttempt := 1
+					if spec.Path == SpecialistModelCancellationPathTemplate {
+						attemptID = childAttempt.ID
+						modelAttempt = childModel.Number
+					}
+					body = `{"attempt_id":"` + attemptID + `","model_attempt":` +
+						fmt.Sprint(modelAttempt) + `}`
 				}
-				body := `{"attempt_id":"` + attemptID + `","model_attempt":` +
-					fmt.Sprint(modelAttempt) + `}`
 				response = performControlPathRequest(t, fixture.api, requestPath,
 					"openapi-live-operation-012345-"+spec.OperationID,
 					strings.NewReader(body))

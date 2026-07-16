@@ -285,6 +285,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 61, Name: "recoverable Docker runtime input application", Statements: sandboxDockerRuntimeInputApplicationStatements},
 		{Version: 62, Name: "inspectable and recoverable Docker runtime input resources", Statements: sandboxDockerRuntimeInputResourceStatements},
 		{Version: 63, Name: "blocked Docker process start gate design review", Statements: sandboxDockerStartGateReviewStatements},
+		{Version: 64, Name: "immutable Run execution profile selection", Statements: runExecutionProfileStatements},
 	})
 }
 

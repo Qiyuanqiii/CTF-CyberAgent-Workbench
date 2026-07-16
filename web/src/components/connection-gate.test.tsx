@@ -23,12 +23,17 @@ describe("ConnectionGate", () => {
     render(<QueryClientProvider client={new QueryClient()}><ConnectionGate /></QueryClientProvider>);
 
     const input = screen.getByLabelText("Read bearer token");
+    const controlInput = screen.getByLabelText(/Control bearer token/);
     expect(input).toHaveAttribute("type", "password");
+    expect(controlInput).toHaveAttribute("type", "password");
     await user.type(input, "ephemeral-token");
+    await user.type(controlInput, "ephemeral-control-token");
     expect(screen.queryByText("ephemeral-token")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "连接" }));
 
     expect(useConnectionStore.getState().token).toBe("ephemeral-token");
+    expect(useConnectionStore.getState().controlToken).toBe("ephemeral-control-token");
     expect(input).toHaveValue("");
+    expect(controlInput).toHaveValue("");
   });
 });
