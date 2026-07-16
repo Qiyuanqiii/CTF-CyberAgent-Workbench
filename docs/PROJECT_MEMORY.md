@@ -176,6 +176,8 @@ The local collector is deliberately inert. Windows returns `unsupported_platform
 
 Focused Domain, Store, Application, CLI, migration, SQL, idempotency, privacy, and malicious-collector tests pass. The final local ordinary suite passed in 212.3s and the full race suite in 213.9s. Vet, zero-warning staticcheck, module verification/tidy diff, zero-finding govulncheck, strict TypeScript, 21 frontend tests, OpenAPI drift, production build, zero-vulnerability npm audit, credential/runtime-artifact/process-capability/diff scans, the canonical README history check, and an isolated real-CLI schema-v65 Workspace smoke are green. The audit fixed eleven static error-style findings, made multi-field identity validation deterministic, bound the SQL operation key directly to its evidence root, and rejected a future collector that could otherwise claim real-daemon contact before durable harness ownership. No unresolved high/medium issue is known. This Windows host did not run a Linux daemon harness because none exists in v65.
 
+GitHub Actions run `29532551701` passed implementation commit `e97daf0`; Go/Linux completed in 2m47s and TypeScript in 20s.
+
 ## Next Slice
 
 Keep process execution closed while completing the evidence boundary before any real daemon contact:

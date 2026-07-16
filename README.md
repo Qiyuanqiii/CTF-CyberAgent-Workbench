@@ -137,7 +137,11 @@ This ledger is a machine-capture and recovery protocol, not a start permit. Even
 
 v65 的当前采集器仍是零副作用门禁：Windows 记录不支持，Linux 记录需 opt-in 或 harness 待实现；Application 会拒绝任何 `capture_complete` 或 `real_daemon_contacted=true` 结果，防止在写前 attempt/lease 尚未实现时借内部采集器边界接触真实 daemon。最终本地门禁通过全仓普通/race 测试、vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、21 项前端测试、production build、零漏洞 npm audit、OpenAPI 无漂移，以及凭据、禁止进程能力、运行产物和 diff 扫描。未发现未解决的高危或中危问题。
 
+实现提交 `e97daf0` 已通过 GitHub Actions run `29532551701`；远端 Go/Linux job 用时 2 分 47 秒，TypeScript job 用时 20 秒。
+
 The current v65 collector is still a zero-side-effect gate: Windows records unsupported, while Linux records opt-in required or harness pending. The Application rejects any `capture_complete` or `real_daemon_contacted=true` result so an internal collector seam cannot contact the daemon before a durable write-ahead attempt and lease exist. The final local gate passed the full ordinary/race suites, vet, zero-warning staticcheck, module verification/tidy diff, zero reachable vulnerabilities, 21 frontend tests, the production build, zero-vulnerability npm audit, OpenAPI drift checks, and credential, process-capability, runtime-artifact, and diff scans. No unresolved high- or medium-severity issue is known.
+
+Implementation commit `e97daf0` passed GitHub Actions run `29532551701`; the remote Go/Linux job completed in 2m47s and TypeScript in 20s.
 
 ## 架构能力详解 / Architecture Details
 

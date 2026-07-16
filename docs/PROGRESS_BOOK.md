@@ -743,3 +743,5 @@ SQLite v65 原子保存不可变 aggregate、恰好 16 条 item、摘要化 oper
 最终本地门禁通过：最终代码全仓普通/race 测试分别用时 212.3 秒/213.9 秒，v65 Domain 普通/race 各 20 轮；`go vet`、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、严格 TypeScript、9 个文件 21 项 Vitest、production build、零漏洞 npm audit、OpenAPI/生成 TypeScript 无漂移、README v1-v65 顺序、凭据/禁止能力/运行产物/diff 扫描和隔离真实 CLI schema-v65 Workspace smoke 均为绿色。smoke 临时目录因永久删除守卫拒绝递归清理而留给系统临时目录回收，无需人工操作。架构完成度维持约 98%，产品可用度维持约 45-50%，通用 Coding Agent 约 40%，Cyber 自动化约 20%；本切片提升的是可审计恢复边界，不是最终用户执行能力。
 
 下一切片为 schema v66：在第一次真实 daemon 调用前持久化 evidence-capture attempt、过期 generation lease、固定 Linux endpoint、typed failure 与重启协调；随后才能实现 exact pre-existing digest/no-pull 的 16-probe Linux harness。机器 receipt 仍需独立 evidence acceptance review，之后才考虑 v63 的 start/wait/TERM/KILL/orphan 状态机；output/Artifact 与 Local OS sandbox 继续独立门禁，Skill Registry 顺延到 v66 或以后，预计 v67+。
+
+GitHub Actions run `29532551701` 已通过 v65 实现提交 `e97daf0`：Go/Linux 作业 2 分 47 秒，TypeScript 作业 20 秒；Linux 全仓测试、vet、govulncheck 与前端完整门禁全部通过。
