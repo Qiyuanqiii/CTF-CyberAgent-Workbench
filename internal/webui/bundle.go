@@ -233,17 +233,27 @@ func readRegularFile(root *os.Root, name string, limit int64) ([]byte, error) {
 
 func assetNameHasDigest(name string, extension string) bool {
 	base := strings.TrimSuffix(name, extension)
-	separator := strings.LastIndexAny(base, "-.")
-	if separator < 0 || len(base)-separator-1 < 8 {
-		return false
-	}
-	for _, current := range base[separator+1:] {
-		if (current < 'a' || current > 'z') && (current < 'A' || current > 'Z') &&
-			(current < '0' || current > '9') && current != '_' {
-			return false
+	for separator := len(base) - 1; separator >= 0; separator-- {
+		if base[separator] != '-' && base[separator] != '.' {
+			continue
+		}
+		digest := base[separator+1:]
+		if len(digest) < 8 {
+			continue
+		}
+		valid := true
+		for _, current := range digest {
+			if (current < 'a' || current > 'z') && (current < 'A' || current > 'Z') &&
+				(current < '0' || current > '9') && current != '_' && current != '-' {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func makeAsset(body []byte, contentType string, immutable bool) asset {

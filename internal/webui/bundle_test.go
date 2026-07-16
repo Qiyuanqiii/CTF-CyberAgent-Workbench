@@ -157,7 +157,7 @@ func writeTestBundle(t *testing.T) string {
 	directory := t.TempDir()
 	writeBundleFile(t, directory, "index.html", []byte(testIndexBody))
 	writeBundleFile(t, directory, "assets/index-AbCd1234.js", []byte(testScriptBody))
-	writeBundleFile(t, directory, "assets/index-EfGh5678.css", []byte("body { color: black; }"))
+	writeBundleFile(t, directory, "assets/index-D0TcvGy-.css", []byte("body { color: black; }"))
 	return directory
 }
 
@@ -189,12 +189,13 @@ func requestBundle(t *testing.T, bundle *Bundle, method string, requestPath stri
 }
 
 func TestAssetNameDigestValidation(t *testing.T) {
-	for _, name := range []string{"index-AbCd1234.js", "chunk.12345678.css", "logo-A_B_C_D1.png"} {
+	for _, name := range []string{"index-AbCd1234.js", "chunk.12345678.css", "logo-A_B_C_D1.png",
+		"index-D0TcvGy-.css"} {
 		if !assetNameHasDigest(name, strings.ToLower(filepath.Ext(name))) {
 			t.Fatalf("valid hashed asset name rejected: %s", name)
 		}
 	}
-	for _, name := range []string{"index.js", "index-short.js", "index-bad!.js"} {
+	for _, name := range []string{"index.js", "index-short.js", "index-short-.js", "index-bad!.js"} {
 		if assetNameHasDigest(name, strings.ToLower(filepath.Ext(name))) {
 			t.Fatalf("invalid hashed asset name accepted: %s", name)
 		}

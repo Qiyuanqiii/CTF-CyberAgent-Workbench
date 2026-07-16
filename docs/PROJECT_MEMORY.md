@@ -164,6 +164,8 @@ The local Web console accepts an optional distinct control bearer in page memory
 
 The v64 final local gate passed final-code full ordinary tests in 225.9s; the complete race suite passed in 196.9s, followed by targeted profile/HTTP race after the final DTO privacy reduction. Vet/staticcheck/module/govulncheck, strict TypeScript, 21 frontend tests, production build, npm audit, deterministic generated-contract hashes, chronology/link/privacy/artifact/encoding/diff checks, and isolated CLI smoke are green. GitHub Actions run `29523634340` passed implementation commit `8378419` with Go/Linux in 3m0s and TypeScript in 26s. Audit fixes were limited to generic control-request wording, six static error-style findings, and omission of requester/reason from browser DTOs. No unresolved high/medium issue is known. Linux real-daemon evidence was not run on this Windows host, so Docker start remains blocked.
 
+A later real production-bundle smoke exposed one low-risk Web availability defect: Vite 8 emitted `index-D0TcvGy-.css`, whose trailing URL-safe hyphen defeated the old last-separator filename heuristic. `assetNameHasDigest` now searches backward for a bounded URL-safe digest; the primary bundle fixture uses the observed name and short/invalid suffixes remain denied. The exact built bundle then loaded under Go, served CSP-protected HTML, rendered on desktop and a 390x844 mobile viewport without horizontal overflow, and completed Docker-to-Preview UI selection while both execution authority bits remained false. The follow-up full suite passed in 201.1s, with 20 targeted race repetitions plus clean vet/staticcheck.
+
 ## Next Slice
 
 Keep process execution closed while turning one selected backend into a separately auditable lifecycle:

@@ -724,6 +724,8 @@ React 控制台新增三段式执行环境控件和可选 distinct control token
 
 代码审计修复三类低风险问题：共用 control body parser 不再返回 cancellation 专用误导文案；六处内部错误文本改为仓库要求的小写形式；HTTP/React profile DTO 删除不需要的 requester/reason 审计叙述，只在 SQLite/Event/CLI 保留。当前无未解决高/中风险。本轮未执行 Linux real-daemon harness，本机留下一个不受 Git 跟踪的系统临时烟测目录。架构完成度仍约 98%，产品可用度仍约 45-50%，因为用户现在可以预先表达执行环境，但真实进程仍关闭。原先预留给 Skill Registry 的 v64 已被本切片占用，Registry 顺延到 v65 或以后。
 
+发布后的真实 production bundle 托管复核又发现一项低风险可用性问题：Vite 8 生成的 `index-D0TcvGy-.css` 使用 URL-safe 哈希且末尾恰好为 `-`，原先“取最后分隔符”的校验会把合法哈希判空，从而让 Go 拒绝整个 UI 目录。校验器现改为向前寻找至少 8 字符的 URL-safe 哈希段，主 bundle 测试直接使用该真实文件名，同时继续拒绝短后缀和非法字符。修复后全仓测试 201.1 秒、Web bundle 20 轮 race、vet/staticcheck 通过；真实二进制加载精确 `web/dist`，桌面与 390x844 移动视口均无横向溢出，UI 可切换 Docker 意图并恢复 Preview，执行与能力位始终为 false。该问题不构成路径或执行权限绕过。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。

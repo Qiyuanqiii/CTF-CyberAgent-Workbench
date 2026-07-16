@@ -120,6 +120,10 @@ Selection records intent, not permission. Schema v64 fixes `process_enabled`, `e
 
 Implementation commit `8378419` passed the final local full-suite, race, static, security, and frontend gates plus GitHub Actions run `29523634340`; the remote Go/Linux job completed in 3 minutes and TypeScript in 26 seconds. The audit found no unresolved high- or medium-severity issue and did not run a real Docker start or host process.
 
+真实生产 bundle 托管复核随后发现并修复一项低风险兼容性缺陷：Vite 8 的 URL-safe 内容哈希可能以 `-` 结尾，旧校验器会把该字符误认作最后一个分隔符并拒绝合法资源。Go 现在向前寻找满足长度与 URL-safe 字符集的哈希段；主 bundle 测试直接使用该真实文件名，并通过 20 轮 race、全仓回归以及桌面/移动端浏览器检查。页面无横向溢出，档位切换后仍显示 `process_enabled=false` 与 `execution_authorized=false`。
+
+A real production-bundle hosting check then found and fixed one low-risk compatibility defect: a Vite 8 URL-safe content hash may end in `-`, which the old validator mistook for the final separator and rejected. Go now searches backward for a bounded URL-safe digest segment; the primary bundle test uses the observed filename and passes 20 race repetitions, the full suite, and desktop/mobile browser checks. The page has no horizontal overflow, and profile changes still report `process_enabled=false` and `execution_authorized=false`.
+
 ## 架构能力详解 / Architecture Details
 
 ### 中文详解
