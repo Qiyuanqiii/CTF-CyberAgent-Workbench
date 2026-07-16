@@ -162,6 +162,9 @@ The final v66 local gate passed on the final functional code: the full ordinary 
 
 The pre-release audit fixed two issues. The v66 lease row originally lacked a delete guard and its direct-SQL release/takeover chronology was too permissive, weakening future collector fencing and recovery evidence; leases are now non-deletable, release must precede expiry, and a new generation cannot predate the previous release or expiry. A low-risk CLI defect that rejected `--limit` after the v65 capture-list positional argument was also fixed. No unresolved high- or medium-severity issue is known. This slice ran no real Docker daemon harness, container start, Shell, or host process.
 
+实现提交 `3e52b7d` 已通过 GitHub Actions run `29538732903`；远端 Go/Linux 作业用时 3 分 33 秒，TypeScript 作业用时 25 秒。<br>
+Implementation commit `3e52b7d` passed GitHub Actions run `29538732903`; the remote Go/Linux job completed in 3m33s and TypeScript in 25s.
+
 ## 架构能力详解 / Architecture Details
 
 ### 中文详解

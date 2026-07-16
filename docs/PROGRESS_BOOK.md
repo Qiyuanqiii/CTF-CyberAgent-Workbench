@@ -748,6 +748,8 @@ schema v66 可恢复 Docker 生产证据 Attempt 切片已完成实现，任务 
 
 v66 最终本地门禁通过全仓普通/race（206.9 秒/230.3 秒）、vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、严格 TypeScript、9 个文件 21 项前端测试、OpenAPI/production build/npm audit、49 份 Markdown 文档链接、凭据/运行产物/乱码/进程入口/diff 扫描和隔离真实二进制 schema-v66 Workspace smoke。Domain/Store/Application/CLI 高频回归为 50/10/5/5 轮，关键 race 为 5/3/3 轮。审计修复 lease 行缺少 DELETE 禁止、direct-SQL release/takeover 时间线过宽，以及 capture list 尾随 `--limit` 无法解析三项问题；当前无未解决高/中风险。宿主受保护删除策略拒绝烟测目录的递归清理，目录留在系统临时根等待自动回收，无需人工操作。
 
+GitHub Actions run `29538732903` 已通过 v66 实现提交 `3e52b7d`：Go/Linux 作业 3 分 33 秒，TypeScript 作业 25 秒；Linux 全仓测试、vet、govulncheck 与前端完整门禁全部通过。
+
 下一切片为 schema v67：在 v66 attempt 之后实现 Linux-only 16-probe harness，固定本机 endpoint、使用已存在的精确 digest 镜像、不 pull，并为每次 transport 操作与 restart reconciliation 设置有界协议。receipt 仍不授权 start，之后还要独立 evidence acceptance review；Skill Registry 顺延到 v67 或以后，预计 v68+。
 
 ## 八、仓库同步与恢复约定

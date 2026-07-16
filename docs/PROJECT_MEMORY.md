@@ -191,6 +191,8 @@ The final local gate passed the full ordinary/race suites in 206.9s/230.3s, vet,
 
 The audit fixed the v66 lease's missing immutable-delete trigger, constrained direct-SQL release to pre-expiry time and generation acquisition to the prior release/expiry chronology, and corrected trailing `--limit` parsing for the v65 capture list. No unresolved high/medium issue is known.
 
+GitHub Actions run `29538732903` passed implementation commit `3e52b7d`; Go/Linux completed in 3m33s and TypeScript in 25s.
+
 ## Next Slice
 
 Keep process execution closed while adding a separately audited real-evidence implementation:
