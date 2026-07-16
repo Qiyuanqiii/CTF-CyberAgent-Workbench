@@ -232,7 +232,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] v62 最终发布门禁通过全仓普通/race（313.6 秒/329.6 秒）、vet/staticcheck/module/govulncheck、严格 TypeScript、17 项前端测试、OpenAPI/构建/npm audit、仓库扫描、Linux 交叉编译、隔离二进制 smoke 与四层高频回归；GitHub Actions run `29444398815` 已通过功能提交 `d250d32`，未发现未解决高/中风险。
 - [x] schema v63 已完成 design-only start-gate review：16 项 v51 检查固定映射为未验证阻塞项，11 条未来 per-Run start/wait/TERM/KILL/orphan 转换固定为未实现、未授权；结果只能是 `blocked/deny_start`，且无 daemon/input/process/output/Artifact 能力。决策见 ADR 0023。
 - [x] v63 定向 Sandbox/Store/Application/CLI/迁移/并发/SQL/隐私测试通过；幂等重放、跨 Store 收敛、迁移不伪造历史、全链复核和 false authority 投影均有覆盖。
-- [x] v63 最终本地发布门禁通过：全仓普通/race（196.9 秒/212.3 秒）、vet/staticcheck/module/govulncheck、TypeScript/OpenAPI/build/npm audit、仓库扫描、Linux 交叉编译、隔离 schema-v63 二进制 smoke 与 Sandbox/Store/Application/CLI 20/15/10/10 轮回归；未发现未解决高/中风险。
+- [x] v63 最终发布门禁通过：全仓普通/race（196.9 秒/212.3 秒）、vet/staticcheck/module/govulncheck、TypeScript/OpenAPI/build/npm audit、仓库扫描、Linux 交叉编译、隔离 schema-v63 二进制 smoke 与 Sandbox/Store/Application/CLI 20/15/10/10 轮回归；未发现未解决高/中风险。GitHub Actions run `29503856229` 已通过提交 `e25a2ab`。
 - [ ] schema v64 建立机器生成的 Linux real-daemon 生产证据账本；只接受规范化 suite/environment/check digest，不接受操作者手写结论，不保存原始 daemon/resource/path 数据，也不授予 start。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
 - [ ] 网络默认关闭，后续仅允许显式 allowlist。
