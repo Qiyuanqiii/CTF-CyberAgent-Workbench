@@ -732,4 +732,14 @@ React 控制台新增三段式执行环境控件和可选 distinct control token
 
 每次完成一个开发切片后，依次执行功能复核、测试、代码与安全审计、项目记忆更新、Git 提交和 GitHub 推送。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0026-run-execution-profile-selection.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0027-non-authorizing-docker-production-evidence-ledger.md`。
+
+schema v65 非授权 Docker 生产证据账本切片已完成实现，任务 ID 为 `P6-Docker-Production-Evidence-Ledger-v65`。Go 固定 `sandbox_docker_production_evidence.v1`、16 项 v51 probe、suite/environment/evidence/capture 指纹和三种当前平台 receipt。操作者只能对同一身份创建的 v63 阻塞审查提交稳定 operation key 与显式机器采集确认；请求没有 evidence item、结论、JSON 报告、socket、路径、镜像、resource、container ID 或 raw daemon response 字段。Windows 只记录 `unsupported_platform`；Linux 未 opt-in 时记录 `opt_in_required`，设置 `CYBERAGENT_DOCKER_PRODUCTION_EVIDENCE=1` 后也只记录 `harness_pending`。当前所有分支均为零 daemon、零 Docker CLI、零网络、零进程调用。
+
+SQLite v65 原子保存不可变 aggregate、恰好 16 条 item、摘要化 operation 与 metadata-only `sandbox.docker_production_evidence_captured` 事件，并复核 v63 review/Run/Mission/Workspace/操作者/authority/threat-model 全绑定；每个 Run 最多 32 份，迁移不伪造旧证据。同键同语义重放不再调用 collector，改语义冲突。CLI 新增 `docker-production-evidence-capture/captures/show`，输出只含有界状态、计数、摘要和全部 false 的权限位。即使未来 item 可表示 `production_verified`，`sufficient_for_start`、start/process/output/Artifact authority 仍由 Go 和 SQL 固定为 false。
+
+本轮代码与安全审计发现并修复一个重要的未来接线风险：仅靠 Domain 校验时，自定义 collector 理论上可返回合法的 `capture_complete` 与 `real_daemon_contacted=true`，在尚无写前 harness attempt/lease 时留下真实 daemon 副作用。Application 现在硬拒绝这两种结果，并通过恶意 collector 回归证明拒绝后账本行数不变。SQL operation trigger 还新增 `key_digest = evidence.operation_key_digest` 的直接绑定和篡改回归，避免正常 Go 路径的一致性只停留在 Store 校验；Domain 多字段身份检查改为固定顺序并做 20 轮确定性回归。另修复 11 处 staticcheck 错误文本大小写问题。凭据扫描只命中既有合成脱敏夹具或长测试操作名；新增路径未出现 `os/exec`、`exec.Command`、进程 `.Start`、Docker start endpoint、`docker.sock`、`DOCKER_HOST`、网络请求或删除调用。ADR 0027 固化该边界，当前未发现未解决高/中风险。
+
+最终本地门禁通过：最终代码全仓普通/race 测试分别用时 212.3 秒/213.9 秒，v65 Domain 普通/race 各 20 轮；`go vet`、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、严格 TypeScript、9 个文件 21 项 Vitest、production build、零漏洞 npm audit、OpenAPI/生成 TypeScript 无漂移、README v1-v65 顺序、凭据/禁止能力/运行产物/diff 扫描和隔离真实 CLI schema-v65 Workspace smoke 均为绿色。smoke 临时目录因永久删除守卫拒绝递归清理而留给系统临时目录回收，无需人工操作。架构完成度维持约 98%，产品可用度维持约 45-50%，通用 Coding Agent 约 40%，Cyber 自动化约 20%；本切片提升的是可审计恢复边界，不是最终用户执行能力。
+
+下一切片为 schema v66：在第一次真实 daemon 调用前持久化 evidence-capture attempt、过期 generation lease、固定 Linux endpoint、typed failure 与重启协调；随后才能实现 exact pre-existing digest/no-pull 的 16-probe Linux harness。机器 receipt 仍需独立 evidence acceptance review，之后才考虑 v63 的 start/wait/TERM/KILL/orphan 状态机；output/Artifact 与 Local OS sandbox 继续独立门禁，Skill Registry 顺延到 v66 或以后，预计 v67+。

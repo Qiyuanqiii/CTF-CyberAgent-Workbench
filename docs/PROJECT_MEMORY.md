@@ -39,8 +39,9 @@ Read in this order after a long context break:
 29. `docs/adr/0024-strict-inert-skill-package.md`
 30. `docs/adr/0025-protected-delete-command-guard.md`
 31. `docs/adr/0026-run-execution-profile-selection.md`
-32. `docs/DESKTOP_PLAN.md`
-33. `docs/SKILL_PACKAGE_PLAN.md`
+32. `docs/adr/0027-non-authorizing-docker-production-evidence-ledger.md`
+33. `docs/DESKTOP_PLAN.md`
+34. `docs/SKILL_PACKAGE_PLAN.md`
 
 ## Current Baseline
 
@@ -49,8 +50,8 @@ Read in this order after a long context break:
 - Generic coding-agent workflow usability: about 40%.
 - Cyber autonomous-workflow usability: about 20%.
 - These are engineering estimates based on tested roadmap slices, not performance benchmarks. Do not reuse the retired single-axis "overall product vision" percentage.
-- Database schema: v64.
-- `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v64` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
+- Database schema: v65.
+- `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v65` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
 - Main languages: Go control plane, TypeScript React/Vite local console; Rust has not started.
 - Desktop status: no desktop binary or installer exists yet. D0 will evaluate a Wails shell around the existing React console while all business authority stays behind Go HTTP/SSE/OpenAPI; installer/registry/update work is deferred to D2. See `docs/DESKTOP_PLAN.md`.
 - Custom Skill status: the five embedded `skill.v1` guides remain the only product-loadable Skills. The strict deterministic `skill_package.v1` in-memory parser/fuzzer and metadata-only `skill package validate` CLI now exist, but validation is inert: there is no user `import/install/upload`, persistent user Registry, Run selection for external packages, or Desktop/HTTP upload endpoint. See ADR 0024 and `docs/SKILL_PACKAGE_PLAN.md`.
@@ -58,7 +59,7 @@ Read in this order after a long context break:
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
 
-Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, parent-selected minimal Specialist Skill context, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, safe-boundary operator steering with pending-only cancellation and explicit drain, embedded Skills plus inert external-package validation, strict metadata-only Sandbox Manifest preparation, approval-bound disabled candidates, a disabled Artifact-bound Sandbox lifecycle with independent fencing/cancellation/cleanup recovery, a required-but-unverified backend/output preflight, simulation-only backend evidence plus atomic in-memory output transactions, fixed-local-endpoint read-only Docker metadata observation, deterministic in-memory Docker container plans plus fake write transactions, default-disabled Docker create-inspect-remove rehearsals, durable pre-daemon attempts with recoverable stopped-container stage/cleanup checkpoints, descriptor-pinned and kernel-sealed host-input capture, immutable pre-stage requirements, daemon-owned fixed-volume handoff with exact archive readback and complete cleanup, strict operator-confirmed runtime-input projection plans, recoverable projection application to readback-verified read-only volumes and one retained never-started target, exact-owned retained-resource inspection/cleanup, an immutable blocked Docker start-gate review plus unimplemented lifecycle blueprint, immutable non-authorizing Preview/Docker/Local Run execution-profile selection, loopback API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite console with one narrowly scoped profile-selection control.
+Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, parent-selected minimal Specialist Skill context, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, safe-boundary operator steering with pending-only cancellation and explicit drain, embedded Skills plus inert external-package validation, strict metadata-only Sandbox Manifest preparation, approval-bound disabled candidates, a disabled Artifact-bound Sandbox lifecycle with independent fencing/cancellation/cleanup recovery, a required-but-unverified backend/output preflight, simulation-only backend evidence plus atomic in-memory output transactions, fixed-local-endpoint read-only Docker metadata observation, deterministic in-memory Docker container plans plus fake write transactions, default-disabled Docker create-inspect-remove rehearsals, durable pre-daemon attempts with recoverable stopped-container stage/cleanup checkpoints, descriptor-pinned and kernel-sealed host-input capture, immutable pre-stage requirements, daemon-owned fixed-volume handoff with exact archive readback and complete cleanup, strict operator-confirmed runtime-input projection plans, recoverable projection application to readback-verified read-only volumes and one retained never-started target, exact-owned retained-resource inspection/cleanup, an immutable blocked Docker start-gate review plus unimplemented lifecycle blueprint, immutable non-authorizing Preview/Docker/Local Run execution-profile selection, an immutable non-authorizing Docker production-evidence capture ledger, loopback API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite console with one narrowly scoped profile-selection control.
 
 ## Security Invariants
 
@@ -72,6 +73,7 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 - External files, repository text, logs, web/mail, tool output, and memory are untrusted evidence with `instruction_authorized=false`; they never become system/assistant authority through persistence or compaction.
 - Shell and ScriptProcess approval paths are dry-run only. Real Local and container-process command execution is disabled.
 - `run_execution_profile.v1` records only operator intent. Every profile fixes `process_enabled=false`, `execution_authorized=false`, and `capability_grant=false`; Docker still requires its production start gate and Local still requires an unimplemented OS-sandbox gate. Selection is allowed only for `created` or quiescent `paused` Runs and cannot be widened by TypeScript, a model, a child Agent, or approval.
+- `sandbox_docker_production_evidence.v1` accepts no caller-supplied conclusion, report, endpoint, socket, path, image, resource, container identity, or raw daemon response. The current collector records only `unsupported_platform`, `opt_in_required`, or `harness_pending`, never contacts a daemon, and the Application rejects `capture_complete` or `real_daemon_contacted=true` until a future write-ahead harness gate exists. All sixteen items remain insufficient and every start/process/export/Artifact authority bit remains false.
 - `sandbox_manifest.v1`, `sandbox_execution_candidate.v1`, `sandbox_execution.v1`, `sandbox_preflight.v1`, `sandbox_backend_evidence.v1`, `sandbox_output_simulation.v1`, `sandbox_docker_observation.v1`, `sandbox_docker_container_plan.v1`, `sandbox_docker_container_rehearsal.v1`, `sandbox_docker_container_rehearsal_attempt.v1`, `sandbox_docker_host_input_staging.v1`, `sandbox_docker_host_input_requirement.v1`, the v59 handoff, v60 projection plan, v61 runtime-input application, v62 retained-resource lifecycle, and v63 start-gate review are evidence, preparation, cleanup, or design facts, never process-execution permits. Schemas v48-v63 fix execution, start, export, and production Artifact-commit capabilities to false even after exact operator approval.
 - Sandbox execution ownership uses a separate generation-fenced lease. The initial lease can only prepare a disabled record; cleanup can recover after Run termination, but stale generations cannot commit.
 - Input Artifacts are reverified by exact Run/Session/Workspace, digest, size, MIME, source, stream, order, and a 16 MiB aggregate cap. v50 stores no Artifact body or raw output path.
@@ -90,7 +92,7 @@ Implemented foundations include resumable RunSupervisor turns, SQLite checkpoint
 - The Web UI is read-first. Its read and optional distinct control bearers remain in memory and never belong in URLs or browser storage. The control bearer can currently select only a non-authorizing Run execution profile; it cannot start a process, approve a tool, mutate a queue, or read API resources.
 - Provider keys are read from process environment only and must never enter Git, SQLite, events, or logs.
 
-## Completed Sandbox Slice History (Latest: v63)
+## Completed Sandbox Slice History (Latest: v65)
 
 Schema v57 adds a default-disabled host-input capture gate to the recoverable v56 never-started rehearsal. It requires separate operator confirmation, binds an immutable intent to the exact attempt, stopped-container fingerprint, plan, input digest, requester, and current lease generation, and makes SQLite completion depend on a matching result.
 
@@ -166,19 +168,27 @@ The v64 final local gate passed final-code full ordinary tests in 225.9s; the co
 
 A later real production-bundle smoke exposed one low-risk Web availability defect: Vite 8 emitted `index-D0TcvGy-.css`, whose trailing URL-safe hyphen defeated the old last-separator filename heuristic. `assetNameHasDigest` now searches backward for a bounded URL-safe digest; the primary bundle fixture uses the observed name and short/invalid suffixes remain denied. The exact built bundle then loaded under Go, served CSP-protected HTML, rendered on desktop and a 390x844 mobile viewport without horizontal overflow, and completed Docker-to-Preview UI selection while both execution authority bits remained false. The follow-up full suite passed in 201.1s, with 20 targeted race repetitions plus clean vet/staticcheck.
 
+## Completed Docker Production-Evidence Slice (v65)
+
+Schema v65 adds immutable `sandbox_docker_production_evidence.v1` aggregates, sixteen ordered probe items, and digest-only idempotency operations. Captures bind the exact v63 blocked review, Run/Mission/Workspace, authority and threat-model fingerprints, and the same operator. The CLI accepts only the review ID, bounded operation key, and explicit confirmation. It cannot accept evidence conclusions, JSON reports, sockets, paths, images, resources, container IDs, or raw daemon responses. One transaction stores the aggregate, all items, operation binding, and a metadata-only event; immutable SQL triggers, semantic replay, and a 32-capture-per-Run cap close mutation and unbounded-growth paths. Migration creates no historical receipts.
+
+The local collector is deliberately inert. Windows returns `unsupported_platform`; Linux without `CYBERAGENT_DOCKER_PRODUCTION_EVIDENCE=1` returns `opt_in_required`; Linux with opt-in returns `harness_pending`. All three paths make zero daemon, network, Docker CLI, and process calls. The domain can represent future normalized machine observations, but the v65 Application hard-rejects `capture_complete` and `real_daemon_contacted=true` before persistence. This closes the internal collector seam until a durable write-ahead attempt, expiring lease, and generation fencing exist. Every probe remains `sufficient_for_start=false`, and all start/process/output/Artifact authority remains false. ADR 0027 records the boundary.
+
+Focused Domain, Store, Application, CLI, migration, SQL, idempotency, privacy, and malicious-collector tests pass. The final local ordinary suite passed in 212.3s and the full race suite in 213.9s. Vet, zero-warning staticcheck, module verification/tidy diff, zero-finding govulncheck, strict TypeScript, 21 frontend tests, OpenAPI drift, production build, zero-vulnerability npm audit, credential/runtime-artifact/process-capability/diff scans, the canonical README history check, and an isolated real-CLI schema-v65 Workspace smoke are green. The audit fixed eleven static error-style findings, made multi-field identity validation deterministic, bound the SQL operation key directly to its evidence root, and rejected a future collector that could otherwise claim real-daemon contact before durable harness ownership. No unresolved high/medium issue is known. This Windows host did not run a Linux daemon harness because none exists in v65.
+
 ## Next Slice
 
-Keep process execution closed while turning one selected backend into a separately auditable lifecycle:
+Keep process execution closed while completing the evidence boundary before any real daemon contact:
 
-1. Implement the Docker start/wait/TERM/KILL/orphan state machine described by v63 behind the existing production start gate, with write-ahead intent, generation fencing, bounded logs, cancellation fan-out, and restart reconciliation.
-2. Require machine-produced Linux real-daemon evidence for every v51 blocker and keep that evidence non-authorizing by itself. This Windows host cannot provide the Linux runtime proof.
-3. Add output collection and atomic Artifact commit as a later independent gate; a successful process exit must not imply output or Artifact authority.
-4. Keep `local` selected-but-disabled until an OS sandbox can make protected host roots unavailable or read-only. Never map the Local profile to an unrestricted host shell.
-5. Resume the content-addressed external Skill Registry at schema v65 or later. Rust analyzers, broader network/secrets, Desktop mutations, and CTF solving remain later slices.
+1. Schema v66: add a durable write-ahead evidence-capture attempt with an expiring generation-fenced lease, fixed Linux local endpoint, bounded deadlines, typed failure records, and restart reconciliation. It must commit before the first daemon call.
+2. Implement and audit the Linux harness only after that gate. It may use an exact pre-existing digest image with no pull and run the sixteen fixed probes, but its receipt remains non-authorizing and metadata-only.
+3. Add an independent evidence-acceptance review, then implement the v63 Docker start/wait/TERM/KILL/orphan lifecycle behind a separate release gate with per-Run ownership, bounded logs, cancellation fan-out, and recovery.
+4. Add output collection and atomic Artifact commit as a later independent gate. Keep `local` selected-but-disabled until an OS sandbox makes protected host roots unavailable or read-only; never map it to unrestricted `os/exec`.
+5. Resume the content-addressed external Skill Registry at schema v66 or later, likely v67+. Rust analyzers, broader network/secrets, Desktop mutations, and CTF solving remain later slices.
 
 ## Local Machine Note
 
-The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so startup correctly fails closed with `migration 30 checksum or name mismatch`. The v63 slice did not modify migrations 1-62, and fresh/upgrade fixtures plus isolated `CYBERAGENT_HOME` runs pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically.
+The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so startup correctly fails closed with `migration 30 checksum or name mismatch`. The v65 slice did not modify migrations 1-64, and fresh/upgrade fixtures plus isolated `CYBERAGENT_HOME` runs pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically.
 
 ## Delivery Loop
 

@@ -68,7 +68,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-runtime-input-plan|docker-runtime-input-plans|docker-runtime-input-plan-show|docker-runtime-input-apply|docker-runtime-input-apply-resume|docker-runtime-input-applications|docker-runtime-input-application-show|docker-runtime-input-resource-inspect|docker-runtime-input-resource-inspections|docker-runtime-input-resource-inspection-show|docker-runtime-input-resource-cleanup|docker-runtime-input-resource-cleanup-resume|docker-runtime-input-resource-cleanups|docker-runtime-input-resource-cleanup-show|docker-start-gate-review|docker-start-gate-reviews|docker-start-gate-review-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-runtime-input-plan|docker-runtime-input-plans|docker-runtime-input-plan-show|docker-runtime-input-apply|docker-runtime-input-apply-resume|docker-runtime-input-applications|docker-runtime-input-application-show|docker-runtime-input-resource-inspect|docker-runtime-input-resource-inspections|docker-runtime-input-resource-inspection-show|docker-runtime-input-resource-cleanup|docker-runtime-input-resource-cleanup-resume|docker-runtime-input-resource-cleanups|docker-runtime-input-resource-cleanup-show|docker-start-gate-review|docker-start-gate-reviews|docker-start-gate-review-show|docker-production-evidence-capture|docker-production-evidence-captures|docker-production-evidence-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	if a.dockerObserver != nil {
@@ -91,6 +91,9 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	}
 	if a.runtimeResourceClean != nil {
 		service.WithDockerRuntimeInputResourceCleanupTransport(a.runtimeResourceClean)
+	}
+	if a.productionEvidence != nil {
+		service.WithDockerProductionEvidenceCollector(a.productionEvidence)
 	}
 	switch args[0] {
 	case "prepare":
@@ -1378,6 +1381,71 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		}
 		printSandboxDockerStartGateReview(a, value)
 		return nil
+	case "docker-production-evidence-capture":
+		fs := newFlagSet("run sandbox docker-production-evidence-capture", a.errOut)
+		operationKey := fs.String("operation-key", "", "stable Docker production evidence operation key")
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		confirmed := fs.Bool("confirm-machine-capture", false,
+			"confirm non-authorizing machine evidence capture")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"operation-key": true, "operator": true, "confirm-machine-capture": false,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox docker-production-evidence-capture <review-id> --operation-key <key> --confirm-machine-capture [--operator <id>]")
+		}
+		if !*confirmed {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker production evidence capture requires --confirm-machine-capture")
+		}
+		value, err := service.CaptureDockerProductionEvidence(ctx,
+			application.CaptureDockerProductionEvidenceRequest{
+				ReviewID: fs.Arg(0), OperationKey: *operationKey,
+				RequestedBy: *operator, OperatorConfirmed: true,
+			})
+		if err != nil {
+			return err
+		}
+		printSandboxDockerProductionEvidence(a, value)
+		return nil
+	case "docker-production-evidence-captures":
+		fs := newFlagSet("run sandbox docker-production-evidence-captures", a.errOut)
+		limit := fs.Int("limit", 100, "maximum Docker production evidence captures")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-production-evidence-captures <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDockerProductionEvidence(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no Docker production evidence captures")
+			return nil
+		}
+		for _, value := range values {
+			fmt.Fprintf(a.out, "%s\t%s\t%s\tobserved=%d\tverified=%d\tstart_authorized=false\n",
+				value.ID, value.Status, value.PlatformClass, value.ObservedCount,
+				value.ProductionVerifiedCount)
+		}
+		return nil
+	case "docker-production-evidence-show":
+		fs := newFlagSet("run sandbox docker-production-evidence-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-production-evidence-show <evidence-id>")
+		}
+		value, err := service.GetDockerProductionEvidence(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxDockerProductionEvidence(a, value)
+		return nil
 	case "docker-rehearsals":
 		fs := newFlagSet("run sandbox docker-rehearsals", a.errOut)
 		limit := fs.Int("limit", 100, "maximum Docker container rehearsals")
@@ -1971,6 +2039,27 @@ func printSandboxDockerStartGateReview(a *App, value sandbox.DockerStartGateRevi
 			transition.Action, transition.WriteAheadRequired,
 			transition.GenerationFenced, transition.DaemonMutation,
 			transition.CancellationFanout)
+	}
+}
+
+func printSandboxDockerProductionEvidence(a *App,
+	value sandbox.DockerProductionEvidence,
+) {
+	fmt.Fprintf(a.out, "docker_production_evidence: %s\ndocker_start_gate_review: %s\ndocker_runtime_input_resource_cleanup_intent: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nstatus: %s\nstatus_detail: %s\nsource: %s\ntrust_class: %s\nplatform_class: %s\nendpoint_class: %s\noperation_key_digest: %s\nreview_fingerprint: %s\nauthority_fingerprint: %s\nthreat_model_fingerprint: %s\nsuite_fingerprint: %s\nenvironment_fingerprint: %s\nevidence_fingerprint: %s\ncapture_fingerprint: %s\noperator_confirmed: true\nreal_daemon_contacted: %t\nrequired_checks: %d\nobserved_checks: %d\nproduction_verified_checks: %d\nsufficient_checks: 0\nblockers: %d\nstart_gate_passed: false\ncontainer_start_authorized: false\nprocess_execution_authorized: false\noutput_export_authorized: false\nartifact_commit_authorized: false\nraw_daemon_payload_stored: false\nraw_resource_names_stored: false\nraw_container_ids_stored: false\nraw_host_paths_stored: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\nchecks:\n",
+		value.ID, value.ReviewID, value.CleanupIntentID, value.RunID, value.MissionID,
+		value.WorkspaceID, value.ProtocolVersion, value.Status,
+		sandbox.DockerProductionEvidenceStatusDescription(value.Status), value.Source,
+		value.TrustClass, value.PlatformClass, value.EndpointClass,
+		value.OperationKeyDigest, value.ReviewFingerprint, value.AuthorityFingerprint,
+		value.ThreatModelFingerprint, value.SuiteFingerprint,
+		value.EnvironmentFingerprint, value.EvidenceFingerprint, value.CaptureFingerprint,
+		value.RealDaemonContacted, value.RequiredCheckCount, value.ObservedCount,
+		value.ProductionVerifiedCount, value.BlockerCount, value.RequestedBy,
+		value.CreatedAt.Format(timeFormatRFC3339Nano), value.Replayed)
+	for _, item := range value.Items {
+		fmt.Fprintf(a.out, "%d\tname=%s\tprobe=%s\tstate=%s\tobserved=%t\tproduction_verified=%t\tsufficient_for_start=false\tblocker=%s\n",
+			item.Ordinal, item.Name, item.ProbeCode, item.State, item.Observed,
+			item.ProductionVerified, item.BlockerCode)
 	}
 }
 

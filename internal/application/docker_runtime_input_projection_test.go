@@ -69,6 +69,26 @@ type recordingDockerRuntimeInputResourceCleanupTransport struct {
 	onCleanup func(sandbox.DockerRuntimeInputResourceCleanupIntent)
 }
 
+type recordingDockerProductionEvidenceCollector struct {
+	calls         int
+	forceComplete bool
+	delegate      sandbox.LocalDockerProductionEvidenceCollector
+}
+
+func (collector *recordingDockerProductionEvidenceCollector) Capture(ctx context.Context,
+	request sandbox.DockerProductionEvidenceCaptureRequest,
+) (sandbox.DockerProductionEvidenceObservation, error) {
+	collector.calls++
+	value, err := collector.delegate.Capture(ctx, request)
+	if err == nil && collector.forceComplete {
+		value.Status = sandbox.DockerProductionEvidenceStatusComplete
+		value.PlatformClass = sandbox.DockerProductionEvidencePlatformLinux
+		value.EndpointClass = sandbox.DockerObservationEndpointLocalUnix
+		value.RealDaemonContacted = true
+	}
+	return value, err
+}
+
 func (transport *recordingDockerRuntimeInputResourceCleanupTransport) Endpoint() sandbox.DockerObservationEndpoint {
 	value, _ := sandbox.NewDockerObservationEndpoint(sandbox.DockerObservationEndpointLocalUnix)
 	return value
@@ -467,6 +487,65 @@ func TestDockerRuntimeInputProjectionPlansPersistsReplaysAndDoesNotWidenAuthorit
 	listedStartGates, err := service.ListDockerStartGateReviews(ctx, run.ID, 10)
 	if err != nil || len(listedStartGates) != 1 || listedStartGates[0].ID != startGateReview.ID {
 		t.Fatalf("list start-gate reviews: %#v err=%v", listedStartGates, err)
+	}
+	productionCollector := &recordingDockerProductionEvidenceCollector{
+		delegate: sandbox.NewLocalDockerProductionEvidenceCollector(),
+	}
+	service.WithDockerProductionEvidenceCollector(productionCollector)
+	productionRequest := CaptureDockerProductionEvidenceRequest{
+		ReviewID: startGateReview.ID, OperationKey: "docker-production-evidence",
+		RequestedBy: "runtime_input_operator",
+	}
+	if _, err := service.CaptureDockerProductionEvidence(ctx,
+		productionRequest); apperror.CodeOf(err) != apperror.CodeFailedPrecondition ||
+		productionCollector.calls != 0 {
+		t.Fatalf("production evidence skipped confirmation: calls=%d err=%v",
+			productionCollector.calls, err)
+	}
+	productionRequest.OperatorConfirmed = true
+	productionEvidence, err := service.CaptureDockerProductionEvidence(ctx, productionRequest)
+	if err != nil || productionEvidence.Replayed || productionCollector.calls != 1 ||
+		productionEvidence.RequiredCheckCount != sandbox.MaxBackendChecks ||
+		productionEvidence.SufficientCheckCount != 0 ||
+		productionEvidence.BlockerCount != sandbox.MaxBackendChecks ||
+		productionEvidence.StartGatePassed || productionEvidence.ContainerStartAuthorized ||
+		productionEvidence.ProcessExecutionAuthorized ||
+		productionEvidence.OutputExportAuthorized ||
+		productionEvidence.ArtifactCommitAuthorized {
+		t.Fatalf("production evidence widened authority: %#v calls=%d err=%v",
+			productionEvidence, productionCollector.calls, err)
+	}
+	replayedProductionEvidence, err := service.CaptureDockerProductionEvidence(ctx,
+		productionRequest)
+	if err != nil || !replayedProductionEvidence.Replayed ||
+		replayedProductionEvidence.ID != productionEvidence.ID || productionCollector.calls != 1 {
+		t.Fatalf("production evidence replay recollected: %#v calls=%d err=%v",
+			replayedProductionEvidence, productionCollector.calls, err)
+	}
+	loadedProductionEvidence, err := service.GetDockerProductionEvidence(ctx,
+		productionEvidence.ID)
+	if err != nil || loadedProductionEvidence.CaptureFingerprint !=
+		productionEvidence.CaptureFingerprint {
+		t.Fatalf("load production evidence: %#v err=%v", loadedProductionEvidence, err)
+	}
+	listedProductionEvidence, err := service.ListDockerProductionEvidence(ctx, run.ID, 10)
+	if err != nil || len(listedProductionEvidence) != 1 ||
+		listedProductionEvidence[0].ID != productionEvidence.ID {
+		t.Fatalf("list production evidence: %#v err=%v", listedProductionEvidence, err)
+	}
+	productionCollector.forceComplete = true
+	unsafeProductionRequest := productionRequest
+	unsafeProductionRequest.OperationKey = "docker-production-evidence-real-daemon"
+	if _, err := service.CaptureDockerProductionEvidence(ctx,
+		unsafeProductionRequest); apperror.CodeOf(err) != apperror.CodeFailedPrecondition ||
+		productionCollector.calls != 2 {
+		t.Fatalf("production evidence bypassed the write-ahead harness gate: calls=%d err=%v",
+			productionCollector.calls, err)
+	}
+	listedProductionEvidence, err = service.ListDockerProductionEvidence(ctx, run.ID, 10)
+	if err != nil || len(listedProductionEvidence) != 1 {
+		t.Fatalf("rejected real-daemon evidence left state: %#v err=%v",
+			listedProductionEvidence, err)
 	}
 	resourceInspector.targetState = sandbox.DockerRuntimeInputResourceTargetForeign
 	unsafeRequest := inspectionRequest

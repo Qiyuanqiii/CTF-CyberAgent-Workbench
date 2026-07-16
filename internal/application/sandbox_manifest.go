@@ -225,6 +225,14 @@ type SandboxManifestStore interface {
 		cleanupIntentID string) (sandbox.DockerStartGateReview, bool, error)
 	ListDockerStartGateReviews(ctx context.Context, runID string,
 		limit int) ([]sandbox.DockerStartGateReview, error)
+	GetDockerProductionEvidenceOperation(ctx context.Context,
+		keyDigest string) (sandbox.DockerProductionEvidenceOperation, bool, error)
+	CreateDockerProductionEvidence(ctx context.Context, value sandbox.DockerProductionEvidence,
+		operation sandbox.DockerProductionEvidenceOperation) (sandbox.DockerProductionEvidence, bool, error)
+	GetDockerProductionEvidence(ctx context.Context,
+		id string) (sandbox.DockerProductionEvidence, error)
+	ListDockerProductionEvidence(ctx context.Context, runID string,
+		limit int) ([]sandbox.DockerProductionEvidence, error)
 }
 
 type SandboxManifestService struct {
@@ -241,6 +249,7 @@ type SandboxManifestService struct {
 	runtimeInputApply    sandbox.DockerRuntimeInputApplicationTransport
 	runtimeResourceRead  sandbox.DockerRuntimeInputResourceInspector
 	runtimeResourceClean sandbox.DockerRuntimeInputResourceCleanupTransport
+	productionEvidence   sandbox.DockerProductionEvidenceCollector
 }
 
 type PrepareSandboxManifestRequest struct {
@@ -267,7 +276,17 @@ func NewSandboxManifestService(store SandboxManifestStore,
 		runtimeInputApply:    sandbox.NewUnavailableDockerRuntimeInputApplicationTransport(),
 		runtimeResourceRead:  sandbox.NewUnavailableDockerRuntimeInputResourceTransport(),
 		runtimeResourceClean: sandbox.NewUnavailableDockerRuntimeInputResourceTransport(),
+		productionEvidence:   sandbox.NewLocalDockerProductionEvidenceCollector(),
 	}
+}
+
+func (s *SandboxManifestService) WithDockerProductionEvidenceCollector(
+	collector sandbox.DockerProductionEvidenceCollector,
+) *SandboxManifestService {
+	if s != nil && collector != nil {
+		s.productionEvidence = collector
+	}
+	return s
 }
 
 func (s *SandboxManifestService) WithDockerRuntimeInputResourceInspector(

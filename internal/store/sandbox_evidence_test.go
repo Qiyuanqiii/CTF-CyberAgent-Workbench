@@ -606,7 +606,7 @@ func removeSchemaV63ForTestStatements() []string {
 }
 
 func removeSchemaV64ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV65ForTestStatements(), []string{
 		`DROP TRIGGER trg_run_execution_profile_operation_delete_immutable`,
 		`DROP TRIGGER trg_run_execution_profile_operation_update_immutable`,
 		`DROP TRIGGER trg_run_execution_profile_snapshot_delete_immutable`,
@@ -617,5 +617,25 @@ func removeSchemaV64ForTestStatements() []string {
 		`DROP INDEX idx_run_execution_profile_snapshots_run_revision`,
 		`DROP TABLE run_execution_profile_snapshots`,
 		`DELETE FROM schema_migrations WHERE version = 64`,
+	}...)
+}
+
+func removeSchemaV65ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_operation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_operation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_item_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_item_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_operation_insert`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_item_insert`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_insert`,
+		`DROP TABLE sandbox_docker_production_evidence_operations`,
+		`DROP TABLE sandbox_docker_production_evidence_items`,
+		`DROP INDEX idx_sandbox_docker_production_evidence_review_created`,
+		`DROP INDEX idx_sandbox_docker_production_evidence_run_created`,
+		`DROP TABLE sandbox_docker_production_evidence`,
+		`DELETE FROM schema_migrations WHERE version = 65`,
 	}
 }

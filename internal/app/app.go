@@ -63,6 +63,7 @@ type App struct {
 	runtimeInputApply    sandbox.DockerRuntimeInputApplicationTransport
 	runtimeResourceRead  sandbox.DockerRuntimeInputResourceInspector
 	runtimeResourceClean sandbox.DockerRuntimeInputResourceCleanupTransport
+	productionEvidence   sandbox.DockerProductionEvidenceCollector
 }
 
 func Execute(args []string, out io.Writer, errOut io.Writer) int {
