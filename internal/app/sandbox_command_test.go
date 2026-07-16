@@ -37,6 +37,7 @@ var sandboxDockerRuntimeInputResourceInspectionIDPattern = regexp.MustCompile(`s
 var sandboxDockerRuntimeInputResourceCleanupIDPattern = regexp.MustCompile(`sandbox-docker-runtime-input-resource-cleanup-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerStartGateReviewIDPattern = regexp.MustCompile(`sandbox-docker-start-gate-review-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerProductionEvidenceIDPattern = regexp.MustCompile(`sandbox-docker-production-evidence-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxDockerProductionEvidenceAttemptIDPattern = regexp.MustCompile(`sandbox-docker-production-evidence-attempt-[0-9]{14}-[a-f0-9]{12}`)
 
 type cliDockerPlanObservationTransport struct {
 	imageDigest string
@@ -1377,12 +1378,65 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 	if productionEvidenceID == "" {
 		t.Fatalf("missing Docker production evidence id: %s", productionCaptured)
 	}
+	productionAttemptID := sandboxDockerProductionEvidenceAttemptIDPattern.FindString(productionCaptured)
+	if productionAttemptID == "" ||
+		!strings.Contains(productionCaptured, "current_reconciliation_status: initial_generation_quiescent") ||
+		!strings.Contains(productionCaptured, "lease_generation: 1") ||
+		!strings.Contains(productionCaptured, "lease_status: released") ||
+		!strings.Contains(productionCaptured, "real_daemon_contact_authorized: false") ||
+		!strings.Contains(productionCaptured, "lease_identity_exposed: false") {
+		t.Fatalf("missing Docker production evidence write-ahead attempt: %s", productionCaptured)
+	}
 	productionReplay, stderr, code := executeTestCommand(t, "run", "sandbox",
 		"docker-production-evidence-capture", startGateReviewID,
 		"--operation-key", "docker-production-evidence-cli", "--confirm-machine-capture")
 	if code != 0 || stderr != "" || !strings.Contains(productionReplay, "replayed: true") {
 		t.Fatalf("Docker production evidence replay recollected: output=%s stderr=%s code=%d",
 			productionReplay, stderr, code)
+	}
+	productionAttemptList, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-production-evidence-attempts", runID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(productionAttemptList, productionAttemptID) ||
+		!strings.Contains(productionAttemptList, "status=evidence_committed") ||
+		!strings.Contains(productionAttemptList, "generation=1") ||
+		!strings.Contains(productionAttemptList, "reconciliations=1") ||
+		!strings.Contains(productionAttemptList, "real_daemon_contacted=false") ||
+		strings.Contains(productionAttemptList, "lease_id") ||
+		strings.Contains(productionAttemptList, "/workspace") ||
+		strings.Contains(productionAttemptList, home) {
+		t.Fatalf("Docker production evidence attempt list leaked data: output=%s stderr=%s code=%d",
+			productionAttemptList, stderr, code)
+	}
+	productionAttemptShown, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-production-evidence-attempt-show", productionAttemptID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(productionAttemptShown, "status: evidence_committed") ||
+		!strings.Contains(productionAttemptShown, "evidence: "+productionEvidenceID) ||
+		!strings.Contains(productionAttemptShown, "current_reconciliation_fingerprint:") ||
+		!strings.Contains(productionAttemptShown, "artifact_commit_authorized: false") ||
+		strings.Contains(productionAttemptShown, "owner_id") ||
+		strings.Contains(productionAttemptShown, "lease_id:") ||
+		strings.Contains(productionAttemptShown, "/workspace") ||
+		strings.Contains(productionAttemptShown, home) {
+		t.Fatalf("Docker production evidence attempt show leaked data: output=%s stderr=%s code=%d",
+			productionAttemptShown, stderr, code)
+	}
+	if _, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-production-evidence-attempt-resume", productionAttemptID); code != 4 ||
+		!strings.Contains(stderr, "requires --confirm-machine-capture") {
+		t.Fatalf("Docker production evidence resume skipped confirmation: stderr=%s code=%d",
+			stderr, code)
+	}
+	productionAttemptReplay, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-production-evidence-attempt-resume", productionAttemptID,
+		"--confirm-machine-capture")
+	if code != 0 || stderr != "" ||
+		!strings.Contains(productionAttemptReplay, "docker_production_evidence_attempt: "+productionAttemptID) ||
+		!strings.Contains(productionAttemptReplay, "docker_production_evidence: "+productionEvidenceID) ||
+		!strings.Contains(productionAttemptReplay, "replayed: true") {
+		t.Fatalf("Docker production evidence attempt replay failed: output=%s stderr=%s code=%d",
+			productionAttemptReplay, stderr, code)
 	}
 	productionList, stderr, code := executeTestCommand(t, "run", "sandbox",
 		"docker-production-evidence-captures", runID)
@@ -1392,6 +1446,12 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		strings.Contains(productionList, "/workspace") || strings.Contains(productionList, home) {
 		t.Fatalf("Docker production evidence list leaked data: output=%s stderr=%s code=%d",
 			productionList, stderr, code)
+	}
+	productionLimited, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-production-evidence-captures", runID, "--limit", "1")
+	if code != 0 || stderr != "" || !strings.Contains(productionLimited, productionEvidenceID) {
+		t.Fatalf("Docker production evidence trailing limit failed: output=%s stderr=%s code=%d",
+			productionLimited, stderr, code)
 	}
 	productionShown, stderr, code := executeTestCommand(t, "run", "sandbox",
 		"docker-production-evidence-show", productionEvidenceID)

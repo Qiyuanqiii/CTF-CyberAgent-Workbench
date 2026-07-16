@@ -8,9 +8,7 @@ import (
 )
 
 func TestLocalDockerProductionEvidenceCollectorFailsClosedByPlatformAndOptIn(t *testing.T) {
-	request := DockerProductionEvidenceCaptureRequest{
-		ReviewID: "review", RunID: "run", AuthorityFingerprint: strings.Repeat("1", 64),
-	}
+	request := testDockerProductionEvidenceCaptureRequest(t)
 	tests := []struct {
 		name         string
 		platform     string
@@ -135,9 +133,96 @@ func TestDockerProductionEvidenceCollectorHonorsCancellation(t *testing.T) {
 	}
 	_, err := collector.Capture(ctx, DockerProductionEvidenceCaptureRequest{
 		ReviewID: "review", RunID: "run", AuthorityFingerprint: strings.Repeat("1", 64),
+		AttemptID: "attempt", LeaseGeneration: 1,
+		EndpointClass:       DockerObservationEndpointLocalUnix,
+		EndpointFingerprint: testDockerProductionEvidenceCaptureRequest(t).EndpointFingerprint,
+		DeadlineAt:          time.Now().UTC().Add(time.Minute),
 	})
 	if err == nil {
 		t.Fatal("canceled evidence capture succeeded")
+	}
+}
+
+func TestDockerProductionEvidenceCollectorRejectsExpiredDeadline(t *testing.T) {
+	request := testDockerProductionEvidenceCaptureRequest(t)
+	request.DeadlineAt = time.Now().UTC().Add(-time.Millisecond)
+	collector := LocalDockerProductionEvidenceCollector{
+		platform: "linux", arch: "test", lookup: func(string) (string, bool) { return "1", true },
+	}
+	if _, err := collector.Capture(context.Background(), request); err != context.DeadlineExceeded {
+		t.Fatalf("expired production evidence deadline reached collector: %v", err)
+	}
+}
+
+func TestDockerProductionEvidenceAttemptRemainsGenerationFencedAndNonAuthorizing(t *testing.T) {
+	review := testDockerStartGateReview(t)
+	endpoint, err := NewDockerObservationEndpoint(DockerObservationEndpointLocalUnix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := NewDockerProductionEvidenceAttempt("production-attempt",
+		strings.Repeat("6", 64), review.RequestedBy, review, endpoint, true,
+		DefaultDockerProductionEvidenceCaptureTimeout, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	lease := DockerProductionEvidenceAttemptLease{AttemptID: attempt.ID,
+		LeaseID: "lease", OwnerID: "worker", Generation: 1,
+		Status:     DockerProductionEvidenceAttemptLeaseActive,
+		AcquiredAt: now, ExpiresAt: now.Add(DefaultDockerProductionEvidenceAttemptLeaseTTL)}
+	reconciliation, err := NewDockerProductionEvidenceReconciliation(attempt, lease,
+		now.Add(time.Millisecond))
+	if err != nil || reconciliation.RealDaemonContacted || reconciliation.DaemonReadCount != 0 {
+		t.Fatalf("unexpected reconciliation: %#v err=%v", reconciliation, err)
+	}
+	collector := NewLocalDockerProductionEvidenceCollector()
+	observation, err := collector.Capture(context.Background(),
+		DockerProductionEvidenceCaptureRequest{ReviewID: review.ID, RunID: review.RunID,
+			AuthorityFingerprint: review.AuthorityFingerprint, AttemptID: attempt.ID,
+			LeaseGeneration: lease.Generation, EndpointClass: endpoint.Class,
+			EndpointFingerprint: endpoint.Fingerprint,
+			DeadlineAt:          now.Add(time.Second)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := NewDockerProductionEvidence("production-evidence",
+		attempt.OperationKeyDigest, review.RequestedBy, review, observation, true,
+		now.Add(2*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewDockerProductionEvidenceAttemptResult(attempt, lease,
+		reconciliation, evidence)
+	if err != nil || result.RealDaemonContacted || result.ContainerStartAuthorized ||
+		result.ProcessExecutionAuthorized || result.ArtifactCommitAuthorized {
+		t.Fatalf("attempt result widened authority: %#v err=%v", result, err)
+	}
+	releasedAt := result.CreatedAt
+	lease.Status, lease.ReleasedAt = DockerProductionEvidenceAttemptLeaseReleased, &releasedAt
+	record := DockerProductionEvidenceAttemptRecord{Attempt: attempt, Lease: lease,
+		Reconciliations: []DockerProductionEvidenceReconciliation{reconciliation}, Result: &result}
+	if err := record.Validate(); err != nil || record.StatusAt(time.Now().UTC()) != "evidence_committed" {
+		t.Fatalf("invalid completed attempt: %#v err=%v", record, err)
+	}
+	tampered := attempt
+	tampered.RealDaemonContactAuthorized = true
+	if err := tampered.Validate(); err == nil {
+		t.Fatal("attempt authorized daemon contact")
+	}
+}
+
+func testDockerProductionEvidenceCaptureRequest(t *testing.T) DockerProductionEvidenceCaptureRequest {
+	t.Helper()
+	endpoint, err := NewDockerObservationEndpoint(DockerObservationEndpointLocalUnix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return DockerProductionEvidenceCaptureRequest{
+		ReviewID: "review", RunID: "run", AuthorityFingerprint: strings.Repeat("1", 64),
+		AttemptID: "attempt", LeaseGeneration: 1, EndpointClass: endpoint.Class,
+		EndpointFingerprint: endpoint.Fingerprint,
+		DeadlineAt:          time.Now().UTC().Add(time.Minute),
 	}
 }
 

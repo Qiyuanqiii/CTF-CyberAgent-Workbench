@@ -73,12 +73,16 @@ type recordingDockerProductionEvidenceCollector struct {
 	calls         int
 	forceComplete bool
 	delegate      sandbox.LocalDockerProductionEvidenceCollector
+	before        func(sandbox.DockerProductionEvidenceCaptureRequest)
 }
 
 func (collector *recordingDockerProductionEvidenceCollector) Capture(ctx context.Context,
 	request sandbox.DockerProductionEvidenceCaptureRequest,
 ) (sandbox.DockerProductionEvidenceObservation, error) {
 	collector.calls++
+	if collector.before != nil {
+		collector.before(request)
+	}
 	value, err := collector.delegate.Capture(ctx, request)
 	if err == nil && collector.forceComplete {
 		value.Status = sandbox.DockerProductionEvidenceStatusComplete
@@ -491,6 +495,15 @@ func TestDockerRuntimeInputProjectionPlansPersistsReplaysAndDoesNotWidenAuthorit
 	productionCollector := &recordingDockerProductionEvidenceCollector{
 		delegate: sandbox.NewLocalDockerProductionEvidenceCollector(),
 	}
+	productionCollector.before = func(request sandbox.DockerProductionEvidenceCaptureRequest) {
+		record, loadErr := st.GetDockerProductionEvidenceAttempt(ctx, request.AttemptID)
+		if loadErr != nil || record.Lease.Generation != request.LeaseGeneration ||
+			len(record.Reconciliations) == 0 ||
+			record.Reconciliations[len(record.Reconciliations)-1].Generation != request.LeaseGeneration {
+			t.Fatalf("collector ran before durable generation reconciliation: %#v err=%v",
+				record, loadErr)
+		}
+	}
 	service.WithDockerProductionEvidenceCollector(productionCollector)
 	productionRequest := CaptureDockerProductionEvidenceRequest{
 		ReviewID: startGateReview.ID, OperationKey: "docker-production-evidence",
@@ -511,14 +524,17 @@ func TestDockerRuntimeInputProjectionPlansPersistsReplaysAndDoesNotWidenAuthorit
 		productionEvidence.StartGatePassed || productionEvidence.ContainerStartAuthorized ||
 		productionEvidence.ProcessExecutionAuthorized ||
 		productionEvidence.OutputExportAuthorized ||
-		productionEvidence.ArtifactCommitAuthorized {
+		productionEvidence.ArtifactCommitAuthorized || productionEvidence.Attempt.Result == nil ||
+		productionEvidence.Attempt.Lease.Generation != 1 ||
+		len(productionEvidence.Attempt.Reconciliations) != 1 {
 		t.Fatalf("production evidence widened authority: %#v calls=%d err=%v",
 			productionEvidence, productionCollector.calls, err)
 	}
 	replayedProductionEvidence, err := service.CaptureDockerProductionEvidence(ctx,
 		productionRequest)
 	if err != nil || !replayedProductionEvidence.Replayed ||
-		replayedProductionEvidence.ID != productionEvidence.ID || productionCollector.calls != 1 {
+		replayedProductionEvidence.ID != productionEvidence.ID || productionCollector.calls != 1 ||
+		replayedProductionEvidence.Attempt.Result == nil {
 		t.Fatalf("production evidence replay recollected: %#v calls=%d err=%v",
 			replayedProductionEvidence, productionCollector.calls, err)
 	}
@@ -546,6 +562,30 @@ func TestDockerRuntimeInputProjectionPlansPersistsReplaysAndDoesNotWidenAuthorit
 	if err != nil || len(listedProductionEvidence) != 1 {
 		t.Fatalf("rejected real-daemon evidence left state: %#v err=%v",
 			listedProductionEvidence, err)
+	}
+	productionAttempts, err := service.ListDockerProductionEvidenceAttempts(ctx, run.ID, 10)
+	if err != nil || len(productionAttempts) != 2 ||
+		len(productionAttempts[1].Failures) != 1 ||
+		productionAttempts[1].Failures[0].Code !=
+			sandbox.DockerProductionEvidenceAttemptErrorUnsafeContact ||
+		productionAttempts[1].Result != nil ||
+		productionAttempts[1].Lease.Status != sandbox.DockerProductionEvidenceAttemptLeaseReleased {
+		t.Fatalf("unsafe collector attempt was not durably failed: %#v err=%v",
+			productionAttempts, err)
+	}
+	productionCollector.forceComplete = false
+	resumedProductionEvidence, err := service.ResumeDockerProductionEvidence(ctx,
+		ResumeDockerProductionEvidenceRequest{AttemptID: productionAttempts[1].Attempt.ID,
+			RequestedBy: "runtime_input_operator", OwnerID: "recovery-worker",
+			OperatorConfirmed: true})
+	if err != nil || resumedProductionEvidence.Attempt.Result == nil ||
+		resumedProductionEvidence.Attempt.Lease.Generation != 2 ||
+		len(resumedProductionEvidence.Attempt.Reconciliations) != 2 ||
+		resumedProductionEvidence.Attempt.Reconciliations[1].Status !=
+			sandbox.DockerProductionEvidenceReconciliationRestart ||
+		productionCollector.calls != 3 {
+		t.Fatalf("production evidence attempt did not recover: %#v calls=%d err=%v",
+			resumedProductionEvidence, productionCollector.calls, err)
 	}
 	resourceInspector.targetState = sandbox.DockerRuntimeInputResourceTargetForeign
 	unsafeRequest := inspectionRequest

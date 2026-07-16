@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
@@ -68,7 +69,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-runtime-input-plan|docker-runtime-input-plans|docker-runtime-input-plan-show|docker-runtime-input-apply|docker-runtime-input-apply-resume|docker-runtime-input-applications|docker-runtime-input-application-show|docker-runtime-input-resource-inspect|docker-runtime-input-resource-inspections|docker-runtime-input-resource-inspection-show|docker-runtime-input-resource-cleanup|docker-runtime-input-resource-cleanup-resume|docker-runtime-input-resource-cleanups|docker-runtime-input-resource-cleanup-show|docker-start-gate-review|docker-start-gate-reviews|docker-start-gate-review-show|docker-production-evidence-capture|docker-production-evidence-captures|docker-production-evidence-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-runtime-input-plan|docker-runtime-input-plans|docker-runtime-input-plan-show|docker-runtime-input-apply|docker-runtime-input-apply-resume|docker-runtime-input-applications|docker-runtime-input-application-show|docker-runtime-input-resource-inspect|docker-runtime-input-resource-inspections|docker-runtime-input-resource-inspection-show|docker-runtime-input-resource-cleanup|docker-runtime-input-resource-cleanup-resume|docker-runtime-input-resource-cleanups|docker-runtime-input-resource-cleanup-show|docker-start-gate-review|docker-start-gate-reviews|docker-start-gate-review-show|docker-production-evidence-capture|docker-production-evidence-attempts|docker-production-evidence-attempt-show|docker-production-evidence-attempt-resume|docker-production-evidence-captures|docker-production-evidence-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	if a.dockerObserver != nil {
@@ -1385,15 +1386,17 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		fs := newFlagSet("run sandbox docker-production-evidence-capture", a.errOut)
 		operationKey := fs.String("operation-key", "", "stable Docker production evidence operation key")
 		operator := fs.String("operator", "cli_operator", "operator identity")
+		owner := fs.String("owner", "", "capture lease owner identity")
 		confirmed := fs.Bool("confirm-machine-capture", false,
 			"confirm non-authorizing machine evidence capture")
 		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
-			"operation-key": true, "operator": true, "confirm-machine-capture": false,
+			"operation-key": true, "operator": true, "owner": true,
+			"confirm-machine-capture": false,
 		})); err != nil {
 			return err
 		}
 		if fs.NArg() != 1 || strings.TrimSpace(*operationKey) == "" {
-			return errors.New("usage: cyberagent run sandbox docker-production-evidence-capture <review-id> --operation-key <key> --confirm-machine-capture [--operator <id>]")
+			return errors.New("usage: cyberagent run sandbox docker-production-evidence-capture <review-id> --operation-key <key> --confirm-machine-capture [--operator <id>] [--owner <id>]")
 		}
 		if !*confirmed {
 			return apperror.New(apperror.CodeFailedPrecondition,
@@ -1402,17 +1405,93 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		value, err := service.CaptureDockerProductionEvidence(ctx,
 			application.CaptureDockerProductionEvidenceRequest{
 				ReviewID: fs.Arg(0), OperationKey: *operationKey,
-				RequestedBy: *operator, OperatorConfirmed: true,
+				RequestedBy: *operator, OwnerID: *owner, OperatorConfirmed: true,
 			})
 		if err != nil {
 			return err
 		}
-		printSandboxDockerProductionEvidence(a, value)
+		if value.Attempt.Attempt.ID != "" {
+			printSandboxDockerProductionEvidenceAttempt(a, value.Attempt)
+		}
+		printSandboxDockerProductionEvidence(a, value.DockerProductionEvidence)
+		return nil
+	case "docker-production-evidence-attempts":
+		fs := newFlagSet("run sandbox docker-production-evidence-attempts", a.errOut)
+		limit := fs.Int("limit", 100, "maximum Docker production evidence attempts")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-production-evidence-attempts <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDockerProductionEvidenceAttempts(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no Docker production evidence attempts")
+			return nil
+		}
+		now := time.Now().UTC()
+		for _, value := range values {
+			evidenceID := "none"
+			if value.Result != nil {
+				evidenceID = value.Result.EvidenceID
+			}
+			fmt.Fprintf(a.out, "%s\treview=%s\tstatus=%s\tgeneration=%d\tlease_status=%s\treconciliations=%d\tfailures=%d\tevidence=%s\treal_daemon_contacted=false\tstart_authorized=false\tcreated_at=%s\n",
+				value.Attempt.ID, value.Attempt.ReviewID, value.StatusAt(now),
+				value.Lease.Generation, value.Lease.Status, len(value.Reconciliations),
+				len(value.Failures), evidenceID,
+				value.Attempt.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "docker-production-evidence-attempt-show":
+		fs := newFlagSet("run sandbox docker-production-evidence-attempt-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-production-evidence-attempt-show <attempt-id>")
+		}
+		value, err := service.GetDockerProductionEvidenceAttempt(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxDockerProductionEvidenceAttempt(a, value)
+		return nil
+	case "docker-production-evidence-attempt-resume":
+		fs := newFlagSet("run sandbox docker-production-evidence-attempt-resume", a.errOut)
+		operator := fs.String("operator", "cli_operator", "operator identity")
+		owner := fs.String("owner", "", "capture lease owner identity")
+		confirmed := fs.Bool("confirm-machine-capture", false,
+			"confirm non-authorizing machine evidence capture resume")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"operator": true, "owner": true, "confirm-machine-capture": false,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-production-evidence-attempt-resume <attempt-id> --confirm-machine-capture [--operator <id>] [--owner <id>]")
+		}
+		if !*confirmed {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker production evidence resume requires --confirm-machine-capture")
+		}
+		value, err := service.ResumeDockerProductionEvidence(ctx,
+			application.ResumeDockerProductionEvidenceRequest{
+				AttemptID: fs.Arg(0), RequestedBy: *operator, OwnerID: *owner,
+				OperatorConfirmed: true,
+			})
+		if err != nil {
+			return err
+		}
+		printSandboxDockerProductionEvidenceAttempt(a, value.Attempt)
+		printSandboxDockerProductionEvidence(a, value.DockerProductionEvidence)
 		return nil
 	case "docker-production-evidence-captures":
 		fs := newFlagSet("run sandbox docker-production-evidence-captures", a.errOut)
 		limit := fs.Int("limit", 100, "maximum Docker production evidence captures")
-		if err := fs.Parse(args[1:]); err != nil {
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
 			return err
 		}
 		if fs.NArg() != 1 {
@@ -2039,6 +2118,40 @@ func printSandboxDockerStartGateReview(a *App, value sandbox.DockerStartGateRevi
 			transition.Action, transition.WriteAheadRequired,
 			transition.GenerationFenced, transition.DaemonMutation,
 			transition.CancellationFanout)
+	}
+}
+
+func printSandboxDockerProductionEvidenceAttempt(a *App,
+	value sandbox.DockerProductionEvidenceAttemptRecord,
+) {
+	evidenceID := "none"
+	resultFingerprint := "none"
+	if value.Result != nil {
+		evidenceID = value.Result.EvidenceID
+		resultFingerprint = value.Result.ResultFingerprint
+	}
+	currentStatus := "none"
+	currentFingerprint := "none"
+	if current, found := value.CurrentReconciliation(); found {
+		currentStatus = current.Status
+		currentFingerprint = current.ReconciliationFingerprint
+	}
+	fmt.Fprintf(a.out, "docker_production_evidence_attempt: %s\ndocker_start_gate_review: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\nstatus: %s\noperation_key_digest: %s\nrequest_fingerprint: %s\nreview_fingerprint: %s\nauthority_fingerprint: %s\nthreat_model_fingerprint: %s\nsuite_fingerprint: %s\nendpoint_class: %s\nendpoint_fingerprint: %s\ncapture_timeout_millis: %d\nlease_generation: %d\nlease_status: %s\nlease_active: %t\nreconciliations: %d\ncurrent_reconciliation_status: %s\ncurrent_reconciliation_fingerprint: %s\nfailures: %d\nevidence: %s\nresult_fingerprint: %s\noperator_confirmed: true\nreal_daemon_contact_authorized: false\nreal_daemon_contacted: false\ncontainer_start_authorized: false\nprocess_execution_authorized: false\noutput_export_authorized: false\nartifact_commit_authorized: false\nlease_identity_exposed: false\nraw_daemon_payload_stored: false\nrequested_by: %s\ncreated_at: %s\nreplayed: %t\ntook_over: %t\n",
+		value.Attempt.ID, value.Attempt.ReviewID, value.Attempt.RunID,
+		value.Attempt.MissionID, value.Attempt.WorkspaceID, value.Attempt.ProtocolVersion,
+		value.StatusAt(time.Now().UTC()), value.Attempt.OperationKeyDigest,
+		value.Attempt.RequestFingerprint, value.Attempt.ReviewFingerprint,
+		value.Attempt.AuthorityFingerprint, value.Attempt.ThreatModelFingerprint,
+		value.Attempt.SuiteFingerprint, value.Attempt.EndpointClass,
+		value.Attempt.EndpointFingerprint, value.Attempt.CaptureTimeoutMillis,
+		value.Lease.Generation, value.Lease.Status, value.Lease.ActiveAt(time.Now().UTC()),
+		len(value.Reconciliations), currentStatus, currentFingerprint, len(value.Failures),
+		evidenceID, resultFingerprint, value.Attempt.RequestedBy,
+		value.Attempt.CreatedAt.Format(timeFormatRFC3339Nano), value.Replayed, value.TookOver)
+	for _, failure := range value.Failures {
+		fmt.Fprintf(a.out, "%d\tcode=%s\tgeneration=%d\tcreated_at=%s\n",
+			failure.Sequence, failure.Code, failure.Generation,
+			failure.CreatedAt.Format(timeFormatRFC3339Nano))
 	}
 }
 

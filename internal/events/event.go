@@ -168,6 +168,12 @@ const (
 	SandboxDockerRuntimeInputResourceCleanupCompletedEvent = "sandbox.docker_runtime_input_resource_cleanup_completed"
 	SandboxDockerStartGateReviewedEvent                    = "sandbox.docker_start_gate_reviewed"
 	SandboxDockerProductionEvidenceCapturedEvent           = "sandbox.docker_production_evidence_captured"
+	SandboxDockerProductionEvidenceAttemptPreparedEvent    = "sandbox.docker_production_evidence_attempt_prepared"
+	SandboxDockerProductionEvidenceAttemptAcquiredEvent    = "sandbox.docker_production_evidence_attempt_acquired"
+	SandboxDockerProductionEvidenceAttemptTakenOverEvent   = "sandbox.docker_production_evidence_attempt_taken_over"
+	SandboxDockerProductionEvidenceReconciledEvent         = "sandbox.docker_production_evidence_reconciled"
+	SandboxDockerProductionEvidenceAttemptFailedEvent      = "sandbox.docker_production_evidence_attempt_failed"
+	SandboxDockerProductionEvidenceAttemptCompletedEvent   = "sandbox.docker_production_evidence_attempt_completed"
 )
 
 type Event struct {

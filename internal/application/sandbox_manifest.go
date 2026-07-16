@@ -233,6 +233,28 @@ type SandboxManifestStore interface {
 		id string) (sandbox.DockerProductionEvidence, error)
 	ListDockerProductionEvidence(ctx context.Context, runID string,
 		limit int) ([]sandbox.DockerProductionEvidence, error)
+	BeginDockerProductionEvidenceAttempt(ctx context.Context,
+		attempt sandbox.DockerProductionEvidenceAttempt, ownerID string,
+		ttl time.Duration) (sandbox.DockerProductionEvidenceAttemptAcquisition, error)
+	AcquireDockerProductionEvidenceAttempt(ctx context.Context, attemptID, requestedBy,
+		ownerID string, ttl time.Duration) (sandbox.DockerProductionEvidenceAttemptAcquisition, error)
+	RecordDockerProductionEvidenceReconciliation(ctx context.Context,
+		value sandbox.DockerProductionEvidenceReconciliation,
+		expected sandbox.DockerProductionEvidenceAttemptLease) (sandbox.DockerProductionEvidenceAttemptRecord, bool, error)
+	CompleteDockerProductionEvidenceAttempt(ctx context.Context,
+		value sandbox.DockerProductionEvidence, operation sandbox.DockerProductionEvidenceOperation,
+		result sandbox.DockerProductionEvidenceAttemptResult,
+		expected sandbox.DockerProductionEvidenceAttemptLease) (sandbox.DockerProductionEvidenceAttemptRecord,
+		sandbox.DockerProductionEvidence, bool, error)
+	RecordDockerProductionEvidenceAttemptFailure(ctx context.Context, attemptID string,
+		expected sandbox.DockerProductionEvidenceAttemptLease, code string,
+		createdAt time.Time) (sandbox.DockerProductionEvidenceAttemptRecord, error)
+	GetDockerProductionEvidenceAttempt(ctx context.Context,
+		id string) (sandbox.DockerProductionEvidenceAttemptRecord, error)
+	GetDockerProductionEvidenceAttemptByOperation(ctx context.Context,
+		keyDigest string) (sandbox.DockerProductionEvidenceAttemptRecord, bool, error)
+	ListDockerProductionEvidenceAttempts(ctx context.Context, runID string,
+		limit int) ([]sandbox.DockerProductionEvidenceAttemptRecord, error)
 }
 
 type SandboxManifestService struct {

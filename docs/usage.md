@@ -428,6 +428,23 @@ cyberagent run sandbox docker-start-gate-review-show <review-id>
 
 The only v63 outcome is `blocked/deny_start`. Output contains bounded evidence source codes, blocker codes, future gate names, and false authority bits. It omits resource names, raw container IDs, host paths, Manifest bodies, raw operation keys, and private ownership identities. A successful review records why start is still denied; it does not verify the Linux real-daemon chain and does not add start, wait, signal, logs, export, execution, or Artifact authority.
 
+Schema v65/v66 adds a non-authorizing production-evidence receipt plus a recoverable write-ahead attempt around collection:
+
+```powershell
+cyberagent run sandbox docker-production-evidence-capture <review-id> `
+  --operation-key <stable-key> --confirm-machine-capture
+cyberagent run sandbox docker-production-evidence-captures <run-id>
+cyberagent run sandbox docker-production-evidence-show <evidence-id>
+cyberagent run sandbox docker-production-evidence-attempts <run-id>
+cyberagent run sandbox docker-production-evidence-attempt-show <attempt-id>
+cyberagent run sandbox docker-production-evidence-attempt-resume <attempt-id> `
+  --confirm-machine-capture
+```
+
+`docker-production-evidence-capture` first commits an immutable attempt, digest-only operation, generation lease, and current-generation quiescent reconciliation checkpoint. Only then can it call the collector. A typed failure releases the lease, and resume acquires generation N+1 only after a release or expiry; stale generations cannot record reconciliation, failure, or evidence. Completion atomically binds the attempt result to the v65 receipt and its sixteen fixed items. New SQL enforcement rejects a v65 evidence operation without this result, while pre-v66 receipts remain readable without fabricated attempts.
+
+The current product collector is intentionally inert. Windows records `unsupported_platform`; Linux without `CYBERAGENT_DOCKER_PRODUCTION_EVIDENCE=1` records `opt_in_required`; Linux with that opt-in still records `harness_pending`. The v66 reconciliation checkpoint reports zero daemon reads and zero known resources, which proves durable call ordering only and is not Docker resource verification. These commands expose bounded metadata but omit lease IDs/owners, raw errors, sockets, paths, image/resource/container identities, and daemon payloads. They do not contact Docker, start a process, export output, commit an Artifact, or authorize a future start.
+
 An optional real-daemon test is available only when an exact image is already present; it never pulls or creates anything:
 
 ```powershell

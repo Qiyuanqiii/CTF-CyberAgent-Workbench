@@ -621,7 +621,7 @@ func removeSchemaV64ForTestStatements() []string {
 }
 
 func removeSchemaV65ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV66ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_docker_production_evidence_operation_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_production_evidence_operation_update_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_production_evidence_item_delete_immutable`,
@@ -637,5 +637,37 @@ func removeSchemaV65ForTestStatements() []string {
 		`DROP INDEX idx_sandbox_docker_production_evidence_run_created`,
 		`DROP TABLE sandbox_docker_production_evidence`,
 		`DELETE FROM schema_migrations WHERE version = 65`,
+	}...)
+}
+
+func removeSchemaV66ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_result_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_result_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_failure_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_failure_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_reconciliation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_reconciliation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_operation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_operation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_lease_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_lease_update`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_v66_attempt_required`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_result_insert`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_failure_insert`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_reconciliation_insert`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_operation_insert`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_attempt_insert`,
+		`DROP TABLE sandbox_docker_production_evidence_attempt_results`,
+		`DROP TABLE sandbox_docker_production_evidence_attempt_failures`,
+		`DROP TABLE sandbox_docker_production_evidence_reconciliations`,
+		`DROP TABLE sandbox_docker_production_evidence_attempt_leases`,
+		`DROP TABLE sandbox_docker_production_evidence_attempt_operations`,
+		`DROP INDEX idx_sandbox_docker_production_evidence_attempts_review_created`,
+		`DROP INDEX idx_sandbox_docker_production_evidence_attempts_run_created`,
+		`DROP TABLE sandbox_docker_production_evidence_attempts`,
+		`DELETE FROM schema_migrations WHERE version = 66`,
 	}
 }

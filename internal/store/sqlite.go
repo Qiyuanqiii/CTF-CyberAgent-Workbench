@@ -287,6 +287,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 63, Name: "blocked Docker process start gate design review", Statements: sandboxDockerStartGateReviewStatements},
 		{Version: 64, Name: "immutable Run execution profile selection", Statements: runExecutionProfileStatements},
 		{Version: 65, Name: "non-authorizing Docker production evidence capture ledger", Statements: sandboxDockerProductionEvidenceStatements},
+		{Version: 66, Name: "recoverable Docker production evidence capture attempts", Statements: sandboxDockerProductionEvidenceAttemptStatements},
 	})
 }
 

@@ -181,13 +181,25 @@ type DockerProductionEvidenceCaptureRequest struct {
 	ReviewID             string
 	RunID                string
 	AuthorityFingerprint string
+	AttemptID            string
+	LeaseGeneration      int64
+	EndpointClass        string
+	EndpointFingerprint  string
+	DeadlineAt           time.Time
 }
 
 func (request DockerProductionEvidenceCaptureRequest) Validate() error {
 	if validateStoredIdentity("Docker production evidence review", request.ReviewID) != nil ||
 		validateStoredIdentity("Docker production evidence Run", request.RunID) != nil ||
-		!validDigest(request.AuthorityFingerprint) {
+		validateStoredIdentity("Docker production evidence attempt", request.AttemptID) != nil ||
+		!validDigest(request.AuthorityFingerprint) || request.LeaseGeneration < 1 ||
+		request.EndpointClass != DockerObservationEndpointLocalUnix ||
+		!validDigest(request.EndpointFingerprint) || request.DeadlineAt.IsZero() {
 		return errors.New("docker production evidence capture request is invalid")
+	}
+	endpoint, err := NewDockerObservationEndpoint(request.EndpointClass)
+	if err != nil || endpoint.Fingerprint != request.EndpointFingerprint {
+		return errors.New("docker production evidence capture endpoint is invalid")
 	}
 	return nil
 }
@@ -217,6 +229,9 @@ func (collector LocalDockerProductionEvidenceCollector) Capture(ctx context.Cont
 	}
 	if err := request.Validate(); err != nil {
 		return DockerProductionEvidenceObservation{}, err
+	}
+	if !time.Now().UTC().Before(request.DeadlineAt) {
+		return DockerProductionEvidenceObservation{}, context.DeadlineExceeded
 	}
 	platformClass := DockerProductionEvidencePlatformUnsupported
 	endpointClass := DockerProductionEvidenceEndpointNone
