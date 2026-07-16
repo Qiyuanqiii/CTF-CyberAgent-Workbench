@@ -36,8 +36,9 @@ Read in this order after a long context break:
 26. `docs/adr/0021-recoverable-runtime-input-application.md`
 27. `docs/adr/0022-retained-runtime-input-resource-lifecycle.md`
 28. `docs/adr/0023-blocked-docker-start-gate-review.md`
-29. `docs/DESKTOP_PLAN.md`
-30. `docs/SKILL_PACKAGE_PLAN.md`
+29. `docs/adr/0024-strict-inert-skill-package.md`
+30. `docs/DESKTOP_PLAN.md`
+31. `docs/SKILL_PACKAGE_PLAN.md`
 
 ## Current Baseline
 
@@ -50,17 +51,18 @@ Read in this order after a long context break:
 - `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v63` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
 - Main languages: Go control plane, TypeScript React/Vite read console; Rust has not started.
 - Desktop status: no desktop binary or installer exists yet. D0 will evaluate a Wails shell around the existing React console while all business authority stays behind Go HTTP/SSE/OpenAPI; installer/registry/update work is deferred to D2. See `docs/DESKTOP_PLAN.md`.
-- Custom Skill status: `skill.v1` and internal `LoadFS` validation exist, but only the five embedded Skills are product-loadable. There is no user `import/install/upload`, package archive protocol, persistent user Registry, or desktop upload endpoint. See `docs/SKILL_PACKAGE_PLAN.md`.
+- Custom Skill status: the five embedded `skill.v1` guides remain the only product-loadable Skills. The strict deterministic `skill_package.v1` in-memory parser/fuzzer and metadata-only `skill package validate` CLI now exist, but validation is inert: there is no user `import/install/upload`, persistent user Registry, Run selection for external packages, or Desktop/HTTP upload endpoint. See ADR 0024 and `docs/SKILL_PACKAGE_PLAN.md`.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
 
-Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, parent-selected minimal Specialist Skill context, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, safe-boundary operator steering with pending-only cancellation and explicit drain, strict metadata-only Sandbox Manifest preparation, approval-bound disabled candidates, a disabled Artifact-bound Sandbox lifecycle with independent fencing/cancellation/cleanup recovery, a required-but-unverified backend/output preflight, simulation-only backend evidence plus atomic in-memory output transactions, fixed-local-endpoint read-only Docker metadata observation, deterministic in-memory Docker container plans plus fake write transactions, default-disabled Docker create-inspect-remove rehearsals, durable pre-daemon attempts with recoverable stopped-container stage/cleanup checkpoints, descriptor-pinned and kernel-sealed host-input capture, immutable pre-stage requirements, daemon-owned fixed-volume handoff with exact archive readback and complete cleanup, strict operator-confirmed runtime-input projection plans, recoverable projection application to readback-verified read-only volumes and one retained never-started target, exact-owned retained-resource inspection/cleanup, an immutable blocked Docker start-gate review plus unimplemented lifecycle blueprint, loopback read API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite read console.
+Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, parent-selected minimal Specialist Skill context, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with operator selection, safe-boundary operator steering with pending-only cancellation and explicit drain, embedded Skills plus inert external-package validation, strict metadata-only Sandbox Manifest preparation, approval-bound disabled candidates, a disabled Artifact-bound Sandbox lifecycle with independent fencing/cancellation/cleanup recovery, a required-but-unverified backend/output preflight, simulation-only backend evidence plus atomic in-memory output transactions, fixed-local-endpoint read-only Docker metadata observation, deterministic in-memory Docker container plans plus fake write transactions, default-disabled Docker create-inspect-remove rehearsals, durable pre-daemon attempts with recoverable stopped-container stage/cleanup checkpoints, descriptor-pinned and kernel-sealed host-input capture, immutable pre-stage requirements, daemon-owned fixed-volume handoff with exact archive readback and complete cleanup, strict operator-confirmed runtime-input projection plans, recoverable projection application to readback-verified read-only volumes and one retained never-started target, exact-owned retained-resource inspection/cleanup, an immutable blocked Docker start-gate review plus unimplemented lifecycle blueprint, loopback read API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and a React/Vite read console.
 
 ## Security Invariants
 
 - Go owns Policy, scope, budgets, state transitions, Docker/process control, API-key access, and file permissions.
 - Core Specialist delegation is capped at two children and requires explicit operator review, application, and scheduling.
 - A Specialist receives at most one parent-selected built-in Skill guide. Assignment text, model output, and external content cannot choose or widen that subset.
+- `skill_package.v1` is accepted only as bounded untrusted input to a pure in-memory validator. Successful parsing never installs, selects, executes, persists, calls a Provider/network/tool, or grants declared tool dependencies; every preview authority bit remains false.
 - The 1/2/4/6 Fan-out pool is separate, read-only, tool-free, network-free, write-free, and creates no Agent.
 - Dangerous cyber commands remain permanently denied; approval cannot override permanent Policy denial.
 - External files, repository text, logs, web/mail, tool output, and memory are untrusted evidence with `instruction_authorized=false`; they never become system/assistant authority through persistence or compaction.
@@ -141,15 +143,19 @@ The v63 final local gate passed the final code's full ordinary/race suites in 19
 
 The docs-only run `29444664401` exposed an npm-registry advisory-endpoint outage after `npm ci` had already reported zero vulnerabilities; GitHub then left the completed runner marked in progress. CI now retries `npm audit --audit-level=high` at most three times with bounded delay. A real high-severity finding still fails every attempt and blocks the workflow.
 
+The first non-schema `skill_package.v1` slice adds a strict pure-memory ZIP parser, immutable metadata preview, canonical semantic fingerprint, raw archive digest, adversarial tests, and fuzzing. The only product entry is `skill package validate`: it performs a bounded regular-file read with symlink and identity-change rejection, prints no body/source path, creates no database, and keeps install, command, network, Provider, tool, and capability authority false. The accepted profile is exactly two ordered Deflate entries (`manifest.json`, `SKILL.md`) with fixed ZIP 2.0 data descriptors, zero metadata, no prefix/gaps/tail, a 64 KiB archive cap, bounded decompression/ratio, CRC/header agreement, and the existing strict `skill.v1` semantic checks. ADR 0024 records the boundary. This slice adds no migration, user Registry, import/install command, Run selection, or Desktop/HTTP upload.
+
+The final package-validation gate passed full ordinary/race suites in 239.4s/226.8s, vet, zero-warning staticcheck, module verification/tidy diff, zero-finding govulncheck, 20 seconds and about 26.45 million parser fuzz executions, 78.5% `internal/skills` statement coverage, 100 parser and 20 CLI repetitions, strict TypeScript, 17 frontend tests across 8 files, OpenAPI/build/npm audit, and credential/runtime-artifact/replacement-character/Markdown-link/diff scans. The audit pinned the central-directory creator version and exact Deflate-stream exhaustion to close hidden post-stream payloads, replaced a deprecated test fixture API, and wrapped filesystem causes behind stable path-free CLI errors. Synthetic redaction fixtures are the only key-pattern scan matches. No unresolved high/medium issue is known.
+
 ## Next Slice
 
-Continue P6 with a schema-v64 machine-produced production-evidence ledger; do not reinterpret the v63 design review as process-isolation or execution proof:
+Continue P7 with schema v64 content-addressed user Skill installation; this reprioritizes, but does not remove, the P6 production-evidence ledger:
 
-1. Extend the opt-in Linux harness to emit a canonical, bounded result for the v59/v61/v62 real-daemon chain using an already-present exact image.
-2. Persist only machine-generated suite identity, environment class, exact check outcomes, and digests; reject operator-authored claims and never import raw daemon/resource/path data.
-3. Keep every v63 blocker unresolved unless the matching harness evidence is complete, current, and independently reproducible; a receipt must not itself authorize start.
-4. Implement start/wait/TERM/KILL/orphan ownership only in a later independent fixed-endpoint state machine after the evidence gate is accepted.
-5. Keep output export and atomic Artifact commit behind another independently audited gate; broader network/secrets, HTTP/React mutation, Rust analyzers, and CTF solving remain deferred.
+1. Reuse `ParsePackage` as the only accepted package decoder; persist only bounded manifest/source/trust/digest/install-operation metadata, never the body in SQLite or events.
+2. Store validated package bytes/content under immutable content-addressed user directories with temporary staging, restrictive permissions, sync, atomic rename, and restart reconciliation. No hook, script, network, Provider, or tool call is allowed during import.
+3. Add immutable, digest-keyed idempotent install/remove operations with same-name/version conflict rejection, bounded retained versions, concurrent convergence, and protection for versions pinned by a Run.
+4. Expose operator-only `skill import`, `skill installed`, and `skill remove` CLI commands with explicit untrusted-package confirmation and metadata-only output. External Run selection and Desktop/HTTP upload remain later independent slices.
+5. Keep the v63 Docker start gate blocked. The machine-produced Linux real-daemon evidence ledger moves to schema v65 or later and still cannot authorize start by itself; process/output execution, broader network/secrets, Rust analyzers, and CTF solving remain deferred.
 
 ## Local Machine Note
 

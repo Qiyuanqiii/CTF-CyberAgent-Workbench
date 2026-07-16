@@ -1,25 +1,27 @@
 # CyberAgent Workbench Custom Skill Package Plan
 
-状态：格式基础部分已完成，用户导入/上传通道尚未实现。
+状态：`skill_package.v1` 纯内存校验与 CLI 预览已完成；用户导入、安装、上传与持久化 Registry 尚未实现。
 
 ## 当前能力
 
 现有 Go `skill.v1` 已严格定义名称、语义版本、描述、兼容 Profile、工具前置声明、Markdown 内容路径、UTF-8 字节数、保守 token 上界和 SHA-256。`internal/skills.LoadFS` 可以从受控 `fs.FS` 构造不可变 Registry，当前只用于编译进二进制的 `code`、`review`、`learn`、`script` 和 `plan-delivery`，以及测试夹具。
 
-当前产品入口只有：
+当前产品入口包括：
 
 - `cyberagent skill list`
 - `cyberagent skill show`
 - `cyberagent skill validate`
+- `cyberagent skill package validate <package.zip>`
 - `cyberagent skill select`
 - `cyberagent skill selection`
 
-因此项目目前没有 `skill import/install/upload`，没有标准 ZIP 技能包、用户 Registry、签名/来源账本、HTTP 上传端点或桌面文件选择入口。内部 `LoadFS` 不能被描述为用户导入功能。
+其中 `skill package validate` 只通过有界普通文件读取和纯内存 parser 返回 metadata-only 风险预览，不创建数据库、不落盘、不安装、不执行正文，也不访问网络、Provider 或工具。因此项目目前仍没有 `skill import/install/upload`、用户 Registry、签名/来源账本、HTTP 上传端点或桌面文件选择入口。内部 `LoadFS` 不能被描述为用户导入功能。
 
 ## 第一版包边界
 
-- 定义 `skill_package.v1`，第一版只允许一个严格 `skill.v1` Manifest 和一份 UTF-8 Markdown 指导正文。
-- 包使用确定性 ZIP 或等价只读字节容器；实现前通过 ADR 固定根目录、文件顺序、压缩方法和 package fingerprint。
+- `skill_package.v1` 第一版只允许一个严格 `skill.v1` Manifest 和一份 UTF-8 Markdown 指导正文。
+- ADR 0024 已固定确定性 ZIP：根目录按顺序只能包含 `manifest.json`、`SKILL.md`，两项都使用 Deflate、零时间戳、无 extra/comment/属性/前缀/间隙/尾随数据，并使用固定 ZIP 2.0 data-descriptor profile。
+- archive 最大 64 KiB，文件数固定为 2；解压总量、单项大小与压缩比均有硬上限。`archive_sha256` 标识原始容器，`package_fingerprint` 通过协议版本、规范 Manifest 和正文的长度分帧标识语义内容。
 - 禁止绝对路径、`..`、反斜杠歧义、重复/大小写碰撞条目、symlink、hardlink、设备、FIFO、嵌套压缩包、尾随数据和 ZIP bomb。
 - 限制压缩包字节、解压字节、文件数、目录深度、单文件大小和压缩比；所有限制在读取正文前执行。
 - 第一版不接受可执行脚本、二进制、动态库、任意资源下载或安装钩子。后续脚本资源仍只能作为 Artifact，由 Go Tool Gateway、Policy、Scope 和审批独立授权。
@@ -67,11 +69,18 @@ Desktop D1 阶段：
 
 ## 实施切片
 
-1. 固定 `skill_package.v1` 和威胁模型，完成纯内存 parser/validator/fuzzer，不写磁盘。
-2. 增加 content-addressed 本地 Registry、不可变安装账本、原子导入/卸载和 CLI。
-3. 将用户 Skill 纳入 Run 选择、root/Specialist 最小上下文和 Code/Cyber 分离测试。
-4. 在 Desktop D1 增加 Go-owned 文件选择、验证预览和确认安装；HTTP mutation 必须单独审计。
-5. 最后评估签名包、团队 Catalog 与 Marketplace；远程自动安装不属于基础版本。
+1. [x] 固定 `skill_package.v1` 和威胁模型，完成纯内存 parser/validator/fuzzer 与 metadata-only CLI 校验，不写磁盘。
+2. [ ] 增加 content-addressed 本地 Registry、不可变安装账本、原子导入/卸载和 CLI。
+3. [ ] 将用户 Skill 纳入 Run 选择、root/Specialist 最小上下文和 Code/Cyber 分离测试。
+4. [ ] 在 Desktop D1 增加 Go-owned 文件选择、验证预览和确认安装；HTTP mutation 必须单独审计。
+5. [ ] 最后评估签名包、团队 Catalog 与 Marketplace；远程自动安装不属于基础版本。
+
+## 已验证基线
+
+- 最终全仓普通/race 测试分别通过于 239.4 秒/226.8 秒；vet、零告警 staticcheck、module verify/tidy diff 与零可达漏洞 govulncheck 通过。
+- parser fuzz 在 20 秒内执行约 2645 万次且无崩溃；`internal/skills` 语句覆盖为 78.5%，parser 100 轮与 CLI 20 轮重复回归通过。
+- TypeScript/OpenAPI/production build、8 个文件 17 项前端测试、零漏洞 npm audit，以及凭据/运行产物/乱码/Markdown 链接/diff 扫描通过。
+- 审计已固定 ZIP creator version 与 Deflate 精确耗尽、关闭有效流后的隐藏载荷通道、移除弃用测试 API，并确保文件系统错误不回显操作者包路径；当前无已知未解决高/中风险。
 
 ## 验收标准
 

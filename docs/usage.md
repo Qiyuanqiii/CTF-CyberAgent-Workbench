@@ -82,11 +82,14 @@ cyberagent skill list
 cyberagent skill list --profile review
 cyberagent skill show review
 cyberagent skill validate
+cyberagent skill package validate <package.zip>
 cyberagent skill select <run-id> review --operation-key <stable-key> --token-budget 4096
 cyberagent skill selection <run-id>
 ```
 
 The embedded read-only `skill.v1` Registry exposes bounded version `1.1.0` workflow guidance for `code`, `review`, `learn`, `script`, and the cross-Profile `plan-delivery` workflow. Schema v39 `skill select` is operator-only and must create the Run's single immutable selection before `run start`. It accepts one to eight names compatible with the Mission Profile, deterministically pins each version/content hash/byte count/token upper bound, and rejects an aggregate above `--token-budget` (maximum 8192). Operation keys must be stable normalized 16-256-byte values; SQLite stores only a domain-separated digest. Exact selection replay returns the original tuples after Run start, while changed intent conflicts. `skill selection` reads those pinned tuples.
+
+`skill package validate` is a read-only, non-schema preview for external `skill_package.v1` files. The deterministic ZIP must contain exactly `manifest.json` and `SKILL.md` in that order and fit the structural, size, decompression, CRC, UTF-8, manifest, byte/token, and hash limits fixed by ADR 0024. The command rejects symlinks and non-regular files, reads at most 64 KiB with identity rechecks, and prints only bounded manifest metadata, exact archive/semantic digests, trust/risk codes, and false authority flags. It does not print the body or source path and does not install, persist, execute, access the network, call a Provider/tool, or grant declared dependencies. No `skill import`, user Registry, or Desktop upload exists yet.
 
 Schema v40 loads the complete selected set for root Supervisor turns. Before every Provider call, Go reconstructs `skill_context.v1` from the persisted tuples and embedded Registry, rechecks exact version/hash/bytes/Profile, redacts it, and enforces a separate deterministic token budget. New selection sees only the current `1.1.0` manifests; a hard-bounded embedded history resolves existing `1.0.0` selections exactly and is not a user-controlled load path. A metadata-only preparation is committed with the first model-start event and safely replays after restart; neither SQLite nor Run events contain Skill text, paths, names, or hashes. A selected Skill never authorizes its declared tool dependencies.
 

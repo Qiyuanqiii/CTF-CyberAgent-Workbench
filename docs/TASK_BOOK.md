@@ -233,7 +233,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] schema v63 已完成 design-only start-gate review：16 项 v51 检查固定映射为未验证阻塞项，11 条未来 per-Run start/wait/TERM/KILL/orphan 转换固定为未实现、未授权；结果只能是 `blocked/deny_start`，且无 daemon/input/process/output/Artifact 能力。决策见 ADR 0023。
 - [x] v63 定向 Sandbox/Store/Application/CLI/迁移/并发/SQL/隐私测试通过；幂等重放、跨 Store 收敛、迁移不伪造历史、全链复核和 false authority 投影均有覆盖。
 - [x] v63 最终发布门禁通过：全仓普通/race（196.9 秒/212.3 秒）、vet/staticcheck/module/govulncheck、TypeScript/OpenAPI/build/npm audit、仓库扫描、Linux 交叉编译、隔离 schema-v63 二进制 smoke 与 Sandbox/Store/Application/CLI 20/15/10/10 轮回归；未发现未解决高/中风险。GitHub Actions run `29503856229` 已通过提交 `e25a2ab`。
-- [ ] schema v64 建立机器生成的 Linux real-daemon 生产证据账本；只接受规范化 suite/environment/check digest，不接受操作者手写结论，不保存原始 daemon/resource/path 数据，也不授予 start。
+- [ ] schema v65 或后续里程碑建立机器生成的 Linux real-daemon 生产证据账本；用户可见 Skill 导入通道按最新优先级占用下一 schema v64。该证据账本仍只接受规范化 suite/environment/check digest，不接受操作者手写结论，不保存原始 daemon/resource/path 数据，也不授予 start。
 - [ ] 本地代码默认只读挂载，输出目录独立可写。
 - [ ] 网络默认关闭，后续仅允许显式 allowlist。
 - [ ] 支持真实执行、stdin、超时/kill、日志和原子 Output Artifact 导出；v51 只固定要求，v52 只验证输出假事务，v53 只读取元数据，v54 只编译并假写，v55-v56 只操作未启动容器，v57-v58 只固定本地输入，v59 只完成 never-started daemon handoff，v60 只编译 projection，v61 只应用只读卷并保留未启动 target，v62 只检查/清理资源，均未启用进程执行或生产 Artifact。
@@ -244,7 +244,7 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 
 ## P7：Skills 与 Profiles
 
-状态：进行中；只读 `skill.v1` Registry、schema v39 Run 选择、schema v40 root 上下文交付、schema v41 Go-owned Run 模式、schema v42 Plan 提案/操作者选择、schema v43 来源隔离、schema v44 Delivery 检查点门禁、schema v45-v46 操作者引导队列与控制，以及 schema v47 Specialist 最小 Skill 上下文已完成；自定义技能包导入/上传尚未实现，计划见 `docs/SKILL_PACKAGE_PLAN.md`
+状态：进行中；只读 `skill.v1` Registry、schema v39 Run 选择、schema v40 root 上下文交付、schema v41 Go-owned Run 模式、schema v42 Plan 提案/操作者选择、schema v43 来源隔离、schema v44 Delivery 检查点门禁、schema v45-v46 操作者引导队列与控制、schema v47 Specialist 最小 Skill 上下文，以及非 schema 的 `skill_package.v1` 只读校验已完成；自定义技能包导入/安装/上传尚未实现，计划见 `docs/SKILL_PACKAGE_PLAN.md`
 
 - [x] 定义有界 `skill.v1` manifest：名称、版本、描述、Profile、工具依赖、内容路径、字节数、保守 token 上界与 SHA-256。
 - [x] 实现内嵌只读 Skill Registry、严格 JSON/UTF-8/路径/校验和验证，以及 `skill list/show/validate`；命令不创建运行数据库。
@@ -260,9 +260,10 @@ P7 已推进到 schema v47：schema v41 为每个 Run 固定 `code|cyber` 工作
 - [x] schema v45 增加持久化操作者引导队列：Run 忙碌时按序接收追加要求，在安全 turn 边界投递且不打断活动工具调用；失败/重启重新准备、Session 消息原子提交、后续输入延后 finish/wait，HTTP/Web 只读且不公开正文或内部身份。
 - [x] schema v46 增加 pending-only 操作者取消账本、明确 idle/paused wake/drain 策略和普通 Session 跨进程幂等标识；禁止编辑、重排或取消 prepared 消息，模型/child/HTTP 不获得写入权限。
 - [x] schema v47 为每个 Specialist Attempt 从父 Run 固定选择派生最多一项 Skill；Code/Cyber 目录分离，`plan-delivery` 保持 root-only，assignment 不能选择或扩权，metadata-only 两阶段来源账本与首次模型调用原子绑定。
-- [ ] 固定 `skill_package.v1` 与威胁模型：第一版只允许单一严格 Manifest + UTF-8 Markdown，拒绝路径逃逸、链接、特殊文件、重复/大小写碰撞、ZIP bomb、尾随数据、脚本和安装钩子。
-- [ ] 实现纯 Go 包 parser/validator/fuzzer，以及 `skill package validate`；校验阶段不写磁盘、不联网、不调用模型或工具。
-- [ ] 实现 content-addressed 用户 Skill Registry、不可变安装/卸载账本、原子导入与恢复，以及 `skill import/installed/remove`；同名同版本异内容冲突，已被 Run 固定的版本不可删除。
+- [x] ADR 0024 固定 `skill_package.v1` 与威胁模型：第一版只允许按顺序包含 `manifest.json` + UTF-8 `SKILL.md` 的确定性 ZIP，拒绝路径歧义、链接、特殊文件、重复/大小写碰撞、ZIP bomb、尾随数据、脚本和安装钩子。
+- [x] 实现纯 Go 包 parser/validator/fuzzer，以及 metadata-only `skill package validate`；校验阶段不写磁盘、不创建数据库、不联网、不调用模型或工具，并保持全部能力/安装授权位为 false。
+- [x] 包校验发布门禁通过最终全仓普通/race、vet/staticcheck/module/govulncheck、约 2645 万次 fuzz、78.5% Skills 覆盖、parser/CLI 高频回归、TypeScript/OpenAPI/build/npm audit 和仓库扫描；审计修复 creator version、Deflate 隐藏尾载荷、弃用测试 API 与错误路径回显，未发现未解决高/中风险。
+- [ ] schema v64 实现 content-addressed 用户 Skill Registry、不可变安装/卸载账本、原子导入与恢复，以及 `skill import/installed/remove`；同名同版本异内容冲突，已被 Run 固定的版本不可删除。
 - [ ] 将外部包标记为 `operator_installed_untrusted`，要求显式安装与 Run 选择；工具声明不授予能力，交付继续经过 hash/Profile/预算/脱敏/来源复核。
 - [ ] 自定义 Code/Cyber Catalog 严格分离；Cyber 仅接收明确兼容的窄化 Skill，不自动继承 Code Catalog。
 - [ ] Desktop D1 由 Go 提供文件选择、metadata-only 风险预览和确认安装；TypeScript 不解压、不校验、不写 Registry。回环上传 API 使用独立 control token、Origin/Host、大小和幂等门禁。
