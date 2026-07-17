@@ -1,6 +1,6 @@
 # CyberAgent Workbench Custom Skill Package Plan
 
-状态：`skill_package.v1` 纯内存校验与 CLI 预览已完成；用户导入、安装、上传与持久化 Registry 尚未实现。
+状态：`skill_package.v1` 纯内存校验与 schema v69 内容寻址本地 Registry 已完成；CLI 可显式确认导入、查询和追加移除 tombstone。外部 Run 选择/上下文加载、HTTP/桌面上传、签名与 Marketplace 尚未实现。
 
 ## 当前能力
 
@@ -12,10 +12,14 @@
 - `cyberagent skill show`
 - `cyberagent skill validate`
 - `cyberagent skill package validate <package.zip>`
+- `cyberagent skill import <package.zip> --surface code|cyber --operation-key <stable-key> --confirm-untrusted-skill`
+- `cyberagent skill installed [--surface code|cyber] [--profile <profile>] [--include-removed]`
+- `cyberagent skill installed show <name>@<version>`
+- `cyberagent skill remove <name>@<version> --operation-key <stable-key> --confirm-remove`
 - `cyberagent skill select`
 - `cyberagent skill selection`
 
-其中 `skill package validate` 只通过有界普通文件读取和纯内存 parser 返回 metadata-only 风险预览，不创建数据库、不落盘、不安装、不执行正文，也不访问网络、Provider 或工具。因此项目目前仍没有 `skill import/install/upload`、用户 Registry、签名/来源账本、HTTP 上传端点或桌面文件选择入口。内部 `LoadFS` 不能被描述为用户导入功能。
+其中 `skill package validate` 只通过有界普通文件读取和纯内存 parser 返回 metadata-only 风险预览，不创建数据库、不落盘、不安装、不执行正文，也不访问网络、Provider 或工具。schema v69 的 `skill import` 在显式确认后只增加不可变元数据与原始包对象，仍不执行正文、联网、调用 Provider/工具或授予能力。项目目前没有外部 Run 选择、签名、HTTP 上传端点或桌面文件选择入口；内部 `LoadFS` 仍不能被描述为用户导入功能。
 
 ## 第一版包边界
 
@@ -31,17 +35,18 @@
 - 包内容是操作者安装的工作流指导，不是系统策略，也不能覆盖 Policy、Scope、预算、Approval、Sandbox 或来源隔离。
 - `tool_dependencies` 仍只是前置声明，永不授予工具能力。
 - 导入不会执行正文、脚本、命令、网络请求或 Provider 调用。
-- 外部包默认标记为 `operator_installed_untrusted`；只有操作者显式安装并为 Run 选择后才能进入模型上下文。
+- 外部包固定标记为 `operator_installed_untrusted`；schema v69 只允许操作者显式安装，尚无任何外部包进入模型上下文的路径。
 - 上下文交付仍需版本/hash/bytes/Profile 精确复核、secret redaction、独立 token 预算和 capability=false 来源事实。
 - Code 与 Cyber Catalog 分离。Cyber 默认不继承 Code Skill；Script Profile 只能使用明确兼容的窄化脚本指导。
 
 ## 本地 Registry
 
-- Go 在用户数据目录维护 content-addressed、不可变的 Skill 版本目录；正文不进入仓库，也不进入 SQLite 事件。
-- SQLite 只保存包摘要、来源类型、信任状态、安装操作、Profile 和版本引用等有界元数据。
-- 相同内容幂等收敛；同名同版本不同内容永久冲突；同一 Skill 最多保留有界版本数。
-- 已被 Run 固定选择的版本不能删除。卸载只影响未来选择，历史 Run 必须仍能精确恢复或明确报告缺失，不能静默升级。
-- 导入事务使用临时目录、完整验证、fsync/原子 rename 和崩溃恢复；失败不得留下半安装 Registry。
+- Go 在用户数据目录的 `skill-registry/objects/sha256/<prefix>/<digest>.zip` 维护 content-addressed 对象；正文不进入仓库、SQLite 或 Run 事件。
+- SQLite 只保存包摘要、信任状态、Profile、安装/完成操作和移除 tombstone 等有界元数据；五类表全部不可更新或删除。
+- 相同对象并发发布收敛；同名同版本已有不可变安装时冲突；Registry 最多 64 个历史包身份，同名最多 8 个版本。
+- 已被 Run 精确固定的版本不能移除。移除只追加 tombstone 且保留对象；恢复/重装需要未来显式协议，不静默推断。
+- 导入先写安装意图，再使用同目录独占临时文件、file sync、原子 hard link 和完整回读验证发布对象，最后写完成结果；崩溃后以同一 operation key 恢复。目录 sync 在 Windows 上为 best effort，不作超出平台证据的持久性声明。
+- 对象接口只有 `Put` 与 `Verify`，没有执行或删除；每次完成重放、列表和详情读取都重新验证字节数、archive SHA-256、ZIP 结构与语义指纹。
 
 ## 产品入口
 
@@ -49,9 +54,10 @@ CLI 第一阶段：
 
 ```text
 cyberagent skill package validate <package.zip>
-cyberagent skill import <package.zip> --operation-key <stable-key> --confirm-untrusted-skill
+cyberagent skill import <package.zip> --surface code|cyber --operation-key <stable-key> --confirm-untrusted-skill
 cyberagent skill installed [--surface code|cyber] [--profile <profile>]
-cyberagent skill remove <name>@<version> --operation-key <stable-key>
+cyberagent skill installed show <name>@<version>
+cyberagent skill remove <name>@<version> --operation-key <stable-key> --confirm-remove
 ```
 
 Desktop D1 阶段：
@@ -70,23 +76,23 @@ Desktop D1 阶段：
 ## 实施切片
 
 1. [x] 固定 `skill_package.v1` 和威胁模型，完成纯内存 parser/validator/fuzzer 与 metadata-only CLI 校验，不写磁盘。
-2. [ ] 增加 content-addressed 本地 Registry、不可变安装账本、原子导入/卸载和 CLI。
-3. [ ] 将用户 Skill 纳入 Run 选择、root/Specialist 最小上下文和 Code/Cyber 分离测试。
+2. [x] schema v69 增加 content-addressed 本地 Registry、不可变安装/移除账本、原子导入/恢复和 CLI；导入保持惰性。
+3. [ ] schema v70 将用户 Skill 纳入 Run 的精确版本选择、root/Specialist 最小上下文和 Code/Cyber 分离测试。
 4. [ ] 在 Desktop D1 增加 Go-owned 文件选择、验证预览和确认安装；HTTP mutation 必须单独审计。
 5. [ ] 最后评估签名包、团队 Catalog 与 Marketplace；远程自动安装不属于基础版本。
 
 ## 已验证基线
 
-- 最终全仓普通/race 测试分别通过于 239.4 秒/226.8 秒；vet、零告警 staticcheck、module verify/tidy diff 与零可达漏洞 govulncheck 通过。
-- parser fuzz 在 20 秒内执行约 2645 万次且无崩溃；`internal/skills` 语句覆盖为 78.5%，parser 100 轮与 CLI 20 轮重复回归通过。
-- TypeScript/OpenAPI/production build、8 个文件 17 项前端测试、零漏洞 npm audit，以及凭据/运行产物/乱码/Markdown 链接/diff 扫描通过。
-- 审计已固定 ZIP creator version 与 Deflate 精确耗尽、关闭有效流后的隐藏载荷通道、移除弃用测试 API，并确保文件系统错误不回显操作者包路径；当前无已知未解决高/中风险。
-- GitHub Actions run `29512332025` 已通过功能提交 `55b3fae`；Go/Linux 与 TypeScript 作业分别用时 3 分 4 秒和 20 秒。
+- v69 最终全仓普通/race 测试分别通过于 265.4 秒/260.7 秒；vet、零告警 staticcheck、module verify/tidy diff 与零可达漏洞 govulncheck 通过。
+- parser 的既有 20 秒约 2645 万次 fuzz 基线保持有效；新增对象发布、Store、Application 和 CLI 定向测试覆盖三轮 race、双 Store 收敛、崩溃恢复、腐坏/symlink/取消、伪造收据和 SQL 旁路；真实双 Service 独立生成候选身份的导入/移除收敛另通过 20 轮普通与 10 轮 race。
+- TypeScript/OpenAPI/production build、9 个文件 21 项前端测试、零漏洞 npm audit 通过；v69 未改变 HTTP 契约。
+- 审计修复旧 schema 夹具未先移除 v69 trigger、错误文本静态规则、冗余临时清理状态、对象收据接口绑定、发布前取消点、并发请求因独立 ID/时间被误判为改意图，以及 Manifest 自由文本 description 未脱敏进入 SQLite；当前无已知未解决高/中风险。
+- schema v69 的 GitHub Actions 结果在本次实现推送后补记；v68 远端基线 run `29552080990` 为绿色。
 
 ## 验收标准
 
 - 恶意 ZIP、路径逃逸、链接、特殊文件、超大包、重复项、Unicode/大小写碰撞和内容 hash 漂移全部失败关闭。
 - 导入前后不会执行命令、访问网络、调用模型或改变工具权限。
 - 并发导入、重启恢复和相同 operation 重放收敛到同一不可变版本。
-- Run 固定版本可跨重启恢复，包升级/卸载不会改变已开始 Run 的上下文。
+- v69 已保证安装与 tombstone 跨重启恢复，并为已固定版本提供 Go/SQL 移除门禁；v70 仍需完成外部 Run 固定版本与上下文恢复验收。
 - CLI 与 Desktop 对同一包产生相同 digest、风险预览、错误码和安装结果。

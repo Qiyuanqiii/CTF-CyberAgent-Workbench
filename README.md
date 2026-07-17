@@ -8,12 +8,12 @@
 项目从 schema v49 起同时使用两项工程指标，避免把“架构已经搭好”误解为“产品已经完整可用”。这些百分比是基于当前任务书和可验证工作流的工程估算，不是性能基准。
 
 - **架构完成度 / Architecture completion：约 98%**。衡量 Go 控制平面、Run/Session、状态恢复、Policy、审批、预算、事件流、Tool Gateway、Agent 协调、Skills、报告、Sandbox 协议及 Go/TypeScript 边界的覆盖程度；其中 V2 Run-centric Runtime 约 99%。
-- **产品可用度 / Product usability：约 45-50%**。衡量普通用户能否依靠当前 CLI、TUI 和 read-first Web 控制台完成真实端到端工作。通用 Coding Agent 工作流约 40%，Cyber 自动化工作流约 20%；真实 Sandbox 执行、完整写工具、成熟 Web 操作面和 Cyber 工具链仍未开放。
+- **产品可用度 / Product usability：约 46-50%**。衡量普通用户能否依靠当前 CLI、TUI 和 read-first Web 控制台完成真实端到端工作。通用 Coding Agent 工作流约 41%，Cyber 自动化工作流约 20%；真实 Sandbox 执行、外部 Skill 的 Run 选择、完整写工具、成熟 Web 操作面和 Cyber 工具链仍未开放。
 
 Starting with schema v49, the project reports two engineering indicators so architectural maturity is not mistaken for end-user completeness. These percentages are roadmap estimates backed by tested workflows, not performance benchmarks.
 
 - **Architecture completion: about 98%.** This covers the Go control plane and its Run/Session recovery, Policy, approval, budget, event, Tool Gateway, Agent coordination, Skills, reporting, Sandbox protocol, and Go/TypeScript boundaries. The V2 run-centric runtime itself is about 99% complete.
-- **Product usability: about 45-50%.** This measures how much real end-to-end work a user can complete through the current CLI, TUI, and web console. The generic coding-agent workflow is about 40% usable and the Cyber automation workflow about 20%; real Sandbox execution, complete write tools, a mature web operations surface, and the Cyber toolchain remain disabled or unfinished.
+- **Product usability: about 46-50%.** This measures how much real end-to-end work a user can complete through the current CLI, TUI, and web console. The generic coding-agent workflow is about 41% usable and the Cyber automation workflow about 20%; real Sandbox execution, external-Skill Run selection, complete write tools, a mature web operations surface, and the Cyber toolchain remain disabled or unfinished.
 
 ## 项目简介 / Project Overview
 
@@ -109,6 +109,7 @@ The table below is the canonical chronological schema history. It includes every
 | v66 | 可恢复 Docker 生产证据捕获 Attempt | recoverable Docker production-evidence capture attempts |
 | v67 | Linux 只读 Docker 生产证据探针 | Linux read-only Docker production-evidence harness |
 | v68 | 不可变 Docker 生产证据操作员审阅 | immutable Docker production-evidence operator review |
+| v69 | 内容寻址惰性用户 Skill 安装账本 | content-addressed inert user Skill installation ledger |
 
 ## 执行环境档位 / Execution Profiles
 
@@ -212,15 +213,31 @@ The final v68 local gate is green. Full ordinary and race suites completed in 24
 
 The independent audit found and fixed two medium/low audit-robustness gaps and one low-risk coverage gap. Store reads and replays now recompute the stored operation/review semantic binding, while SQL directly binds both request fingerprints. Negative tests cover isolated reviews, operation mutation/deletion, source/fingerprint/authority tampering, and two-Store convergence. Rejected decisions now have Store, event, Application, CLI, list/show, and replay coverage. No unresolved high- or medium-severity issue is known. This host ran no real Docker, container start, Shell, or host process. Protected deletion left one cross-compiled binary and one smoke root under the OS temporary directory for normal cleanup; no manual action is required.
 
+## 惰性用户 Skill Registry / Inert User Skill Registry
+
+schema v69 增加内容寻址、不可变且默认不授权的用户 Skill Registry。`skill import` 只接收已通过 `skill_package.v1` 严格校验的本地 ZIP，并要求显式选择 `code|cyber` 工作面、稳定 operation key 与 `--confirm-untrusted-skill`。Go 先把安装意图和摘要化操作写入 SQLite，再将包发布到 `$CYBERAGENT_HOME/skill-registry/objects/sha256/...`，完整回读摘要、结构与语义指纹后才写入安装结果；同键重试可恢复中断导入，两个 SQLite 连接并发时收敛到同一记录。
+
+外部包固定为 `operator_installed_untrusted`。导入不会执行正文、脚本、钩子或命令，不访问网络，不调用 Provider 或工具，也不授予 Run 选择、上下文注入或工具能力。Code 与 Cyber 用户目录分离；Cyber 第一版只接受精确的 `script` Profile，用户包不能覆盖五个内置 Skill。`skill installed`、`skill installed show` 与 `skill remove` 只投影有界元数据；移除追加不可变 tombstone，不删除内容对象，并在 Go 与 SQL 两层拒绝移除已被 Run 精确固定的版本。
+
+v69 只完成安全存放与审计，不把外部 Skill 合入内置 Registry，也不允许它进入模型上下文。下一切片是独立审计的 v70 Run 版本选择与最小化加载协议，仍需精确对象复核、Profile/Code/Cyber 约束、来源隔离、脱敏和独立 token 预算。边界见 ADR 0031。
+
+Schema v69 adds a content-addressed, immutable, and non-authorizing user Skill Registry. `skill import` accepts only a local ZIP that passes strict `skill_package.v1` validation and requires an explicit `code|cyber` surface, stable operation key, and `--confirm-untrusted-skill`. Go commits the installation intent before publishing the archive below `$CYBERAGENT_HOME/skill-registry/objects/sha256/...`; it records completion only after full digest, structure, and semantic readback verification. Same-key retries recover interrupted imports, and concurrent SQLite connections converge on one record.
+
+Every external package remains `operator_installed_untrusted`. Import executes no content, script, hook, or command; accesses no network; calls no Provider or tool; and grants no Run-selection, context-injection, or tool authority. Code and Cyber catalogs remain separate, with Cyber accepting only the exact `script` Profile in this first release. User packages cannot shadow the five built-ins. `skill installed`, `skill installed show`, and `skill remove` expose bounded metadata only. Removal appends an immutable tombstone, retains the object, and is rejected in both Go and SQL for an exact version already pinned by a Run.
+
+Schema v69 is storage and audit, not runtime loading. External packages are not merged into the embedded Registry and cannot enter model context. The next slice is a separately audited v70 immutable Run-selection and minimized-load protocol with exact object verification, Profile/surface checks, provenance isolation, redaction, and an independent token budget. ADR 0031 records the boundary.
+
+The final v69 local gate passed full ordinary/race suites in 265.4s/260.7s, vet, zero-warning staticcheck, module verification/tidy diff, zero-finding govulncheck, OpenAPI drift checks, 21 frontend tests, the production build, and zero-vulnerability npm audit. The audit fixed v69 downgrade-fixture ordering, static error style, redundant temporary cleanup state, forged object-receipt acceptance, cancellation immediately before object publication, concurrent requests with independently generated IDs/timestamps being misclassified as changed intent, and unredacted free-text Manifest descriptions being copied into SQLite metadata. The real two-Service convergence regression passed 20 ordinary and 10 race repetitions. No unresolved high- or medium-severity issue is known; this slice ran no real model, network request, Shell, Docker operation, installer hook, or host process.
+
 ## 架构能力详解 / Architecture Details
 
 ### 中文详解
 
-以下内容按能力域和当前阅读价值组织，不代表 schema 时间顺序；需要核对开发先后时，请以上方 `v1 -> v68` 表为准。
+以下内容按能力域和当前阅读价值组织，不代表 schema 时间顺序；需要核对开发先后时，请以上方 `v1 -> v69` 表为准。
 
 P7 Skills 的第一条纵向链路已经落地。Go 内置并严格校验 `code`、`review`、`learn`、`script` 与跨 Profile 的 `plan-delivery` 五份 `skill.v1` 工作流指导，包括固定版本、兼容 Profile、工具前置声明、相对内容路径、UTF-8、字节数、保守 token 上界和 SHA-256。只读 Registry 与 `skill list/show/validate` 不创建数据库，也不读取任意外部路径；当前内置指导版本为 `1.1.0`，工具依赖绝不直接授予执行权限。
 
-非 schema 的 `skill_package.v1` 第一阶段也已完成：Go 可对只含 `manifest.json` 与 `SKILL.md` 的严格确定性 ZIP 做纯内存校验，CLI `skill package validate` 只返回 metadata-only 摘要、信任类别和风险代码。成功校验不代表安装、选择或授权；该路径不写磁盘/数据库、不联网、不调用模型、命令或工具。用户 Registry、`skill import/installed/remove` 和桌面上传仍未开放，边界见 ADR 0024。
+`skill_package.v1` 校验与 schema v69 惰性用户 Registry 已完成：Go 对只含 `manifest.json` 与 `SKILL.md` 的严格确定性 ZIP 做纯内存校验，随后可在显式确认下将包发布到内容寻址对象存储并写入不可变安装/移除账本。`skill import/installed/remove` 不执行或显示正文，不联网、不调用模型、命令或工具，并保持 Run 选择与上下文注入权限为 false。外部 Run 选择、HTTP/桌面上传和签名分发仍未开放，边界见 ADR 0024 与 ADR 0031。
 
 非 schema 的受保护删除守卫也已接入 Go Policy。Shell、ScriptProcess 与 Sandbox 的可执行意图若包含递归删除、绝对/越界/通配路径、环境变量或命令替换目标，或常见 PowerShell、`cmd`、Python、Node 删除形式，会在审批前被永久拒绝；逐次审批和 Session Grant 都不能覆盖。README、日志和模型说明仍按无执行权限的证据处理。该守卫是纵深防御而不是宿主 Full Access 的安全证明：真实 Local 与容器进程仍关闭，未来执行必须继续依赖只读/不可见宿主根、隔离输出和类型化工作区删除工具。边界见 ADR 0025。
 
@@ -389,11 +406,11 @@ Bubble Tea TUI 现在以 Run-first 选择器启动，可在最近 50 个 Run 与
 
 ### English details
 
-The following notes are organized by capability and current reading value, not by schema order. Use the canonical `v1 -> v68` table above whenever chronology matters.
+The following notes are organized by capability and current reading value, not by schema order. Use the canonical `v1 -> v69` table above whenever chronology matters.
 
 The first P7 Skills vertical slice is now in place. Go embeds and strictly validates five `skill.v1` workflow guides for `code`, `review`, `learn`, `script`, and cross-Profile `plan-delivery`, including pinned versions, compatible Profiles, tool prerequisites, relative content paths, UTF-8, byte counts, a conservative token upper bound, and SHA-256. The read-only Registry and `skill list/show/validate` create no database and accept no arbitrary external path. The current built-in guidance version is `1.1.0`, and a declared tool dependency is never a capability grant.
 
-The non-schema first stage of `skill_package.v1` is also complete. Go can validate a strict deterministic ZIP containing only `manifest.json` and `SKILL.md` entirely in memory; `skill package validate` returns metadata, trust, and risk codes only. Successful validation is not installation, selection, or authorization, and the path writes no disk/database state and invokes no network, model, command, or tool. The user Registry, `skill import/installed/remove`, and Desktop upload remain closed; ADR 0024 records the boundary.
+`skill_package.v1` validation and the schema-v69 inert user Registry are complete. Go validates a strict deterministic ZIP containing only `manifest.json` and `SKILL.md` in memory, then may publish it to content-addressed storage under explicit confirmation and an immutable installation/removal ledger. `skill import/installed/remove` neither execute nor display the body, invoke no network/model/command/tool, and keep Run-selection and context-injection authority false. External Run selection, HTTP/Desktop upload, and signed distribution remain closed; ADR 0024 and ADR 0031 record the boundaries.
 
 A non-schema protected-delete guard now runs inside Go Policy as well. Executable Shell, ScriptProcess, and Sandbox intents are permanently denied before approval when they express recursive deletion, absolute/traversing/wildcard targets, environment-variable or command-substitution targets, or common PowerShell, `cmd`, Python, and Node deletion forms. Per-call approval and Session Grants cannot override that result, while README text, logs, and model explanations remain non-executable evidence. This is defense in depth, not proof that host Full Access is safe: real Local/container processes remain disabled, and future execution still requires inaccessible/read-only host roots, isolated output, and a typed workspace deletion tool. ADR 0025 records the boundary.
 
@@ -602,6 +619,10 @@ go run ./cmd/cyberagent skill list --profile review
 go run ./cmd/cyberagent skill show code
 go run ./cmd/cyberagent skill validate
 go run ./cmd/cyberagent skill package validate <package.zip>
+go run ./cmd/cyberagent skill import <package.zip> --surface code --operation-key <stable-key> --confirm-untrusted-skill
+go run ./cmd/cyberagent skill installed --surface code
+go run ./cmd/cyberagent skill installed show <name>@<version>
+go run ./cmd/cyberagent skill remove <name>@<version> --operation-key <stable-key> --confirm-remove
 go run ./cmd/cyberagent workspace init demo
 go run ./cmd/cyberagent workspace tree demo
 go run ./cmd/cyberagent workspace read demo README.md
@@ -765,9 +786,11 @@ On Unix, newly created runtime directories and SQLite databases are restricted t
 
 Read [docs/PROJECT_MEMORY.md](docs/PROJECT_MEMORY.md), [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [docs/PROGRESS_BOOK.md](docs/PROGRESS_BOOK.md), [docs/TASK_BOOK.md](docs/TASK_BOOK.md), [docs/http-api.md](docs/http-api.md), [docs/openapi.json](docs/openapi.json), [web/README.md](web/README.md), [docs/errors.md](docs/errors.md), and the chronological [ADR 0001](docs/adr/0001-go-control-plane.md), [ADR 0002](docs/adr/0002-run-centric-runtime.md), [ADR 0003](docs/adr/0003-run-execution-modes.md), [ADR 0004](docs/adr/0004-plan-delivery-workflow.md), [ADR 0005](docs/adr/0005-operator-steering-queue.md), [ADR 0006](docs/adr/0006-operator-steering-controls.md), [ADR 0007](docs/adr/0007-specialist-skill-context.md), [ADR 0008](docs/adr/0008-sandbox-manifest-boundary.md), [ADR 0009](docs/adr/0009-sandbox-approval-candidate.md), [ADR 0010](docs/adr/0010-disabled-sandbox-lifecycle.md), [ADR 0011](docs/adr/0011-disabled-sandbox-preflight.md), [ADR 0012](docs/adr/0012-simulation-only-sandbox-evidence.md), [ADR 0013](docs/adr/0013-read-only-docker-observation.md), [ADR 0014](docs/adr/0014-deterministic-docker-container-plan.md), [ADR 0015](docs/adr/0015-bounded-docker-write-rehearsal.md), [ADR 0016](docs/adr/0016-recoverable-docker-rehearsal-attempt.md), [ADR 0017](docs/adr/0017-descriptor-sealed-host-input-staging.md), [ADR 0018](docs/adr/0018-durable-pre-stage-host-input-requirement.md), [ADR 0019](docs/adr/0019-daemon-owned-host-input-handoff.md), [ADR 0020](docs/adr/0020-deterministic-runtime-input-projection.md), [ADR 0021](docs/adr/0021-recoverable-runtime-input-application.md), [ADR 0022](docs/adr/0022-retained-runtime-input-resource-lifecycle.md), [ADR 0023](docs/adr/0023-blocked-docker-start-gate-review.md), [ADR 0024](docs/adr/0024-strict-inert-skill-package.md), [ADR 0025](docs/adr/0025-protected-delete-command-guard.md), [ADR 0026](docs/adr/0026-run-execution-profile-selection.md), [ADR 0027](docs/adr/0027-non-authorizing-docker-production-evidence-ledger.md), and [ADR 0028](docs/adr/0028-recoverable-docker-production-evidence-attempts.md) when resuming development after a long conversation. They record current progress, language ownership, run architecture, execution mode, Plan/Delivery and steering invariants, Specialist Skill delivery, Sandbox authority boundaries, API and error contracts, audit notes, verified commands, and the recommended next slice.
 
-桌面端仍是已确定边界、尚未实现的产品路线。Windows Desktop 的 Wails/React/Go 分阶段方案见 [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md)。自定义 Skill 已具备严格 `skill_package.v1` 只读验证入口，但尚无用户 Registry、`skill import/install/upload`、HTTP/桌面上传或安装执行通道；详情见 [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md)，内部 `LoadFS` 也不能视为产品导入通道。
+The latest decisions are [ADR 0029](docs/adr/0029-bounded-linux-read-only-docker-evidence-harness.md), [ADR 0030](docs/adr/0030-immutable-docker-production-evidence-review.md), and [ADR 0031](docs/adr/0031-content-addressed-inert-skill-registry.md).
 
-The Desktop remains a bounded but unimplemented product route; see [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md) for the phased Wails/React/Go Windows plan. Custom Skills now have a strict read-only `skill_package.v1` validation surface, but no user Registry, `skill import/install/upload`, HTTP/Desktop upload, or installation execution path exists. See [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md); the internal `LoadFS` helper is still not a product import channel.
+桌面端仍是已确定边界、尚未实现的产品路线。Windows Desktop 的 Wails/React/Go 分阶段方案见 [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md)。自定义 Skill 已具备严格 `skill_package.v1` 校验和 schema v69 本地惰性 Registry，可通过 CLI 导入、查询和追加移除 tombstone；外部 Run 选择、HTTP/桌面上传、签名和安装时执行仍未开放。详情见 [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md)，内部 `LoadFS` 也不能视为产品导入通道。
+
+The Desktop remains a bounded but unimplemented product route; see [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md) for the phased Wails/React/Go Windows plan. Custom Skills now have strict `skill_package.v1` validation and the schema-v69 local inert Registry with CLI import, inspection, and removal tombstones. External Run selection, HTTP/Desktop upload, signatures, and install-time execution remain closed. See [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md); the internal `LoadFS` helper is still not a product import channel.
 
 ## Repository Workflow
 

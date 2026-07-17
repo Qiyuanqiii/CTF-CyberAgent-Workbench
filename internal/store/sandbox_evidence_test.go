@@ -710,7 +710,7 @@ func removeSchemaV67ForTestStatements() []string {
 }
 
 func removeSchemaV68ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV69ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_docker_production_evidence_review_operation_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_production_evidence_review_operation_update_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_production_evidence_review_delete_immutable`,
@@ -720,5 +720,5 @@ func removeSchemaV68ForTestStatements() []string {
 		`DROP TABLE sandbox_docker_production_evidence_review_operations`,
 		`DROP TABLE sandbox_docker_production_evidence_reviews`,
 		`DELETE FROM schema_migrations WHERE version = 68`,
-	}
+	}...)
 }

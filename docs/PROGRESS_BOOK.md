@@ -774,10 +774,20 @@ v68 最终本地门禁通过：全仓普通/race 分别 247.9 秒/276.3 秒，ve
 
 架构完成度保持约 98%（V2 约 99%），产品可用度保持约 45-50%，通用 Coding Agent 约 40%，Cyber 自动化约 20%。本切片补齐了审计决策，不增加终端用户执行能力。下一唯一推荐切片转回 P7 schema v69：建立内容寻址的本地用户 Skill Registry，只安装已经通过 `skill_package.v1` 校验的惰性包；导入阶段禁止脚本、钩子、命令、Provider、网络、工具和能力授予，并继续隔离 Code/Cyber 目录。
 
+schema v69 内容寻址惰性用户 Skill Registry 切片已完成实现，任务 ID 为 `P7-Content-Addressed-Inert-User-Skill-Registry-v69`。CLI 新增显式确认的 `skill import`、metadata-only `skill installed/installed show` 和显式确认的 `skill remove`。Go 只接收已通过 ADR 0024 严格 parser 的确定性双文件 ZIP，内置名不可覆盖，Code/Cyber Catalog 分离，Cyber 只接受精确 `script` Profile。外部包固定为 `operator_installed_untrusted`，导入命令、网络、Provider、工具授予、Run 选择和上下文注入全部为 false。
+
+SQLite 新增安装 operation/intent/result 与移除 operation/tombstone 五类不可变表。摘要化 operation 先写，延迟外键和互相约束 trigger 防止任一半单独提交；安装意图在对象发布前持久化，同键重试恢复中断，改意图冲突，两个独立 Store 收敛。Registry 最多保留 64 个历史包身份和同名 8 个版本。移除只追加 tombstone，内容对象继续保留；Go 与 SQL 都拒绝移除已经被 `run_skill_selection_items` 以 name/version/content hash 精确固定的版本，已移除包不能无显式 restore 协议静默重装。
+
+本地对象存储固定在 `$CYBERAGENT_HOME/skill-registry/objects/sha256/<prefix>/<digest>.zip`，接口只有 `Put`/`Verify`。实现使用 `os.Root`、同目录独占临时文件、file sync、原子 hard link 与完整回读；已有或新对象都必须重新匹配普通文件身份、字节数、archive SHA-256、严格 ZIP 结构和语义 package fingerprint。symlink、腐坏、读取中替换、伪造收据和取消全部失败关闭。正文、源路径和 raw operation key 不进入 SQLite、Run event 或 CLI；v69 没有向 Agent 暴露内容读取器。
+
+本轮全仓普通/race 最终用时 265.4 秒/260.7 秒；`go vet`、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、OpenAPI 无漂移、9 个文件 21 项前端测试、Vite production build 与零漏洞 npm audit 全部通过。对象/Store/Application/CLI 定向 race 通过三轮，两个真实 Service 各自生成不同候选 ID/时间的导入与移除收敛通过 20 轮普通和 10 轮 race。审计修复了 v69 trigger 阻碍旧 schema 夹具逐级还原、37 处新错误文本静态风格、冗余临时清理状态、对象收据接口绑定缺口、对象发布前缺少一次取消复核、生成身份误判改意图冲突，以及 Manifest 自由文本 description 未脱敏复制进 SQLite；应用层恶意收据 list/show 回归现证明失败关闭。当前无已知未解决高/中风险，本轮未执行模型、网络请求、Shell、Docker、安装钩子或宿主进程。ADR 0031 固化边界。
+
+双指标更新为：架构完成度仍约 98%（V2 约 99%）；产品可用度约 46-50%，通用 Coding Agent 约 41%，Cyber 自动化约 20%。提升来自可实际管理外部 Skill 包的 CLI，但外部包尚不能被 Run 选择或进入模型上下文。下一唯一推荐切片为 schema v70：精确固定已验证且未 tombstone 的外部 Skill 版本，并通过独立预算、脱敏、来源隔离和 first-model-call 原子账本向 root/Specialist 最小化交付；声明工具继续不授予能力。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每次完成一个开发切片后，依次执行功能复核、测试、代码与安全审计、项目记忆更新、Git 提交和 GitHub 推送。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0030-immutable-docker-production-evidence-review.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0031-content-addressed-inert-skill-registry.md`。

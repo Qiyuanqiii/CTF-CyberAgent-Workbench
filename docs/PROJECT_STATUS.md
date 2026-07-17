@@ -4,11 +4,11 @@ Last updated: 2026-07-17
 
 ## Resume Context
 
-Current database schema is v68. The latest slice adds one immutable operator acceptance/rejection decision over an exact completed v67 harness receipt. Acceptance classifies only the bounded metadata receipt: all sixteen checks remain blocked with zero production verification, and daemon write, process, start, output, Artifact, and capability authority remain false.
+Current database schema is v69. The latest slice adds an explicitly confirmed, content-addressed, inert user Skill Registry. It stores only packages that pass strict `skill_package.v1` validation, commits immutable installation/removal metadata, and revalidates archive and semantic identity on every read. Import, list, show, and removal execute no package content and grant no Run selection, prompt injection, tool, Provider, network, command, hook, or capability authority.
 
-Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No path starts a Runner, container, Shell, or host process. ADR 0024 fixes the external Skill validation boundary, ADR 0025 fixes protected-delete classification, ADR 0026 fixes execution-profile selection, ADR 0027 fixes the production-evidence ledger, ADR 0028 fixes its recoverable attempt boundary, ADR 0029 fixes the bounded read-only daemon harness, and ADR 0030 fixes the immutable receipt-review boundary.
+Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No path starts a Runner, container, Shell, or host process. ADR 0024 fixes the external Skill validation boundary, ADR 0025 fixes protected-delete classification, ADR 0026 fixes execution-profile selection, ADR 0027 fixes the production-evidence ledger, ADR 0028 fixes its recoverable attempt boundary, ADR 0029 fixes the bounded read-only daemon harness, ADR 0030 fixes the immutable receipt-review boundary, and ADR 0031 fixes the inert user Skill Registry.
 
-CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The CLI-first implementation has resumable Runs, a durable root Agent Coordinator, bounded review-gated Specialist delegation, a separate read-only 1/2/4/6 Fan-out pool, persisted sessions and model calls, context compaction, WorkItems/Notes/Artifacts, a unified Tool Gateway, Finding/Evidence/Report lifecycles with SARIF/CI output, loopback HTTP/SSE/OpenAPI, a Run-first TUI, and a generated React/Vite console. Core delegation remains capped at two children and only the original application operator can schedule it; models, ordinary tools, and HTTP cannot autonomously spawn or schedule children.
+CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The CLI-first implementation has resumable Runs, a durable root Agent Coordinator, bounded review-gated Specialist delegation, a separate read-only 1/2/4/6 Fan-out pool, persisted sessions and model calls, context compaction, WorkItems/Notes/Artifacts, a unified Tool Gateway, embedded and inert user Skills, Finding/Evidence/Report lifecycles with SARIF/CI output, loopback HTTP/SSE/OpenAPI, a Run-first TUI, and a generated React/Vite console. Core delegation remains capped at two children and only the original application operator can schedule it; models, ordinary tools, and HTTP cannot autonomously spawn or schedule children.
 
 Schemas v48-v68 form the current Sandbox chain: strict Manifest preparation, exact approval and disabled candidates, generation-fenced lifecycle recovery, fixed threat checks, simulation evidence, read-only Docker observation, deterministic plans, never-started rehearsals, sealed host-input capture and handoff, read-only runtime-input projection, retained-resource cleanup, a blocked start-gate review, non-authorizing execution-profile selection, production-evidence receipts and recoverable attempts, the bounded opt-in Linux read-only daemon harness, and an immutable operator receipt review. These records, including an accepted v68 receipt, grant no execution authority. Local and container-process execution remain disabled, and TypeScript, future Rust analyzers, Skills, models, documents, and approval facts cannot bypass Go Policy, Scope, budgets, or the Tool Gateway.
 
@@ -89,6 +89,9 @@ Use these files first when resuming:
 - `docs/adr/0009-sandbox-approval-candidate.md`
 - `docs/adr/0010-disabled-sandbox-lifecycle.md`
 - `docs/adr/0011-disabled-sandbox-preflight.md`
+- `docs/adr/0024-strict-inert-skill-package.md`
+- `docs/adr/0031-content-addressed-inert-skill-registry.md`
+- `docs/SKILL_PACKAGE_PLAN.md`
 - `docs/architecture.md`
 - `docs/usage.md`
 - `docs/http-api.md`
@@ -98,7 +101,11 @@ Use these files first when resuming:
 - `internal/headless/export.go`
 - `internal/application/run_supervisor.go`
 - `internal/application/specialist_runner.go`
+- `internal/application/skill_packages.go`
 - `internal/skills/specialist.go`
+- `internal/skills/package.go`
+- `internal/skills/installation.go`
+- `internal/skills/object_store.go`
 - `internal/store/specialist_skill_context.go`
 - `internal/sandbox/manifest.go`
 - `internal/sandbox/intent.go`
@@ -171,6 +178,8 @@ Use these files first when resuming:
 - `internal/tui/picker.go`
 - `internal/tui/edit_activity.go`
 - `internal/store/sqlite.go`
+- `internal/store/migration_v69.go`
+- `internal/store/skill_package_installations.go`
 - `internal/store/run_modes.go`
 - `internal/store/work_items.go`
 - `internal/store/notes.go`
@@ -205,8 +214,8 @@ Use these files first when resuming:
 ## Progress Review
 
 - Architecture completion: about 98%; the V2 run-centric control plane is about 99% complete.
-- Product usability: about 45-50% for the complete Code + Cyber product.
-- Generic coding-agent workflow usability: about 40%.
+- Product usability: about 46-50% for the complete Code + Cyber product.
+- Generic coding-agent workflow usability: about 41%.
 - Cyber autonomous-workflow usability: about 20%.
 - These values are engineering estimates derived from tested roadmap slices, not performance benchmarks. The retired single-axis "overall product vision" percentage must not be used for current status.
 
@@ -796,19 +805,29 @@ The final ordinary/race suites passed in 247.9s/276.3s; vet, zero-warning static
 
 The independent audit fixed stored request-fingerprint drift by binding it in SQL and recomputing the operation/review relation on every Store read/replay. Negative tests now cover review-only and operation-only halves, operation immutability, source/fingerprint/authority tampering, two-Store convergence, and the full rejected Store/event/Application/CLI/list/show/replay path. No unresolved high/medium issue is known. Protected deletion left one cross-compiled binary and one smoke root under the OS temporary directory for normal cleanup; no manual action is required. GitHub Actions run `29552080990` passed implementation commit `41583ac`; Go/Linux completed in 2m57s and TypeScript in 24s. ADR 0030 records the boundary.
 
-## Planned Desktop And Skill Import Surfaces
+## Schema v69 Content-Addressed Inert User Skill Registry
+
+Schema v69 adds immutable installation operations/intents/results and removal operations/tombstones. Raw operation keys are stored only as domain-separated digests. Deferred foreign keys and reciprocal triggers require each operation/root pair to commit atomically, and all rows reject update/delete. A same-key retry recovers an intent that committed before object publication; changed intent conflicts, and independent SQLite connections converge on one installation and result.
+
+The local object store writes only strictly validated deterministic archives below `$CYBERAGENT_HOME/skill-registry/objects/sha256/<prefix>/<digest>.zip`. Its interface exposes `Put` and `Verify`, not execute or delete. Publication uses an exclusive same-directory temporary file, file sync, atomic hard link, and full readback. Existing and newly published objects must match byte count, archive SHA-256, strict ZIP structure, semantic package fingerprint, and stable file identity. Symlinks, replacement, corruption, forged receipts, and cancellation fail closed.
+
+CLI `skill import` requires an explicit surface, stable operation key, and `--confirm-untrusted-skill`; `skill installed`, `installed show`, and `remove` expose bounded metadata. Built-in names are reserved. Code and Cyber catalogs are separate; Cyber accepts exactly `script`. All external packages are `operator_installed_untrusted`, and all import command/network/Provider, tool-grant, Run-selection, and context-injection fields are false. Removal appends a tombstone, retains the object, and rejects exact Run-pinned versions in Go and SQL. External packages are not yet merged into the embedded Registry or loaded by any Agent. ADR 0031 records the boundary.
+
+The final local ordinary/race suites passed in 265.4s/260.7s. Vet, zero-warning staticcheck, module verification/tidy diff, zero-finding govulncheck, OpenAPI drift checks, 21 frontend tests, production build, and zero-vulnerability npm audit are green. Focused v69 race tests passed three repetitions; real two-Service import/removal convergence with independent generated identities passed 20 ordinary and 10 race repetitions. The audit fixed migration downgrade ordering, static error text, redundant temporary cleanup state, forged receipt binding, cancellation immediately before publication, generated-identity replay comparison, and credential redaction of free-text Manifest descriptions before SQLite persistence. No unresolved high/medium issue is known, and no model, network request, Shell, Docker operation, installer hook, or host process was run.
+
+## Desktop And Skill Registry Surfaces
 
 No desktop executable, installer, custom registry integration, or auto-updater exists today. The current React/Vite console remains browser-hosted and read-first, with only the v64 non-authorizing execution-profile control. `docs/DESKTOP_PLAN.md` fixes a phased Windows route: D0 validates a Wails shell and reuses Go HTTP/SSE/OpenAPI without an installer; D1 adds broader Go-owned mutations only after product usability reaches roughly 65-70%; D2 adds portable ZIP and signed MSIX around 75-80%; MSI, protocol registration, startup, services, and auto-update stay separate. CLI remains a first-class interface, TypeScript gains no Shell/Docker/key authority, and business data does not move into the registry.
 
-The project has a strict `skill.v1` manifest and internal immutable `fs.FS` loader, and now also has the first inert `skill_package.v1` boundary. Its pure-memory parser accepts only an exact two-entry deterministic ZIP, checks archive structure before bounded decompression, applies existing manifest/content validation, separates raw archive SHA-256 from a canonical semantic fingerprint, and returns an immutable untrusted metadata preview with every authority bit false. `skill package validate` adds only a bounded regular-file read with symlink and identity-change rejection; it prints no body or source path and performs no database, installation, command, network, Provider, or tool operation. ADR 0024 fixes the profile and threat model.
+The project has a strict `skill.v1` manifest, internal immutable `fs.FS` loader, strict `skill_package.v1` boundary, and schema-v69 local user Registry. The pure-memory parser accepts only an exact two-entry deterministic ZIP, checks archive structure before bounded decompression, applies existing manifest/content validation, and separates raw archive SHA-256 from a canonical semantic fingerprint. Validation remains read-only. Import adds only explicitly confirmed immutable storage and metadata history; it prints no body/source path and performs no command, network, Provider, tool, or context-injection operation. ADR 0024 and ADR 0031 fix these boundaries.
 
 The final slice gate passed full ordinary/race suites in 239.4s/226.8s, vet, zero-warning staticcheck, module verification/tidy diff, zero-finding govulncheck, roughly 26.45 million fuzz executions, 78.5% `internal/skills` statement coverage, repeated parser/CLI regressions, strict TypeScript, all 17 frontend tests, OpenAPI/build/npm audit, and repository privacy/encoding/link/diff scans. The audit fixed deterministic creator-version enforcement, exact Deflate-stream exhaustion against hidden post-stream payloads, a deprecated fixture API, and source-path disclosure in filesystem errors. No unresolved high/medium issue is known. GitHub Actions run `29512332025` passed commit `55b3fae` with Go/Linux in 3m4s and TypeScript in 20s.
 
-The user-visible Registry still contains only the five embedded Skills. There is no `skill import/install/upload`, persistent user Registry, external Run selection, or Desktop/HTTP upload endpoint. `docs/SKILL_PACKAGE_PLAN.md` stages a post-v68, likely v69+, content-addressed atomic installation, immutable version pins, Code/Cyber catalog separation, explicit untrusted-package confirmation, and a later Go-owned Desktop upload preview. Import must never execute content, call a model/network/tool, or grant capability.
+The CLI can now import and inspect inert external packages in a persistent user Registry, while the Run-loadable Registry still contains only the five embedded Skills. There is no external Run selection or Desktop/HTTP upload endpoint. `docs/SKILL_PACKAGE_PLAN.md` now stages schema v70 exact Run pinning and minimized context delivery before a later Go-owned Desktop upload preview. Import never executes content, calls a model/network/tool, or grants capability.
 
 ## Recommended Next Slice
 
-Continue P7 with schema v69: add a content-addressed local user Skill Registry that installs/imports only already-validated `skill_package.v1` packages. Import must stay inert and metadata-bounded: no scripts, hooks, commands, Provider calls, network, tools, or capability grants. Keep Code and Cyber catalog/profile compatibility separate and defer external Run selection until immutable version pinning and removal semantics are audited.
+Continue P7 with schema v70: add immutable external-Skill selection for one Run using the exact verified active installation identity, then a separately budgeted, provenance-preserving, redacted root/Specialist load protocol. Selection must reject tombstoned versions, preserve Code/Cyber and Profile separation, and never turn declared tools into capabilities. HTTP/Desktop import remains later and separately audited.
 
 Keep the Local profile disabled until a real OS sandbox makes protected host roots unavailable or read-only; never map it to unrestricted `os/exec`. Runtime verification and the Docker start/wait/TERM/KILL/orphan lifecycle still require a later independent release gate. Broader HTTP/Desktop mutations, Rust analyzers, network/secret support, end-user process execution, and CTF solving remain deferred.
 
