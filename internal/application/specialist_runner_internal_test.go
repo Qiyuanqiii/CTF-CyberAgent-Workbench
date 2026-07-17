@@ -19,7 +19,7 @@ func TestSpecialistRequestBoundsAggregateHistoryBytes(t *testing.T) {
 	}
 	request, err := specialistRequest(history, `{"goal":"bounded"}`, domain.AgentNode{
 		ID: "agent-child", RunID: "run-child", SessionID: "session-child",
-	}, skills.SpecialistContextAssembly{})
+	}, skills.SpecialistContextAssembly{}, skills.ExternalSpecialistContextAssembly{})
 	if err != nil {
 		t.Fatal(err)
 	}

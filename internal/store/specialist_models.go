@@ -182,6 +182,10 @@ func (s *SQLiteStore) RecordSpecialistModelStarted(ctx context.Context,
 			modelAttempt.Number); err != nil {
 			return false, err
 		}
+		if err := commitExternalSpecialistSkillContextTx(ctx, tx, run, attempt, child,
+			modelAttempt.Number); err != nil {
+			return false, err
+		}
 		if err := tx.Commit(); err != nil {
 			return false, err
 		}
@@ -223,6 +227,10 @@ func (s *SQLiteStore) RecordSpecialistModelStarted(ctx context.Context,
 		return false, err
 	}
 	if err := commitSpecialistSkillContextTx(ctx, tx, run, attempt, child,
+		modelAttempt.Number); err != nil {
+		return false, err
+	}
+	if err := commitExternalSpecialistSkillContextTx(ctx, tx, run, attempt, child,
 		modelAttempt.Number); err != nil {
 		return false, err
 	}

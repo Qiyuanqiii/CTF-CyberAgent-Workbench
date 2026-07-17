@@ -23,7 +23,8 @@ import (
 )
 
 type SQLiteStore struct {
-	db *sql.DB
+	db   *sql.DB
+	home string
 }
 
 const maxStoreListOffset = 100000
@@ -73,7 +74,12 @@ func Open(path string) (*SQLiteStore, error) {
 		_ = db.Close()
 		return nil, err
 	}
-	s := &SQLiteStore{db: db}
+	absolutePath, err := filepath.Abs(path)
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	s := &SQLiteStore{db: db, home: filepath.Dir(absolutePath)}
 	if err := s.Migrate(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -291,6 +297,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 67, Name: "Linux read-only Docker production evidence harness", Statements: sandboxDockerProductionEvidenceHarnessStatements},
 		{Version: 68, Name: "immutable Docker production evidence operator reviews", Statements: sandboxDockerProductionEvidenceReviewStatements},
 		{Version: 69, Name: "content-addressed inert user Skill package installations", Statements: skillPackageInstallationStatements},
+		{Version: 70, Name: "Run-bound external Skill selection and context provenance", Statements: externalSkillSelectionStatements},
 	})
 }
 

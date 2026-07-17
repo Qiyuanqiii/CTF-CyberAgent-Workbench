@@ -1,6 +1,6 @@
 # CyberAgent Workbench Custom Skill Package Plan
 
-状态：`skill_package.v1` 纯内存校验与 schema v69 内容寻址本地 Registry 已完成；CLI 可显式确认导入、查询和追加移除 tombstone。外部 Run 选择/上下文加载、HTTP/桌面上传、签名与 Marketplace 尚未实现。
+状态：`skill_package.v1` 纯内存校验、schema v69 内容寻址本地 Registry，以及 schema v70 外部 Skill Run 固定选择与最小上下文均已完成。CLI 可显式确认导入、查询、选择和追加移除 tombstone；HTTP/桌面上传、签名与 Marketplace 尚未实现。
 
 ## 当前能力
 
@@ -16,10 +16,12 @@
 - `cyberagent skill installed [--surface code|cyber] [--profile <profile>] [--include-removed]`
 - `cyberagent skill installed show <name>@<version>`
 - `cyberagent skill remove <name>@<version> --operation-key <stable-key> --confirm-remove`
+- `cyberagent skill select-external <run-id> <name>@<version>... --operation-key <stable-key> --confirm-untrusted-skill-context [--specialist <name>@<version>]`
+- `cyberagent skill external-selection <run-id>`
 - `cyberagent skill select`
 - `cyberagent skill selection`
 
-其中 `skill package validate` 只通过有界普通文件读取和纯内存 parser 返回 metadata-only 风险预览，不创建数据库、不落盘、不安装、不执行正文，也不访问网络、Provider 或工具。schema v69 的 `skill import` 在显式确认后只增加不可变元数据与原始包对象，仍不执行正文、联网、调用 Provider/工具或授予能力。项目目前没有外部 Run 选择、签名、HTTP 上传端点或桌面文件选择入口；内部 `LoadFS` 仍不能被描述为用户导入功能。
+其中 `skill package validate` 只通过有界普通文件读取和纯内存 parser 返回 metadata-only 风险预览，不创建数据库、不落盘、不安装、不执行正文，也不访问网络、Provider 或工具。schema v69 的 `skill import` 在显式确认后只增加不可变元数据与原始包对象，仍不执行正文、联网、调用 Provider/工具或授予能力。schema v70 再要求独立 Run 级确认，固定精确 active 版本，并只把脱敏正文作为用户角色的非可信工作流指导交付；包内工具声明不授权。项目目前没有签名、HTTP 上传端点或桌面文件选择入口；内部 `LoadFS` 仍不能被描述为用户导入功能。
 
 ## 第一版包边界
 
@@ -35,8 +37,8 @@
 - 包内容是操作者安装的工作流指导，不是系统策略，也不能覆盖 Policy、Scope、预算、Approval、Sandbox 或来源隔离。
 - `tool_dependencies` 仍只是前置声明，永不授予工具能力。
 - 导入不会执行正文、脚本、命令、网络请求或 Provider 调用。
-- 外部包固定标记为 `operator_installed_untrusted`；schema v69 只允许操作者显式安装，尚无任何外部包进入模型上下文的路径。
-- 上下文交付仍需版本/hash/bytes/Profile 精确复核、secret redaction、独立 token 预算和 capability=false 来源事实。
+- 外部包固定标记为 `operator_installed_untrusted`；安装不会自动影响 Run，schema v70 另需操作者显式确认精确 Run 选择。
+- 上下文交付会重新执行版本/hash/bytes/Profile/对象语义精确复核、secret redaction、独立 token 预算和 capability=false 来源记录；正文只进入当前 Provider request 的用户角色信封。
 - Code 与 Cyber Catalog 分离。Cyber 默认不继承 Code Skill；Script Profile 只能使用明确兼容的窄化脚本指导。
 
 ## 本地 Registry
@@ -46,7 +48,7 @@
 - 相同对象并发发布收敛；同名同版本已有不可变安装时冲突；Registry 最多 64 个历史包身份，同名最多 8 个版本。
 - 已被 Run 精确固定的版本不能移除。移除只追加 tombstone 且保留对象；恢复/重装需要未来显式协议，不静默推断。
 - 导入先写安装意图，再使用同目录独占临时文件、file sync、原子 hard link 和完整回读验证发布对象，最后写完成结果；崩溃后以同一 operation key 恢复。目录 sync 在 Windows 上为 best effort，不作超出平台证据的持久性声明。
-- 对象接口只有 `Put` 与 `Verify`，没有执行或删除；每次完成重放、列表和详情读取都重新验证字节数、archive SHA-256、ZIP 结构与语义指纹。
+- 写入接口只有 `Put` 与 `Verify`，另有与写权限分离的只读 `PackageObjectLoader`；它没有执行或删除方法。每次完成重放、列表、详情和 Run 上下文加载都重新验证普通文件身份、字节数、archive SHA-256、ZIP 结构与语义指纹。
 
 ## 产品入口
 
@@ -57,6 +59,8 @@ cyberagent skill package validate <package.zip>
 cyberagent skill import <package.zip> --surface code|cyber --operation-key <stable-key> --confirm-untrusted-skill
 cyberagent skill installed [--surface code|cyber] [--profile <profile>]
 cyberagent skill installed show <name>@<version>
+cyberagent skill select-external <run-id> <name>@<version> --operation-key <stable-key> --confirm-untrusted-skill-context
+cyberagent skill external-selection <run-id>
 cyberagent skill remove <name>@<version> --operation-key <stable-key> --confirm-remove
 ```
 
@@ -77,7 +81,7 @@ Desktop D1 阶段：
 
 1. [x] 固定 `skill_package.v1` 和威胁模型，完成纯内存 parser/validator/fuzzer 与 metadata-only CLI 校验，不写磁盘。
 2. [x] schema v69 增加 content-addressed 本地 Registry、不可变安装/移除账本、原子导入/恢复和 CLI；导入保持惰性。
-3. [ ] schema v70 将用户 Skill 纳入 Run 的精确版本选择、root/Specialist 最小上下文和 Code/Cyber 分离测试。
+3. [x] schema v70 将用户 Skill 纳入 Run 的精确版本选择、root/Specialist 最小上下文和 Code/Cyber 分离测试；安装与 Run 上下文使用两次独立确认。
 4. [ ] 在 Desktop D1 增加 Go-owned 文件选择、验证预览和确认安装；HTTP mutation 必须单独审计。
 5. [ ] 最后评估签名包、团队 Catalog 与 Marketplace；远程自动安装不属于基础版本。
 
@@ -94,5 +98,5 @@ Desktop D1 阶段：
 - 恶意 ZIP、路径逃逸、链接、特殊文件、超大包、重复项、Unicode/大小写碰撞和内容 hash 漂移全部失败关闭。
 - 导入前后不会执行命令、访问网络、调用模型或改变工具权限。
 - 并发导入、重启恢复和相同 operation 重放收敛到同一不可变版本。
-- v69 已保证安装与 tombstone 跨重启恢复，并为已固定版本提供 Go/SQL 移除门禁；v70 仍需完成外部 Run 固定版本与上下文恢复验收。
+- v69 已保证安装与 tombstone 跨重启恢复；v70 已完成外部 Run 固定版本、Go/SQL 移除门禁、root/Specialist 上下文恢复与首次模型调用原子提交。
 - CLI 与 Desktop 对同一包产生相同 digest、风险预览、错误码和安装结果。

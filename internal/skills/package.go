@@ -81,6 +81,16 @@ func (p *SkillPackage) Manifest() Manifest {
 	return cloneManifest(p.preview.Manifest)
 }
 
+// contentBytes returns a defensive copy for the trusted package delivery
+// path. It remains unexported so callers cannot bypass PackageObjectLoader's
+// object identity and descriptor checks.
+func (p *SkillPackage) contentBytes() []byte {
+	if p == nil {
+		return nil
+	}
+	return bytes.Clone(p.content)
+}
+
 // ParsePackage validates the complete deterministic ZIP container before it
 // decodes the Skill manifest or body.
 func ParsePackage(raw []byte) (*SkillPackage, error) {

@@ -1,7 +1,11 @@
 package application_test
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -21,6 +25,7 @@ import (
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/store"
+	"cyberagent-workbench/internal/toolgateway"
 )
 
 func TestSpecialistRunnerExecutesInternalNoToolContinuation(t *testing.T) {
@@ -75,6 +80,53 @@ func TestSpecialistRunnerExecutesInternalNoToolContinuation(t *testing.T) {
 		events.AgentTurnCompletedEvent:              1,
 		events.SpecialistSkillContextPreparedEvent:  1,
 		events.SpecialistSkillContextCommittedEvent: 1,
+	})
+}
+
+func TestSpecialistRunnerDeliversOnlyOperatorDesignatedExternalSkill(t *testing.T) {
+	provider := &specialistTestProvider{responses: []llm.ChatResponse{{
+		Text: specialistResponse(t, domain.SpecialistAction{
+			Version: domain.SpecialistLifecycleVersion, Kind: domain.SpecialistActionContinue,
+			Message: "used bounded external workflow guidance",
+		}), Usage: llm.Usage{InputTokens: 4, OutputTokens: 2, TotalTokens: 6},
+	}}}
+	st, run, child, runner := newSpecialistRunnerFixtureWithExternal(t, provider,
+		domain.Budget{MaxTurns: 10}, 2, 64, true)
+	result, err := runner.Step(context.Background(), run.ID, child.ID)
+	if err != nil || result.ExternalSkillItems != 1 || result.ExternalSkillTokens <= 0 ||
+		result.ExternalSkillBudget != result.ExternalSkillTokens ||
+		result.ExternalSkillBudget <= skills.DefaultExternalSpecialistTokenBudget ||
+		result.ExternalSkillBudget > skills.MaxExternalSpecialistTokenBudget ||
+		result.ExternalSkillRecovered {
+		t.Fatalf("external Specialist Skill delivery failed: result=%#v err=%v", result, err)
+	}
+	if len(provider.requests) != 1 ||
+		provider.requests[0].Metadata["external_skill_items"] != "1" ||
+		len(provider.requests[0].Tools) != 0 {
+		t.Fatalf("external Specialist request escaped its boundary: %#v", provider.requests)
+	}
+	found := false
+	for _, message := range provider.requests[0].Messages {
+		if strings.Contains(message.Content, "External Specialist review") {
+			found = true
+			if message.Role != "user" ||
+				!strings.Contains(message.Content, `"workflow_guidance":true`) ||
+				!strings.Contains(message.Content, `"tool_grant":false`) ||
+				!strings.Contains(message.Content, `"file_write_grant":false`) ||
+				!strings.Contains(message.Content, `"scope_expansion":false`) ||
+				!strings.Contains(message.Content, `"delegation_grant":false`) ||
+				!strings.Contains(message.Content, `"audience":"specialist"`) {
+				t.Fatalf("external Specialist guidance authority widened: %#v", message)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("designated external Specialist guidance was not delivered: %#v",
+			provider.requests[0].Messages)
+	}
+	assertSpecialistEventCounts(t, st, run.ID, map[string]int{
+		events.ExternalSpecialistSkillContextPreparedEvent:  1,
+		events.ExternalSpecialistSkillContextCommittedEvent: 1,
 	})
 }
 
@@ -671,8 +723,16 @@ func TestSpecialistRunnerRecoversExpiredWorkerBeforeFreshTurn(t *testing.T) {
 func newSpecialistRunnerFixture(t testing.TB, provider llm.Provider, budget domain.Budget,
 	turnLimit int64, tokenLimit int64,
 ) (*store.SQLiteStore, domain.Run, domain.AgentNode, *application.SpecialistRunner) {
+	return newSpecialistRunnerFixtureWithExternal(t, provider, budget, turnLimit,
+		tokenLimit, false)
+}
+
+func newSpecialistRunnerFixtureWithExternal(t testing.TB, provider llm.Provider,
+	budget domain.Budget, turnLimit int64, tokenLimit int64, withExternal bool,
+) (*store.SQLiteStore, domain.Run, domain.AgentNode, *application.SpecialistRunner) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "cyberagent.db"))
+	home := t.TempDir()
+	st, err := store.Open(filepath.Join(home, "cyberagent.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -696,6 +756,32 @@ func newSpecialistRunnerFixture(t testing.TB, provider llm.Provider, budget doma
 			OperationKey: "specialist-runner-skills-0001", RequestedBy: "operator",
 		}); err != nil {
 		t.Fatal(err)
+	}
+	if withExternal {
+		objects, err := skills.NewLocalPackageObjectStore(home)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := buildSpecialistExternalPackage(t)
+		installed, err := application.NewSkillPackageRegistryService(st, objects, registry).
+			Import(ctx, application.ImportSkillPackageRequest{
+				Raw: raw, Surface: domain.ExecutionSurfaceCode,
+				OperationKey: "specialist-external-import-0001",
+				InstalledBy:  "operator", ConfirmUntrusted: true,
+			})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ref := skills.FormatInstalledPackageRef(installed.Package.Installation.Name,
+			installed.Package.Installation.Version)
+		if _, err := application.NewExternalSkillSelectionService(st).Select(ctx,
+			application.SelectExternalSkillsRequest{
+				RunID: run.ID, PackageRefs: []string{ref}, SpecialistRef: ref,
+				OperationKey: "specialist-external-selection-0001",
+				RequestedBy:  "operator", ConfirmUntrustedContext: true,
+			}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	run, err = service.Start(ctx, run.ID)
 	if err != nil {
@@ -724,6 +810,50 @@ func newSpecialistRunnerFixture(t testing.TB, provider llm.Provider, budget doma
 	router.RegisterProvider(provider)
 	runner := application.NewSpecialistRunner(st, router, policy.NewDefaultChecker())
 	return st, run, admitted.Agent, runner
+}
+
+func buildSpecialistExternalPackage(t testing.TB) []byte {
+	t.Helper()
+	content := []byte("# External Specialist review\n\n" +
+		strings.Repeat("Verify repository evidence before conclusions.\n", 30))
+	digest := sha256.Sum256(content)
+	manifest := skills.Manifest{
+		Protocol: skills.ProtocolVersion, Name: "external-specialist-review", Version: "1.0.0",
+		Description: "Untrusted external Specialist workflow.",
+		Profiles:    []domain.Profile{domain.ProfileCode},
+		ToolDependencies: []toolgateway.ToolName{
+			toolgateway.ListWorkspaceTool, toolgateway.ReadFileTool,
+		},
+		ContentPath: skills.PackageContentPath, ContentSHA256: hex.EncodeToString(digest[:]),
+		ContentBytes:           len(content),
+		ContentTokenUpperBound: skills.ContentTokenUpperBound(content),
+	}
+	manifestRaw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	for _, entry := range []struct {
+		name string
+		data []byte
+	}{
+		{name: skills.PackageManifestPath, data: manifestRaw},
+		{name: skills.PackageContentPath, data: content},
+	} {
+		header := &zip.FileHeader{Name: entry.name, Method: zip.Deflate}
+		file, err := writer.CreateHeader(header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.Write(entry.data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
 }
 
 type specialistTestProvider struct {

@@ -347,8 +347,12 @@ func (s *SQLiteStore) CreatePackageRemoval(ctx context.Context,
 	var pinned int
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (
 		SELECT 1 FROM run_skill_selection_items
-		WHERE name = ? AND version = ? AND content_sha256 = ?)`, removal.Name,
-		removal.Version, removal.ContentSHA256).Scan(&pinned); err != nil {
+		WHERE name = ? AND version = ? AND content_sha256 = ?)
+		OR EXISTS (
+			SELECT 1 FROM run_external_skill_selection_items
+			WHERE installation_id = ? AND installation_fingerprint = ?)`, removal.Name,
+		removal.Version, removal.ContentSHA256, removal.InstallationID,
+		removal.InstallationFingerprint).Scan(&pinned); err != nil {
 		return skills.PackageRemoval{}, false, err
 	}
 	if pinned != 0 {

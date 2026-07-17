@@ -21,6 +21,41 @@ type PackageObjectStore interface {
 	Verify(context.Context, PackageObjectDescriptor) (PackageObjectReceipt, error)
 }
 
+// PackageObjectLoader is deliberately separate from PackageObjectStore. A
+// runtime that only installs packages does not automatically gain access to
+// their untrusted instruction bodies.
+type PackageObjectLoader interface {
+	Load(context.Context, PackageObjectDescriptor) (LoadedPackageObject, error)
+}
+
+// LoadedPackageObject is an immutable-by-convention, defensive in-memory
+// readback. Content must never be persisted in a Run event or context ledger.
+type LoadedPackageObject struct {
+	Receipt  PackageObjectReceipt
+	Manifest Manifest
+	Content  []byte
+}
+
+func (o LoadedPackageObject) Validate(expected PackageObjectDescriptor) error {
+	if err := ValidatePackageObjectReceipt(expected, o.Receipt); err != nil {
+		return err
+	}
+	if err := o.Manifest.Validate(o.Content); err != nil {
+		return fmt.Errorf("loaded skill package manifest is invalid: %w", err)
+	}
+	parsedFingerprint, err := packageFingerprint(o.Manifest, o.Content)
+	if err != nil || parsedFingerprint != expected.PackageFingerprint {
+		return errors.New("loaded skill package semantic fingerprint does not match its descriptor")
+	}
+	return nil
+}
+
+func CloneLoadedPackageObject(value LoadedPackageObject) LoadedPackageObject {
+	value.Manifest = cloneManifest(value.Manifest)
+	value.Content = bytes.Clone(value.Content)
+	return value
+}
+
 // LocalPackageObjectStore stores only validated deterministic ZIP bytes. It has
 // no removal or execution method.
 type LocalPackageObjectStore struct {
@@ -157,37 +192,93 @@ func (s *LocalPackageObjectStore) Verify(ctx context.Context,
 	return receipt, nil
 }
 
+// Load performs the same race-resistant object verification as Verify, then
+// returns only the strictly parsed manifest and a defensive body copy.
+func (s *LocalPackageObjectStore) Load(ctx context.Context,
+	descriptor PackageObjectDescriptor,
+) (LoadedPackageObject, error) {
+	if s == nil {
+		return LoadedPackageObject{}, errors.New("skill package object store is required")
+	}
+	if err := descriptor.Validate(); err != nil {
+		return LoadedPackageObject{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return LoadedPackageObject{}, err
+	}
+	root, err := os.OpenRoot(s.home)
+	if err != nil {
+		return LoadedPackageObject{}, errors.New("skill package object home cannot be opened")
+	}
+	defer root.Close()
+	objectKey, _ := PackageObjectKey(descriptor.ArchiveSHA256)
+	loaded, found, err := loadPackageObjectAt(ctx, root,
+		path.Join(PackageObjectRoot, objectKey), objectKey, descriptor)
+	if err != nil {
+		return LoadedPackageObject{}, err
+	}
+	if !found {
+		return LoadedPackageObject{}, errors.New("skill package object is missing")
+	}
+	return CloneLoadedPackageObject(loaded), nil
+}
+
 func verifyPackageObjectAt(ctx context.Context, root *os.Root, fullKey, objectKey string,
 	descriptor PackageObjectDescriptor,
 ) (PackageObjectReceipt, bool, error) {
+	loaded, found, err := loadPackageObjectAt(ctx, root, fullKey, objectKey, descriptor)
+	return loaded.Receipt, found, err
+}
+
+func loadPackageObjectAt(ctx context.Context, root *os.Root, fullKey, objectKey string,
+	descriptor PackageObjectDescriptor,
+) (LoadedPackageObject, bool, error) {
 	info, err := root.Lstat(fullKey)
 	if errors.Is(err, fs.ErrNotExist) {
-		return PackageObjectReceipt{}, false, nil
+		return LoadedPackageObject{}, false, nil
 	}
 	if err != nil {
-		return PackageObjectReceipt{}, false, errors.New("skill package object cannot be inspected")
+		return LoadedPackageObject{}, false, errors.New("skill package object cannot be inspected")
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() ||
 		info.Size() != int64(descriptor.ArchiveBytes) {
-		return PackageObjectReceipt{}, false, errors.New("skill package object identity is invalid")
+		return LoadedPackageObject{}, false, errors.New("skill package object identity is invalid")
 	}
 	file, err := root.Open(fullKey)
 	if err != nil {
-		return PackageObjectReceipt{}, false, errors.New("skill package object cannot be opened")
+		return LoadedPackageObject{}, false, errors.New("skill package object cannot be opened")
 	}
 	defer file.Close()
 	raw, err := readPackageObject(ctx, file, MaxPackageArchiveBytes)
 	if err != nil {
-		return PackageObjectReceipt{}, false, err
+		return LoadedPackageObject{}, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return LoadedPackageObject{}, false, err
 	}
 	after, err := file.Stat()
 	if err != nil || !os.SameFile(info, after) || after.Size() != int64(len(raw)) {
-		return PackageObjectReceipt{}, false, errors.New("skill package object changed while it was read")
+		return LoadedPackageObject{}, false, errors.New("skill package object changed while it was read")
 	}
 	if err := validatePackageObjectBytes(raw, descriptor); err != nil {
-		return PackageObjectReceipt{}, false, err
+		return LoadedPackageObject{}, false, err
 	}
-	return PackageObjectReceipt{Descriptor: descriptor, ObjectKey: objectKey}, true, nil
+	parsed, err := ParsePackage(raw)
+	if err != nil {
+		return LoadedPackageObject{}, false,
+			fmt.Errorf("skill package object failed delivery validation: %w", err)
+	}
+	loaded := LoadedPackageObject{
+		Receipt:  PackageObjectReceipt{Descriptor: descriptor, ObjectKey: objectKey},
+		Manifest: parsed.Manifest(), Content: parsed.contentBytes(),
+	}
+	if err := loaded.Validate(descriptor); err != nil {
+		return LoadedPackageObject{}, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return LoadedPackageObject{}, false, err
+	}
+	return loaded, true, nil
 }
 
 func validatePackageObjectBytes(raw []byte, descriptor PackageObjectDescriptor) error {

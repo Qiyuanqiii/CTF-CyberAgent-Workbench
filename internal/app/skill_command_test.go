@@ -213,7 +213,7 @@ func TestSkillPackageRegistryCLIImportsListsShowsAndTombstonesWithoutExecutingCo
 		!strings.Contains(listed, "external-review-cli@1.0.0") ||
 		!strings.Contains(listed, "status=installed") ||
 		!strings.Contains(listed, "installed_count: 1") ||
-		!strings.Contains(listed, "external_run_selection: disabled") ||
+		!strings.Contains(listed, "external_run_selection: explicit_run_confirmation_required") ||
 		strings.Contains(listed, manifest.Description) || strings.Contains(listed, sentinel) {
 		t.Fatalf("installed list: code=%d stderr=%q output=%q", code, stderr, listed)
 	}
@@ -264,7 +264,8 @@ func TestSkillPackageRegistryCLIImportsListsShowsAndTombstonesWithoutExecutingCo
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if version, err := st.SchemaVersion(context.Background()); err != nil || version != 69 {
+	if version, err := st.SchemaVersion(context.Background()); err != nil ||
+		version != store.LatestSchemaVersion {
 		t.Fatalf("Skill package Registry schema version=%d err=%v", version, err)
 	}
 }

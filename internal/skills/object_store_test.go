@@ -149,6 +149,39 @@ func TestLocalPackageObjectStoreRejectsSymlinkObject(t *testing.T) {
 	}
 }
 
+func TestLocalPackageObjectLoaderReturnsDefensiveStrictReadback(t *testing.T) {
+	raw, descriptor := objectStoreFixture(t)
+	objects, err := NewLocalPackageObjectStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := objects.Put(context.Background(), raw, descriptor); err != nil {
+		t.Fatal(err)
+	}
+	first, err := objects.Load(context.Background(), descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Validate(descriptor); err != nil {
+		t.Fatal(err)
+	}
+	first.Content[0] ^= 0xff
+	first.Manifest.Name = "mutated"
+	second, err := objects.Load(context.Background(), descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(second.Content) != "# Object store package\n" ||
+		second.Manifest.Name != "object-store-package" {
+		t.Fatalf("loaded object aliases caller-owned memory: %#v", second)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := objects.Load(cancelled, descriptor); err == nil {
+		t.Fatal("cancelled object load succeeded")
+	}
+}
+
 func objectStoreFixture(t *testing.T) ([]byte, PackageObjectDescriptor) {
 	t.Helper()
 	content := []byte("# Object store package\n")

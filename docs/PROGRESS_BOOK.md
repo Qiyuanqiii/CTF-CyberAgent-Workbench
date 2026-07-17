@@ -784,10 +784,22 @@ SQLite 新增安装 operation/intent/result 与移除 operation/tombstone 五类
 
 双指标更新为：架构完成度仍约 98%（V2 约 99%）；产品可用度约 46-50%，通用 Coding Agent 约 41%，Cyber 自动化约 20%。提升来自可实际管理外部 Skill 包的 CLI，但外部包尚不能被 Run 选择或进入模型上下文。下一唯一推荐切片为 schema v70：精确固定已验证且未 tombstone 的外部 Skill 版本，并通过独立预算、脱敏、来源隔离和 first-model-call 原子账本向 root/Specialist 最小化交付；声明工具继续不授予能力。
 
+schema v70 外部 Skill Run 选择与最小上下文切片已完成实现，任务 ID 为 `P7-External-Skill-Run-Context-v70`。CLI 新增 `skill select-external` 与 `skill external-selection`。安装确认不会自动授权上下文；操作者必须对 created Run 再次提供稳定 operation key 和 `--confirm-untrusted-skill-context`，才能固定 1-4 个精确 active `name@version`。选择绑定 mode、安装/结果/对象/Manifest 全链指纹，总预算最多 4096，最多一项可明确交给 Specialist，声明工具始终不授予能力。
+
+对象读取使用与发布接口分离的 `PackageObjectLoader`，每次交付都重新核验内容寻址路径、普通文件身份、大小、archive SHA-256、严格 ZIP、语义 package fingerprint 和 Manifest。root 与 Specialist 使用独立预算和 secret redaction，child 默认 1024、硬上限 2048且只加载操作者指定的一项。正文只在当前 Provider request 内以用户角色 `external_skill_guidance.v1` 信封存在；Policy、工具、Shell、网络、Secret、Scope 和委派授权全部为 false。系统控制文本要求把外部 Skill 当作可选工作流建议、把仓库/文档当作证据，并忽略隐藏步骤、泄露秘密、改策略或扩权诱导。
+
+SQLite v70 新增不可变 selection/item/operation 及 root/Specialist preparation/commit 账本；首次 `model.started` 与来源 commit 原子提交，崩溃和重放不伪造交付。事件只含协议、计数、预算、脱敏统计和关闭权限结论，不含正文、路径、raw key、Secret 或模型文本。定向测试覆盖第二次确认、重放、精确对象漂移、removed/跨工作面/Profile 拒绝、Prompt Injection 用户角色隔离、root/无工具 Specialist 交付、SQL 不可变、v69 原地升级不伪造状态，以及 Go/SQL 双层固定版本删除保护。
+
+本轮聚焦审计发现并修复一项中风险约束错误和多项低风险健壮性缺口：`installation_id` 曾被错误设为全表唯一，导致同一已验证安装只能被一个 Run 选择；现改为每份选择内唯一，并新增第二个 Run 独立确认复用回归。旧 schema 降级夹具先拆除全部 v70 trigger/table；Specialist 上下文拒绝未知 Profile、`cyber + 非 script`、其他 Run 或过期 mode，且 1024-2048 合法范围动态适配、超过 2048 在落库前拒绝；包移除在 SQL 触发器前稳定返回 `failed_precondition`；相同 operation 跨 Plan/Delivery revision 漂移仍重放原选择；延迟互反外键保证 selection/operation 原子成对；对象读取在解析前后都复核取消；用户角色信封显式列出全部关闭权限位。当前无已知未解决高/中风险；本轮没有新增真实模型、网络、Shell、Docker start、安装钩子或宿主进程执行。ADR 0032 固化边界。
+
+v70 最终本地门禁通过：全仓普通/race 分别 197.6 秒/264.4 秒，vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、9 个文件 21 项前端测试、OpenAPI 无漂移、production build、零漏洞 npm audit、凭证/运行产物/乱码/43 份 Markdown 链接/diff 扫描和隔离真实 CLI schema-v70 smoke 均为绿色。Prompt Injection 审计结论分层记录：Go/Policy/Tool Gateway 能硬阻断外部 Skill 借正文获得工具、Shell、网络、写文件、Secret、Scope 或委派权限；模型对事实或工作流的语义误判仍是残余风险，依赖用户角色来源、证据优先提示和操作者复核降低，不能宣称绝对消除。宿主保护策略拒绝递归清理烟测目录，该目录仅位于系统 `%TEMP%` 并等待自动回收，无需人工操作。
+
+双指标更新为：架构完成度仍约 98%（V2 约 99%）；产品可用度约 48-52%，通用 Coding Agent 约 43%，Cyber 自动化约 20%。提升来自外部 Skill 已能真实固定并安全进入 root/Specialist 工作流；HTTP/TUI/Web 仍未投影该来源，真实 Sandbox、完整写工具和 Cyber 工具链仍关闭。下一推荐切片为 schema v71 metadata-only 跨界面来源投影，随后再独立审计 Desktop Go-owned 本地上传预览与 Docker 真实进程状态机。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每次完成一个开发切片后，依次执行功能复核、测试、代码与安全审计、项目记忆更新、Git 提交和 GitHub 推送。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0031-content-addressed-inert-skill-registry.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0032-external-skill-run-context.md`。

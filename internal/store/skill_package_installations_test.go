@@ -208,6 +208,45 @@ func TestSchemaV69UpgradeDoesNotFabricateSkillPackageInstallations(t *testing.T)
 	}
 }
 
+func TestSchemaV70UpgradeDoesNotFabricateExternalSkillSelections(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "external-skill-selections-v69.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range removeSchemaV70ForTestStatements() {
+		if _, err := st.db.ExecContext(ctx, statement); err != nil {
+			_ = st.Close()
+			t.Fatalf("remove schema v70 with %q: %v", statement, err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	upgraded, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = upgraded.Close() })
+	if version, err := upgraded.SchemaVersion(ctx); err != nil || version != LatestSchemaVersion {
+		t.Fatalf("schema v70 upgrade version=%d err=%v", version, err)
+	}
+	var selectionCount, contextCount int
+	if err := upgraded.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM run_external_skill_selections`).Scan(&selectionCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := upgraded.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM root_external_skill_context_preparations`).Scan(&contextCount); err != nil {
+		t.Fatal(err)
+	}
+	if selectionCount != 0 || contextCount != 0 {
+		t.Fatalf("schema v70 fabricated state: selections=%d contexts=%d",
+			selectionCount, contextCount)
+	}
+}
+
 func fixturePackageInstallation(t *testing.T, name, version, operationKey string,
 	createdAt time.Time,
 ) (skills.PackageInstallation, skills.PackageInstallOperation, skills.PackageInstallResult) {
@@ -392,7 +431,7 @@ func assertPackageRemovalSQLPinGuard(t *testing.T, ctx context.Context, st *SQLi
 }
 
 func removeSchemaV69ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV70ForTestStatements(), []string{
 		`DROP TRIGGER skill_package_removals_no_delete`,
 		`DROP TRIGGER skill_package_removals_no_update`,
 		`DROP TRIGGER skill_package_remove_operations_no_delete`,
@@ -412,5 +451,40 @@ func removeSchemaV69ForTestStatements() []string {
 		`DROP TABLE skill_package_installations`,
 		`DROP TABLE skill_package_install_operations`,
 		`DELETE FROM schema_migrations WHERE version = 69`,
+	}...)
+}
+
+func removeSchemaV70ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_specialist_external_skill_context_commit_delete_immutable`,
+		`DROP TRIGGER trg_specialist_external_skill_context_commit_update_immutable`,
+		`DROP TRIGGER trg_specialist_external_skill_context_preparation_delete_immutable`,
+		`DROP TRIGGER trg_specialist_external_skill_context_preparation_update_immutable`,
+		`DROP TRIGGER trg_root_external_skill_context_commit_delete_immutable`,
+		`DROP TRIGGER trg_root_external_skill_context_commit_update_immutable`,
+		`DROP TRIGGER trg_root_external_skill_context_preparation_delete_immutable`,
+		`DROP TRIGGER trg_root_external_skill_context_preparation_update_immutable`,
+		`DROP TRIGGER trg_run_external_skill_selection_operation_delete_immutable`,
+		`DROP TRIGGER trg_run_external_skill_selection_operation_update_immutable`,
+		`DROP TRIGGER trg_run_external_skill_selection_item_delete_immutable`,
+		`DROP TRIGGER trg_run_external_skill_selection_item_update_immutable`,
+		`DROP TRIGGER trg_run_external_skill_selection_delete_immutable`,
+		`DROP TRIGGER trg_run_external_skill_selection_update_immutable`,
+		`DROP TRIGGER trg_specialist_external_skill_context_commit_insert`,
+		`DROP TRIGGER trg_specialist_external_skill_context_preparation_insert`,
+		`DROP TRIGGER trg_root_external_skill_context_commit_insert`,
+		`DROP TRIGGER trg_root_external_skill_context_preparation_insert`,
+		`DROP TRIGGER trg_skill_package_removal_external_selection_guard`,
+		`DROP TRIGGER trg_run_external_skill_selection_operation_insert`,
+		`DROP TRIGGER trg_run_external_skill_selection_item_insert`,
+		`DROP TRIGGER trg_run_external_skill_selection_insert`,
+		`DROP TABLE specialist_external_skill_context_commits`,
+		`DROP TABLE specialist_external_skill_context_preparations`,
+		`DROP TABLE root_external_skill_context_commits`,
+		`DROP TABLE root_external_skill_context_preparations`,
+		`DROP TABLE run_external_skill_selection_operations`,
+		`DROP TABLE run_external_skill_selection_items`,
+		`DROP TABLE run_external_skill_selections`,
+		`DELETE FROM schema_migrations WHERE version = 70`,
 	}
 }

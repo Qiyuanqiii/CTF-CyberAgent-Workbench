@@ -246,6 +246,55 @@ func (a *App) skillCommand(ctx context.Context, args []string) error {
 			result.Removal.RemovedBy, result.Removal.CreatedAt.Format(time.RFC3339Nano),
 			result.Replayed)
 		return nil
+	case "select-external":
+		flags := newFlagSet("skill select-external", a.errOut)
+		tokenBudget := flags.Int("token-budget", skills.DefaultExternalSelectionTokenBudget,
+			"separate conservative external context token budget")
+		operationKey := flags.String("operation-key", "", "stable idempotency key")
+		requestedBy := flags.String("operator", "cli_operator", "operator identity")
+		specialistRef := flags.String("specialist", "",
+			"at most one selected package allowed in Specialist context")
+		confirmed := flags.Bool("confirm-untrusted-skill-context", false,
+			"confirm Run-scoped delivery of untrusted Skill instructions")
+		if err := flags.Parse(reorderFlags(args[1:], map[string]bool{
+			"token-budget": true, "operation-key": true, "operator": true,
+			"specialist": true, "confirm-untrusted-skill-context": false,
+		})); err != nil {
+			return err
+		}
+		if flags.NArg() < 2 {
+			return errors.New("usage: cyberagent skill select-external <run-id> <name>@<version> [name@version...] --operation-key <stable-key> --confirm-untrusted-skill-context [--specialist name@version] [--token-budget 2048] [--operator cli_operator]")
+		}
+		if err := a.ensureStore(); err != nil {
+			return err
+		}
+		result, err := application.NewExternalSkillSelectionService(a.store).Select(ctx,
+			application.SelectExternalSkillsRequest{
+				RunID: flags.Arg(0), PackageRefs: flags.Args()[1:],
+				SpecialistRef: *specialistRef, TokenBudget: *tokenBudget,
+				OperationKey: *operationKey, RequestedBy: *requestedBy,
+				ConfirmUntrustedContext: *confirmed,
+			})
+		if err != nil {
+			return err
+		}
+		printExternalSkillSelection(a, result.Selection)
+		fmt.Fprintf(a.out, "replayed: %t\n", result.Replayed)
+		return nil
+	case "external-selection":
+		if len(args) != 2 {
+			return errors.New("usage: cyberagent skill external-selection <run-id>")
+		}
+		if err := a.ensureStore(); err != nil {
+			return err
+		}
+		selection, err := application.NewExternalSkillSelectionService(a.store).
+			GetForRun(ctx, args[1])
+		if err != nil {
+			return err
+		}
+		printExternalSkillSelection(a, selection)
+		return nil
 	case "select":
 		flags := newFlagSet("skill select", a.errOut)
 		tokenBudget := flags.Int("token-budget", skills.DefaultSelectionTokenBudget,
@@ -396,12 +445,32 @@ func printInstalledSkillPackage(a *App, value skills.InstalledPackage) {
 }
 
 func printExternalSkillBoundary(a *App) {
-	fmt.Fprintln(a.out, "external_run_selection: disabled")
+	fmt.Fprintln(a.out, "external_run_selection: explicit_run_confirmation_required")
 	fmt.Fprintln(a.out, "context_injection_authorized: false")
 	fmt.Fprintln(a.out, "tool_capability_grant: false")
 	fmt.Fprintln(a.out, "import_command_execution: false")
 	fmt.Fprintln(a.out, "import_network_access: false")
 	fmt.Fprintln(a.out, "import_provider_calls: false")
+}
+
+func printExternalSkillSelection(a *App, selection skills.ExternalSelection) {
+	fmt.Fprintf(a.out, "selection_id: %s\nrun_id: %s\nmission_id: %s\nmode_snapshot_id: %s\nmode_revision: %d\nprotocol: %s\nsurface: %s\nprofile: %s\ntoken_budget: %d\ntoken_upper_bound: %d\nitem_count: %d\nselection_fingerprint: %s\ntrust_class: %s\noperator_confirmed: %t\ncontext_delivery_authorized: %t\ntool_capability_grant: %t\nrequested_by: %s\ncreated_at: %s\n",
+		selection.ID, selection.RunID, selection.MissionID, selection.ModeSnapshotID,
+		selection.ModeRevision, selection.ProtocolVersion, selection.Surface,
+		selection.Profile, selection.TokenBudget, selection.TokenUpperBound,
+		selection.ItemCount, selection.Fingerprint,
+		skills.PackageTrustOperatorInstalledUntrusted, selection.OperatorConfirmed,
+		selection.ContextDeliveryAuthorized, selection.ToolCapabilityGrant,
+		selection.RequestedBy, selection.CreatedAt.Format(time.RFC3339Nano))
+	for _, item := range selection.Items {
+		fmt.Fprintf(a.out, "skill[%d]: %s installation_id=%s content_sha256=%s archive_sha256=%s object_key=%s bytes=%d token_upper_bound=%d declared_tools=%d specialist_eligible=%t\n",
+			item.Ordinal, skills.FormatInstalledPackageRef(item.Name, item.Version),
+			item.InstallationID, item.ContentSHA256, item.ArchiveSHA256, item.ObjectKey,
+			item.ContentBytes, item.TokenUpperBound, item.ToolDependencyCount,
+			item.SpecialistEligible)
+	}
+	fmt.Fprintln(a.out, "content_role: untrusted_workflow_guidance")
+	fmt.Fprintln(a.out, "shell_network_file_or_tool_grant: false")
 }
 
 func printSkillSelection(a *App, selection skills.Selection) {
