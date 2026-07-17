@@ -14,10 +14,6 @@ import (
 func TestLocalPackageObjectStorePublishesAndVerifiesOneImmutableObject(t *testing.T) {
 	raw, descriptor := objectStoreFixture(t)
 	home := t.TempDir()
-	objects, err := NewLocalPackageObjectStore(home)
-	if err != nil {
-		t.Fatal(err)
-	}
 	const workers = 12
 	results := make(chan error, workers)
 	var wait sync.WaitGroup
@@ -25,6 +21,11 @@ func TestLocalPackageObjectStorePublishesAndVerifiesOneImmutableObject(t *testin
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
+			objects, err := NewLocalPackageObjectStore(home)
+			if err != nil {
+				results <- err
+				return
+			}
 			receipt, putErr := objects.Put(context.Background(), raw, descriptor)
 			if putErr == nil && receipt.ObjectKey == "" {
 				putErr = os.ErrInvalid
@@ -39,6 +40,10 @@ func TestLocalPackageObjectStorePublishesAndVerifiesOneImmutableObject(t *testin
 			t.Fatal(err)
 		}
 	}
+	objects, err := NewLocalPackageObjectStore(home)
+	if err != nil {
+		t.Fatal(err)
+	}
 	receipt, err := objects.Verify(context.Background(), descriptor)
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +55,33 @@ func TestLocalPackageObjectStorePublishesAndVerifiesOneImmutableObject(t *testin
 	}
 	if len(entries) != 1 || entries[0].Name() != filepath.Base(filepath.FromSlash(receipt.ObjectKey)) {
 		t.Fatalf("content-addressed directory entries = %v", entries)
+	}
+}
+
+func TestLocalPackageObjectStoreRejectsSymlinkDirectory(t *testing.T) {
+	raw, descriptor := objectStoreFixture(t)
+	home := t.TempDir()
+	redirect := filepath.Join(home, "redirect")
+	if err := os.Mkdir(redirect, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("redirect", filepath.Join(home, "skill-registry")); err != nil {
+		t.Skipf("symlink creation is unavailable: %v", err)
+	}
+	objects, err := NewLocalPackageObjectStore(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := objects.Put(context.Background(), raw, descriptor); err == nil ||
+		!strings.Contains(err.Error(), "directory") {
+		t.Fatalf("symlink directory error = %v", err)
+	}
+	entries, err := os.ReadDir(redirect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("symlink redirect received object-store entries: %v", entries)
 	}
 }
 

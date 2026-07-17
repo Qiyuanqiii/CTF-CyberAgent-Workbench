@@ -136,14 +136,18 @@ retained objects, Run-pinned
 removal rejection in both Go and SQL, and v68-to-v69 migration without
 fabricated installations.
 
-The final local gate passed the full ordinary and race suites in 265.4s and
-260.7s. Vet, zero-warning staticcheck, module verification/tidy diff,
+The final local gate passed the full ordinary and race suites in 259.7s and
+275.3s. Vet, zero-warning staticcheck, module verification/tidy diff,
 zero-finding govulncheck, OpenAPI drift checks, 21 frontend tests, the Vite
 production build, and zero-vulnerability npm audit are green. No real model,
 network request, Shell, Docker operation, installer hook, or host process was
 run by this slice. Two real Services generating independent candidate IDs and
 timestamps converged through 20 ordinary and 10 race repetitions for both
-import and removal. No unresolved high- or medium-severity issue is known.
+import and removal. Initial Linux CI run `29556933994` exposed concurrent nested
+directory preparation through `os.Root.MkdirAll`; publication now creates and
+`Lstat`-verifies every path component and rejects symlink redirection. Twelve
+independent Stores passed 100 ordinary and 20 race repetitions. No unresolved
+high- or medium-severity issue is known.
 
 ## Follow-Up
 

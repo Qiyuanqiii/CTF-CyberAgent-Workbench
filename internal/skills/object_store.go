@@ -13,6 +13,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 )
 
 type PackageObjectStore interface {
@@ -62,7 +63,7 @@ func (s *LocalPackageObjectStore) Put(ctx context.Context, raw []byte,
 	defer root.Close()
 	objectKey, _ := PackageObjectKey(descriptor.ArchiveSHA256)
 	parent := path.Dir(path.Join(PackageObjectRoot, objectKey))
-	if err := root.MkdirAll(parent, 0o700); err != nil {
+	if err := preparePackageObjectDirectory(root, parent); err != nil {
 		return PackageObjectReceipt{}, errors.New("skill package object directory cannot be prepared")
 	}
 	fullKey := path.Join(PackageObjectRoot, objectKey)
@@ -107,6 +108,24 @@ func (s *LocalPackageObjectStore) Put(ctx context.Context, raw []byte,
 		_ = syncPackageObjectDirectory(root, parent)
 		return receipt, nil
 	}
+}
+
+func preparePackageObjectDirectory(root *os.Root, name string) error {
+	if root == nil || !fs.ValidPath(name) || name == "." {
+		return errors.New("skill package object directory is invalid")
+	}
+	current := ""
+	for _, component := range strings.Split(name, "/") {
+		current = path.Join(current, component)
+		if err := root.Mkdir(current, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+		info, err := root.Lstat(current)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return errors.New("skill package object directory identity is invalid")
+		}
+	}
+	return nil
 }
 
 func (s *LocalPackageObjectStore) Verify(ctx context.Context,
