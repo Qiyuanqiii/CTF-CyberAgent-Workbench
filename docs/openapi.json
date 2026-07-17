@@ -505,7 +505,7 @@
       "get": {
         "operationId": "getRun",
         "summary": "Inspect a Run",
-        "description": "Returns Run, Mission, checkpoint, tool usage, token-free execution-lease metadata, and the read-only Plan/Delivery projection when present.",
+        "description": "Returns Run, Mission, checkpoint, tool usage, token-free execution-lease metadata, and read-only Plan/Delivery and external-Skill metadata projections when present.",
         "tags": [
           "Runs"
         ],
@@ -1439,6 +1439,84 @@
           }
         },
         "x-cyberagent-read-only": false
+      }
+    },
+    "/api/v1/runs/{run_id}/external-skills": {
+      "get": {
+        "operationId": "getRunExternalSkills",
+        "summary": "Inspect bounded external Skill provenance",
+        "description": "Returns Run-pinned external Skill names, versions, trust and bounded delivery counts without package content, paths, digests, installation identities, requester identities, or operation identities.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ExternalSkillProjectionView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
       }
     },
     "/api/v1/runs/{run_id}/fanout-plans": {
@@ -3308,6 +3386,166 @@
         ],
         "type": "object"
       },
+      "ExternalSkillDeliveryView": {
+        "additionalProperties": false,
+        "properties": {
+          "committed": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "prepared": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prepared",
+          "committed"
+        ],
+        "type": "object"
+      },
+      "ExternalSkillProjectionItemView": {
+        "additionalProperties": false,
+        "properties": {
+          "declared_tool_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ordinal": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "specialist_eligible": {
+            "type": "boolean"
+          },
+          "token_upper_bound": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "trust_class": {
+            "enum": [
+              "operator_installed_untrusted"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ordinal",
+          "name",
+          "version",
+          "token_upper_bound",
+          "trust_class",
+          "declared_tool_count",
+          "specialist_eligible"
+        ],
+        "type": "object"
+      },
+      "ExternalSkillProjectionView": {
+        "additionalProperties": false,
+        "properties": {
+          "context_delivery_authorized": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "item_count": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalSkillProjectionItemView"
+            },
+            "type": "array"
+          },
+          "mode_revision": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "operator_confirmed": {
+            "type": "boolean"
+          },
+          "profile": {
+            "enum": [
+              "code",
+              "review",
+              "learn",
+              "script"
+            ],
+            "type": "string"
+          },
+          "protocol_version": {
+            "enum": [
+              "external_skill_projection.v1"
+            ],
+            "type": "string"
+          },
+          "root_delivery": {
+            "$ref": "#/components/schemas/ExternalSkillDeliveryView"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "specialist_delivery": {
+            "$ref": "#/components/schemas/ExternalSkillDeliveryView"
+          },
+          "surface": {
+            "enum": [
+              "code",
+              "cyber"
+            ],
+            "type": "string"
+          },
+          "token_budget": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "token_upper_bound": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "tool_capability_grant": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "mode_revision",
+          "surface",
+          "profile",
+          "token_budget",
+          "token_upper_bound",
+          "item_count",
+          "operator_confirmed",
+          "context_delivery_authorized",
+          "tool_capability_grant",
+          "root_delivery",
+          "specialist_delivery",
+          "items",
+          "created_at"
+        ],
+        "type": "object"
+      },
       "FanoutExecutionShardView": {
         "additionalProperties": false,
         "properties": {
@@ -4611,6 +4849,9 @@
           },
           "execution_profile": {
             "$ref": "#/components/schemas/RunExecutionProfileView"
+          },
+          "external_skills": {
+            "$ref": "#/components/schemas/ExternalSkillProjectionView"
           },
           "mission": {
             "$ref": "#/components/schemas/MissionView"

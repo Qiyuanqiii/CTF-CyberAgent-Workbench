@@ -9,6 +9,7 @@ import (
 
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
+	"cyberagent-workbench/internal/skills"
 )
 
 const (
@@ -39,6 +40,12 @@ type RunProjection struct {
 	SteeringPrepared        int
 	SteeringCommitted       int
 	SteeringCancelled       int
+	ExternalSkillCount      int
+	ExternalSkillTokens     int
+	ExternalRootPrepared    int
+	ExternalRootCommitted   int
+	ExternalChildPrepared   int
+	ExternalChildCommitted  int
 }
 
 func (m *Model) CurrentRunProjection() (RunProjection, bool) {
@@ -70,7 +77,35 @@ func (m *Model) CurrentRunProjection() (RunProjection, bool) {
 	projection.SteeringPrepared = m.runContext.Steering.Prepared
 	projection.SteeringCommitted = m.runContext.Steering.Committed
 	projection.SteeringCancelled = m.runContext.Steering.Cancelled
+	if external := m.runContext.ExternalSkills; external != nil {
+		projection.ExternalSkillCount = external.ItemCount
+		projection.ExternalSkillTokens = external.TokenUpperBound
+		projection.ExternalRootPrepared = external.RootPreparedCount
+		projection.ExternalRootCommitted = external.RootCommittedCount
+		projection.ExternalChildPrepared = external.SpecialistPreparedCount
+		projection.ExternalChildCommitted = external.SpecialistCommittedCount
+	}
 	return projection, true
+}
+
+func loadExternalSkillProjectionContext(ctx context.Context, stateStore RunStateStore,
+	run domain.Run, mode domain.RunModeSnapshot,
+) (*skills.ExternalSkillProjection, error) {
+	projectionStore, ok := any(stateStore).(externalSkillProjectionStore)
+	if !ok {
+		return nil, nil
+	}
+	value, found, err := projectionStore.GetExternalSkillProjectionByRun(ctx, run.ID)
+	if err != nil || !found {
+		return nil, err
+	}
+	if err := value.Validate(); err != nil || value.RunID != run.ID ||
+		value.Surface != mode.Surface || value.Profile != mode.Profile ||
+		value.ModeRevision > mode.Revision {
+		return nil, errors.New("TUI external Skill projection is invalid or cross-Run")
+	}
+	copy := skills.CloneExternalSkillProjection(value)
+	return &copy, nil
 }
 
 func loadPlanDeliveryContext(ctx context.Context, stateStore RunStateStore,

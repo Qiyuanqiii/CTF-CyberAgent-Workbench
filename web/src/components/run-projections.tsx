@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FileSearch, GitBranch, Network, ScanSearch, ShieldAlert } from "lucide-react";
+import { FileSearch, GitBranch, Network, PackageCheck, ScanSearch, ShieldAlert } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import type {
   AgentGraphView,
   DelegationView,
+  ExternalSkillProjectionView,
   FanoutPlanView,
   FindingReportSummaryView,
   FindingReportView,
@@ -12,6 +13,38 @@ import type {
 import { usePagedResource } from "../hooks/use-paged-resource";
 import { formatBytes, formatDate, formatNumber, shortID } from "../lib/format";
 import { EmptyState, ErrorState, LoadMoreButton, LoadingState, StatusBadge } from "./common";
+
+export function ExternalSkillsPanel({ projection }: { projection: ExternalSkillProjectionView }) {
+  return (
+    <section className="detail-section external-skills-section" aria-label="External Skill provenance">
+      <div className="section-heading">
+        <h2><PackageCheck aria-hidden="true" size={15} />External skills</h2>
+        <span>{formatNumber(projection.item_count)} selected</span>
+      </div>
+      <dl className="detail-grid compact external-skill-summary">
+        <Metric label="Surface" value={`${projection.surface} / ${projection.profile}`} />
+        <Metric label="Mode revision" value={formatNumber(projection.mode_revision)} />
+        <Metric label="Token bound" value={`${formatNumber(projection.token_upper_bound)} / ${formatNumber(projection.token_budget)}`} />
+        <Metric label="Root delivery" value={`${formatNumber(projection.root_delivery.committed)} / ${formatNumber(projection.root_delivery.prepared)}`} />
+        <Metric label="Specialist delivery" value={`${formatNumber(projection.specialist_delivery.committed)} / ${formatNumber(projection.specialist_delivery.prepared)}`} />
+        <Metric label="Operator confirmation" value={projection.operator_confirmed ? "Confirmed" : "Missing"} />
+        <Metric label="Context delivery" value={projection.context_delivery_authorized ? "Authorized" : "Closed"} />
+        <Metric label="Tool authority" value={projection.tool_capability_grant ? "Granted" : "Closed"} />
+      </dl>
+      <ol className="external-skill-list">
+        {projection.items.map((item) => (
+          <li key={`${item.ordinal}-${item.name}-${item.version}`}>
+            <span className="external-skill-order">#{item.ordinal}</span>
+            <div><strong>{item.name}@{item.version}</strong><small>{item.trust_class}</small></div>
+            <span>{formatNumber(item.token_upper_bound)} tokens max</span>
+            <span>{formatNumber(item.declared_tool_count)} declared tools</span>
+            <span>{item.specialist_eligible ? "Specialist" : "Root only"}</span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
 
 export function AgentGraphPanel({ client, runID }: ProjectionProps) {
   const query = useQuery({

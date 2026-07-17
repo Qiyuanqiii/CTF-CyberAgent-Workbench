@@ -796,6 +796,16 @@ v70 最终本地门禁通过：全仓普通/race 分别 197.6 秒/264.4 秒，ve
 
 双指标更新为：架构完成度仍约 98%（V2 约 99%）；产品可用度约 48-52%，通用 Coding Agent 约 43%，Cyber 自动化约 20%。提升来自外部 Skill 已能真实固定并安全进入 root/Specialist 工作流；HTTP/TUI/Web 仍未投影该来源，真实 Sandbox、完整写工具和 Cyber 工具链仍关闭。下一推荐切片为 schema v71 metadata-only 跨界面来源投影，随后再独立审计 Desktop Go-owned 本地上传预览与 Docker 真实进程状态机。
 
+schema v71 有界外部 Skill 来源与交付只读投影切片已完成实现，任务 ID 为 `P7-Bounded-External-Skill-Provenance-Projection-v71`。Go 新增严格 `external_skill_projection.v1` 类型，SQLite 新增两张只读 view，并通过 Store 将一份选择投影成最多四个条目和一个 Specialist。公开字段仅包含 surface/profile、模式修订、token 预算/上界、名称/版本、固定信任类别、声明工具数量、操作者已确认/上下文已授权的历史事实，以及 root/Specialist preparation/commit 计数；`tool_capability_grant` 固定为 false。
+
+HTTP 新增 `GET /api/v1/runs/{run_id}/external-skills`，并在 Run detail 中可选嵌入同一投影；OpenAPI 扩展为 26 个 path、61 个 schema、23 个只读 GET 和原有三个 control POST。TUI 增加只读 Skills activity，React Run Overview 增加响应式 External Skills panel。三个界面都没有安装、选择、审批、授权或执行控件，且 DTO/类型从结构上排除正文、路径、字节数、所有 hash/digest/fingerprint、选择/安装/模式快照 ID、operation key，以及操作者/请求者/attempt/agent 身份。
+
+定向测试已覆盖投影字段、clone 隔离、空 Run、跨 Run 范围、SQLite view 不可写、v70 原地升级不伪造选择或事件、HTTP endpoint/Run detail、OpenAPI 隐私、TUI 安全显示和 React 无 mutation 渲染。切片审计进一步把四个 preparation/commit 计数子查询都显式绑定 `preparation.run_id = selection.run_id`，减少对间接 ID 约束的依赖并改善查询作用域。本切片只读取元数据，没有打开 Skill 对象、执行正文、调用模型/网络/工具、接触 Docker、启动 Shell/宿主进程或写入新的 Run 事件。
+
+v71 最终本地门禁通过：全仓普通/race 分别用时 227.1 秒/301.1 秒；vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、OpenAPI/TypeScript 双次生成哈希一致、严格 TypeScript、9 个文件 22 项前端测试、production build、零漏洞 npm audit、用户测试 key/运行产物/生产 `exec.Command`/乱码/54 份 Markdown 与 78 条相对链接/diff 扫描和隔离真实二进制 schema-v71 Workspace smoke 均为绿色。最终健壮性审计补充了有效 Run 无外部选择时 detail 必须省略 `external_skills` 且独立 endpoint 必须返回 404 的负向普通/race 回归（14.7 秒/17.6 秒）。当前无已知未解决高/中风险；未调用真实 Provider、Agent-controlled Shell/宿主进程、Docker、安装钩子或外部网络。smoke 根位于系统临时目录等待正常回收，无需人工操作。
+
+双指标更新为：架构完成度仍约 98%（V2 约 99%）；产品可用度约 49-53%，通用 Coding Agent 约 44%，Cyber 自动化约 20%。提升来自操作者现在能在 CLI、TUI 和 Web 一致核对外部 Skill 的来源、预算与实际交付状态；真实 Sandbox、完整写工具和 Cyber 工具链仍关闭。下一推荐切片是 Desktop D1-A 的 Go-owned 本地包验证预览，只校验并显示风险元数据，不安装、不持久化、不执行、不联网、不调用模型/工具。真正安装 mutation 继续作为后续独立安全审计切片。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。

@@ -3,6 +3,8 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,9 +20,12 @@ import (
 
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
+	"cyberagent-workbench/internal/runmutation"
 	"cyberagent-workbench/internal/session"
+	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/store"
 	"cyberagent-workbench/internal/toolgateway"
 )
@@ -38,18 +43,19 @@ type apiTestEnvelope struct {
 }
 
 type apiFixture struct {
-	api        *API
-	store      *store.SQLiteStore
-	dbPath     string
-	run        domain.Run
-	root       domain.AgentNode
-	workItems  []domain.WorkItem
-	notes      []domain.Note
-	artifactID string
-	secret     string
-	leaseID    string
-	checkpoint domain.SupervisorCheckpoint
-	attempt    llm.ModelAttempt
+	api               *API
+	store             *store.SQLiteStore
+	dbPath            string
+	run               domain.Run
+	root              domain.AgentNode
+	workItems         []domain.WorkItem
+	notes             []domain.Note
+	artifactID        string
+	secret            string
+	leaseID           string
+	checkpoint        domain.SupervisorCheckpoint
+	attempt           llm.ModelAttempt
+	externalSelection skills.ExternalSelection
 }
 
 func newAPIFixture(t *testing.T) *apiFixture {
@@ -69,6 +75,7 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	externalSelection := prepareAPIExternalSkillProjection(t, st, run)
 	run, err = runs.Start(ctx, run.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -148,6 +155,21 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := st.PrepareExternalRootSkillContext(ctx, turn.Checkpoint,
+		skills.ExternalRootContextPreparationRequest{
+			RunID: run.ID, MissionID: run.MissionID, RootAgentID: root.ID,
+			SupervisorAttemptID: turn.Checkpoint.AttemptID,
+			Turn:                turn.Checkpoint.NextTurn, SelectionID: externalSelection.ID,
+			ProtocolVersion: skills.ExternalContextProtocolVersion,
+			Surface:         externalSelection.Surface, Profile: externalSelection.Profile,
+			SelectionFingerprint: externalSelection.Fingerprint,
+			ContextFingerprint: runmutation.Fingerprint("http-api-external-context",
+				externalSelection.Fingerprint),
+			ItemCount: externalSelection.ItemCount, TokenBudget: externalSelection.TokenBudget,
+			TokenUpperBound: externalSelection.TokenUpperBound,
+		}); err != nil {
+		t.Fatal(err)
+	}
 	attempt := llm.ModelAttempt{
 		Number: 1, TransportAttempt: 1, MaxAttempts: 3, Provider: "http-api-test", Model: "test-model",
 	}
@@ -163,7 +185,120 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	return &apiFixture{api: api, store: st, dbPath: dbPath, run: run, root: root,
 		workItems: workItems, notes: notes,
 		artifactID: reviewed.Result.Metadata["artifact_stdout_id"], secret: secret,
-		leaseID: acquiredLease.Lease.LeaseID, checkpoint: turn.Checkpoint, attempt: attempt}
+		leaseID: acquiredLease.Lease.LeaseID, checkpoint: turn.Checkpoint, attempt: attempt,
+		externalSelection: externalSelection}
+}
+
+func prepareAPIExternalSkillProjection(t *testing.T, st *store.SQLiteStore,
+	run domain.Run,
+) skills.ExternalSelection {
+	t.Helper()
+	ctx := context.Background()
+	const name = "api-projection-review"
+	const version = "1.0.0"
+	content := []byte("# API projection review\n")
+	contentDigest := sha256.Sum256(content)
+	archiveDigest := sha256.Sum256([]byte("archive:" + name + "@" + version))
+	createdAt := time.Now().UTC().Add(-time.Minute)
+	operationDigest := runmutation.Fingerprint("skill_package_install_operation.v1",
+		"api-projection-install-operation")
+	installation := skills.PackageInstallation{
+		ID: idgen.New("skill-install"), ProtocolVersion: skills.PackageInstallationProtocolVersion,
+		Name: name, Version: version, Surface: domain.ExecutionSurfaceCode,
+		Manifest: skills.Manifest{
+			Protocol: skills.ProtocolVersion, Name: name, Version: version,
+			Description: "External API projection fixture.",
+			Profiles:    []domain.Profile{domain.ProfileReview},
+			ToolDependencies: []toolgateway.ToolName{
+				toolgateway.ListWorkspaceTool, toolgateway.ReadFileTool,
+			},
+			ContentPath:   skills.PackageContentPath,
+			ContentSHA256: hex.EncodeToString(contentDigest[:]),
+			ContentBytes:  len(content), ContentTokenUpperBound: len(content),
+		},
+		ArchiveSHA256: hex.EncodeToString(archiveDigest[:]), ArchiveBytes: 512,
+		UncompressedBytes: 256, EntryCount: skills.PackageEntryCount,
+		PackageFingerprint: runmutation.Fingerprint("package", name, version,
+			hex.EncodeToString(contentDigest[:])),
+		TrustClass: skills.PackageTrustOperatorInstalledUntrusted,
+		RiskCodes: []skills.PackageRiskCode{
+			skills.PackageRiskUntrustedInstructions, skills.PackageRiskDeclaredToolsOnly,
+		},
+		OperatorConfirmed: true, OperationKeyDigest: operationDigest,
+		InstalledBy: "api-fixture-operator", CreatedAt: createdAt,
+	}
+	installation.RequestFingerprint = skills.PackageInstallationIntentFingerprint(installation)
+	installation.InstallationFingerprint = skills.PackageInstallationFingerprint(installation)
+	operation := skills.PackageInstallOperation{
+		KeyDigest: operationDigest, RequestFingerprint: installation.RequestFingerprint,
+		InstallationID: installation.ID, Name: name, Version: version,
+		Surface: installation.Surface, InstalledBy: installation.InstalledBy,
+		CreatedAt: installation.CreatedAt,
+	}
+	objectKey, err := skills.PackageObjectKey(installation.ArchiveSHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := skills.NewPackageInstallResult(installation, skills.PackageObjectReceipt{
+		Descriptor: skills.DescriptorForInstallation(installation), ObjectKey: objectKey,
+	}, createdAt.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := st.PreparePackageInstallation(ctx, installation, operation); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.CompletePackageInstallation(ctx, result); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := application.NewExternalSkillSelectionService(st).Select(ctx,
+		application.SelectExternalSkillsRequest{
+			RunID: run.ID, PackageRefs: []string{name + "@" + version},
+			SpecialistRef: name + "@" + version, TokenBudget: 1024,
+			OperationKey:            "api-projection-selection-operation",
+			RequestedBy:             "private-api-projection-operator",
+			ConfirmUntrustedContext: true,
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return selected.Selection
+}
+
+func assertExternalSkillResponseIsMetadataOnly(t *testing.T, body string,
+	selection skills.ExternalSelection,
+) {
+	t.Helper()
+	assertExternalSkillPrivateValuesOmitted(t, body, selection)
+	for _, forbiddenField := range []string{
+		`"selection_id"`, `"mission_id"`, `"mode_snapshot_id"`,
+		`"installation_id"`, `"requested_by"`, `"object_key"`, `"content_sha256"`,
+		`"archive_sha256"`, `"package_fingerprint"`,
+	} {
+		if strings.Contains(body, forbiddenField) {
+			t.Fatalf("external Skill HTTP projection exposed private field %s: %s",
+				forbiddenField, body)
+		}
+	}
+}
+
+func assertExternalSkillPrivateValuesOmitted(t *testing.T, body string,
+	selection skills.ExternalSelection,
+) {
+	t.Helper()
+	for _, forbidden := range []string{
+		selection.ID, selection.ModeSnapshotID,
+		selection.Fingerprint, selection.RequestedBy,
+		selection.Items[0].InstallationID, selection.Items[0].InstallationFingerprint,
+		selection.Items[0].InstallResultFingerprint, selection.Items[0].ContentSHA256,
+		selection.Items[0].ArchiveSHA256, selection.Items[0].PackageFingerprint,
+		selection.Items[0].ObjectKey,
+	} {
+		if forbidden != "" && strings.Contains(body, forbidden) {
+			t.Fatalf("external Skill HTTP projection leaked private value %q: %s",
+				forbidden, body)
+		}
+	}
 }
 
 func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *testing.T) {
@@ -206,6 +341,8 @@ func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *te
 		strings.Contains(runDetailResponse.Body.String(), steering.Message.ContentSHA256) {
 		t.Fatal("Run detail exposed private Supervisor or operator steering data")
 	}
+	assertExternalSkillPrivateValuesOmitted(t, runDetailResponse.Body.String(),
+		fixture.externalSelection)
 	var runDetail RunDetailView
 	decodeData(t, runDetailResponse, &runDetail)
 	if runDetail.Run.ID != fixture.run.ID || runDetail.Mission.Goal == "" || runDetail.Checkpoint == nil ||
@@ -219,13 +356,27 @@ func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *te
 		runDetail.Steering.Pending != 1 || runDetail.Steering.Prepared != 0 ||
 		len(runDetail.Steering.Messages) != 1 ||
 		runDetail.Steering.Messages[0].ID != steering.Message.ID ||
-		runDetail.Steering.Messages[0].Sequence != 1 {
+		runDetail.Steering.Messages[0].Sequence != 1 || runDetail.ExternalSkills == nil ||
+		runDetail.ExternalSkills.ProtocolVersion != skills.ExternalSkillProjectionProtocolVersion ||
+		runDetail.ExternalSkills.ItemCount != 1 || len(runDetail.ExternalSkills.Items) != 1 ||
+		runDetail.ExternalSkills.Items[0].Name != "api-projection-review" {
 		t.Fatalf("unexpected Run detail: %#v", runDetail)
 	}
 	if strings.Contains(runDetailResponse.Body.String(), `"lease_id"`) {
 		t.Fatal("Run detail exposed the execution fencing token")
 	}
-
+	externalSkillsResponse := fixture.get(t,
+		"/api/v1/runs/"+fixture.run.ID+"/external-skills")
+	assertExternalSkillResponseIsMetadataOnly(t, externalSkillsResponse.Body.String(),
+		fixture.externalSelection)
+	var externalSkills ExternalSkillProjectionView
+	decodeData(t, externalSkillsResponse, &externalSkills)
+	if externalSkills.RunID != fixture.run.ID || externalSkills.ItemCount != 1 ||
+		len(externalSkills.Items) != 1 || externalSkills.Items[0].Name != "api-projection-review" ||
+		externalSkills.Items[0].TrustClass != string(skills.PackageTrustOperatorInstalledUntrusted) ||
+		externalSkills.ToolCapabilityGrant || !externalSkills.ContextDeliveryAuthorized {
+		t.Fatalf("unexpected external Skill projection: %#v", externalSkills)
+	}
 	graphResponse := fixture.get(t, "/api/v1/runs/"+fixture.run.ID+"/agent-graph")
 	var graph AgentGraphView
 	decodeData(t, graphResponse, &graph)
@@ -357,6 +508,27 @@ func TestReadAPIExposesDurableStateWithoutArtifactContentOrCheckpointInput(t *te
 	}
 	missing := fixture.get(t, "/api/v1/runs/missing/events")
 	assertAPIError(t, missing, http.StatusNotFound, "NOT_FOUND")
+}
+
+func TestExternalSkillProjectionIsAbsentWithoutRunSelection(t *testing.T) {
+	fixture := newAPIFixture(t)
+	_, unselectedRun, err := application.NewRunService(fixture.store).Create(
+		context.Background(), application.CreateRunRequest{
+			Goal: "Run without external Skill provenance", Profile: "review",
+			Budget: domain.Budget{MaxTurns: 2, MaxTokens: 1024},
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unselectedDetail := fixture.get(t, "/api/v1/runs/"+unselectedRun.ID)
+	if unselectedDetail.Code != http.StatusOK ||
+		strings.Contains(unselectedDetail.Body.String(), `"external_skills"`) {
+		t.Fatalf("Run without an external selection fabricated projection data: %s",
+			unselectedDetail.Body.String())
+	}
+	assertAPIError(t, fixture.get(t,
+		"/api/v1/runs/"+unselectedRun.ID+"/external-skills"),
+		http.StatusNotFound, "NOT_FOUND")
 }
 
 func TestReadAPIPaginationCursorIsOpaqueScopedAndBounded(t *testing.T) {

@@ -1,6 +1,6 @@
 # CyberAgent Workbench Custom Skill Package Plan
 
-状态：`skill_package.v1` 纯内存校验、schema v69 内容寻址本地 Registry，以及 schema v70 外部 Skill Run 固定选择与最小上下文均已完成。CLI 可显式确认导入、查询、选择和追加移除 tombstone；HTTP/桌面上传、签名与 Marketplace 尚未实现。
+状态：`skill_package.v1` 纯内存校验、schema v69 内容寻址本地 Registry、schema v70 外部 Skill Run 固定选择与最小上下文，以及 schema v71 安全只读来源投影均已完成。CLI 可显式确认导入、查询、选择和追加移除 tombstone；HTTP/桌面上传、签名与 Marketplace 尚未实现。
 
 ## 当前能力
 
@@ -21,7 +21,7 @@
 - `cyberagent skill select`
 - `cyberagent skill selection`
 
-其中 `skill package validate` 只通过有界普通文件读取和纯内存 parser 返回 metadata-only 风险预览，不创建数据库、不落盘、不安装、不执行正文，也不访问网络、Provider 或工具。schema v69 的 `skill import` 在显式确认后只增加不可变元数据与原始包对象，仍不执行正文、联网、调用 Provider/工具或授予能力。schema v70 再要求独立 Run 级确认，固定精确 active 版本，并只把脱敏正文作为用户角色的非可信工作流指导交付；包内工具声明不授权。项目目前没有签名、HTTP 上传端点或桌面文件选择入口；内部 `LoadFS` 仍不能被描述为用户导入功能。
+其中 `skill package validate` 只通过有界普通文件读取和纯内存 parser 返回 metadata-only 风险预览，不创建数据库、不落盘、不安装、不执行正文，也不访问网络、Provider 或工具。schema v69 的 `skill import` 在显式确认后只增加不可变元数据与原始包对象，仍不执行正文、联网、调用 Provider/工具或授予能力。schema v70 再要求独立 Run 级确认，固定精确 active 版本，并只把脱敏正文作为用户角色的非可信工作流指导交付；包内工具声明不授权。schema v71 仅向 HTTP、TUI 和 React 投影有界来源与交付状态，不暴露正文、文件路径、hash/digest/fingerprint、内部选择/安装 ID、操作者身份或 operation key。项目目前没有签名、HTTP 上传端点或桌面文件选择入口；内部 `LoadFS` 仍不能被描述为用户导入功能。
 
 ## 第一版包边界
 
@@ -39,6 +39,7 @@
 - 导入不会执行正文、脚本、命令、网络请求或 Provider 调用。
 - 外部包固定标记为 `operator_installed_untrusted`；安装不会自动影响 Run，schema v70 另需操作者显式确认精确 Run 选择。
 - 上下文交付会重新执行版本/hash/bytes/Profile/对象语义精确复核、secret redaction、独立 token 预算和 capability=false 来源记录；正文只进入当前 Provider request 的用户角色信封。
+- schema v71 只读投影固定 `tool_capability_grant=false`，只报告声明工具数量，不返回工具名称，更不把声明提升为授权；投影按 Run 显式关联并限制最多四个条目、一个 Specialist。
 - Code 与 Cyber Catalog 分离。Cyber 默认不继承 Code Skill；Script Profile 只能使用明确兼容的窄化脚本指导。
 
 ## 本地 Registry
@@ -82,14 +83,16 @@ Desktop D1 阶段：
 1. [x] 固定 `skill_package.v1` 和威胁模型，完成纯内存 parser/validator/fuzzer 与 metadata-only CLI 校验，不写磁盘。
 2. [x] schema v69 增加 content-addressed 本地 Registry、不可变安装/移除账本、原子导入/恢复和 CLI；导入保持惰性。
 3. [x] schema v70 将用户 Skill 纳入 Run 的精确版本选择、root/Specialist 最小上下文和 Code/Cyber 分离测试；安装与 Run 上下文使用两次独立确认。
-4. [ ] 在 Desktop D1 增加 Go-owned 文件选择、验证预览和确认安装；HTTP mutation 必须单独审计。
-5. [ ] 最后评估签名包、团队 Catalog 与 Marketplace；远程自动安装不属于基础版本。
+4. [x] schema v71 增加按 Run 隔离的有界只读来源/交付投影，并接入 HTTP/OpenAPI、TUI 与 React；所有内容、摘要和私有身份保持在边界内。
+5. [ ] 在 Desktop D1-A 增加 Go-owned 本地验证预览；确认安装及 HTTP mutation 必须作为后续独立切片审计。
+6. [ ] 最后评估签名包、团队 Catalog 与 Marketplace；远程自动安装不属于基础版本。
 
 ## 已验证基线
 
 - v69 最终全仓普通/race 测试分别通过于 259.7 秒/275.3 秒；vet、零告警 staticcheck、module verify/tidy diff 与零可达漏洞 govulncheck 通过。
 - parser 的既有 20 秒约 2645 万次 fuzz 基线保持有效；新增对象发布、Store、Application 和 CLI 定向测试覆盖三轮 race、双 Store 收敛、崩溃恢复、腐坏/symlink/取消、伪造收据和 SQL 旁路；真实双 Service 独立生成候选身份的导入/移除收敛另通过 20 轮普通与 10 轮 race。首次 Linux CI run `29556933994` 暴露并发嵌套目录准备失败；逐级创建并验证真实目录后，12 个独立 Store 通过 100 轮普通与 20 轮 race。
-- TypeScript/OpenAPI/production build、9 个文件 21 项前端测试、零漏洞 npm audit 通过；v69 未改变 HTTP 契约。
+- TypeScript/OpenAPI/production build、9 个文件 22 项前端测试与零漏洞 npm audit 已在 v71 定向基线通过；v71 新增一个只读 GET path 和三个安全 DTO schema。
+- v71 最终全仓普通/race 分别通过于 227.1 秒/301.1 秒；vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、确定性生成、仓库隐私/diff 扫描与隔离真实 CLI schema-v71 smoke 全绿。空选择 Run 的 detail 省略/endpoint 404 普通与 race 回归也已通过。
 - 审计修复旧 schema 夹具未先移除 v69 trigger、错误文本静态规则、冗余临时清理状态、对象收据接口绑定、发布前取消点、并发请求因独立 ID/时间被误判为改意图，以及 Manifest 自由文本 description 未脱敏进入 SQLite；当前无已知未解决高/中风险。
 - 首次 Linux CI run `29556933994` 暴露并发嵌套目录准备失败；修复提交 `d28b100` 的 GitHub Actions run `29557803407` 已全绿（Go/Linux 3 分 21 秒，TypeScript 23 秒）。
 
@@ -98,5 +101,5 @@ Desktop D1 阶段：
 - 恶意 ZIP、路径逃逸、链接、特殊文件、超大包、重复项、Unicode/大小写碰撞和内容 hash 漂移全部失败关闭。
 - 导入前后不会执行命令、访问网络、调用模型或改变工具权限。
 - 并发导入、重启恢复和相同 operation 重放收敛到同一不可变版本。
-- v69 已保证安装与 tombstone 跨重启恢复；v70 已完成外部 Run 固定版本、Go/SQL 移除门禁、root/Specialist 上下文恢复与首次模型调用原子提交。
+- v69 已保证安装与 tombstone 跨重启恢复；v70 已完成外部 Run 固定版本、Go/SQL 移除门禁、root/Specialist 上下文恢复与首次模型调用原子提交；v71 已完成按 Run 隔离、不可写且不含正文/摘要/私有身份的来源与交付投影。
 - CLI 与 Desktop 对同一包产生相同 digest、风险预览、错误码和安装结果。

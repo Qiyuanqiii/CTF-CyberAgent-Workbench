@@ -198,6 +198,16 @@ td code { font-size: 11px; }
 .projection-metrics dd { margin: 0; overflow-wrap: anywhere; font-size: 11px; }
 .tag-line { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 15px 13px; }
 .tag-line code { padding: 2px 5px; border: 1px solid #dce3e7; border-radius: 3px; background: #f5f7f8; color: #44535f; font-size: 10px; }
+.external-skill-summary { margin-top: 14px; }
+.external-skill-summary > div { min-width: 0; }
+.external-skill-summary dt { margin-bottom: 4px; color: var(--muted); font-size: 9px; text-transform: uppercase; }
+.external-skill-summary dd { margin: 0; overflow-wrap: anywhere; font-size: 11px; }
+.external-skill-list { margin: 15px 0 0; padding: 0; border-top: 1px solid var(--border); list-style: none; }
+.external-skill-list li { min-height: 48px; display: grid; grid-template-columns: 34px minmax(150px, 1fr) minmax(100px, auto) minmax(110px, auto) 76px; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 11px; }
+.external-skill-list li > div { min-width: 0; display: grid; gap: 3px; }
+.external-skill-list strong, .external-skill-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.external-skill-list small, .external-skill-list li > span { color: var(--muted); }
+.external-skill-order { font-family: monospace; }
 .completion-summary { display: flex; align-items: flex-start; gap: 9px; padding: 11px 15px; border-top: 1px solid var(--border); background: var(--surface-subtle); font-size: 12px; line-height: 1.5; }
 .assignment-list { border-bottom: 1px solid var(--border); }
 .assignment-list section { padding: 12px 15px; border-bottom: 1px solid #e7ebee; }
@@ -295,4 +305,6 @@ td code { font-size: 11px; }
   .session-summary { padding: 0 14px 17px; }
   .message-row header { flex-wrap: wrap; }
   .message-row header time { width: 100%; margin-left: 0; }
+  .external-skill-list li { grid-template-columns: 28px minmax(0, 1fr); align-items: start; gap: 5px 10px; }
+  .external-skill-list li > span:not(.external-skill-order) { grid-column: 2; }
 }

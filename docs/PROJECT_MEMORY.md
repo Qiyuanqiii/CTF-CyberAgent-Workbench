@@ -51,15 +51,15 @@ Read in this order after a long context break:
 ## Current Baseline
 
 - Architecture completion: about 98%; the V2 run-centric control plane is about 99% complete.
-- Product usability: about 48-52% for the complete Code + Cyber product.
-- Generic coding-agent workflow usability: about 43%.
+- Product usability: about 49-53% for the complete Code + Cyber product.
+- Generic coding-agent workflow usability: about 44%.
 - Cyber autonomous-workflow usability: about 20%.
 - These are engineering estimates based on tested roadmap slices, not performance benchmarks. Do not reuse the retired single-axis "overall product vision" percentage.
-- Database schema: v70.
-- `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v70` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
+- Database schema: v71.
+- `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v71` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
 - Main languages: Go control plane, TypeScript React/Vite local console; Rust has not started.
 - Desktop status: no desktop binary or installer exists yet. D0 will evaluate a Wails shell around the existing React console while all business authority stays behind Go HTTP/SSE/OpenAPI; installer/registry/update work is deferred to D2. See `docs/DESKTOP_PLAN.md`.
-- Custom Skill status: the five embedded `skill.v1` guides and explicitly selected external packages are Run-loadable through separate protocols. Schema v69 adds persistent content-addressed import/history; schema v70 adds a second explicitly confirmed exact Run selection and redacted user-role root/Specialist context. External packages remain untrusted and grant no declared tools; HTTP/Desktop upload is absent. See ADR 0024, ADR 0031, ADR 0032, and `docs/SKILL_PACKAGE_PLAN.md`.
+- Custom Skill status: the five embedded `skill.v1` guides and explicitly selected external packages are Run-loadable through separate protocols. Schema v69 adds persistent content-addressed import/history; schema v70 adds a second explicitly confirmed exact Run selection and redacted user-role root/Specialist context; schema v71 adds bounded read-only provenance across HTTP/TUI/Web. External packages remain untrusted and grant no declared tools; HTTP/Desktop upload is absent. See ADR 0024, ADR 0031, ADR 0032, and `docs/SKILL_PACKAGE_PLAN.md`.
 - Protected-delete status: explicit recursive, absolute/traversing/wildcard, environment-derived, command-substituted, current-home, PowerShell/`cmd`, and common interpreter deletion intents are permanently denied before approval across Shell, ScriptProcess, and Sandbox Policy. This is defense in depth; Local/container process execution remains disabled and a future executor still requires OS/container isolation. See ADR 0025.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
@@ -242,18 +242,26 @@ Root context preparation commits with the corresponding first `model.started`; S
 
 The final local gate passed the full ordinary/race suites in 197.6s/264.4s, vet, zero-warning staticcheck, module verification/tidy diff, zero-finding govulncheck, 21 frontend tests across nine files, OpenAPI drift checks, production build, zero-vulnerability npm audit, repository credential/runtime-artifact/encoding/43-file Markdown-link/diff scans, and an isolated real-CLI schema-v70 smoke. The audit fixed one medium-severity schema defect that had made `installation_id` globally unique, incorrectly preventing one verified installation from being independently selected by later Runs; uniqueness is now scoped to a selection and covered by a second-Run regression. Further hardening binds Specialist provenance to the latest mode in Go and SQL, rejects Specialist packages above 2048 before persistence, dynamically accepts the valid 1024-2048 range, preserves same-operation replay across Plan-to-Delivery drift, pairs selection and operation with a deferred reciprocal foreign key, closes cancellation windows around object parsing, and emits every non-guidance authority field explicitly false. No unresolved high/medium issue is known. No real model, network, Shell, Docker, installer hook, or host process ran. Protected cleanup left the isolated smoke root under the OS temporary directory for normal cleanup; no user action is required. GitHub Actions run `29566538449` passed implementation commit `edc4073` with Go/Linux in 3m42s and TypeScript in 21s.
 
+## Completed External Skill Read Projection Slice (v71)
+
+Schema v71 adds two SQLite read-only views and a separate `external_skill_projection.v1` Go contract. Existing v70 selections become visible without backfill or new events. Runs without an external selection remain absent. The root projection contains Run/mode/surface/Profile, bounded token and item totals, closed authority facts, and root/Specialist prepared/committed counts. Item rows contain only ordinal, name, version, token upper bound, trust class, declared-tool count, and Specialist eligibility.
+
+The safe type cannot represent package bodies, paths, byte sizes, digests/fingerprints, selection/installation/mode-snapshot IDs, requester/operation identities, or attempt/Agent identities. Store tests inspect the view columns, reject writes, verify v70 in-place upgrade without fabricated facts, and scan serialized values for private identities. The same DTO is optional in Run detail and available from read-only `GET /api/v1/runs/{run_id}/external-skills`; the OpenAPI contract now has 26 paths and 61 schemas. TUI adds a read-only `Skills` activity and stable count projection. React adds a button-free Run-overview panel. No control capability, model call, package load, Shell, network, Docker, installer hook, or Agent-controlled host process was added or run.
+
+Final local gates: full ordinary/race suites passed in 227.1s/301.1s; vet, zero-warning staticcheck, module verify/tidy diff, zero-finding govulncheck, deterministic OpenAPI/TypeScript generation, strict TypeScript, 9 files/22 frontend tests, production build, zero-vulnerability npm audit, credential/runtime-artifact/production-process-entry/encoding/54-file and 78-relative-link Markdown/diff scans, and an isolated real-binary schema-v71 Workspace smoke are green. The audit added explicit Run matching to all four preparation/commit count subqueries and a separate ordinary/race HTTP regression for a valid Run without a selection. No unresolved high/medium issue is known. No real Provider, Agent-controlled Shell/host process, Docker, installer hook, or external network call ran. The smoke root remains below the OS temporary directory for normal cleanup and requires no user action.
+
 ## Next Slice
 
 Continue product-facing integration while process execution stays closed:
 
-1. Schema v71: add bounded read-only external-Skill selection/provenance projection to HTTP/OpenAPI, TUI, and React without package bodies, paths, digests, requester identities, or new mutation authority.
-2. Design a separately audited Go-owned local package-validation/upload preview for Desktop D1; browser mutation must use the distinct control token and must not execute hooks or package content.
+1. Desktop D1-A: design and implement a Go-owned local package-validation preview that accepts only a bounded local file chosen by the operator and returns the existing metadata-only risk preview. It must not install, persist, execute, call a model, or contact a network.
+2. Audit a later Desktop/HTTP installation mutation separately. It must use the distinct control token plus loopback Host/Origin, exact content length, idempotency, CSRF and cancellation gates; TypeScript must not unzip, validate, write the Registry, or submit derived authority fields.
 3. Only after a separate runtime-verification design, implement the v63 Docker start/wait/TERM/KILL/orphan lifecycle behind its own release gate. Output collection/Artifact commit and Local OS sandboxing remain separate.
 4. Signatures/Marketplace, Rust analyzers, broader network/secrets, and CTF solving remain later slices.
 
 ## Local Machine Note
 
-The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so startup correctly fails closed with `migration 30 checksum or name mismatch`. The v70 slice did not modify migrations 1-69, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically.
+The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so startup correctly fails closed with `migration 30 checksum or name mismatch`. The v71 slice did not modify migrations 1-70, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically.
 
 ## Delivery Loop
 

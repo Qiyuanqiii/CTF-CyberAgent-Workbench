@@ -4,7 +4,70 @@ import (
 	"time"
 
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/skills"
 )
+
+type ExternalSkillProjectionItemView struct {
+	Ordinal            int    `json:"ordinal"`
+	Name               string `json:"name"`
+	Version            string `json:"version"`
+	TokenUpperBound    int    `json:"token_upper_bound"`
+	TrustClass         string `json:"trust_class"`
+	DeclaredToolCount  int    `json:"declared_tool_count"`
+	SpecialistEligible bool   `json:"specialist_eligible"`
+}
+
+type ExternalSkillDeliveryView struct {
+	Prepared  int `json:"prepared"`
+	Committed int `json:"committed"`
+}
+
+type ExternalSkillProjectionView struct {
+	ProtocolVersion           string                            `json:"protocol_version"`
+	RunID                     string                            `json:"run_id"`
+	ModeRevision              int64                             `json:"mode_revision"`
+	Surface                   string                            `json:"surface"`
+	Profile                   string                            `json:"profile"`
+	TokenBudget               int                               `json:"token_budget"`
+	TokenUpperBound           int                               `json:"token_upper_bound"`
+	ItemCount                 int                               `json:"item_count"`
+	OperatorConfirmed         bool                              `json:"operator_confirmed"`
+	ContextDeliveryAuthorized bool                              `json:"context_delivery_authorized"`
+	ToolCapabilityGrant       bool                              `json:"tool_capability_grant"`
+	RootDelivery              ExternalSkillDeliveryView         `json:"root_delivery"`
+	SpecialistDelivery        ExternalSkillDeliveryView         `json:"specialist_delivery"`
+	Items                     []ExternalSkillProjectionItemView `json:"items"`
+	CreatedAt                 time.Time                         `json:"created_at"`
+}
+
+func externalSkillProjectionView(value skills.ExternalSkillProjection) ExternalSkillProjectionView {
+	view := ExternalSkillProjectionView{
+		ProtocolVersion: value.ProtocolVersion, RunID: value.RunID,
+		ModeRevision: value.ModeRevision, Surface: string(value.Surface),
+		Profile: string(value.Profile), TokenBudget: value.TokenBudget,
+		TokenUpperBound: value.TokenUpperBound, ItemCount: value.ItemCount,
+		OperatorConfirmed:         value.OperatorConfirmed,
+		ContextDeliveryAuthorized: value.ContextDeliveryAuthorized,
+		ToolCapabilityGrant:       value.ToolCapabilityGrant,
+		RootDelivery: ExternalSkillDeliveryView{
+			Prepared: value.RootPreparedCount, Committed: value.RootCommittedCount,
+		},
+		SpecialistDelivery: ExternalSkillDeliveryView{
+			Prepared: value.SpecialistPreparedCount, Committed: value.SpecialistCommittedCount,
+		},
+		Items:     make([]ExternalSkillProjectionItemView, len(value.Items)),
+		CreatedAt: value.CreatedAt,
+	}
+	for index, item := range value.Items {
+		view.Items[index] = ExternalSkillProjectionItemView{
+			Ordinal: item.Ordinal, Name: item.Name, Version: item.Version,
+			TokenUpperBound: item.TokenUpperBound, TrustClass: string(item.TrustClass),
+			DeclaredToolCount:  item.DeclaredToolCount,
+			SpecialistEligible: item.SpecialistEligible,
+		}
+	}
+	return view
+}
 
 type AgentCompletionView struct {
 	ID          string    `json:"id"`

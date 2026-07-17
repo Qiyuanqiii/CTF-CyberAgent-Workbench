@@ -25,6 +25,7 @@ import (
 	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/session"
+	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/toolbudget"
 )
 
@@ -72,6 +73,7 @@ type Store interface {
 	ListPlanDeliveryProposals(ctx context.Context, runID string, limit int) ([]domain.PlanDeliveryProposal, error)
 	GetPlanDeliveryProposal(ctx context.Context, id string) (domain.PlanDeliveryProposal, error)
 	GetPlanDeliverySelectionByRun(ctx context.Context, runID string) (domain.PlanDeliverySelection, bool, error)
+	GetExternalSkillProjectionByRun(ctx context.Context, runID string) (skills.ExternalSkillProjection, bool, error)
 	ListDeliveryCheckpoints(ctx context.Context, runID string, limit int) ([]domain.DeliveryCheckpoint, error)
 	DeliveryGateEnforced(ctx context.Context, runID string) (bool, error)
 	ListAgentNodes(ctx context.Context, runID string) ([]domain.AgentNode, error)

@@ -20,6 +20,7 @@ import (
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/session"
+	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/store"
 	"cyberagent-workbench/internal/toolrun"
 )
@@ -137,6 +138,11 @@ type RunStateStore interface {
 		runID string) (domain.OperatorSteeringQueueSummary, error)
 }
 
+type externalSkillProjectionStore interface {
+	GetExternalSkillProjectionByRun(ctx context.Context, runID string) (
+		skills.ExternalSkillProjection, bool, error)
+}
+
 type workspaceContext struct {
 	ID       string
 	Name     string
@@ -171,6 +177,7 @@ type runContext struct {
 	DeliveryGateEnforced bool
 	DeliveryCheckpoints  []domain.DeliveryCheckpoint
 	Steering             operatorSteeringContext
+	ExternalSkills       *skills.ExternalSkillProjection
 }
 
 type operatorSteeringContext struct {
@@ -198,6 +205,7 @@ type activityView string
 const (
 	activityTools        activityView = "tools"
 	activityPlan         activityView = "plan"
+	activitySkills       activityView = "skills"
 	activityWork         activityView = "work"
 	activityNotes        activityView = "notes"
 	activityRounds       activityView = "rounds"
@@ -592,7 +600,7 @@ func (m *Model) PreviousActivityView() {
 
 func (m *Model) setActivityView(view activityView) {
 	switch view {
-	case activityTools, activityPlan, activityWork, activityNotes, activityRounds,
+	case activityTools, activityPlan, activitySkills, activityWork, activityNotes, activityRounds,
 		activityEvents, activityAgents, activityFindings, activityEdits, activityQueue:
 		m.activityView = view
 	default:
@@ -624,6 +632,8 @@ func (m *Model) SelectNextActivityItem() {
 		m.SelectNextTool()
 	case activityPlan:
 		m.status = "Plan/Delivery view is read-only"
+	case activitySkills:
+		m.status = "external Skills view is read-only"
 	case activityQueue:
 		m.status = "operator steering view is read-only"
 	case activityWork:
@@ -663,6 +673,8 @@ func (m *Model) SelectPreviousActivityItem() {
 		m.SelectPreviousTool()
 	case activityPlan:
 		m.status = "Plan/Delivery view is read-only"
+	case activitySkills:
+		m.status = "external Skills view is read-only"
 	case activityQueue:
 		m.status = "operator steering view is read-only"
 	case activityWork:
@@ -1039,6 +1051,8 @@ func (m *Model) renderActivity(width int, height int) string {
 	switch m.activityView {
 	case activityPlan:
 		return m.renderPlanDelivery(width, height)
+	case activitySkills:
+		return m.renderExternalSkills(width, height)
 	case activityWork:
 		return m.renderWorkItems(width, height)
 	case activityNotes:
@@ -1333,6 +1347,8 @@ func activityLabel(view activityView) string {
 	switch view {
 	case activityPlan:
 		return "Plan"
+	case activitySkills:
+		return "Skills"
 	case activityWork:
 		return "Work"
 	case activityNotes:
@@ -1355,7 +1371,7 @@ func activityLabel(view activityView) string {
 }
 
 func activityViews() []activityView {
-	return []activityView{activityTools, activityPlan, activityQueue, activityWork, activityNotes,
+	return []activityView{activityTools, activityPlan, activitySkills, activityQueue, activityWork, activityNotes,
 		activityRounds, activityEvents, activityAgents, activityFindings, activityEdits}
 }
 
@@ -1487,12 +1503,17 @@ func loadRunContext(ctx context.Context, runStateStore RunStateStore,
 	if err != nil {
 		return runContext{}, err
 	}
+	externalSkills, err := loadExternalSkillProjectionContext(ctx, runStateStore, run, mode)
+	if err != nil {
+		return runContext{}, err
+	}
 	return runContext{Found: true, Run: run, Mode: mode, WorkItems: workItems, Notes: notes,
 		ToolRounds: rounds, Grants: grants, Events: eventList, EventSequence: eventSequence,
 		Agents: agents, FindingReports: reports, FileEdits: edits,
 		FileEditsTruncated: editsTruncated, PlanProposal: planProposal,
 		PlanSelection: planSelection, DeliveryGateEnforced: deliveryGateEnforced,
-		DeliveryCheckpoints: deliveryCheckpoints, Steering: steering}, nil
+		DeliveryCheckpoints: deliveryCheckpoints, Steering: steering,
+		ExternalSkills: externalSkills}, nil
 }
 
 func loadOperatorSteeringContext(ctx context.Context, stateStore RunStateStore,

@@ -1,14 +1,46 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import type { CyberAgentClient } from "../api/client";
-import type { AgentGraphView, FindingReportView } from "../api/types";
-import { AgentGraphPanel, DelegationsPanel, FanoutPanel, FindingsPanel } from "./run-projections";
+import type { AgentGraphView, ExternalSkillProjectionView, FindingReportView } from "../api/types";
+import { AgentGraphPanel, DelegationsPanel, ExternalSkillsPanel, FanoutPanel, FindingsPanel } from "./run-projections";
 
 function provider(children: React.ReactNode) {
   return <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{children}</QueryClientProvider>;
 }
 
 describe("Run projection panels", () => {
+  it("renders bounded external Skill metadata without a mutation control", () => {
+    const projection: ExternalSkillProjectionView = {
+      protocol_version: "external_skill_projection.v1",
+      run_id: "run-1",
+      mode_revision: 2,
+      surface: "code",
+      profile: "review",
+      token_budget: 1024,
+      token_upper_bound: 180,
+      item_count: 1,
+      operator_confirmed: true,
+      context_delivery_authorized: true,
+      tool_capability_grant: false,
+      root_delivery: { prepared: 2, committed: 1 },
+      specialist_delivery: { prepared: 1, committed: 1 },
+      items: [{ ordinal: 1, name: "safe-review", version: "1.0.0",
+        token_upper_bound: 180, trust_class: "operator_installed_untrusted",
+        declared_tool_count: 2, specialist_eligible: true }],
+      created_at: "2026-07-17T00:00:00Z",
+    };
+    const { container } = render(<ExternalSkillsPanel projection={projection} />);
+    expect(screen.getByText("safe-review@1.0.0")).toBeInTheDocument();
+    expect(screen.getByText("operator_installed_untrusted")).toBeInTheDocument();
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Confirmed")).toBeInTheDocument();
+    expect(screen.getByText("Authorized")).toBeInTheDocument();
+    expect(screen.getByText("Closed")).toBeInTheDocument();
+    expect(container.querySelector("button")).toBeNull();
+    expect(container.textContent).not.toContain("SKILL.md");
+    expect(container.textContent).not.toContain("sha256/");
+  });
+
   it("renders the bounded Agent graph and completion summary", async () => {
     const graph: AgentGraphView = {
       protocol_version: "agent_graph.v1",

@@ -44,7 +44,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
-			"event-stream", "openapi"}
+			"external-skills", "event-stream", "openapi"}
 		if a.controlEnabled {
 			resources = append(resources, "model-cancellation-control",
 				"specialist-model-cancellation-control", "execution-profile-control")
@@ -96,6 +96,8 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 		switch segments[2] {
 		case "agent-graph":
 			return a.runAgentGraph(request, segments[1])
+		case "external-skills":
+			return a.runExternalSkills(request, segments[1])
 		case "delegations":
 			return a.runDelegations(request, segments[1])
 		case "fanout-plans":
@@ -231,6 +233,15 @@ func (a *API) run(request *http.Request, runID string) (any, *Page, error) {
 		return nil, nil, err
 	}
 	detail.Steering = operatorSteeringQueueView(steeringSummary, steeringMessages)
+	externalSkills, found, err := a.store.GetExternalSkillProjectionByRun(
+		request.Context(), run.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if found {
+		view := externalSkillProjectionView(externalSkills)
+		detail.ExternalSkills = &view
+	}
 	selection, selected, err := a.store.GetPlanDeliverySelectionByRun(request.Context(), run.ID)
 	if err != nil {
 		return nil, nil, err

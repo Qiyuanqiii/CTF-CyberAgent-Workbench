@@ -12,6 +12,7 @@ import (
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/session"
+	"cyberagent-workbench/internal/skills"
 )
 
 const (
@@ -223,7 +224,7 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 				stringQueryParameter("status", "Exact Run status filter", runStatuses()),
 				identityQueryParameter("mission_id", "Exact Mission identity filter"))},
 		{Path: "/api/v1/runs/{run_id}", OperationID: "getRun", Summary: "Inspect a Run", Tag: "Runs",
-			Description: "Returns Run, Mission, checkpoint, tool usage, token-free execution-lease metadata, and the read-only Plan/Delivery projection when present.",
+			Description: "Returns Run, Mission, checkpoint, tool usage, token-free execution-lease metadata, and read-only Plan/Delivery and external-Skill metadata projections when present.",
 			DataType:    reflect.TypeOf(RunDetailView{}), NotFound: true, Parameters: []openAPIParameter{runID}},
 		{Path: "/api/v1/runs/{run_id}/events", OperationID: "listRunEvents", Summary: "List Run events",
 			Tag: "Runs", Description: "Returns the ordered append-only Run event stream.",
@@ -233,6 +234,11 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 			Summary: "Inspect the bounded Agent graph", Tag: "Agents",
 			Description: "Returns root and Specialist projections plus completion summaries without lease or fencing state.",
 			DataType:    reflect.TypeOf(AgentGraphView{}), NotFound: true,
+			Parameters: []openAPIParameter{runID}},
+		{Path: "/api/v1/runs/{run_id}/external-skills", OperationID: "getRunExternalSkills",
+			Summary: "Inspect bounded external Skill provenance", Tag: "Runs",
+			Description: "Returns Run-pinned external Skill names, versions, trust and bounded delivery counts without package content, paths, digests, installation identities, requester identities, or operation identities.",
+			DataType:    reflect.TypeOf(ExternalSkillProjectionView{}), NotFound: true,
 			Parameters: []openAPIParameter{runID}},
 		{Path: "/api/v1/runs/{run_id}/delegations", OperationID: "listRunDelegations",
 			Summary: "List operator-gated delegations", Tag: "Agents",
@@ -695,6 +701,10 @@ var openAPIFieldEnums = map[string][]string{
 	"ModelCancellationView.status":                  {string(domain.ModelCancellationPending), string(domain.ModelCancellationObserved), string(domain.ModelCancellationResolved)},
 	"SpecialistModelCancellationView.status":        {string(domain.ModelCancellationPending), string(domain.ModelCancellationObserved), string(domain.ModelCancellationResolved)},
 	"AgentGraphView.protocol_version":               {domain.AgentGraphProtocolVersion},
+	"ExternalSkillProjectionView.protocol_version":  {skills.ExternalSkillProjectionProtocolVersion},
+	"ExternalSkillProjectionView.surface":           {string(domain.ExecutionSurfaceCode), string(domain.ExecutionSurfaceCyber)},
+	"ExternalSkillProjectionView.profile":           {string(domain.ProfileCode), string(domain.ProfileReview), string(domain.ProfileLearn), string(domain.ProfileScript)},
+	"ExternalSkillProjectionItemView.trust_class":   {string(skills.PackageTrustOperatorInstalledUntrusted)},
 	"AgentNodeView.role":                            {string(domain.AgentRoleRoot), string(domain.AgentRoleSpecialist)},
 	"AgentNodeView.status":                          {string(domain.AgentReady), string(domain.AgentRunning), string(domain.AgentWaiting), string(domain.AgentCompleted), string(domain.AgentFailed), string(domain.AgentCancelled)},
 	"DelegationReviewView.decision":                 {string(domain.SpecialistDelegationApproved), string(domain.SpecialistDelegationRejected)},
@@ -760,6 +770,16 @@ var openAPIFieldMinimums = map[string]float64{
 	"FindingReportSummaryView.evidence_count":       0,
 	"FindingView.ordinal":                           1,
 	"FindingView.confidence":                        0,
+
+	"ExternalSkillProjectionView.mode_revision":           1,
+	"ExternalSkillProjectionView.token_budget":            1,
+	"ExternalSkillProjectionView.token_upper_bound":       1,
+	"ExternalSkillProjectionView.item_count":              1,
+	"ExternalSkillProjectionItemView.ordinal":             1,
+	"ExternalSkillProjectionItemView.token_upper_bound":   1,
+	"ExternalSkillProjectionItemView.declared_tool_count": 0,
+	"ExternalSkillDeliveryView.prepared":                  0,
+	"ExternalSkillDeliveryView.committed":                 0,
 }
 
 var openAPIFieldMaxLengths = map[string]int{

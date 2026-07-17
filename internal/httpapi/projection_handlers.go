@@ -37,6 +37,25 @@ func (a *API) runAgentGraph(request *http.Request, runID string) (any, *Page, er
 	return view, nil, nil
 }
 
+func (a *API) runExternalSkills(request *http.Request, runID string) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	if _, err := a.store.GetRun(request.Context(), runID); err != nil {
+		return nil, nil, err
+	}
+	projection, found, err := a.store.GetExternalSkillProjectionByRun(
+		request.Context(), runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !found {
+		return nil, nil, apperror.New(apperror.CodeNotFound,
+			"external Skill projection was not found in Run")
+	}
+	return externalSkillProjectionView(projection), nil, nil
+}
+
 func (a *API) runDelegations(request *http.Request, runID string) (any, *Page, error) {
 	pageRequest, err := a.projectionPage(request, runID)
 	if err != nil {

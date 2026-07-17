@@ -133,7 +133,7 @@ export interface paths {
         };
         /**
          * Inspect a Run
-         * @description Returns Run, Mission, checkpoint, tool usage, token-free execution-lease metadata, and the read-only Plan/Delivery projection when present.
+         * @description Returns Run, Mission, checkpoint, tool usage, token-free execution-lease metadata, and read-only Plan/Delivery and external-Skill metadata projections when present.
          */
         get: operations["getRun"];
         put?: never;
@@ -298,6 +298,26 @@ export interface paths {
          * @description Records operator intent for Preview, Docker, or local workspace execution. Selection never starts a process and never grants execution authority; backend-specific production gates remain mandatory.
          */
         post: operations["selectRunExecutionProfile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/external-skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect bounded external Skill provenance
+         * @description Returns Run-pinned external Skill names, versions, trust and bounded delivery counts without package content, paths, digests, installation identities, requester identities, or operation identities.
+         */
+        get: operations["getRunExternalSkills"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -707,6 +727,50 @@ export interface components {
             type: string;
             version: string;
         };
+        ExternalSkillDeliveryView: {
+            /** Format: int32 */
+            committed: number;
+            /** Format: int32 */
+            prepared: number;
+        };
+        ExternalSkillProjectionItemView: {
+            /** Format: int32 */
+            declared_tool_count: number;
+            name: string;
+            /** Format: int32 */
+            ordinal: number;
+            specialist_eligible: boolean;
+            /** Format: int32 */
+            token_upper_bound: number;
+            /** @enum {string} */
+            trust_class: "operator_installed_untrusted";
+            version: string;
+        };
+        ExternalSkillProjectionView: {
+            context_delivery_authorized: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int32 */
+            item_count: number;
+            items: components["schemas"]["ExternalSkillProjectionItemView"][];
+            /** Format: int64 */
+            mode_revision: number;
+            operator_confirmed: boolean;
+            /** @enum {string} */
+            profile: "code" | "review" | "learn" | "script";
+            /** @enum {string} */
+            protocol_version: "external_skill_projection.v1";
+            root_delivery: components["schemas"]["ExternalSkillDeliveryView"];
+            run_id: string;
+            specialist_delivery: components["schemas"]["ExternalSkillDeliveryView"];
+            /** @enum {string} */
+            surface: "code" | "cyber";
+            /** Format: int32 */
+            token_budget: number;
+            /** Format: int32 */
+            token_upper_bound: number;
+            tool_capability_grant: boolean;
+        };
         FanoutExecutionShardView: {
             /** Format: int32 */
             attempt_count: number;
@@ -1061,6 +1125,7 @@ export interface components {
             checkpoint?: components["schemas"]["SupervisorCheckpointView"];
             execution_lease?: components["schemas"]["RunExecutionLeaseView"];
             execution_profile: components["schemas"]["RunExecutionProfileView"];
+            external_skills?: components["schemas"]["ExternalSkillProjectionView"];
             mission: components["schemas"]["MissionView"];
             mode: components["schemas"]["RunModeView"];
             operator_steering: components["schemas"]["OperatorSteeringQueueView"];
@@ -1968,6 +2033,41 @@ export interface operations {
             413: components["responses"]["RequestEntityTooLarge"];
             414: components["responses"]["RequestTooLarge"];
             415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getRunExternalSkills: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ExternalSkillProjectionView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];
         };

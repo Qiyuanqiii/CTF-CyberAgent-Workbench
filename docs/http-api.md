@@ -1,8 +1,8 @@
 # 本地 HTTP API / Local HTTP API
 
-CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`。它主要用于检查 SQLite 中的持久化 Agent 状态（包括 schema v41 Run 模式、schema v42 Plan/Delivery、schema v44 Delivery 门禁、schema v45-v46 操作者引导状态与 schema v64 执行环境档位），并通过可恢复 SSE 投影 Run events。独立 control capability 只允许精确取消活动模型调用，或选择不授予执行权的 Run 档位。API 不选择 Plan 方向、不写入 Delivery 检查点、不修改引导队列、不执行工具、不启动进程、不切换执行阶段，也不替代 Policy、Approval、Tool Gateway 或 Sandbox 门禁。
+CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`。它主要用于检查 SQLite 中的持久化 Agent 状态（包括 schema v41 Run 模式、schema v42 Plan/Delivery、schema v44 Delivery 门禁、schema v45-v46 操作者引导状态、schema v64 执行环境档位与 schema v71 外部 Skill 安全来源投影），并通过可恢复 SSE 投影 Run events。独立 control capability 只允许精确取消活动模型调用，或选择不授予执行权的 Run 档位。API 不选择 Plan 方向、不写入 Delivery 检查点、不修改引导队列、不安装 Skill、不执行工具、不启动进程、不切换执行阶段，也不替代 Policy、Approval、Tool Gateway 或 Sandbox 门禁。
 
-CyberAgent Workbench exposes a Go-controlled local `api.v1`. It primarily inspects durable Agent state in SQLite, including schema v41 Run modes, schema v42 Plan/Delivery state, schema v44 Delivery gates, schema v45-v46 operator-steering state, and schema v64 execution profiles, and projects persisted Run events through resumable SSE. The distinct control capability permits only exact active-call cancellation or selection of a non-authorizing Run profile. The API cannot choose a Plan direction, write a Delivery checkpoint, mutate steering, execute a tool, start a process, or change execution phase and does not replace Policy, Approval, the Tool Gateway, or Sandbox gates.
+CyberAgent Workbench exposes a Go-controlled local `api.v1`. It primarily inspects durable Agent state in SQLite, including schema v41 Run modes, schema v42 Plan/Delivery state, schema v44 Delivery gates, schema v45-v46 operator-steering state, schema v64 execution profiles, and schema v71 safe external-Skill provenance, and projects persisted Run events through resumable SSE. The distinct control capability permits only exact active-call cancellation or selection of a non-authorizing Run profile. The API cannot choose a Plan direction, write a Delivery checkpoint, mutate steering, install a Skill, execute a tool, start a process, or change execution phase and does not replace Policy, Approval, the Tool Gateway, or Sandbox gates.
 
 ## 启动 / Start
 
@@ -87,7 +87,8 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/runs/<run-id>/execut
 | `GET` | `/api/v1/health` | Health and SQLite schema version |
 | `GET` | `/api/v1/openapi.json` | Raw deterministic OpenAPI 3.1 JSON document |
 | `GET` | `/api/v1/runs` | Runs; `status`, `mission_id`, pagination |
-| `GET` | `/api/v1/runs/{run_id}` | Run, Mission, immutable execution-mode and execution-profile snapshots, read-only Plan proposal/selection, checkpoint metadata, tool usage, token-free execution-lease summary |
+| `GET` | `/api/v1/runs/{run_id}` | Run, Mission, immutable execution-mode/profile snapshots, read-only Plan/checkpoint/external-Skill metadata, tool usage, token-free execution-lease summary |
+| `GET` | `/api/v1/runs/{run_id}/external-skills` | Bounded external-Skill provenance and root/Specialist delivery counts; no content, paths, digests, or private identities |
 | `GET` | `/api/v1/runs/{run_id}/events` | Ordered Run events; pagination |
 | `GET` | `/api/v1/runs/{run_id}/events/stream` | Bounded SSE projection; opaque `cursor` or `Last-Event-ID` resume |
 | `GET` | `/api/v1/runs/{run_id}/agent-graph` | Root/Specialist nodes, budgets, lifecycle, and redacted completion summaries |
@@ -121,6 +122,10 @@ Schema v45 adds required `operator_steering` metadata to Run detail. It reports 
 
 Schema v64 adds required `execution_profile` metadata to Run detail. Its profile enum maps to Go-owned backend, approval, filesystem/network, risk, and required-gate fields; `process_enabled`, `execution_authorized`, and `capability_grant` are always false. Selection requires a `created` or quiescent `paused` Run, the distinct control bearer, strict JSON, and a 16-to-256-byte idempotency key. The browser submits only `profile` and an optional redacted reason; it cannot submit derived controls or authority fields. Stored requester/reason audit fields are omitted from browser DTOs. Selecting Docker or Local neither contacts a runner nor satisfies the corresponding production/OS-sandbox gate.
 
+Schema v71 在 Run detail 中可选嵌入 `external_skills`，并提供同内容的独立只读 endpoint。投影最多包含四个固定版本条目和一个 Specialist，只公开 surface/profile、模式修订、token 上界、信任类别、声明工具数量以及 root/Specialist 准备/提交计数。正文、文件路径、字节数、全部 hash/digest/fingerprint、选择/安装/模式快照 ID、operation key、操作者/请求者/attempt/agent 身份均不进入 DTO。`operator_confirmed` 与 `context_delivery_authorized` 只是历史事实，`tool_capability_grant` 固定为 false；该 endpoint 不安装、选择、加载或执行 Skill。
+
+Schema v71 optionally embeds `external_skills` in Run detail and exposes the same projection through a dedicated read-only endpoint. The projection is bounded to four pinned-version items and one Specialist and reveals only surface/profile, mode revision, token bounds, trust class, declared-tool count, and root/Specialist preparation and commit counts. Content, file paths, byte sizes, every hash/digest/fingerprint, selection/installation/mode-snapshot IDs, operation keys, and operator/requester/attempt/agent identities never enter the DTO. `operator_confirmed` and `context_delivery_authorized` are historical facts only, while `tool_capability_grant` is fixed false; the endpoint cannot install, select, load, or execute a Skill.
+
 ## OpenAPI Contract
 
 Go DTO 是响应结构的唯一来源。以下命令不启动数据库、不读取 token，并可复现仓库内受测试的 [openapi.json](openapi.json)：
@@ -132,9 +137,9 @@ cyberagent api openapi
 cyberagent api openapi --output docs/openapi.json
 ```
 
-运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 25 个 path、58 个 schema：22 个只读 GET 使用全局 read capability，三个控制 POST 显式覆盖为 `ControlBearerAuth`。测试会逐条命中公开 handler，并确认契约不包含 Artifact 正文、checkpoint pending input、Delivery 证据/摘要、操作者引导正文/摘要/身份、raw Fan-out report、私有审批/生命周期叙述、Plan operation/fencing 身份、`lease_id`、其他摘要或 API key 字段。
+运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 26 个 path、61 个 schema：23 个只读 GET 使用全局 read capability，三个控制 POST 显式覆盖为 `ControlBearerAuth`。测试会逐条命中公开 handler，并确认契约不包含 Artifact 正文、checkpoint pending input、Delivery 证据/摘要、操作者引导正文/摘要/身份、外部 Skill 正文/路径/摘要/私有身份、raw Fan-out report、私有审批/生命周期叙述、Plan operation/fencing 身份、`lease_id`、其他摘要或 API key 字段。
 
-The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract currently contains 25 paths and 58 schemas: 22 read-only GET operations use the global read capability, while three control POST operations override security with `ControlBearerAuth`. Tests exercise every published handler and verify that the contract omits Artifact content, checkpoint pending input, Delivery evidence/digests, steering content/digests/operator identity, raw Fan-out reports, private approval/lifecycle narratives, Plan operation/fencing identity, `lease_id`, other digests, and API-key fields.
+The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract currently contains 26 paths and 61 schemas: 23 read-only GET operations use the global read capability, while three control POST operations override security with `ControlBearerAuth`. Tests exercise every published handler and verify that the contract omits Artifact content, checkpoint pending input, Delivery evidence/digests, steering content/digests/operator identity, external-Skill content/paths/digests/private identities, raw Fan-out reports, private approval/lifecycle narratives, Plan operation/fencing identity, `lease_id`, other digests, and API-key fields.
 
 ## 主动取消 / Active-Call Cancellation
 

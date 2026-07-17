@@ -118,6 +118,16 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "FindingArtifactEvidenceView", "attached_by")
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "RunExecutionProfileView", "requested_by")
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "RunExecutionProfileView", "reason")
+	for _, field := range []string{"selection_id", "mission_id", "mode_snapshot_id", "requested_by",
+		"operation_id", "fingerprint", "digest", "content", "path"} {
+		assertOpenAPISchemaOmits(t, document.Components.Schemas,
+			"ExternalSkillProjectionView", field)
+	}
+	for _, field := range []string{"selection_id", "installation_id", "fingerprint", "sha256",
+		"object_key", "content", "path", "archive_bytes", "content_bytes"} {
+		assertOpenAPISchemaOmits(t, document.Components.Schemas,
+			"ExternalSkillProjectionItemView", field)
+	}
 	assertOpenAPISchemaOptional(t, document.Components.Schemas, "AgentGraphView", "root_agent_id")
 }
 

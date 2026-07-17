@@ -10,6 +10,7 @@ import (
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/fileedit"
+	"cyberagent-workbench/internal/skills"
 )
 
 func TestRunActivityViewsRenderEventsAgentsAndFindings(t *testing.T) {
@@ -31,6 +32,19 @@ func TestRunActivityViewsRenderEventsAgentsAndFindings(t *testing.T) {
 			Status: domain.FindingReportGenerated, Title: "review findings",
 			FindingCount: 1, EvidenceCount: 1,
 			Severity: domain.FindingSeveritySummary{High: 1}}},
+		ExternalSkills: &skills.ExternalSkillProjection{
+			ProtocolVersion: skills.ExternalSkillProjectionProtocolVersion,
+			RunID:           "run-view", ModeRevision: 2, Surface: domain.ExecutionSurfaceCode,
+			Profile: domain.ProfileReview, TokenBudget: 1024, TokenUpperBound: 120,
+			ItemCount: 1, OperatorConfirmed: true, ContextDeliveryAuthorized: true,
+			RootPreparedCount: 2, RootCommittedCount: 1,
+			SpecialistPreparedCount: 1, SpecialistCommittedCount: 1,
+			Items: []skills.ExternalSkillProjectionItem{{Ordinal: 1,
+				Name: "safe-review", Version: "1.0.0", TokenUpperBound: 120,
+				TrustClass:        skills.PackageTrustOperatorInstalledUntrusted,
+				DeclaredToolCount: 2, SpecialistEligible: true}},
+			CreatedAt: now,
+		},
 	}}
 
 	for view, wants := range map[activityView][]string{
@@ -38,6 +52,9 @@ func TestRunActivityViewsRenderEventsAgentsAndFindings(t *testing.T) {
 		activityAgents: {"Agents 1", "root/ready agent-root", "turns=1/4", "skills=code"},
 		activityFindings: {"Findings 1 reports=1", "generated findings=1", "review findings",
 			"severity c=0 h=1"},
+		activitySkills: {"External Skills 1", "code/review mode=r2", "tokens=120/1024",
+			"delivery root=1/2 specialist=1/1", "safe-review@1.0.0",
+			"trust=operator_installed_untrusted"},
 	} {
 		model.setActivityView(view)
 		output := model.renderActivity(80, 16)
@@ -50,8 +67,17 @@ func TestRunActivityViewsRenderEventsAgentsAndFindings(t *testing.T) {
 	projection, found := model.CurrentRunProjection()
 	if !found || projection.Status != domain.RunRunning || projection.EventSequence != 7 ||
 		projection.AgentCount != 1 || projection.FindingReportCount != 1 ||
-		projection.FindingCount != 1 {
+		projection.FindingCount != 1 || projection.ExternalSkillCount != 1 ||
+		projection.ExternalSkillTokens != 120 || projection.ExternalRootPrepared != 2 ||
+		projection.ExternalRootCommitted != 1 || projection.ExternalChildPrepared != 1 ||
+		projection.ExternalChildCommitted != 1 {
 		t.Fatalf("unexpected TUI Run projection: %#v found=%t", projection, found)
+	}
+	model.setActivityView(activitySkills)
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
+	model = updated.(*Model)
+	if cmd != nil || !strings.Contains(model.status, "skills view is read-only") {
+		t.Fatalf("external Skills activity exposed control: status=%q cmd=%#v", model.status, cmd)
 	}
 }
 

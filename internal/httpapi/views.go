@@ -215,15 +215,16 @@ type PlanDeliveryStateView struct {
 }
 
 type RunDetailView struct {
-	Run              RunView                   `json:"run"`
-	Mission          MissionView               `json:"mission"`
-	Mode             RunModeView               `json:"mode"`
-	ExecutionProfile RunExecutionProfileView   `json:"execution_profile"`
-	Checkpoint       *SupervisorCheckpointView `json:"checkpoint,omitempty"`
-	Lease            *RunExecutionLeaseView    `json:"execution_lease,omitempty"`
-	Steering         OperatorSteeringQueueView `json:"operator_steering"`
-	ToolUsage        ToolUsageView             `json:"tool_usage"`
-	PlanDelivery     *PlanDeliveryStateView    `json:"plan_delivery,omitempty"`
+	Run              RunView                      `json:"run"`
+	Mission          MissionView                  `json:"mission"`
+	Mode             RunModeView                  `json:"mode"`
+	ExecutionProfile RunExecutionProfileView      `json:"execution_profile"`
+	Checkpoint       *SupervisorCheckpointView    `json:"checkpoint,omitempty"`
+	Lease            *RunExecutionLeaseView       `json:"execution_lease,omitempty"`
+	Steering         OperatorSteeringQueueView    `json:"operator_steering"`
+	ToolUsage        ToolUsageView                `json:"tool_usage"`
+	PlanDelivery     *PlanDeliveryStateView       `json:"plan_delivery,omitempty"`
+	ExternalSkills   *ExternalSkillProjectionView `json:"external_skills,omitempty"`
 }
 
 type SessionView struct {

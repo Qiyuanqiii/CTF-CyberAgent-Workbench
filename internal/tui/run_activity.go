@@ -72,6 +72,44 @@ func (m *Model) renderAgents(width int, height int) string {
 	return strings.Join(windowTop(lines, height+1), "\n")
 }
 
+func (m *Model) renderExternalSkills(width int, height int) string {
+	count := 0
+	if m.runContext.ExternalSkills != nil {
+		count = m.runContext.ExternalSkills.ItemCount
+	}
+	lines := m.activityHeader(fmt.Sprintf("External Skills %d", count),
+		activitySkills, width)
+	if !m.runContext.Found {
+		lines = append(lines, "no Run attached")
+		return strings.Join(lines, "\n")
+	}
+	projection := m.runContext.ExternalSkills
+	if projection == nil {
+		lines = append(lines, "none")
+		return strings.Join(windowTop(lines, height+1), "\n")
+	}
+	lines = append(lines, truncate(fmt.Sprintf(
+		"%s/%s mode=r%d tokens=%d/%d confirmed=%t context=%t tools-granted=%t",
+		projection.Surface, projection.Profile, projection.ModeRevision,
+		projection.TokenUpperBound, projection.TokenBudget,
+		projection.OperatorConfirmed, projection.ContextDeliveryAuthorized,
+		projection.ToolCapabilityGrant), width))
+	lines = append(lines, truncate(fmt.Sprintf(
+		"delivery root=%d/%d specialist=%d/%d (committed/prepared)",
+		projection.RootCommittedCount, projection.RootPreparedCount,
+		projection.SpecialistCommittedCount, projection.SpecialistPreparedCount), width))
+	for _, item := range projection.Items {
+		specialist := ""
+		if item.SpecialistEligible {
+			specialist = " specialist"
+		}
+		lines = append(lines, truncate(fmt.Sprintf("#%d %s@%s tokens<=%d tools=%d trust=%s%s",
+			item.Ordinal, item.Name, item.Version, item.TokenUpperBound,
+			item.DeclaredToolCount, item.TrustClass, specialist), width))
+	}
+	return strings.Join(windowTop(lines, height+1), "\n")
+}
+
 func (m *Model) renderFindings(width int, height int) string {
 	total := 0
 	for _, report := range m.runContext.FindingReports {

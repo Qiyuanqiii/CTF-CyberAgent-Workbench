@@ -37,7 +37,7 @@ import { usePagedResource } from "../hooks/use-paged-resource";
 import { useRunEventStream } from "../hooks/use-run-event-stream";
 import { formatBytes, formatDate, formatNumber, shortID } from "../lib/format";
 import { EmptyState, ErrorState, KeyValue, LoadMoreButton, LoadingState, StatusBadge } from "./common";
-import { AgentGraphPanel, DelegationsPanel, FanoutPanel, FindingsPanel } from "./run-projections";
+import { AgentGraphPanel, DelegationsPanel, ExternalSkillsPanel, FanoutPanel, FindingsPanel } from "./run-projections";
 
 type RunTab = "overview" | "agents" | "delegations" | "fanout" | "findings" | "events" | "work" | "notes" | "artifacts" | "tools";
 
@@ -217,6 +217,7 @@ function RunOverview({ client, detail }: { client: CyberAgentClient; detail: Run
       </section>
       <OperatorSteeringPanel state={steering} />
       {detail.plan_delivery && <PlanDeliveryPanel state={detail.plan_delivery} />}
+      {detail.external_skills && <ExternalSkillsPanel projection={detail.external_skills} />}
     </div>
   );
 }
