@@ -770,7 +770,7 @@ Go 从 Store 重建精确 v67 source chain，拒绝 v66 inert result、未完成
 
 独立审计发现并修复两项中低风险审计健壮性缺口和一项低风险覆盖缺口：review root 现持久化并自校验完整 request fingerprint，SQL 要求 operation 与 root 指纹一致，Store 每次读取/重放还会重新计算并复核语义绑定；新增 review-only、operation update/delete、gate/Mission/Workspace/capture/harness/权限篡改负向矩阵和双 Store 并发收敛；`rejected` 已贯通 Store、事件、Application、CLI、list/show 和重放。当前没有已知未解决高/中风险。
 
-v68 最终本地门禁通过：全仓普通/race 分别 247.9 秒/276.3 秒，vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、9 个文件 21 项前端测试、OpenAPI 无漂移、production build、零漏洞 npm audit、57 份 Markdown/74 条相对链接、用户测试 key/乱码/禁止执行入口/diff 扫描、Linux test binary 交叉编译和隔离真实 CLI schema-v68 smoke 均为绿色。Domain/Store/Application/CLI 高频回归为 50/10/5/5，关键 race 为 10/3/3/3。本机未运行真实 Docker、容器 start、Shell 或宿主进程；一个交叉编译文件和一个 smoke 根留在系统临时目录等待回收，无需人工操作。
+v68 最终本地门禁通过：全仓普通/race 分别 247.9 秒/276.3 秒，vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、9 个文件 21 项前端测试、OpenAPI 无漂移、production build、零漏洞 npm audit、57 份 Markdown/74 条相对链接、用户测试 key/乱码/禁止执行入口/diff 扫描、Linux test binary 交叉编译和隔离真实 CLI schema-v68 smoke 均为绿色。Domain/Store/Application/CLI 高频回归为 50/10/5/5，关键 race 为 10/3/3/3。本机未运行真实 Docker、容器 start、Shell 或宿主进程；一个交叉编译文件和一个 smoke 根留在系统临时目录等待回收，无需人工操作。GitHub Actions run `29552080990` 已通过实现提交 `41583ac`，Go/Linux 用时 2 分 57 秒，TypeScript 用时 24 秒。
 
 架构完成度保持约 98%（V2 约 99%），产品可用度保持约 45-50%，通用 Coding Agent 约 40%，Cyber 自动化约 20%。本切片补齐了审计决策，不增加终端用户执行能力。下一唯一推荐切片转回 P7 schema v69：建立内容寻址的本地用户 Skill Registry，只安装已经通过 `skill_package.v1` 校验的惰性包；导入阶段禁止脚本、钩子、命令、Provider、网络、工具和能力授予，并继续隔离 Code/Cyber 目录。
 

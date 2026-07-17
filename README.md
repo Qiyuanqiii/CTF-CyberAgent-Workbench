@@ -204,7 +204,9 @@ Even `accepted` means only `receipt_accepted=true`: production verification rema
 
 v68 最终本地门禁已通过：全仓普通/race 测试分别用时 247.9 秒和 276.3 秒；`go vet`、零告警 `staticcheck`、module verify/tidy diff、零可达漏洞 `govulncheck`、9 个文件 21 项 Vitest、OpenAPI 无漂移、Vite production build 和零漏洞 npm audit 均为绿色。Domain/Store/Application/CLI 高频回归分别通过 50/10/5/5 轮普通测试和 10/3/3/3 轮 race；57 份 Markdown 的 74 条相对链接、用户测试 key、乱码、禁止执行入口和 diff 扫描通过，Linux test binary 交叉编译与隔离真实 CLI schema-v68 smoke 通过。
 
-独立审计发现并修复两项中低风险审计健壮性缺口和一项低风险覆盖缺口：Store 现在读取/重放时重新计算已存 operation/review 语义绑定，SQL 也直接绑定两侧 request fingerprint；负向矩阵覆盖孤立 review、operation 更新/删除、来源/指纹/权限篡改和双 Store 并发收敛；`rejected` 决定已覆盖 Store、事件、Application、CLI、list/show 和重放。当前没有已知未解决的高危或中危问题。本机没有运行真实 Docker、容器启动、Shell 或宿主进程；受保护删除策略让一个交叉编译文件和一个 smoke 根留在系统临时目录等待系统回收，无需人工操作。
+独立审计发现并修复两项中低风险审计健壮性缺口和一项低风险覆盖缺口：Store 现在读取/重放时重新计算已存 operation/review 语义绑定，SQL 也直接绑定两侧 request fingerprint；负向矩阵覆盖孤立 review、operation 更新/删除、来源/指纹/权限篡改和双 Store 并发收敛；`rejected` 决定已覆盖 Store、事件、Application、CLI、list/show 和重放。当前没有已知未解决的高危或中危问题。本机没有运行真实 Docker、容器启动、Shell 或宿主进程；受保护删除策略让一个交叉编译文件和一个 smoke 根留在系统临时目录等待系统回收，无需人工操作。GitHub Actions run `29552080990` 已通过实现提交 `41583ac`，Go/Linux 用时 2 分 57 秒，TypeScript 用时 24 秒。
+
+GitHub Actions run `29552080990` passed implementation commit `41583ac`; Go/Linux completed in 2m57s and TypeScript in 24s. This remote proof does not widen v68's non-authorizing boundary.
 
 The final v68 local gate is green. Full ordinary and race suites completed in 247.9s and 276.3s. Vet, zero-warning staticcheck, module verification/tidy diff, zero reachable vulnerabilities, 21 Vitest cases across nine files, OpenAPI drift checks, the Vite production build, and zero-vulnerability npm audit passed. Domain, Store, Application, and CLI repetitions passed at 50/10/5/5 ordinary iterations and 10/3/3/3 race iterations. Validation also covered 74 relative links across 57 Markdown files, user test-key exclusion, encoding, forbidden execution entries, diff hygiene, Linux test-binary cross-compilation, and an isolated real-CLI schema-v68 smoke.
 
