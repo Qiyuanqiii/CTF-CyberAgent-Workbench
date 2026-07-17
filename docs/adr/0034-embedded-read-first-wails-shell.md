@@ -121,7 +121,9 @@ schema-v71 home. Visual inspection covered the 1440x900 workbench, empty Run and
 Session states, the Skill preview modal, and the native `.zip` dialog. No
 overlap, horizontal overflow, blank WebView, or stale disconnect action remained.
 GitHub Actions now has a separate Windows Desktop build/test job in addition to
-the existing Go/Linux and TypeScript jobs.
+the existing Go/Linux and TypeScript jobs. Run `29602281365` passed implementation
+commit `2c0b81c` with Go/Linux in 4m57s, TypeScript in 26s, and Windows Desktop in
+4m27s.
 
 ## Follow-Up
 
