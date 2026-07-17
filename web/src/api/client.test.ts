@@ -7,6 +7,25 @@ const healthEnvelope = {
   data: { status: "ok", api_version: "api.v1", app_version: "test", schema_version: 37 },
 };
 
+const runCreationData = {
+  mission: {
+    id: "mission-created", goal: "Create parser", workspace_id: "workspace-1", profile: "code",
+    scope: { workspace_id: "workspace-1", network_mode: "disabled" },
+  },
+  run: {
+    id: "run-created", mission_id: "mission-created", session_id: "sess-created",
+    status: "created",
+    config: { interactive: true, model_route: "code" }, budget: { max_turns: 100, max_tool_calls: 100 },
+  },
+  session: { id: "sess-created", workspace_id: "workspace-1", title: "Create parser", route: "code", status: "active" },
+  mode: {
+    protocol_version: "run_mode.v1", policy_version: "mode_policy.v1", revision: 1,
+    profile: "code", surface: "code", phase: "deliver",
+    scope: { workspace_id: "workspace-1", network_mode: "disabled" }, capability_grant: false,
+  },
+  replayed: false,
+};
+
 describe("CyberAgentClient", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -132,6 +151,97 @@ describe("CyberAgentClient", () => {
     await expect(client.postControl("/runs/run-1/execution-profile", { profile: "docker" },
       "web-execution-profile-test-0002")).rejects.toThrow("control bearer token");
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("separates Run creation from existing Run controls and validates closed authority", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-create", data: runCreationData,
+    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false,
+      runCreationEnabled: true,
+    });
+    expect(client.hasControl).toBe(false);
+    expect(client.hasRunCreation).toBe(true);
+    await expect(client.postControl("/runs/run-1/execution-profile", { profile: "docker" },
+      "web-profile-separated-0001")).rejects.toThrow("control bearer token");
+    const result = await client.createRun({
+      version: "run_creation.v1", goal: "Create parser", workspace_id: "workspace-1",
+    }, "web-run-create-operation-0001");
+    expect(result.run.id).toBe("run-created");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/runs");
+    expect(url).not.toContain("control-secret");
+    expect(init.headers).toMatchObject({
+      Authorization: "Bearer control-secret",
+      "Idempotency-Key": "web-run-create-operation-0001",
+    });
+    expect(String(init.body)).not.toContain("control-secret");
+  });
+
+  it("rejects a Run creation response that widens authority", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1",
+      request_id: "req-create-forged",
+      data: { ...runCreationData, mode: { ...runCreationData.mode, capability_grant: true } },
+    }), { status: 202, headers: { "Content-Type": "application/json" } })));
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false,
+      runCreationEnabled: true,
+    });
+    await expect(client.createRun({ version: "run_creation.v1", goal: "Create parser",
+      workspace_id: "workspace-1" }, "web-run-create-operation-0002"))
+      .rejects.toThrow("closed authority");
+  });
+
+  it("rejects a Run creation response bound to a different requested workspace", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1",
+      request_id: "req-create-forged-workspace",
+      data: runCreationData,
+    }), { status: 202, headers: { "Content-Type": "application/json" } })));
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false,
+      runCreationEnabled: true,
+    });
+    await expect(client.createRun({ version: "run_creation.v1", goal: "Create parser",
+      workspace_id: "workspace-other" }, "web-run-create-operation-0003"))
+      .rejects.toThrow("closed authority");
+  });
+
+  it("rejects a Run creation response with a cross-Workspace Mission scope", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1",
+      request_id: "req-create-forged-scope",
+      data: {
+        ...runCreationData,
+        mission: { ...runCreationData.mission,
+          scope: { ...runCreationData.mission.scope, workspace_id: "workspace-other" } },
+      },
+    }), { status: 202, headers: { "Content-Type": "application/json" } })));
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false,
+      runCreationEnabled: true,
+    });
+    await expect(client.createRun({ version: "run_creation.v1", goal: "Create parser",
+      workspace_id: "workspace-1" }, "web-run-create-operation-scope"))
+      .rejects.toThrow("closed authority");
+  });
+
+  it("rejects a Run creation response bound to a different requested goal", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1",
+      request_id: "req-create-forged-goal",
+      data: runCreationData,
+    }), { status: 202, headers: { "Content-Type": "application/json" } })));
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false,
+      runCreationEnabled: true,
+    });
+    await expect(client.createRun({ version: "run_creation.v1", goal: "Different goal",
+      workspace_id: "workspace-1" }, "web-run-create-operation-0004"))
+      .rejects.toThrow("closed authority");
   });
 
   it("polls Run events with a stream-compatible opaque cursor and validates the envelope", async () => {

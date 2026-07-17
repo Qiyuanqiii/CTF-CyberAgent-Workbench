@@ -31,7 +31,10 @@ export function ConnectionGate() {
         return;
       }
       queryClient.clear();
-      connect(bootstrap.read_token, health, bootstrap.control_token);
+      connect(bootstrap.read_token, health, bootstrap.control_token, {
+        runControlEnabled: bootstrap.control_enabled,
+        runCreationEnabled: bootstrap.run_creation_enabled,
+      });
     }).catch((caught: unknown) => {
       if (active) {
         setError(desktopErrorMessage(caught));

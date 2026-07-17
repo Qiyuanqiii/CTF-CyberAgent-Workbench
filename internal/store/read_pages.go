@@ -46,6 +46,27 @@ func (s *SQLiteStore) ListSessionsPage(ctx context.Context, offset int, limit in
 	return out, rows.Err()
 }
 
+func (s *SQLiteStore) ListWorkspacesPage(ctx context.Context, offset int, limit int) ([]WorkspaceRecord, error) {
+	if err := validateStoreReadPage(offset, limit); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, root_path, created_at
+		FROM workspaces ORDER BY name, id LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]WorkspaceRecord, 0, limit)
+	for rows.Next() {
+		record, err := scanWorkspace(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	return out, rows.Err()
+}
+
 func (s *SQLiteStore) ListSessionMessagesPage(ctx context.Context, sessionID string,
 	includeCompacted bool, offset int, limit int,
 ) ([]session.Message, error) {

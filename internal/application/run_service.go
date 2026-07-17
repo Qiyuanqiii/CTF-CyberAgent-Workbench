@@ -44,6 +44,7 @@ type CreateRunRequest struct {
 	ModelRoute  string
 	Interactive bool
 	Budget      domain.Budget
+	RequestedBy string
 }
 
 func NewRunService(store RunStore) *RunService {
@@ -75,9 +76,22 @@ func (s *RunService) prepare(ctx context.Context, req CreateRunRequest) (prepare
 	if s == nil || s.store == nil {
 		return preparedRun{}, errors.New("run store is required")
 	}
+	return prepareRun(ctx, req, s.store.GetSession)
+}
+
+func prepareRun(ctx context.Context, req CreateRunRequest,
+	getSession func(context.Context, string) (session.Session, error),
+) (preparedRun, error) {
 	goal := redact.String(strings.TrimSpace(req.Goal))
 	if goal == "" {
 		return preparedRun{}, errors.New("mission goal is required")
+	}
+	requestedBy := redact.String(strings.TrimSpace(req.RequestedBy))
+	if requestedBy == "" {
+		requestedBy = "run_service"
+	}
+	if !domain.ValidAgentID(requestedBy) || strings.ContainsRune(requestedBy, 0) {
+		return preparedRun{}, errors.New("run requester must be normalized and bounded UTF-8")
 	}
 	profileValue := strings.TrimSpace(req.Profile)
 	if profileValue == "" {
@@ -108,7 +122,10 @@ func (s *RunService) prepare(ctx context.Context, req CreateRunRequest) (prepare
 	var linkedSession session.Session
 	createSession := requestedSessionID == ""
 	if !createSession {
-		linkedSession, err = s.store.GetSession(ctx, requestedSessionID)
+		if getSession == nil {
+			return preparedRun{}, errors.New("run session lookup is required")
+		}
+		linkedSession, err = getSession(ctx, requestedSessionID)
 		if err != nil {
 			return preparedRun{}, err
 		}
@@ -178,7 +195,7 @@ func (s *RunService) prepare(ctx context.Context, req CreateRunRequest) (prepare
 		return preparedRun{}, err
 	}
 	mode, err := domain.NewInitialRunModeSnapshot(idgen.New("run-mode"), run, mission,
-		surface, phase, "run_service", "initial Run mode", now)
+		surface, phase, requestedBy, "initial Run mode", now)
 	if err != nil {
 		return preparedRun{}, err
 	}

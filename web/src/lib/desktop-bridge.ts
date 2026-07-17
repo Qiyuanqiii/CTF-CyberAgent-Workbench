@@ -12,6 +12,7 @@ export interface DesktopConnectionBootstrap {
   read_token: string;
   control_token: string;
   control_enabled: boolean;
+  run_creation_enabled: boolean;
   read_only_default: boolean;
   process_execution_enabled: false;
   shell_execution_enabled: false;
@@ -158,7 +159,7 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
   if (!hasExactKeys(value, [
     "api_base_url", "api_version", "app_version", "control_enabled", "control_token",
     "docker_execution_enabled", "process_execution_enabled", "protocol_version", "read_only_default",
-    "read_token", "renderer_path_input_supported", "shell_execution_enabled",
+    "read_token", "renderer_path_input_supported", "run_creation_enabled", "shell_execution_enabled",
     "skill_installation_enabled", "ui_digest",
   ])) {
     return false;
@@ -166,11 +167,12 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
   return value.protocol_version === desktopConnectionProtocol && value.api_base_url === "/api/v1" &&
     value.api_version === "api.v1" && boundedText(value.app_version, 1, 64) &&
     isSHA256(value.ui_digest) && validToken(value.read_token) &&
-    typeof value.control_token === "string" &&
-    value.control_enabled === (value.control_token !== "") &&
-    (!value.control_enabled || validToken(value.control_token)) &&
+    typeof value.control_token === "string" && typeof value.control_enabled === "boolean" &&
+    typeof value.run_creation_enabled === "boolean" &&
+    (value.control_token !== "") === (value.control_enabled || value.run_creation_enabled) &&
+    (value.control_token === "" || validToken(value.control_token)) &&
     value.control_token !== value.read_token &&
-    value.read_only_default === !value.control_enabled &&
+    value.read_only_default === !(value.control_enabled || value.run_creation_enabled) &&
     value.process_execution_enabled === false && value.shell_execution_enabled === false &&
     value.docker_execution_enabled === false && value.skill_installation_enabled === false &&
     value.renderer_path_input_supported === false;

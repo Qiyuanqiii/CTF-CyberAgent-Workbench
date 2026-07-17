@@ -20,12 +20,16 @@ describe("connection store", () => {
 
     expect(useConnectionStore.getState().token).toBe("ephemeral-token");
     expect(useConnectionStore.getState().controlToken).toBe("ephemeral-control-token");
+   expect(useConnectionStore.getState().runControlEnabled).toBe(true);
+   expect(useConnectionStore.getState().runCreationEnabled).toBe(true);
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
 
     useConnectionStore.getState().disconnect();
     expect(useConnectionStore.getState().token).toBe("");
     expect(useConnectionStore.getState().controlToken).toBe("");
+   expect(useConnectionStore.getState().runControlEnabled).toBe(false);
+   expect(useConnectionStore.getState().runCreationEnabled).toBe(false);
     expect(useConnectionStore.getState().selectedRunID).toBe("");
   });
 });

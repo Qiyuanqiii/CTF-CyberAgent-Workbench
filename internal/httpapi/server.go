@@ -45,6 +45,11 @@ type Store interface {
 	GetMission(ctx context.Context, id string) (domain.Mission, error)
 	GetRun(ctx context.Context, id string) (domain.Run, error)
 	GetRunMode(ctx context.Context, runID string) (domain.RunModeSnapshot, error)
+	GetRunCreationOperation(ctx context.Context,
+		keyDigest string) (domain.RunCreationOperation, bool, error)
+	CreateMissionRunWithOperation(ctx context.Context, mission domain.Mission, run domain.Run,
+		mode domain.RunModeSnapshot, linkedSession session.Session, initialEvents []events.Event,
+		operation domain.RunCreationOperation) (domain.RunCreationOperation, bool, error)
 	GetRunExecutionProfile(ctx context.Context,
 		runID string) (domain.RunExecutionProfileSnapshot, error)
 	GetRunExecutionProfileSnapshot(ctx context.Context,
@@ -97,6 +102,8 @@ type Store interface {
 	GetFindingReport(ctx context.Context, id string) (domain.FindingReport, error)
 
 	GetSession(ctx context.Context, id string) (session.Session, error)
+	GetWorkspaceInfo(ctx context.Context, id string) (session.WorkspaceInfo, error)
+	ListWorkspacesPage(ctx context.Context, offset int, limit int) ([]session.WorkspaceRecord, error)
 	ListSessionsPage(ctx context.Context, offset int, limit int) ([]session.Session, error)
 	ListSessionMessagesPage(ctx context.Context, sessionID string, includeCompacted bool,
 		offset int, limit int) ([]session.Message, error)
@@ -111,23 +118,26 @@ type Store interface {
 }
 
 type Config struct {
-	AccessToken  string
-	ControlToken string
-	AppVersion   string
-	EventStream  EventStreamConfig
-	UIHandler    http.Handler
+	AccessToken        string
+	ControlToken       string
+	RunControlEnabled  bool
+	RunCreationEnabled bool
+	AppVersion         string
+	EventStream        EventStreamConfig
+	UIHandler          http.Handler
 }
 
 type API struct {
-	store            Store
-	tokenHash        [sha256.Size]byte
-	controlTokenHash [sha256.Size]byte
-	controlEnabled   bool
-	appVersion       string
-	openAPI          []byte
-	eventStream      EventStreamConfig
-	eventStreamSlots chan struct{}
-	uiHandler        http.Handler
+	store              Store
+	tokenHash          [sha256.Size]byte
+	controlTokenHash   [sha256.Size]byte
+	controlEnabled     bool
+	runCreationEnabled bool
+	appVersion         string
+	openAPI            []byte
+	eventStream        EventStreamConfig
+	eventStreamSlots   chan struct{}
+	uiHandler          http.Handler
 }
 
 func New(store Store, config Config) (*API, error) {
@@ -139,9 +149,9 @@ func New(store Store, config Config) (*API, error) {
 		return nil, err
 	}
 	controlToken := config.ControlToken
-	controlEnabled := controlToken != ""
+	controlTokenPresent := controlToken != ""
 	var controlTokenHash [sha256.Size]byte
-	if controlEnabled {
+	if controlTokenPresent {
 		if err := validateAccessToken(controlToken); err != nil {
 			return nil, apperror.Wrap(apperror.CodeInvalidArgument, "invalid HTTP API control token", err)
 		}
@@ -151,6 +161,10 @@ func New(store Store, config Config) (*API, error) {
 			return nil, apperror.New(apperror.CodeInvalidArgument,
 				"HTTP API read and control tokens must be distinct")
 		}
+	}
+	if (config.RunControlEnabled || config.RunCreationEnabled) && !controlTokenPresent {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API control capabilities require a control token")
 	}
 	version := strings.TrimSpace(config.AppVersion)
 	if version == "" {
@@ -165,7 +179,9 @@ func New(store Store, config Config) (*API, error) {
 		return nil, err
 	}
 	return &API{store: store, tokenHash: sha256.Sum256([]byte(token)),
-		controlTokenHash: controlTokenHash, controlEnabled: controlEnabled, appVersion: version,
+		controlTokenHash:   controlTokenHash,
+		controlEnabled:     controlTokenPresent && config.RunControlEnabled,
+		runCreationEnabled: controlTokenPresent && config.RunCreationEnabled, appVersion: version,
 		openAPI: document, eventStream: eventStream,
 		eventStreamSlots: make(chan struct{}, eventStream.MaxConnections),
 		uiHandler:        config.UIHandler}, nil
@@ -277,6 +293,10 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if uiRequest {
 		a.serveUI(tracked, request)
+		return
+	}
+	if request.URL.Path == "/api/v1/runs" && request.Method != http.MethodGet {
+		a.serveRunCreationControl(tracked, request, requestID)
 		return
 	}
 	if runID, matched := matchRunExecutionProfileControlPath(request.URL.Path); matched {

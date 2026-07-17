@@ -836,10 +836,22 @@ secure Desktop 构建必须显式使用 `desktop,production,wv2runtime.error`。
 
 双指标更新为架构完成度约 98%（V2 约 99%）、完整产品可用度约 53-57%、通用 Coding Agent 约 47%、Cyber 自动化约 20%。下一推荐切片为 Desktop D1-R1：先增加 Go-owned Run 创建与自动 Session 绑定的窄 control route，不调用模型、不扩展 Wails native bridge；Session message/steering 作为随后独立审计。边界见 ADR 0035。
 
+schema v72 / Desktop D1-R1 幂等受控 Run 创建切片已完成实现，任务 ID 为 `P9-Idempotent-Controlled-Run-Creation-v72-D1R1`。Go 新增不可变 `run_creation.v1` operation 账本，只持久化域分隔幂等键摘要、请求指纹和 Mission/Run/Session/Workspace 身份。Application 仅接受已注册 Workspace、1-4096 UTF-8 字节目标和规范 Profile/Surface/Phase，并在一个 immediate SQLite 事务中创建脱敏 Mission、交互式 created Run、活动 Session、revision-one mode、`preview/noop` execution profile、root Agent、精确初始事件及 operation。网络固定 disabled、目标为空、预算固定默认值、model route 固定等于 Profile；SQL trigger 独立复核整条绑定并拒绝 operation 更新/删除。
+
+HTTP 新增 distinct-control `POST /api/v1/runs` 和 read-bearer `GET /api/v1/workspaces`。写入口要求恰好一个 `Idempotency-Key`、严格 Content-Type、零 query、有界 body、无未知/重复字段和无尾随 JSON；相同 key/语义跨重启和跨连接收敛到原对象，不同意图冲突。Workspace DTO 只含 ID、名称和创建时间，不公开 root path。OpenAPI 更新为 28 个 path、65 个 schema、25 个 GET 与 4 个 control POST。
+
+Desktop 新增独立 `--enable-run-creation`，与 `--enable-profile-control` 分别控制 capability；creation-only token 不能访问取消或档位 route，Wails 原生 bridge 仍精确保持三个方法。React 新增 New Run 对话框、Workspace/Profile/Surface/Phase 选择、内存内不确定失败 key 重放、UTF-8 字节预检、请求-响应 Workspace/Profile/模式复核、默认预算/关闭权限校验、Run/Session 刷新与新 Run 选中。token 与 operation key 不进入 URL、Local Storage 或 Session Storage。
+
+切片审计发现并修复多类健壮性问题：creation-only control token 与旧取消/档位 capability 完全拆分；重放会重新计算已存图请求指纹并验证完整初态；历史 schema 夹具先移除 v72 trigger 再拆旧 profile 表，避免降级测试失败和 SQLite 文件锁；v72 trigger 进一步锁定初始 updated_at、root 状态和四条事件总数；HTTP 在 Go JSON 解码前拒绝非法 UTF-8，并改用窄 Store 契约而不继承无关 Run transition 权限；Domain 多字段错误顺序固定；React 同时绑定请求 Goal/Workspace、初始 Run/Session 状态、Mode Profile/Surface/Phase/revision/policy、默认预算和关闭权限，并按 Go 的 4096 UTF-8 字节上限预检多字节目标。当前未调用真实 Provider、Agent-controlled Shell/宿主进程、Docker、Skill 安装钩子或外部网络，也未取得 execution lease。边界见 ADR 0036。
+
+v72 最终本地发布门通过：全仓普通/race 分别 271.5 秒/257.9 秒；普通与 secure-Desktop 测试、vet、零告警 staticcheck、module verify/tidy diff、双路径零可达漏洞 govulncheck、严格 TypeScript、14 个文件 45 项前端测试、Vite 与 Windows production build、零漏洞 npm audit、OpenAPI/TypeScript 双次生成哈希一致、63 份 Markdown/86 条相对链接、凭据/运行产物/生产 `exec.Command`/乱码/diff 扫描和隔离 schema-v72 CLI smoke 均为绿色。一次与四项分析并行的 Desktop-tag 测试只触发 244 秒外层超时且没有失败输出，独立重跑在 267.2 秒明确通过；该编排超时不计为产品失败。当前没有已知未解决高/中风险；烟测根位于系统临时目录并等待正常回收，无需人工操作。
+
+双指标更新为架构完成度约 98%（V2 约 99%）、完整产品可用度约 55-59%、通用 Coding Agent 约 49%、Cyber 自动化约 20%。下一推荐切片为 Desktop D1-S1：复用既有 RunSupervisor、持久化引导队列、预算、Policy、脱敏、operation key 和事件语义，增加现有 Run-bound Session 的 Go-owned message/steering mutation；继续不建立 Desktop-only 执行路径，不启动进程。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每次完成一个开发切片后，依次执行功能复核、测试、代码与安全审计、项目记忆更新、Git 提交和 GitHub 推送。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0035-desktop-lifecycle-and-event-resumption.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0036-idempotent-controlled-run-creation.md`。

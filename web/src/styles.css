@@ -19,8 +19,9 @@
 * { box-sizing: border-box; }
 html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
 button, input, select { font: inherit; letter-spacing: 0; }
+textarea { font: inherit; letter-spacing: 0; }
 button { color: inherit; }
-button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible { outline: 2px solid #168f82; outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid #168f82; outline-offset: 2px; }
 code, pre { font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace; }
 
 .app-shell { height: 100dvh; min-height: 600px; overflow: hidden; background: #eef1f4; }
@@ -288,6 +289,28 @@ td code { font-size: 11px; }
 .desktop-package-digests code { color: #3f4e5a; }
 .desktop-dialog > footer { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 16px; border-top: 1px solid var(--border); background: var(--surface-subtle); }
 .desktop-dialog > footer > span { display: inline-flex; align-items: center; gap: 7px; color: #146c4e; font-size: 11px; }
+.run-creation-dialog { width: min(620px, 100%); }
+.run-creation-form { min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.run-creation-form > label { min-width: 0; display: grid; gap: 7px; color: #455463; font-size: 12px; font-weight: 600; }
+.run-creation-form > label:nth-child(2), .run-creation-choice-row,
+.run-creation-form > .connection-error { grid-column: 1 / -1; }
+.run-creation-form select, .run-creation-form textarea { width: 100%; min-width: 0; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--surface); color: var(--ink); }
+.run-creation-form select { height: 38px; padding: 0 9px; }
+.run-creation-form textarea { min-height: 112px; padding: 9px 10px; resize: vertical; line-height: 1.45; }
+.run-creation-form select:focus, .run-creation-form textarea:focus { border-color: #168f82; outline: 1px solid #168f82; }
+.run-creation-choice-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.run-creation-choice-row fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+.run-creation-choice-row legend { margin-bottom: 7px; color: #455463; font-size: 12px; font-weight: 600; }
+.run-creation-segments { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: hidden; border: 1px solid var(--border-strong); border-radius: 5px; }
+.run-creation-segments button { min-width: 0; height: 36px; border: 0; border-right: 1px solid var(--border); background: var(--surface); cursor: pointer; text-transform: capitalize; }
+.run-creation-segments button:last-child { border-right: 0; }
+.run-creation-segments button:hover { background: #eef5f4; }
+.run-creation-segments button.selected { background: var(--accent-soft); color: #08665e; font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+.run-creation-actions { justify-content: flex-end !important; }
+.dialog-secondary, .dialog-primary { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 7px 13px; border-radius: 5px; cursor: pointer; }
+.dialog-secondary { border: 1px solid var(--border-strong); background: var(--surface); }
+.dialog-primary { border: 1px solid #087f73; background: #087f73; color: #ffffff; }
+.dialog-secondary:disabled, .dialog-primary:disabled { opacity: .55; cursor: default; }
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -308,6 +331,12 @@ td code { font-size: 11px; }
   .steering-row time { grid-column: 2 / -1; text-align: left; }
   .event-row summary { grid-template-columns: 58px minmax(150px, 1fr) auto; }
   .event-row summary > span:nth-of-type(2) { display: none; }
+}
+
+@media (max-width: 620px) {
+  .run-creation-form, .run-creation-choice-row { grid-template-columns: 1fr; }
+  .run-creation-form > label, .run-creation-choice-row,
+  .run-creation-form > .connection-error { grid-column: 1; }
 }
 
 @media (max-width: 680px) {

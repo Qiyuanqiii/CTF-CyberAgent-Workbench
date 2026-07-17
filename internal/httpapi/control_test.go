@@ -153,7 +153,8 @@ func TestModelCancellationControlStopsProviderAcrossSQLiteConnections(t *testing
 		t.Fatal(err)
 	}
 	defer controlStore.Close()
-	api, err := New(controlStore, Config{AccessToken: testAccessToken, ControlToken: testControlToken})
+	api, err := New(controlStore, Config{AccessToken: testAccessToken,
+		ControlToken: testControlToken, RunControlEnabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +245,7 @@ func TestSpecialistModelCancellationControlStopsExactChildAcrossSQLiteConnection
 	}
 	defer controlStore.Close()
 	api, err := New(controlStore, Config{
-		AccessToken: testAccessToken, ControlToken: testControlToken,
+		AccessToken: testAccessToken, ControlToken: testControlToken, RunControlEnabled: true,
 	})
 	if err != nil {
 		t.Fatal(err)

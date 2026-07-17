@@ -24,6 +24,12 @@ type HealthView struct {
 	SchemaVersion int    `json:"schema_version"`
 }
 
+type WorkspaceView struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type ScopeView struct {
 	WorkspaceID    string   `json:"workspace_id,omitempty"`
 	NetworkMode    string   `json:"network_mode"`

@@ -9,6 +9,7 @@ const bootstrap = {
   read_token: "read-token-0123456789abcdefghijklmnop",
   control_token: "",
   control_enabled: false,
+  run_creation_enabled: false,
   read_only_default: true,
   process_execution_enabled: false,
   shell_execution_enabled: false,
@@ -71,6 +72,19 @@ describe("desktop native bridge", () => {
     expect(module.desktopRuntimeActive()).toBe(true);
   });
 
+  it("accepts Run creation without enabling existing Run controls", async () => {
+    const creationOnly = {
+      ...bootstrap,
+      control_token: "control-token-0123456789abcdefghijkl",
+      control_enabled: false,
+      run_creation_enabled: true,
+      read_only_default: false,
+    };
+    installBridge({ Bootstrap: vi.fn().mockResolvedValue(creationOnly) });
+    const module = await import("./desktop-bridge");
+    await expect(module.loadDesktopBootstrap()).resolves.toEqual(creationOnly);
+  });
+
   it("rejects authority widening and extra local-file fields", async () => {
     installBridge({ Bootstrap: vi.fn().mockResolvedValue({ ...bootstrap, process_execution_enabled: true }) });
     let module = await import("./desktop-bridge");
@@ -86,6 +100,7 @@ describe("desktop native bridge", () => {
       ...bootstrap,
       control_token: bootstrap.read_token,
       control_enabled: true,
+    run_creation_enabled: false,
       read_only_default: false,
     }) });
     module = await import("./desktop-bridge");

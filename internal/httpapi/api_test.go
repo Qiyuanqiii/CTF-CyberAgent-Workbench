@@ -56,6 +56,7 @@ type apiFixture struct {
 	checkpoint        domain.SupervisorCheckpoint
 	attempt           llm.ModelAttempt
 	externalSelection skills.ExternalSelection
+	workspace         store.WorkspaceRecord
 }
 
 func newAPIFixture(t *testing.T) *apiFixture {
@@ -67,10 +68,15 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	ctx := context.Background()
+	workspace := store.WorkspaceRecord{ID: "workspace-http-api", Name: "http-api",
+		RootPath: t.TempDir(), CreatedAt: time.Now().UTC()}
+	if err := st.SaveWorkspace(ctx, workspace); err != nil {
+		t.Fatal(err)
+	}
 	runs := application.NewRunService(st)
 	_, run, err := runs.Create(ctx, application.CreateRunRequest{
 		Goal: "inspect durable agent state", Profile: "review", ModelRoute: "review",
-		Budget: domain.Budget{MaxTurns: 8, MaxToolCalls: 20},
+		WorkspaceID: workspace.ID, Budget: domain.Budget{MaxTurns: 8, MaxToolCalls: 20},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -133,7 +139,8 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	gateway := toolgateway.New(st, policy.NewDefaultChecker())
 	proposed, err := gateway.Invoke(ctx, toolgateway.ToolCall{
 		Name: toolgateway.ShellTool, Arguments: map[string]string{"command": "echo api evidence"},
-		RunID: run.ID, SessionID: run.SessionID, RequestedBy: "http_api_test",
+		RunID: run.ID, SessionID: run.SessionID, WorkspaceID: workspace.ID,
+		WorkspaceRoot: workspace.RootPath, RequestedBy: "http_api_test",
 	})
 	if err != nil || proposed.Proposal == nil {
 		t.Fatalf("artifact proposal failed: %#v err=%v", proposed, err)
@@ -177,7 +184,8 @@ func newAPIFixture(t *testing.T) *apiFixture {
 		t.Fatalf("fixture model start inserted=%t err=%v", inserted, err)
 	}
 	api, err := New(st, Config{
-		AccessToken: testAccessToken, ControlToken: testControlToken, AppVersion: "test-version",
+		AccessToken: testAccessToken, ControlToken: testControlToken,
+		RunControlEnabled: true, RunCreationEnabled: true, AppVersion: "test-version",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -186,7 +194,7 @@ func newAPIFixture(t *testing.T) *apiFixture {
 		workItems: workItems, notes: notes,
 		artifactID: reviewed.Result.Metadata["artifact_stdout_id"], secret: secret,
 		leaseID: acquiredLease.Lease.LeaseID, checkpoint: turn.Checkpoint, attempt: attempt,
-		externalSelection: externalSelection}
+		externalSelection: externalSelection, workspace: workspace}
 }
 
 func prepareAPIExternalSkillProjection(t *testing.T, st *store.SQLiteStore,

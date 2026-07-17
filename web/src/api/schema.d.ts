@@ -117,7 +117,11 @@ export interface paths {
          */
         get: operations["listRuns"];
         put?: never;
-        post?: never;
+        /**
+         * Create a controlled Run
+         * @description Atomically creates one Mission, interactive Run, active Session, closed Run mode, preview execution profile, root Agent, and initial events. The request cannot select a model, budget, network target, existing Session, process backend, or capability grant.
+         */
+        post: operations["createRun"];
         delete?: never;
         options?: never;
         head?: never;
@@ -536,6 +540,26 @@ export interface paths {
          * @description Returns one structured WorkItem.
          */
         get: operations["getWorkItem"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspaces
+         * @description Returns registered Workspace ids and names without local root paths.
+         */
+        get: operations["listWorkspaces"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1141,6 +1165,25 @@ export interface components {
             interactive: boolean;
             model_route: string;
         };
+        RunCreationControlRequestView: {
+            goal: string;
+            /** @enum {string} */
+            phase?: "plan" | "deliver";
+            /** @enum {string} */
+            profile?: "code" | "review" | "learn" | "script";
+            /** @enum {string} */
+            surface?: "code" | "cyber";
+            /** @enum {string} */
+            version: "run_creation.v1";
+            workspace_id: string;
+        };
+        RunCreationControlView: {
+            mission: components["schemas"]["MissionView"];
+            mode: components["schemas"]["RunModeView"];
+            replayed: boolean;
+            run: components["schemas"]["RunView"];
+            session: components["schemas"]["SessionView"];
+        };
         RunDetailView: {
             checkpoint?: components["schemas"]["SupervisorCheckpointView"];
             execution_lease?: components["schemas"]["RunExecutionLeaseView"];
@@ -1381,6 +1424,12 @@ export interface components {
             updated_at: string;
             /** Format: int64 */
             version: number;
+        };
+        WorkspaceView: {
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            name: string;
         };
     };
     responses: {
@@ -1688,6 +1737,48 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createRun: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunCreationControlRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RunCreationControlView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];
         };
@@ -2547,6 +2638,43 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listWorkspaces: {
+        parameters: {
+            query?: {
+                /** @description Page size from 1 to 100; defaults to 50 */
+                limit?: number;
+                /** @description Opaque cursor bound to this route and exact filter set */
+                cursor?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WorkspaceView"][];
+                        page: components["schemas"]["Page"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             414: components["responses"]["RequestTooLarge"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];

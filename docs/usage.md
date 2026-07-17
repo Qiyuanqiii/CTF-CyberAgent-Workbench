@@ -107,7 +107,7 @@ Schema v40 loads the complete selected set for root Supervisor turns. Before eve
 
 Schema v47 derives `specialist_skill_context.v1` for each active child Attempt. Go reloads the child after Attempt start, binds the current immutable Run mode and parent selection, requires delegated `model.chat`, and selects at most one already-pinned guide. Code uses the guide matching its Profile. Cyber receives no broad Code/Review/Learn guide and receives `script` only for the Script Profile. `plan-delivery` is root-only. The default child budget is 1,024 conservative tokens with a 2,048 hard maximum. Preparation is idempotent across concurrent Store callers and commits atomically with the first Specialist model start; a selected Run cannot start that call without preparation. Child assignment text, model output, HTTP, Tool Gateway, and external directories cannot select Skills. The body remains in the current Go Provider request only, while SQLite and events store aggregate metadata and fingerprints.
 
-## Windows Desktop D0-A/D0-B
+## Windows Desktop D0-A/D0-B/D1-R1
 
 Build the unsigned development/portable-test shell from the repository root:
 
@@ -126,7 +126,16 @@ To expose only the existing schema-v64 profile selector, launch explicitly:
 .\build\desktop\cyberagent-desktop.exe --enable-profile-control
 ```
 
-This flag creates a distinct in-memory control token. It does not enable a backend: `preview`, `docker`, and `local` still return `process_enabled=false`, `execution_authorized=false`, and `capability_grant=false`. There is no Run/Session creation, chat mutation, terminal, LocalRunner, Docker start, Shell, Skill installation, upload, registry integration, startup entry, updater, or installer in D0-A/D0-B.
+To expose only schema-v72 controlled Run creation, or both narrow capabilities:
+
+```powershell
+.\build\desktop\cyberagent-desktop.exe --enable-run-creation
+.\build\desktop\cyberagent-desktop.exe --enable-run-creation --enable-profile-control
+```
+
+Either flag creates one distinct in-memory control token, while capability bits keep their routes independent. Profile selection does not enable a backend: `preview`, `docker`, and `local` still return `process_enabled=false`, `execution_authorized=false`, and `capability_grant=false`. Run creation requires an existing registered Workspace and creates only a default-budget, network-disabled, `preview/noop` Mission/Run/Session with no model call or execution lease. There is no Session chat/steering mutation, terminal, LocalRunner, Docker start, Shell, Skill installation, upload, registry integration, startup entry, updater, or installer in D0-A/D0-B/D1-R1.
+
+The New Run dialog selects a Workspace, Profile, Code/Cyber surface, and Plan/Deliver phase. It keeps the bearer and uncertain-response retry key in memory only, and the Go API performs the authoritative validation and idempotent transaction. A creation-only launch does not unlock active-call cancellation or profile selection.
 
 The top-bar package button opens the native `.zip` picker. The operating-system path stays inside Go and is immediately validated. React receives only an opaque one-time handle followed by bounded metadata and the fixed conclusion `installation_authorized=false`; cancellation creates no state. Set `CYBERAGENT_HOME` before launch only when intentionally using an isolated data directory for testing. The renderer cannot read or change that path.
 

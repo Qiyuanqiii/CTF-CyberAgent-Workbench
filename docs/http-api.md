@@ -1,14 +1,14 @@
 # 本地 HTTP API / Local HTTP API
 
-CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`。它主要用于检查 SQLite 中的持久化 Agent 状态（包括 schema v41 Run 模式、schema v42 Plan/Delivery、schema v44 Delivery 门禁、schema v45-v46 操作者引导状态、schema v64 执行环境档位与 schema v71 外部 Skill 安全来源投影），并通过可恢复 SSE 投影 Run events。独立 control capability 只允许精确取消活动模型调用，或选择不授予执行权的 Run 档位。API 不选择 Plan 方向、不写入 Delivery 检查点、不修改引导队列、不安装 Skill、不执行工具、不启动进程、不切换执行阶段，也不替代 Policy、Approval、Tool Gateway 或 Sandbox 门禁。
+CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`。它主要用于检查 SQLite 中的持久化 Agent 状态（包括 schema v41 Run 模式、schema v42 Plan/Delivery、schema v44 Delivery 门禁、schema v45-v46 操作者引导状态、schema v64 执行环境档位与 schema v71 外部 Skill 安全来源投影），并通过可恢复 SSE 投影 Run events。独立 control capability 允许精确取消活动模型调用、选择不授予执行权的 Run 档位，以及通过 schema v72 创建注册 Workspace 内、默认预算、禁用网络的受控 Mission/Run/Session。API 不选择 Plan 方向、不写入 Delivery 检查点、不修改引导队列、不安装 Skill、不执行工具、不启动进程、不切换执行阶段，也不替代 Policy、Approval、Tool Gateway 或 Sandbox 门禁。
 
-CyberAgent Workbench exposes a Go-controlled local `api.v1`. It primarily inspects durable Agent state in SQLite, including schema v41 Run modes, schema v42 Plan/Delivery state, schema v44 Delivery gates, schema v45-v46 operator-steering state, schema v64 execution profiles, and schema v71 safe external-Skill provenance, and projects persisted Run events through resumable SSE. The distinct control capability permits only exact active-call cancellation or selection of a non-authorizing Run profile. The API cannot choose a Plan direction, write a Delivery checkpoint, mutate steering, install a Skill, execute a tool, start a process, or change execution phase and does not replace Policy, Approval, the Tool Gateway, or Sandbox gates.
+CyberAgent Workbench exposes a Go-controlled local `api.v1`. It primarily inspects durable Agent state in SQLite, including schema v41 Run modes, schema v42 Plan/Delivery state, schema v44 Delivery gates, schema v45-v46 operator-steering state, schema v64 execution profiles, and schema v71 safe external-Skill provenance, and projects persisted Run events through resumable SSE. The distinct control capability permits exact active-call cancellation, selection of a non-authorizing Run profile, and schema-v72 creation of a registered-Workspace, default-budget, network-disabled Mission/Run/Session. The API cannot choose a Plan direction, write a Delivery checkpoint, mutate steering, install a Skill, execute a tool, start a process, or change execution phase and does not replace Policy, Approval, the Tool Gateway, or Sandbox gates.
 
 ## 启动 / Start
 
-省略 `CYBERAGENT_API_TOKEN` 时，进程会生成并打印一个临时只读 token。取消与执行档位选择默认关闭；只有设置不同的 `CYBERAGENT_API_CONTROL_TOKEN` 才启用。两个 token 都必须是 32 到 512 字节的规范 UTF-8，不能包含空白或控制字符，且不能相同；CLI 不会回显环境提供的值。
+省略 `CYBERAGENT_API_TOKEN` 时，进程会生成并打印一个临时只读 token。取消、执行档位选择与受控 Run 创建默认关闭；只有设置不同的 `CYBERAGENT_API_CONTROL_TOKEN` 才启用。两个 token 都必须是 32 到 512 字节的规范 UTF-8，不能包含空白或控制字符，且不能相同；CLI 不会回显环境提供的值。
 
-When `CYBERAGENT_API_TOKEN` is absent, the process generates and prints a temporary read token. Cancellation and execution-profile selection are disabled by default and enabled only by a distinct `CYBERAGENT_API_CONTROL_TOKEN`. Both tokens must be 32 to 512 bytes of normalized UTF-8 without whitespace or control characters, and they must differ. The CLI never echoes an environment-provided value.
+When `CYBERAGENT_API_TOKEN` is absent, the process generates and prints a temporary read token. Cancellation, execution-profile selection, and controlled Run creation are disabled by default and enabled only by a distinct `CYBERAGENT_API_CONTROL_TOKEN`. Both tokens must be 32 to 512 bytes of normalized UTF-8 without whitespace or control characters, and they must differ. The CLI never echoes an environment-provided value.
 
 ```powershell
 $env:CYBERAGENT_API_TOKEN = "<a-random-token-of-at-least-32-bytes>"
@@ -38,18 +38,19 @@ note: the API is loopback-only; control is separately authorized and tokens are 
 
 ### Windows Desktop 进程内传输 / Windows Desktop In-Process Transport
 
-Desktop D0-A/D0-B 复用同一 `api.v1` Handler，但不调用 `ListenAndServe`，也不绑定回环端口。Wails AssetServer 在同一进程内把 React 请求交给 Go；适配层只接受精确 `http://wails.localhost`，clone 后清除来源 URL origin、重建 `RequestURI` 并固定 loopback Host/RemoteAddr，现有鉴权、DTO、CSP、错误和 Store 路径保持不变。默认只生成内存 read token；显式 `--enable-profile-control` 才生成不同的内存 control token，并且它仍只能调用非授权 execution-profile route。两个 token 都不写磁盘、日志、Local Storage 或注册表。
+Desktop D0-A/D0-B/D1-R1 复用同一 `api.v1` Handler，但不调用 `ListenAndServe`，也不绑定回环端口。Wails AssetServer 在同一进程内把 React 请求交给 Go；适配层只接受精确 `http://wails.localhost`，clone 后清除来源 URL origin、重建 `RequestURI` 并固定 loopback Host/RemoteAddr，现有鉴权、DTO、CSP、错误和 Store 路径保持不变。默认只生成内存 read token；显式 `--enable-profile-control` 与 `--enable-run-creation` 分别开放非授权 execution-profile route 与受控创建 route。任一 capability 会生成同一个不同于 read token 的内存 control token，但未启用的 route 仍返回 404。两个 token 都不写磁盘、日志、Local Storage 或注册表。
 
-Desktop D0-A/D0-B reuses the same `api.v1` Handler without calling `ListenAndServe` or binding a loopback port. The Wails AssetServer passes React requests to Go in the same process; a narrow adapter accepts only exact `http://wails.localhost`, clears the source URL origin after cloning, rebuilds `RequestURI`, and pins loopback Host/RemoteAddr while preserving the existing authorization, DTO, CSP, error, and Store paths. The default launch creates only an in-memory read token. Explicit `--enable-profile-control` creates a distinct in-memory control token, still limited to the non-authorizing execution-profile route. Neither token is written to disk, logs, Local Storage, or the registry.
+Desktop D0-A/D0-B/D1-R1 reuses the same `api.v1` Handler without calling `ListenAndServe` or binding a loopback port. The Wails AssetServer passes React requests to Go in the same process; a narrow adapter accepts only exact `http://wails.localhost`, clears the source URL origin after cloning, rebuilds `RequestURI`, and pins loopback Host/RemoteAddr while preserving the existing authorization, DTO, CSP, error, and Store paths. The default launch creates only an in-memory read token. Explicit `--enable-profile-control` and `--enable-run-creation` independently expose the non-authorizing profile route and controlled creation route. Either creates one in-memory control token distinct from the read token, while disabled routes remain 404. Neither token is written to disk, logs, Local Storage, or the registry.
 
 普通浏览器继续使用 `/events/stream` SSE。Wails v2 在 Windows 上不支持 AssetServer response streaming，因此 Desktop 使用 `GET /runs/{run_id}/events/poll` 做一秒有界轮询。该 endpoint 与 SSE 共用同一个绑定 Run 与 sequence 的高水位 cursor，单次最多返回 100 帧并明确给出 `has_more`；poll cursor 可续接 SSE，SSE cursor 也可续接 poll。Renderer 最多在模块内存保存 16 个 Run、每个 500 帧，重挂载继续最后 cursor，失效 cursor 每次挂载最多回退一次；不写 Local/Session Storage，也不再生成伪 cursor。它不会建立新的事件真源。原生 Wails bridge 不是 HTTP 旁路，只提供 connection bootstrap 和路径隔离 Skill 选择/预览，不提供业务 mutation。
 
-Ordinary browser clients keep `/events/stream` SSE. Wails v2 does not support AssetServer response streaming on Windows, so Desktop polls `GET /runs/{run_id}/events/poll` at a bounded one-second interval. That endpoint shares the SSE Run/sequence high-water cursor, returns at most 100 frames plus explicit `has_more`, and permits cursor interchange in both directions. The renderer retains at most 16 Runs and 500 frames per Run in module memory, resumes the last cursor after remount, and resets a stale cursor at most once per mount. It writes neither Local nor Session Storage and no longer invents synthetic cursors. This creates no new event source. The native Wails bridge is not a business-API bypass: it provides only connection bootstrap and pathless Skill selection/preview, with no mutation surface.
+Ordinary browser clients keep `/events/stream` SSE. Wails v2 does not support AssetServer response streaming on Windows, so Desktop polls `GET /runs/{run_id}/events/poll` at a bounded one-second interval. That endpoint shares the SSE Run/sequence high-water cursor, returns at most 100 frames plus explicit `has_more`, and permits cursor interchange in both directions. The renderer retains at most 16 Runs and 500 frames per Run in module memory, resumes the last cursor after remount, and resets a stale cursor at most once per mount. It writes neither Local nor Session Storage and no longer invents synthetic cursors. This creates no new event source. The native Wails bridge is not a business-API bypass: it provides only connection bootstrap and pathless Skill selection/preview; Run creation still goes through the authenticated Go HTTP Handler.
 
 ```powershell
 $headers = @{ Authorization = "Bearer $env:CYBERAGENT_API_TOKEN" }
 Invoke-RestMethod http://127.0.0.1:8765/api/v1/health -Headers $headers
 Invoke-RestMethod "http://127.0.0.1:8765/api/v1/runs?limit=20" -Headers $headers
+Invoke-RestMethod "http://127.0.0.1:8765/api/v1/workspaces?limit=20" -Headers $headers
 Invoke-WebRequest http://127.0.0.1:8765/api/v1/openapi.json -Headers $headers
 curl.exe -N -H "Authorization: Bearer $env:CYBERAGENT_API_TOKEN" http://127.0.0.1:8765/api/v1/runs/<run-id>/events/stream
 $controlHeaders = @{ Authorization = "Bearer $env:CYBERAGENT_API_CONTROL_TOKEN"; "Idempotency-Key" = "cancel-<stable-operation-id>" }
@@ -59,6 +60,9 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/runs/<run-id>/agents
 $controlHeaders["Idempotency-Key"] = "profile-<stable-operation-id>"
 $profileBody = @{ profile = "docker"; reason = "prefer isolated execution" } | ConvertTo-Json
 Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/runs/<run-id>/execution-profile -Headers $controlHeaders -ContentType application/json -Body $profileBody
+$controlHeaders["Idempotency-Key"] = "create-run-<stable-operation-id>"
+$createBody = @{ version = "run_creation.v1"; goal = "Implement parser"; workspace_id = "<workspace-id>"; profile = "code"; surface = "code"; phase = "deliver" } | ConvertTo-Json
+Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/runs -Headers $controlHeaders -ContentType application/json -Body $createBody
 ```
 
 `Ctrl+C` cancels the command context and performs a bounded graceful shutdown.
@@ -66,27 +70,27 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/runs/<run-id>/execut
 ## 安全边界 / Security Boundary
 
 - Listener、HTTP `Host` 与客户端地址都必须是 loopback；`0.0.0.0`、空 host 和公网客户端会被拒绝。
-- 每个 `/api` 请求必须有且只有一个正确的 `Authorization: Bearer <token>`。GET 使用 read token；三个控制 POST 只接受不同的 control token，两种凭据不能互换。Web 静态请求匿名可读，并明确拒绝 Authorization header，避免 bearer 被意外发送到资源路径。
-- 所有读取只接受无 body 的 `GET`。三个 POST 只写入精确的 root/Specialist 取消意图或非授权执行档位选择；没有 CORS 响应头或浏览器跨源授权。
+- 每个 `/api` 请求必须有且只有一个正确的 `Authorization: Bearer <token>`。GET 使用 read token；四个控制 POST 只接受不同的 control token，两种凭据不能互换。Web 静态请求匿名可读，并明确拒绝 Authorization header，避免 bearer 被意外发送到资源路径。
+- 所有读取只接受无 body 的 `GET`。四个 POST 只写入精确的 root/Specialist 取消意图、非授权执行档位选择或关闭的 Mission/Run/Session 创建；没有 CORS 响应头或浏览器跨源授权。
 - 启用 UI 时，只在非 `/api` 命名空间接受无 query、无 body 的 `GET`/`HEAD`。HTML 使用 `no-store`；仅允许类型且文件名带哈希的资源使用一年 immutable cache。bundle 的根目录、`assets/`、软链接、文件类型、数量、单文件/总大小与 SPA fallback 深度均受限。
 - UI 与 API 共享 loopback、Host、客户端地址、request-target 和规范路径校验。UI 响应使用无 `unsafe-inline`/`unsafe-eval` 的 CSP、同源 opener/resource policy、`nosniff`、`DENY` frame policy 和禁用敏感浏览器能力的 Permissions Policy。
 - request target 最大 8 KiB，query 最大 4 KiB，response 最大 8 MiB，header 上限为 32 KiB。
 - HTTP handler 构造后只保留两个 token 的 SHA-256 摘要；明文仍可能存在于启动环境或短期进程内存，但不会写入配置、SQLite 或 Run events。
 - Artifact API 只返回 descriptor，不读取或返回正文；Run detail 不返回 checkpoint pending input 或 execution fencing token。租约摘要仅包含 owner、generation、状态与时间。
-- read token 可以读取该进程数据库暴露的全部只读资源；control token 只能请求取消或选择非授权档位，不能读取资源。两者都应视为本地管理员凭据。
+- read token 可以读取该进程数据库暴露的全部只读资源；control token 只能请求取消、选择非授权档位或创建关闭的 Run，不能读取资源。两者都应视为本地管理员凭据。
 - 取消请求必须精确绑定 Run/Supervisor/model attempt，或 Run/Specialist Agent/AgentAttempt/model attempt，并携带 16 到 256 字节的 `Idempotency-Key`。客户端不能提交 `lease_id`、generation 或 fencing token；请求 body 上限为 4 KiB，未知字段和尾随 JSON 会被拒绝。
 - SSE 使用同一 Authorization header，token 不进入 URL、cursor 或事件数据。默认最多同时 16 条 stream；每条连接最多 32-event 批量、2 MiB 单帧、10,000 events、5 分钟寿命，并对每次写入设置 2 秒 deadline。
 - Event poll 只接受 query `cursor` 与 1-100 的 `limit`，拒绝 `Last-Event-ID`、跨 Run cursor、gap 和未知参数；空批次仍返回可继续使用的高水位 cursor，读取本身不写事件。
 
 - The listener, HTTP `Host`, and client address must all be loopback. `0.0.0.0`, an empty host, and public clients are rejected.
-- Every `/api` request must contain exactly one valid `Authorization: Bearer <token>` header. GET uses the read token; the three control POST routes accept only the distinct control token. The credentials are not interchangeable. Static Web requests are anonymous and explicitly reject authorization headers so a bearer is not accidentally sent to an asset path.
-- All reads accept only bodyless `GET`. The three POST routes record only exact root/Specialist cancellation intent or a non-authorizing execution-profile selection. There are no CORS response headers or browser cross-origin grants.
+- Every `/api` request must contain exactly one valid `Authorization: Bearer <token>` header. GET uses the read token; the four control POST routes accept only the distinct control token. The credentials are not interchangeable. Static Web requests are anonymous and explicitly reject authorization headers so a bearer is not accidentally sent to an asset path.
+- All reads accept only bodyless `GET`. The four POST routes record only exact root/Specialist cancellation intent, a non-authorizing execution-profile selection, or closed Mission/Run/Session creation. There are no CORS response headers or browser cross-origin grants.
 - When the UI is enabled, only queryless, bodyless GET/HEAD requests outside the reserved `/api` namespace reach it. HTML is `no-store`; only allowlisted, hash-named assets receive a one-year immutable cache. Bundle roots, `assets/`, symlinks, types, counts, per-file/aggregate size, and SPA-fallback depth are bounded.
 - UI and API requests share the loopback, Host, client-address, request-target, and canonical-path boundary. UI responses add a CSP without `unsafe-inline` or `unsafe-eval`, same-origin opener/resource policies, `nosniff`, frame denial, and a Permissions Policy disabling sensitive browser features.
 - Request targets are capped at 8 KiB, queries at 4 KiB, responses at 8 MiB, and headers at 32 KiB.
 - After construction, the HTTP handler retains only SHA-256 digests of both tokens. Plaintext may still exist in the launch environment or short-lived process memory, but is never written to configuration, SQLite, or Run events.
 - Artifact routes return descriptors only and never load content. Run detail omits checkpoint pending input and the execution fencing token; its lease summary contains only owner, generation, status, and timestamps.
-- The read token can inspect every exposed read resource; the control token can only request cancellation or select a non-authorizing profile and cannot read resources. Treat both as local administrator credentials.
+- The read token can inspect every exposed read resource; the control token can only request cancellation, select a non-authorizing profile, or create a closed Run and cannot read resources. Treat both as local administrator credentials.
 - Cancellation must bind either the exact Run/Supervisor/model attempt or the exact Run/Specialist Agent/AgentAttempt/model attempt and carry a 16-to-256-byte `Idempotency-Key`. Clients cannot submit a lease id, generation, or fencing token. The JSON body is capped at 4 KiB; unknown fields and trailing JSON are rejected.
 - SSE uses the same Authorization header; the token never enters the URL, cursor, or event data. Defaults allow at most 16 concurrent streams, 32 events per batch, 2 MiB per frame, 10,000 events per connection, a five-minute lifetime, and a two-second deadline on each write.
 - Event polling accepts only query `cursor` and a 1-100 `limit`; it rejects `Last-Event-ID`, cross-Run cursors, sequence gaps, and unknown parameters. An empty batch still returns a reusable high-water cursor, and polling itself writes no event.
@@ -98,7 +102,9 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/runs/<run-id>/execut
 | `GET` | `/api/v1` | API and application versions plus top-level resources |
 | `GET` | `/api/v1/health` | Health and SQLite schema version |
 | `GET` | `/api/v1/openapi.json` | Raw deterministic OpenAPI 3.1 JSON document |
+| `GET` | `/api/v1/workspaces` | Bounded Workspace ID/name/creation metadata; no host root path |
 | `GET` | `/api/v1/runs` | Runs; `status`, `mission_id`, pagination |
+| `POST` | `/api/v1/runs` | Idempotently create one closed Mission/Run/Session in a registered Workspace |
 | `GET` | `/api/v1/runs/{run_id}` | Run, Mission, immutable execution-mode/profile snapshots, read-only Plan/checkpoint/external-Skill metadata, tool usage, token-free execution-lease summary |
 | `GET` | `/api/v1/runs/{run_id}/external-skills` | Bounded external-Skill provenance and root/Specialist delivery counts; no content, paths, digests, or private identities |
 | `GET` | `/api/v1/runs/{run_id}/events` | Ordered Run events; pagination |
@@ -139,6 +145,10 @@ Schema v71 在 Run detail 中可选嵌入 `external_skills`，并提供同内容
 
 Schema v71 optionally embeds `external_skills` in Run detail and exposes the same projection through a dedicated read-only endpoint. The projection is bounded to four pinned-version items and one Specialist and reveals only surface/profile, mode revision, token bounds, trust class, declared-tool count, and root/Specialist preparation and commit counts. Content, file paths, byte sizes, every hash/digest/fingerprint, selection/installation/mode-snapshot IDs, operation keys, and operator/requester/attempt/agent identities never enter the DTO. `operator_confirmed` and `context_delivery_authorized` are historical facts only, while `tool_capability_grant` is fixed false; the endpoint cannot install, select, load, or execute a Skill.
 
+Schema v72 新增 `run_creation.v1`。创建请求必须指定已注册 Workspace，并可选择规范 `code|review|learn|script` Profile、`code|cyber` surface 和 `plan|deliver` phase；省略时分别默认为 `code`、`code`、`deliver`。目标原始输入为 1-4096 UTF-8 字节，持久化前脱敏。Go/SQLite 固定交互式 created Run、active Session、默认预算、Profile model route、disabled network、空 targets、revision-one mode 与 `preview/noop` execution profile。相同 operation key 与语义返回原对象并标记 `replayed=true`，改变语义返回 conflict。该 route 不发送消息、调用模型、启动 Run、取得 lease 或授予 capability。
+
+Schema v72 adds `run_creation.v1`. A request must name a registered Workspace and may choose canonical `code|review|learn|script` Profile, `code|cyber` surface, and `plan|deliver` phase; omitted values default to `code`, `code`, and `deliver`. The raw goal is 1-4096 UTF-8 bytes and is redacted before persistence. Go and SQLite fix an interactive created Run, active Session, default budget, Profile model route, disabled network, empty targets, revision-one mode, and `preview/noop` execution profile. Same-key/same-intent replay returns the original graph with `replayed=true`; changed intent conflicts. The route sends no message, calls no model, starts no Run, acquires no lease, and grants no capability.
+
 ## OpenAPI Contract
 
 Go DTO 是响应结构的唯一来源。以下命令不启动数据库、不读取 token，并可复现仓库内受测试的 [openapi.json](openapi.json)：
@@ -150,9 +160,9 @@ cyberagent api openapi
 cyberagent api openapi --output docs/openapi.json
 ```
 
-运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 27 个 path、62 个 schema：24 个只读 GET 使用全局 read capability，三个控制 POST 显式覆盖为 `ControlBearerAuth`。测试会逐条命中公开 handler，并确认契约不包含 Artifact 正文、checkpoint pending input、Delivery 证据/摘要、操作者引导正文/摘要/身份、外部 Skill 正文/路径/摘要/私有身份、raw Fan-out report、私有审批/生命周期叙述、Plan operation/fencing 身份、`lease_id`、其他摘要或 API key 字段。
+运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 28 个 path、65 个 schema：25 个只读 GET 使用全局 read capability，四个控制 POST 显式覆盖为 `ControlBearerAuth`。测试会逐条命中公开 handler，并确认契约不包含 Workspace root、Artifact 正文、checkpoint pending input、Delivery 证据/摘要、操作者引导正文/摘要/身份、外部 Skill 正文/路径/摘要/私有身份、raw Fan-out report、私有审批/生命周期叙述、Plan operation/fencing 身份、`lease_id`、其他摘要或 API key 字段。
 
-The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract currently contains 27 paths and 62 schemas: 24 read-only GET operations use the global read capability, while three control POST operations override security with `ControlBearerAuth`. Tests exercise every published handler and verify that the contract omits Artifact content, checkpoint pending input, Delivery evidence/digests, steering content/digests/operator identity, external-Skill content/paths/digests/private identities, raw Fan-out reports, private approval/lifecycle narratives, Plan operation/fencing identity, `lease_id`, other digests, and API-key fields.
+The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract currently contains 28 paths and 65 schemas: 25 read-only GET operations use the global read capability, while four control POST operations override security with `ControlBearerAuth`. Tests exercise every published handler and verify that the contract omits Workspace roots, Artifact content, checkpoint pending input, Delivery evidence/digests, steering content/digests/operator identity, external-Skill content/paths/digests/private identities, raw Fan-out reports, private approval/lifecycle narratives, Plan operation/fencing identity, `lease_id`, other digests, and API-key fields.
 
 ## 主动取消 / Active-Call Cancellation
 
@@ -236,7 +246,7 @@ Pagination is a bounded live SQLite projection, not a multi-request snapshot. Ap
 
 ## 当前限制 / Current Limits
 
-- No general write API or user-visible model-text stream. The Go-hosted browser UI is read-first and accepts an optional memory-only control token solely for non-authorizing execution-profile selection; exact active-call cancellation remains API-only.
+- No general write API or user-visible model-text stream. The Go-hosted browser UI is read-mostly and accepts an optional memory-only control token for non-authorizing execution-profile selection and controlled Run creation; exact active-call cancellation remains API-only. Session chat, steering, Plan, approval, Diff, and Skill mutations remain absent.
 - Execution-lease rows coordinate workers, but the API exposes neither `lease_id` nor any operation that accepts a fencing token.
 - No Artifact content route. Use the authenticated local CLI `artifact read` when content is explicitly required.
 - No real Shell, LocalSandbox, or Docker process execution. Schema v64 profile selection records intent only; HTTP exposes no runner start, Sandbox execution, approval, output-export, or Artifact-commit route. Existing approvals still resolve to audited dry-run results.

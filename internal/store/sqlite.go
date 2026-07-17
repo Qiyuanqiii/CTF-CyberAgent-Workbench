@@ -36,12 +36,7 @@ func validateStoreListOffset(offset int) error {
 	return nil
 }
 
-type WorkspaceRecord struct {
-	ID        string
-	Name      string
-	RootPath  string
-	CreatedAt time.Time
-}
+type WorkspaceRecord = session.WorkspaceRecord
 
 type ArtifactRecord struct {
 	ID          string
@@ -299,6 +294,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 69, Name: "content-addressed inert user Skill package installations", Statements: skillPackageInstallationStatements},
 		{Version: 70, Name: "Run-bound external Skill selection and context provenance", Statements: externalSkillSelectionStatements},
 		{Version: 71, Name: "bounded external Skill provenance projection", Statements: externalSkillProjectionStatements},
+		{Version: 72, Name: "idempotent operator-controlled Run creation", Statements: runCreationOperationStatements},
 	})
 }
 

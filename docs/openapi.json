@@ -3,7 +3,7 @@
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "info": {
     "title": "CyberAgent Workbench Local API",
-    "description": "Authenticated loopback-only API owned by the Go control plane. Read operations expose durable metadata; the separately authorized control capability permits exact active-call cancellation and selection of a non-authorizing Run execution profile.",
+    "description": "Authenticated loopback-only API owned by the Go control plane. Read operations expose durable metadata; separately authorized control capabilities permit exact active-call cancellation, non-authorizing execution-profile selection, and idempotent creation of a closed, workspace-bound Run.",
     "version": "api.v1",
     "license": {
       "name": "Apache License 2.0",
@@ -45,6 +45,10 @@
     {
       "name": "Sessions",
       "description": "Persisted Session metadata and redacted messages."
+    },
+    {
+      "name": "Workspaces",
+      "description": "Registered Workspace identities without local root paths."
     },
     {
       "name": "Memory",
@@ -499,6 +503,106 @@
           }
         },
         "x-cyberagent-read-only": true
+      },
+      "post": {
+        "operationId": "createRun",
+        "summary": "Create a controlled Run",
+        "description": "Atomically creates one Mission, interactive Run, active Session, closed Run mode, preview execution profile, root Agent, and initial events. The request cannot select a model, budget, network target, existing Session, process backend, or capability grant.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque retry key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RunCreationControlView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunCreationControlRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
       }
     },
     "/api/v1/runs/{run_id}": {
@@ -2754,6 +2858,97 @@
         },
         "x-cyberagent-read-only": true
       }
+    },
+    "/api/v1/workspaces": {
+      "get": {
+        "operationId": "listWorkspaces",
+        "summary": "List Workspaces",
+        "description": "Returns registered Workspace ids and names without local root paths.",
+        "tags": [
+          "Workspaces"
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size from 1 to 100; defaults to 50",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor bound to this route and exact filter set",
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/WorkspaceView"
+                      },
+                      "type": "array"
+                    },
+                    "page": {
+                      "$ref": "#/components/schemas/Page"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data",
+                    "page"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
     }
   },
   "components": {
@@ -4937,6 +5132,83 @@
         ],
         "type": "object"
       },
+      "RunCreationControlRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "goal": {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "plan",
+              "deliver"
+            ],
+            "type": "string"
+          },
+          "profile": {
+            "enum": [
+              "code",
+              "review",
+              "learn",
+              "script"
+            ],
+            "type": "string"
+          },
+          "surface": {
+            "enum": [
+              "code",
+              "cyber"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "run_creation.v1"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "goal",
+          "workspace_id"
+        ],
+        "type": "object"
+      },
+      "RunCreationControlView": {
+        "additionalProperties": false,
+        "properties": {
+          "mission": {
+            "$ref": "#/components/schemas/MissionView"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/RunModeView"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunView"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionView"
+          }
+        },
+        "required": [
+          "mission",
+          "run",
+          "session",
+          "mode",
+          "replayed"
+        ],
+        "type": "object"
+      },
       "RunDetailView": {
         "additionalProperties": false,
         "properties": {
@@ -5839,6 +6111,29 @@
           "version",
           "created_at",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "WorkspaceView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_at"
         ],
         "type": "object"
       }

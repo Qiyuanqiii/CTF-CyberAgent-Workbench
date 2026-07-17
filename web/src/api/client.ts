@@ -3,6 +3,8 @@ import type {
   ErrorEnvelope,
   HealthView,
   PageResult,
+  RunCreationControlRequestView,
+  RunCreationControlView,
   RunEventPollView,
   RunEventStreamView,
   SuccessEnvelope,
@@ -97,20 +99,89 @@ function parseEventPoll(value: unknown, expectedRunID: string, requestID: string
   return { ...poll, frames } as RunEventPollView;
 }
 
+function parseRunCreationControl(value: unknown,
+  request: RunCreationControlRequestView): RunCreationControlView {
+  if (!hasExactKeys(value, ["mission", "mode", "replayed", "run", "session"]) ||
+    typeof value.replayed !== "boolean" || !isRecord(value.mission) ||
+    !isRecord(value.mode) || !isRecord(value.run) || !isRecord(value.session) ||
+    !isRecord(value.run.config) || !isRecord(value.run.budget) || !isRecord(value.mission.scope) ||
+    !isRecord(value.mode.scope)) {
+    throw new APIRequestError("Run creation response is invalid", "INVALID_RESPONSE", 502);
+  }
+  const missionID = boundedIdentity(value.mission.id);
+  const runID = boundedIdentity(value.run.id);
+  const sessionID = boundedIdentity(value.session.id);
+  const workspaceID = boundedIdentity(value.mission.workspace_id);
+  const expectedProfile = request.profile ?? "code";
+  const expectedSurface = request.surface ?? "code";
+  const expectedPhase = request.phase ?? "deliver";
+  if (!missionID || !runID || !sessionID || !workspaceID ||
+    workspaceID !== request.workspace_id || value.mission.goal !== request.goal ||
+    value.run.mission_id !== missionID || value.run.session_id !== sessionID ||
+    value.session.workspace_id !== workspaceID ||
+    value.mission.scope.workspace_id !== workspaceID || value.mode.scope.workspace_id !== workspaceID ||
+    value.run.status !== "created" || value.session.status !== "active" ||
+    value.run.config.interactive !== true || value.mission.profile !== expectedProfile ||
+    value.mode.profile !== expectedProfile ||
+    value.run.config.model_route !== expectedProfile || value.session.route !== expectedProfile ||
+    value.session.title !== value.mission.goal ||
+    value.mission.scope.network_mode !== "disabled" ||
+    value.mode.scope.network_mode !== "disabled" ||
+    !hasNoAllowedTargets(value.mission.scope) || !hasNoAllowedTargets(value.mode.scope) ||
+    value.run.budget.max_turns !== 100 || value.run.budget.max_tool_calls !== 100 ||
+    (value.run.budget.max_tokens ?? 0) !== 0 || (value.run.budget.max_cost_usd ?? 0) !== 0 ||
+    (value.run.budget.timeout_seconds ?? 0) !== 0 ||
+    value.mode.capability_grant !== false || value.mode.protocol_version !== "run_mode.v1" ||
+    value.mode.policy_version !== "mode_policy.v1" || value.mode.revision !== 1 ||
+    value.mode.surface !== expectedSurface || value.mode.phase !== expectedPhase) {
+    throw new APIRequestError("Run creation response violated its closed authority contract",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as RunCreationControlView;
+}
+
+function hasNoAllowedTargets(scope: Record<string, unknown>): boolean {
+  return scope.allowed_targets === undefined ||
+    (Array.isArray(scope.allowed_targets) && scope.allowed_targets.length === 0);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: unknown, expected: string[]): value is Record<string, unknown> {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
+}
+
+function boundedIdentity(value: unknown): string {
+  return typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= 256
+    ? value
+    : "";
+}
+
 export class CyberAgentClient {
   readonly baseURL: string;
   readonly hasControl: boolean;
+  readonly hasRunCreation: boolean;
 
   constructor(
     private readonly token: string,
     baseURL = import.meta.env.VITE_API_BASE_URL || "/api/v1",
     private readonly controlToken = "",
+    capabilities: { runControlEnabled?: boolean; runCreationEnabled?: boolean } = {},
   ) {
     if (token.trim() === "") {
       throw new Error("A read bearer token is required");
     }
     this.baseURL = normalizeBaseURL(baseURL);
-    this.hasControl = controlToken.trim() !== "";
+    const controlPresent = controlToken.trim() !== "";
+    this.hasControl = controlPresent && (capabilities.runControlEnabled ?? true);
+    this.hasRunCreation = controlPresent && (capabilities.runCreationEnabled ?? true);
   }
 
   async health(signal?: AbortSignal): Promise<HealthView> {
@@ -145,6 +216,20 @@ export class CyberAgentClient {
     if (!this.hasControl) {
       throw new Error("A control bearer token is required for this operation");
     }
+    return this.sendControl<T>(path, body, idempotencyKey, signal);
+  }
+
+  async createRun(body: RunCreationControlRequestView, idempotencyKey: string,
+    signal?: AbortSignal): Promise<RunCreationControlView> {
+    if (!this.hasRunCreation) {
+      throw new Error("Run creation capability is required for this operation");
+    }
+    const result = await this.sendControl<unknown>("/runs", body, idempotencyKey, signal);
+    return parseRunCreationControl(result, body);
+  }
+
+  private async sendControl<T>(path: string, body: unknown, idempotencyKey: string,
+    signal?: AbortSignal): Promise<T> {
     if (idempotencyKey.trim() !== idempotencyKey || idempotencyKey.length < 16) {
       throw new Error("A normalized idempotency key is required");
     }

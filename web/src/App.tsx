@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { LogOut, PackageSearch, RefreshCw, ShieldCheck } from "lucide-react";
+import { LogOut, PackageSearch, Plus, RefreshCw, ShieldCheck } from "lucide-react";
 import { CyberAgentClient } from "./api/client";
 import { ConnectionGate } from "./components/connection-gate";
 import { DesktopSkillPreviewDialog } from "./components/desktop-skill-preview";
+import { RunCreationDialog } from "./components/run-creation-dialog";
 import { ResourceSidebar } from "./components/resource-sidebar";
 import { RunWorkspace } from "./components/run-workspace";
 import { SessionWorkspace } from "./components/session-workspace";
@@ -13,16 +14,27 @@ import { useConnectionStore } from "./state/connection";
 export default function App() {
   const token = useConnectionStore((state) => state.token);
   const controlToken = useConnectionStore((state) => state.controlToken);
+  const runControlEnabled = useConnectionStore((state) => state.runControlEnabled);
+  const runCreationEnabled = useConnectionStore((state) => state.runCreationEnabled);
   if (!token) {
     return <ConnectionGate />;
   }
-  return <ConnectedWorkbench token={token} controlToken={controlToken} />;
+  return <ConnectedWorkbench token={token} controlToken={controlToken}
+    runControlEnabled={runControlEnabled} runCreationEnabled={runCreationEnabled} />;
 }
 
-function ConnectedWorkbench({ token, controlToken }: { token: string; controlToken: string }) {
+function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreationEnabled }: {
+  token: string;
+  controlToken: string;
+  runControlEnabled: boolean;
+  runCreationEnabled: boolean;
+}) {
   const [skillPreviewOpen, setSkillPreviewOpen] = useState(false);
+  const [runCreationOpen, setRunCreationOpen] = useState(false);
   const desktop = desktopBridgeAvailable();
-  const client = useMemo(() => new CyberAgentClient(token, undefined, controlToken), [token, controlToken]);
+  const client = useMemo(() => new CyberAgentClient(token, undefined, controlToken, {
+    runControlEnabled, runCreationEnabled,
+  }), [token, controlToken, runControlEnabled, runCreationEnabled]);
   const queryClient = useQueryClient();
   const health = useConnectionStore((state) => state.health);
   const setHealth = useConnectionStore((state) => state.setHealth);
@@ -45,6 +57,7 @@ function ConnectedWorkbench({ token, controlToken }: { token: string; controlTok
 
   const leave = () => {
     setSkillPreviewOpen(false);
+    setRunCreationOpen(false);
     queryClient.clear();
     disconnect();
   };
@@ -61,6 +74,10 @@ function ConnectedWorkbench({ token, controlToken }: { token: string; controlTok
             <span className={`health-indicator ${healthQuery.isError ? "offline" : "online"}`}>
               <i />{healthQuery.isError ? "API error" : `api.v1 / schema ${healthQuery.data?.schema_version ?? "-"}`}
             </span>
+            {runCreationEnabled &&
+              <button aria-label="Create Run" className="icon-button" onClick={() => setRunCreationOpen(true)} title="Create Run" type="button">
+                <Plus aria-hidden="true" size={17} />
+              </button>}
             {desktop &&
               <button aria-label="预览 Skill 包" className="icon-button" onClick={() => setSkillPreviewOpen(true)} title="预览 Skill 包" type="button">
                 <PackageSearch aria-hidden="true" size={16} />
@@ -79,6 +96,8 @@ function ConnectedWorkbench({ token, controlToken }: { token: string; controlTok
         </div>
       </div>
       <DesktopSkillPreviewDialog open={skillPreviewOpen} onClose={() => setSkillPreviewOpen(false)} />
+      <RunCreationDialog client={client} open={runCreationOpen}
+        onClose={() => setRunCreationOpen(false)} />
     </>
   );
 }

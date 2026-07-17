@@ -18,6 +18,7 @@ const (
 	ModelCancellationPathTemplate           = "/api/v1/runs/{run_id}/active-call/cancel"
 	SpecialistModelCancellationPathTemplate = "/api/v1/runs/{run_id}/agents/{agent_id}/active-call/cancel"
 	MaxControlRequestBodyBytes              = 4 * 1024
+	MaxRunCreationRequestBodyBytes          = 8 * 1024
 )
 
 type ModelCancellationRequestView struct {
@@ -222,21 +223,28 @@ func modelCancellationIdempotencyKey(header http.Header) (string, error) {
 }
 
 func readBoundedControlBody(request *http.Request) ([]byte, error) {
+	return readBoundedRequestBody(request, MaxControlRequestBodyBytes)
+}
+
+func readBoundedRequestBody(request *http.Request, maximum int64) ([]byte, error) {
 	if request.Body == nil || request.ContentLength == 0 {
 		return nil, apperror.New(apperror.CodeInvalidArgument, "control request JSON body is required")
 	}
-	if request.ContentLength > MaxControlRequestBodyBytes {
+	if maximum <= 0 {
+		return nil, apperror.New(apperror.CodeInternal, "control request body limit is invalid")
+	}
+	if request.ContentLength > maximum {
 		return nil, apperror.New(apperror.CodeResourceExhausted,
 			"control request body exceeds its limit")
 	}
-	body, err := io.ReadAll(io.LimitReader(request.Body, MaxControlRequestBodyBytes+1))
+	body, err := io.ReadAll(io.LimitReader(request.Body, maximum+1))
 	if err != nil {
 		return nil, apperror.Wrap(apperror.CodeInvalidArgument, "read control request body", err)
 	}
 	if len(body) == 0 {
 		return nil, apperror.New(apperror.CodeInvalidArgument, "control request JSON body is required")
 	}
-	if len(body) > MaxControlRequestBodyBytes {
+	if int64(len(body)) > maximum {
 		return nil, apperror.New(apperror.CodeResourceExhausted,
 			"control request body exceeds its limit")
 	}

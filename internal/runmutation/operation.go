@@ -87,6 +87,17 @@ func OperationKeyDigest(toolName string, runID string, operationKey string) stri
 	return Fingerprint("structured_tool_operation.v1", toolName, runID, operationKey)
 }
 
+func RunCreationOperationDigest(operationKey string) string {
+	return Fingerprint("run_creation_operation.v1", operationKey)
+}
+
+func RunCreationRequestFingerprint(goal string, workspaceID string, profile string,
+	surface string, phase string, requestedBy string,
+) string {
+	return Fingerprint("run_creation_request.v1", goal, workspaceID, profile,
+		surface, phase, requestedBy)
+}
+
 func SupervisorToolOperationKey(runID string, turn int, toolName string, payloadJSON string) string {
 	return Fingerprint("supervisor_structured_tool.v1", strings.TrimSpace(runID), strconv.Itoa(turn),
 		strings.TrimSpace(toolName), strings.TrimSpace(payloadJSON))

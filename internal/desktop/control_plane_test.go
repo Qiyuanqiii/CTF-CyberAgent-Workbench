@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -18,6 +19,7 @@ import (
 )
 
 const desktopControlPlaneTestToken = "desktop-control-plane-read-token-0123456789"
+const desktopControlPlaneControlToken = "desktop-control-plane-control-token-012345"
 
 type desktopAPIEnvelope struct {
 	Version   string          `json:"version"`
@@ -140,6 +142,59 @@ func TestControlPlaneConcurrentOpenOnAnInitializedDatabase(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func TestControlPlaneSeparatesRunCreationFromExistingRunControls(t *testing.T) {
+	plane, err := OpenControlPlane(ControlPlaneConfig{
+		DatabasePath: filepath.Join(t.TempDir(), "creation.db"),
+		ReadToken:    desktopControlPlaneTestToken, ControlToken: desktopControlPlaneControlToken,
+		RunCreationEnabled: true, AppVersion: "desktop-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plane.Close()
+	workspace := store.WorkspaceRecord{ID: "workspace-desktop-create", Name: "desktop-create",
+		RootPath: t.TempDir()}
+	if err := plane.stateStore.SaveWorkspace(t.Context(), workspace); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"version":"run_creation.v1","goal":"Desktop Run",` +
+		`"workspace_id":"` + workspace.ID + `"}`
+	created := desktopControlRequest(plane.Handler(), http.MethodPost, "/api/v1/runs",
+		"desktop-run-create-operation-0001", body)
+	if created.Code != http.StatusAccepted {
+		t.Fatalf("Run creation status=%d body=%s", created.Code, created.Body.String())
+	}
+	var envelope desktopAPIEnvelope
+	if err := json.Unmarshal(created.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	var result httpapi.RunCreationControlView
+	if err := json.Unmarshal(envelope.Data, &result); err != nil || result.Run.ID == "" {
+		t.Fatalf("Run creation response=%#v err=%v", result, err)
+	}
+	profile := desktopControlRequest(plane.Handler(), http.MethodPost,
+		"/api/v1/runs/"+result.Run.ID+"/execution-profile",
+		"desktop-profile-operation-0001", `{"profile":"docker"}`)
+	if profile.Code != http.StatusNotFound {
+		t.Fatalf("Run creation capability widened profile control: status=%d body=%s",
+			profile.Code, profile.Body.String())
+	}
+}
+
+func desktopControlRequest(handler http.Handler, method string, path string,
+	key string, body string,
+) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(method, "http://127.0.0.1"+path, strings.NewReader(body))
+	request.Host = "127.0.0.1:8765"
+	request.RemoteAddr = "127.0.0.1:45678"
+	request.Header.Set("Authorization", "Bearer "+desktopControlPlaneControlToken)
+	request.Header.Set("Idempotency-Key", key)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
 }
 
 func readDesktopEventPoll(t *testing.T, handler http.Handler, runID string,

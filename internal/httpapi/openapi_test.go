@@ -66,7 +66,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				(path == SpecialistModelCancellationPathTemplate &&
 					item.Post.OperationID == "requestSpecialistModelCancellation") ||
 				(path == RunExecutionProfileControlPathTemplate &&
-					item.Post.OperationID == "selectRunExecutionProfile")
+					item.Post.OperationID == "selectRunExecutionProfile") ||
+				(path == RunCreationControlPath && item.Post.OperationID == "createRun")
 			if !validControl ||
 				item.Post.ReadOnly || item.Post.Responses["202"] == nil || item.Post.RequestBody == nil ||
 				len(item.Post.Security) != 1 || item.Post.Security[0]["ControlBearerAuth"] == nil {
@@ -74,13 +75,20 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 			}
 			operations = append(operations, item.Post)
 		}
-		if len(operations) != 1 {
-			t.Fatalf("path %s must expose exactly one operation: %#v", path, item)
+		expectedOperations := 1
+		if path == RunCreationControlPath {
+			expectedOperations = 2
 		}
-		if _, duplicate := operationIDs[operations[0].OperationID]; duplicate {
-			t.Fatalf("duplicate OpenAPI operation id %q", operations[0].OperationID)
+		if len(operations) != expectedOperations {
+			t.Fatalf("path %s exposes %d operations, want %d: %#v",
+				path, len(operations), expectedOperations, item)
 		}
-		operationIDs[operations[0].OperationID] = struct{}{}
+		for _, operation := range operations {
+			if _, duplicate := operationIDs[operation.OperationID]; duplicate {
+				t.Fatalf("duplicate OpenAPI operation id %q", operation.OperationID)
+			}
+			operationIDs[operation.OperationID] = struct{}{}
+		}
 	}
 	sort.Strings(actualPaths)
 	if !reflect.DeepEqual(actualPaths, expectedPaths) {
@@ -97,7 +105,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 		for method := range item {
 			if method != "get" && !((path == ModelCancellationPathTemplate ||
 				path == SpecialistModelCancellationPathTemplate ||
-				path == RunExecutionProfileControlPathTemplate) && method == "post") {
+				path == RunExecutionProfileControlPathTemplate ||
+				path == RunCreationControlPath) && method == "post") {
 				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
 			}
 		}
@@ -185,7 +194,10 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 			}
 			if spec.Control {
 				body := `{"profile":"docker"}`
-				if spec.Path != RunExecutionProfileControlPathTemplate {
+				if spec.Path == RunCreationControlPath {
+					body = `{"version":"run_creation.v1","goal":"OpenAPI live Run",` +
+						`"workspace_id":"` + fixture.workspace.ID + `"}`
+				} else if spec.Path != RunExecutionProfileControlPathTemplate {
 					attemptID := fixture.checkpoint.AttemptID
 					modelAttempt := 1
 					if spec.Path == SpecialistModelCancellationPathTemplate {

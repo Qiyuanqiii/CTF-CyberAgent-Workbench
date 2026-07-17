@@ -44,10 +44,13 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
-			"external-skills", "event-stream", "event-poll", "openapi"}
+			"external-skills", "workspaces", "event-stream", "event-poll", "openapi"}
 		if a.controlEnabled {
 			resources = append(resources, "model-cancellation-control",
 				"specialist-model-cancellation-control", "execution-profile-control")
+		}
+		if a.runCreationEnabled {
+			resources = append(resources, "run-creation-control")
 		}
 		return IndexView{APIVersion: Version, AppVersion: a.appVersion, Resources: resources}, nil, nil
 	case "/api/v1/health":
@@ -68,6 +71,10 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 	switch segments[0] {
 	case "runs":
 		return a.routeRuns(request, segments)
+	case "workspaces":
+		if len(segments) == 1 {
+			return a.workspaces(request)
+		}
 	case "sessions":
 		return a.routeSessions(request, segments)
 	case "work-items":
@@ -84,6 +91,29 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 	}
 	return nil, nil, apperror.New(apperror.CodeNotFound, "HTTP API endpoint was not found")
+}
+
+func (a *API) workspaces(request *http.Request) (any, *Page, error) {
+	values := request.URL.Query()
+	if err := validateSingleQueryValues(values, "limit", "cursor"); err != nil {
+		return nil, nil, err
+	}
+	pageRequest, err := parsePage(values, request.URL.Path)
+	if err != nil {
+		return nil, nil, err
+	}
+	records, err := a.store.ListWorkspacesPage(request.Context(),
+		pageRequest.Offset, pageRequest.Limit+1)
+	if err != nil {
+		return nil, nil, err
+	}
+	views := make([]WorkspaceView, len(records))
+	for index, record := range records {
+		views[index] = WorkspaceView{ID: record.ID, Name: record.Name,
+			CreatedAt: record.CreatedAt}
+	}
+	views, page := trimPage(views, pageRequest)
+	return views, page, nil
 }
 
 func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, error) {

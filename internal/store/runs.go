@@ -122,7 +122,7 @@ func createMissionRunTx(ctx context.Context, tx *sql.Tx, mission domain.Mission,
 		return err
 	}
 	executionProfile, err := domain.NewInitialRunExecutionProfileSnapshot(
-		idgen.New("run-exec-profile"), run, mission, "run_service",
+		idgen.New("run-exec-profile"), run, mission, mode.RequestedBy,
 		"initial preview execution profile", run.CreatedAt)
 	if err != nil {
 		return err

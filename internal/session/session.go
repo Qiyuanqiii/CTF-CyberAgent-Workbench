@@ -90,6 +90,13 @@ type WorkspaceInfo struct {
 	RootPath string
 }
 
+type WorkspaceRecord struct {
+	ID        string
+	Name      string
+	RootPath  string
+	CreatedAt time.Time
+}
+
 type Store interface {
 	fileedit.Store
 	toolrun.Store

@@ -48,6 +48,7 @@ describe("ConnectionGate", () => {
       read_token: "desktop-read-token-0123456789abcdef",
       control_token: "",
       control_enabled: false,
+    run_creation_enabled: false,
       read_only_default: true,
       process_execution_enabled: false,
       shell_execution_enabled: false,

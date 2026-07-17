@@ -31,16 +31,18 @@ export function ResourceSidebar({ client }: { client: CyberAgentClient }) {
   const visibleSessions = sessions.filter((session) => !normalizedSearch || `${session.id} ${session.title} ${session.route}`.toLowerCase().includes(normalizedSearch));
 
   useEffect(() => {
-    if (kind === "run" && !runsQuery.isLoading && !runs.some((run) => run.id === selectedRunID)) {
+    if (kind === "run" && !runsQuery.isLoading && !runsQuery.isFetching &&
+      !runs.some((run) => run.id === selectedRunID)) {
       selectRun(runs[0]?.id ?? "");
     }
-  }, [kind, runs, runsQuery.isLoading, selectRun, selectedRunID]);
+  }, [kind, runs, runsQuery.isFetching, runsQuery.isLoading, selectRun, selectedRunID]);
 
   useEffect(() => {
-    if (kind === "session" && !sessionsQuery.isLoading && !sessions.some((session) => session.id === selectedSessionID)) {
+    if (kind === "session" && !sessionsQuery.isLoading && !sessionsQuery.isFetching &&
+      !sessions.some((session) => session.id === selectedSessionID)) {
       selectSession(sessions[0]?.id ?? "");
     }
-  }, [kind, selectSession, selectedSessionID, sessions, sessionsQuery.isLoading]);
+  }, [kind, selectSession, selectedSessionID, sessions, sessionsQuery.isFetching, sessionsQuery.isLoading]);
 
   const activeQuery = kind === "run" ? runsQuery : sessionsQuery;
 

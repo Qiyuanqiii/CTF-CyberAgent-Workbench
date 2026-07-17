@@ -30,15 +30,22 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if defaults.profileControl || defaults.version {
+	if defaults.profileControl || defaults.runCreation || defaults.version {
 		t.Fatalf("unexpected defaults: %#v", defaults)
 	}
 	enabled, err := parseDesktopOptions([]string{"--enable-profile-control"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !enabled.profileControl || enabled.version {
+	if !enabled.profileControl || enabled.runCreation || enabled.version {
 		t.Fatalf("profile control was not explicit: %#v", enabled)
+	}
+	creation, err := parseDesktopOptions([]string{"--enable-run-creation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if creation.profileControl || !creation.runCreation || creation.version {
+		t.Fatalf("Run creation was not independently explicit: %#v", creation)
 	}
 	if _, err := parseDesktopOptions([]string{"unexpected"}); err == nil {
 		t.Fatal("desktop positional argument was accepted")

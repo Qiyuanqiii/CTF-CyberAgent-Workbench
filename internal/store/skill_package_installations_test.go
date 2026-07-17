@@ -490,9 +490,20 @@ func removeSchemaV70ForTestStatements() []string {
 }
 
 func removeSchemaV71ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV72ForTestStatements(), []string{
 		`DROP VIEW run_external_skill_projection_items`,
 		`DROP VIEW run_external_skill_projections`,
 		`DELETE FROM schema_migrations WHERE version = 71`,
+	}...)
+
+}
+
+func removeSchemaV72ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_run_creation_operation_delete_immutable`,
+		`DROP TRIGGER trg_run_creation_operation_update_immutable`,
+		`DROP TRIGGER trg_run_creation_operation_insert`,
+		`DROP TABLE run_creation_operations`,
+		`DELETE FROM schema_migrations WHERE version = 72`,
 	}
 }

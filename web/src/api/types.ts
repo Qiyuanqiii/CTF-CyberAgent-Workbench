@@ -22,11 +22,14 @@ export type RunEventStreamView = components["schemas"]["RunEventStreamView"];
 export type RunModeView = components["schemas"]["RunModeView"];
 export type RunExecutionProfileControlView = components["schemas"]["RunExecutionProfileControlView"];
 export type RunExecutionProfileView = components["schemas"]["RunExecutionProfileView"];
+export type RunCreationControlRequestView = components["schemas"]["RunCreationControlRequestView"];
+export type RunCreationControlView = components["schemas"]["RunCreationControlView"];
 export type RunView = components["schemas"]["RunView"];
 export type SessionDetailView = components["schemas"]["SessionDetailView"];
 export type SessionView = components["schemas"]["SessionView"];
 export type SupervisorToolRoundView = components["schemas"]["SupervisorToolRoundView"];
 export type WorkItemView = components["schemas"]["WorkItemView"];
+export type WorkspaceView = components["schemas"]["WorkspaceView"];
 
 export interface SuccessEnvelope<T> {
   version: "api.v1";
