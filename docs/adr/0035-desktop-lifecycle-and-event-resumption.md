@@ -129,6 +129,8 @@ The code audit also fixed repeated stale-cursor fallback, non-canonical source
 `RequestURI`, and the narrow native restore/shutdown race. The final unsigned
 19,572,224-byte GUI has SHA-256
 `f26ea87f42701a7eba8efa789900ea6953ef3c1533ff95106ec4b8e6b02b1160`.
+GitHub Actions run `29609621468` passed implementation commit `c9b1c66` with
+Go/Linux in 5m00s, Windows Desktop in 4m21s, and TypeScript in 23s.
 No unresolved high- or medium-severity issue is known.
 
 ## Follow-Up
