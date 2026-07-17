@@ -273,6 +273,10 @@ The non-schema Desktop D1-A Go boundary groundwork is complete, while SQLite rem
 
 A future native picker passes the path only to a Go closure. Go immediately performs strict `skill_package.v1` validation, forgets the path and body, and stores at most sixteen metadata projections behind 256-bit opaque handles that expire after five minutes and can be consumed once. The renderer preview omits file name/path, body, Manifest description/content path/content digest, and every install, persistence, execution, network, model, tool, or capability grant. There is still no Wails shell, desktop executable, native dialog, HTTP upload, or install button, so product usability is unchanged. ADR 0033 records the boundary.
 
+D1-A 最终本地全仓普通/race 分别通过于 255.8 秒/314.0 秒，静态、依赖、前端、文档和隐私门禁全部通过。GitHub Actions run `29578985787` 已通过实现提交 `45c047c`，Go/Linux 3 分 13 秒，TypeScript 27 秒；当前无已知未解决高/中风险。本轮没有调用真实 Provider、Shell、宿主进程、Docker、安装钩子或外部网络。
+
+The final D1-A local ordinary/race suites passed in 255.8s/314.0s, together with all static, dependency, frontend, documentation, and privacy gates. GitHub Actions run `29578985787` passed implementation commit `45c047c` with Go/Linux in 3m13s and TypeScript in 27s. No unresolved high/medium issue is known, and the slice called no real Provider, Shell, host process, Docker operation, installer hook, or external network.
+
 ## 架构能力详解 / Architecture Details
 
 ### 中文详解

@@ -93,7 +93,7 @@ Desktop D1 阶段：
 - parser 的既有 20 秒约 2645 万次 fuzz 基线保持有效；新增对象发布、Store、Application 和 CLI 定向测试覆盖三轮 race、双 Store 收敛、崩溃恢复、腐坏/symlink/取消、伪造收据和 SQL 旁路；真实双 Service 独立生成候选身份的导入/移除收敛另通过 20 轮普通与 10 轮 race。首次 Linux CI run `29556933994` 暴露并发嵌套目录准备失败；逐级创建并验证真实目录后，12 个独立 Store 通过 100 轮普通与 20 轮 race。
 - TypeScript/OpenAPI/production build、9 个文件 22 项前端测试与零漏洞 npm audit 已在 v71 定向基线通过；v71 新增一个只读 GET path 和三个安全 DTO schema。
 - v71 最终全仓普通/race 分别通过于 227.1 秒/301.1 秒；vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、确定性生成、仓库隐私/diff 扫描与隔离真实 CLI schema-v71 smoke 全绿。空选择 Run 的 detail 省略/endpoint 404 普通与 race 回归也已通过。
-- Desktop D1-A 最终全仓普通/race 分别通过于 255.8 秒/314.0 秒；Desktop 普通 100 轮/race 25 轮、Skill 文件边界 100 轮、CLI 包链 10 轮与 32 方并发消费测试通过，vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、22 项前端测试、OpenAPI drift、production build、零漏洞 npm audit、60 份 Markdown/79 条相对链接及仓库隐私扫描全绿。该切片不改变 schema v71。
+- Desktop D1-A 最终全仓普通/race 分别通过于 255.8 秒/314.0 秒；Desktop 普通 100 轮/race 25 轮、Skill 文件边界 100 轮、CLI 包链 10 轮与 32 方并发消费测试通过，vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、22 项前端测试、OpenAPI drift、production build、零漏洞 npm audit、60 份 Markdown/79 条相对链接及仓库隐私扫描全绿。GitHub Actions run `29578985787` 已通过实现提交 `45c047c`（Go/Linux 3 分 13 秒，TypeScript 27 秒）。该切片不改变 schema v71。
 - 审计修复旧 schema 夹具未先移除 v69 trigger、错误文本静态规则、冗余临时清理状态、对象收据接口绑定、发布前取消点、并发请求因独立 ID/时间被误判为改意图，以及 Manifest 自由文本 description 未脱敏进入 SQLite；当前无已知未解决高/中风险。
 - 首次 Linux CI run `29556933994` 暴露并发嵌套目录准备失败；修复提交 `d28b100` 的 GitHub Actions run `29557803407` 已全绿（Go/Linux 3 分 21 秒，TypeScript 23 秒）。
 
