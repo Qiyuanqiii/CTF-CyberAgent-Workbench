@@ -148,8 +148,8 @@ that had incorrectly made an installation globally single-Run; uniqueness is
 now selection-scoped and covered by a second-Run regression. The audit also
 tightened latest-mode Specialist provenance, token boundaries, cross-phase
 replay, selection/operation atomicity, cancellation-safe object loading, and
-explicit closed authority fields. GitHub Actions remains the final remote Linux
-gate for the delivery commit; its measured result is recorded after push.
+explicit closed authority fields. GitHub Actions run `29566538449` passed
+implementation commit `edc4073` with Go/Linux in 3m42s and TypeScript in 21s.
 
 ## Follow-Up
 
