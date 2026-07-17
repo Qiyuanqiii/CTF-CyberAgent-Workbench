@@ -264,6 +264,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/events/poll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Poll Run events
+         * @description Returns one bounded append-only event batch using the same Run-bound high-water cursor as the SSE stream. Intended for embedded renderers without response streaming.
+         */
+        get: operations["pollRunEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/events/stream": {
         parameters: {
             query?: never;
@@ -1133,6 +1153,14 @@ export interface components {
             run: components["schemas"]["RunView"];
             tool_usage: components["schemas"]["ToolUsageView"];
         };
+        RunEventPollView: {
+            cursor: string;
+            frames: components["schemas"]["RunEventStreamView"][];
+            has_more: boolean;
+            run_id: string;
+            /** @enum {string} */
+            version: "run-event-poll.v1";
+        };
         RunEventStreamView: {
             cursor: string;
             event: components["schemas"]["EventView"];
@@ -1940,6 +1968,46 @@ export interface operations {
                     "application/json": {
                         data: components["schemas"]["EventView"][];
                         page: components["schemas"]["Page"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    pollRunEvents: {
+        parameters: {
+            query?: {
+                /** @description Opaque final cursor from a previous poll or SSE frame */
+                cursor?: string;
+                /** @description Maximum events returned in this bounded poll */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RunEventPollView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";

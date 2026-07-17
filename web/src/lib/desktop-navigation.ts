@@ -1,0 +1,63 @@
+import { desktopBridgeAvailable } from "./desktop-bridge";
+
+function sameRendererOrigin(raw: string): boolean {
+  try {
+    const target = new URL(raw, window.location.href);
+    return target.origin === window.location.origin &&
+      (target.protocol === "http:" || target.protocol === "https:") &&
+      target.username === "" && target.password === "";
+  } catch {
+    return false;
+  }
+}
+
+function closestElement(event: Event, selector: string): Element | null {
+  const target = event.target;
+  if (target instanceof Element) {
+    return target.closest(selector);
+  }
+  return target instanceof Node ? target.parentElement?.closest(selector) ?? null : null;
+}
+
+function block(event: Event): void {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}
+
+// installDesktopNavigationGuard is renderer defense in depth. Wails' empty
+// BindingsAllowedOrigins remains the native authority boundary; this guard
+// prevents ordinary links, forms, and popup calls from leaving that origin.
+export function installDesktopNavigationGuard(): () => void {
+  if (!desktopBridgeAvailable()) {
+    return () => undefined;
+  }
+  const onLink = (event: Event) => {
+    const anchor = closestElement(event, "a[href]");
+    const href = anchor?.getAttribute("href");
+    if (href !== null && href !== undefined && !sameRendererOrigin(href)) {
+      block(event);
+    }
+  };
+  const onSubmit = (event: Event) => {
+    const form = closestElement(event, "form[action]");
+    const action = form?.getAttribute("action");
+    if (action !== null && action !== undefined && !sameRendererOrigin(action)) {
+      block(event);
+    }
+  };
+  document.addEventListener("click", onLink, true);
+  document.addEventListener("auxclick", onLink, true);
+  document.addEventListener("submit", onSubmit, true);
+
+  const originalOpen = window.open;
+  const blockedOpen: typeof window.open = () => null;
+  window.open = blockedOpen;
+  return () => {
+    document.removeEventListener("click", onLink, true);
+    document.removeEventListener("auxclick", onLink, true);
+    document.removeEventListener("submit", onSubmit, true);
+    if (window.open === blockedOpen) {
+      window.open = originalOpen;
+    }
+  };
+}

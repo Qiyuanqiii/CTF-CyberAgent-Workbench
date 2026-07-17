@@ -1,12 +1,50 @@
 import { useEffect, useState } from "react";
 import { APIRequestError, type CyberAgentClient } from "../api/client";
-import type { EventView, RunEventStreamView } from "../api/types";
+import type { RunEventStreamView } from "../api/types";
 import { desktopRuntimeActive } from "../lib/desktop-bridge";
 
 export type StreamStatus = "connecting" | "live" | "reconnecting" | "stopped";
 
 const reconnectDelayMs = 1_000;
 const maxLiveFrames = 500;
+const maxRememberedRuns = 16;
+
+interface RememberedDesktopRun {
+  cursor: string;
+  frames: RunEventStreamView[];
+}
+
+const rememberedDesktopRuns = new Map<string, RememberedDesktopRun>();
+
+export function clearDesktopRunEventMemory(runID = ""): void {
+  if (runID) {
+    rememberedDesktopRuns.delete(runID);
+    return;
+  }
+  rememberedDesktopRuns.clear();
+}
+
+function rememberDesktopRun(runID: string, cursor: string, frames: RunEventStreamView[]): void {
+  rememberedDesktopRuns.delete(runID);
+  rememberedDesktopRuns.set(runID, { cursor, frames: [...frames].slice(-maxLiveFrames) });
+  while (rememberedDesktopRuns.size > maxRememberedRuns) {
+    const oldest = rememberedDesktopRuns.keys().next().value as string | undefined;
+    if (!oldest) {
+      break;
+    }
+    rememberedDesktopRuns.delete(oldest);
+  }
+}
+
+function mergeFrames(current: RunEventStreamView[], incoming: RunEventStreamView[]): RunEventStreamView[] {
+  const bySequence = new Map(current.map((frame) => [frame.sequence, frame]));
+  for (const frame of incoming) {
+    bySequence.set(frame.sequence, frame);
+  }
+  return [...bySequence.values()]
+    .sort((left, right) => left.sequence - right.sequence)
+    .slice(-maxLiveFrames);
+}
 
 function delay(signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -24,48 +62,41 @@ export function useRunEventStream(client: CyberAgentClient, runID: string) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    setFrames([]);
     setError("");
     if (!runID) {
+      setFrames([]);
       setStatus("stopped");
       return;
     }
 
     const controller = new AbortController();
-    let cursor = "";
     if (desktopRuntimeActive()) {
+      const remembered = rememberedDesktopRuns.get(runID);
+      let cursor = remembered?.cursor ?? "";
+      let currentFrames = remembered?.frames ?? [];
+      let cursorResetUsed = false;
+      setFrames(currentFrames);
       const poll = async () => {
         setStatus("connecting");
         let immediatePages = 0;
         while (!controller.signal.aborted) {
           try {
-            const page = await client.getPage<EventView>(
-              `/runs/${encodeURIComponent(runID)}/events`,
-              { limit: 100 },
+            const page = await client.pollRunEvents(
+              runID,
               cursor,
+              100,
               controller.signal,
             );
-            const polledFrames: RunEventStreamView[] = page.items.map((event) => ({
-              version: "run-events.v1",
-              request_id: page.requestID,
-              run_id: runID,
-              sequence: event.sequence,
-              cursor: `desktop-poll-${event.sequence}`,
-              event,
-            }));
-            setFrames((current) => {
-              const bySequence = new Map(current.map((frame) => [frame.sequence, frame]));
-              for (const frame of polledFrames) {
-                bySequence.set(frame.sequence, frame);
-              }
-              return [...bySequence.values()]
-                .sort((left, right) => left.sequence - right.sequence)
-                .slice(-maxLiveFrames);
-            });
+            if (controller.signal.aborted) {
+              return;
+            }
+            cursor = page.cursor;
+            currentFrames = mergeFrames(currentFrames, page.frames);
+            rememberDesktopRun(runID, cursor, currentFrames);
+            setFrames(currentFrames);
             setStatus("live");
             setError("");
-            if (page.page.next_cursor) {
-              cursor = page.page.next_cursor;
+            if (page.has_more) {
               immediatePages++;
               if (immediatePages < 4) {
                 continue;
@@ -75,6 +106,15 @@ export function useRunEventStream(client: CyberAgentClient, runID: string) {
           } catch (caught) {
             if (controller.signal.aborted) {
               return;
+            }
+            if (caught instanceof APIRequestError && caught.status === 400 && cursor !== "" &&
+              !cursorResetUsed) {
+              cursorResetUsed = true;
+              cursor = "";
+              currentFrames = [];
+              clearDesktopRunEventMemory(runID);
+              setFrames([]);
+              continue;
             }
             setError(caught instanceof Error ? caught.message : "Event polling disconnected");
             if (caught instanceof APIRequestError && [400, 401, 403, 404].includes(caught.status)) {
@@ -92,6 +132,8 @@ export function useRunEventStream(client: CyberAgentClient, runID: string) {
         setStatus("stopped");
       };
     }
+    setFrames([]);
+    let cursor = "";
     const run = async () => {
       setStatus("connecting");
       while (!controller.signal.aborted) {

@@ -31,10 +31,10 @@ Push-Location $repositoryRoot
 try {
     & go test ./internal/desktop ./internal/webui -count=1
     if ($LASTEXITCODE -ne 0) { throw "Desktop Go boundary tests failed" }
-    & go test -tags desktop ./cmd/cyberagent-desktop -count=1
+    & go test -tags "desktop,wv2runtime.error" ./cmd/cyberagent-desktop -count=1
     if ($LASTEXITCODE -ne 0) { throw "Wails adapter tests failed" }
     New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
-    & go build -tags "desktop,production" -trimpath -ldflags "-s -w -H=windowsgui" -o $binaryPath ./cmd/cyberagent-desktop
+    & go build -tags "desktop,production,wv2runtime.error" -trimpath -ldflags "-s -w -H=windowsgui" -o $binaryPath ./cmd/cyberagent-desktop
     if ($LASTEXITCODE -ne 0) { throw "Desktop production build failed" }
 }
 finally {

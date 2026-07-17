@@ -3,6 +3,7 @@ import type {
   ErrorEnvelope,
   HealthView,
   PageResult,
+  RunEventPollView,
   RunEventStreamView,
   SuccessEnvelope,
 } from "./types";
@@ -51,19 +52,49 @@ function isSuccessEnvelope<T>(value: unknown): value is SuccessEnvelope<T> {
     Object.prototype.hasOwnProperty.call(candidate, "data");
 }
 
-function parseStreamFrame(value: unknown, expectedRunID: string): RunEventStreamView {
+function parseStreamFrame(value: unknown, expectedRunID: string, expectedRequestID = ""): RunEventStreamView {
   if (typeof value !== "object" || value === null) {
     throw new Error("SSE frame is not an object");
   }
   const frame = value as Partial<RunEventStreamView>;
   if (frame.version !== "run-events.v1" || frame.run_id !== expectedRunID ||
-    typeof frame.cursor !== "string" || frame.cursor === "" ||
-    typeof frame.sequence !== "number" || !Number.isSafeInteger(frame.sequence) ||
+    typeof frame.request_id !== "string" || frame.request_id === "" ||
+    (expectedRequestID !== "" && frame.request_id !== expectedRequestID) ||
+    typeof frame.cursor !== "string" || frame.cursor === "" || frame.cursor.length > 512 ||
+    typeof frame.sequence !== "number" || !Number.isSafeInteger(frame.sequence) || frame.sequence <= 0 ||
     typeof frame.event !== "object" || frame.event === null ||
-    frame.event.run_id !== expectedRunID || frame.event.sequence !== frame.sequence) {
+    frame.event.version !== "event.v1" || frame.event.run_id !== expectedRunID ||
+    frame.event.sequence !== frame.sequence || typeof frame.event.event_id !== "string" ||
+    frame.event.event_id === "" || typeof frame.event.mission_id !== "string" ||
+    typeof frame.event.type !== "string" || frame.event.type === "" ||
+    typeof frame.event.source !== "string" || frame.event.source === "" ||
+    typeof frame.event.created_at !== "string") {
     throw new Error("SSE frame does not match run-events.v1");
   }
   return frame as RunEventStreamView;
+}
+
+function parseEventPoll(value: unknown, expectedRunID: string, requestID: string): RunEventPollView {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("Event poll response is not an object");
+  }
+  const poll = value as Partial<RunEventPollView>;
+  if (poll.version !== "run-event-poll.v1" || poll.run_id !== expectedRunID ||
+    typeof poll.cursor !== "string" || poll.cursor === "" || poll.cursor.length > 512 ||
+    !Array.isArray(poll.frames) || typeof poll.has_more !== "boolean" ||
+    (poll.has_more && poll.frames.length === 0) || poll.frames.length > 100) {
+    throw new Error("Event poll response does not match run-event-poll.v1");
+  }
+  const frames = poll.frames.map((frame) => parseStreamFrame(frame, expectedRunID, requestID));
+  for (let index = 1; index < frames.length; index++) {
+    if (frames[index]!.sequence !== frames[index - 1]!.sequence + 1) {
+      throw new Error("Event poll response contains a sequence gap");
+    }
+  }
+  if (frames.length > 0 && frames[frames.length - 1]!.cursor !== poll.cursor) {
+    throw new Error("Event poll response cursor does not match its final frame");
+  }
+  return { ...poll, frames } as RunEventPollView;
 }
 
 export class CyberAgentClient {
@@ -184,6 +215,23 @@ export class CyberAgentClient {
       }
       options.onFrame(frame);
     });
+  }
+
+  async pollRunEvents(
+    runID: string,
+    cursor = "",
+    limit = 100,
+    signal?: AbortSignal,
+  ): Promise<RunEventPollView> {
+    if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 100) {
+      throw new Error("Event poll limit must be between 1 and 100");
+    }
+    const envelope = await this.request<unknown>(
+      `/runs/${encodeURIComponent(runID)}/events/poll`,
+      { cursor: cursor || undefined, limit },
+      signal,
+    );
+    return parseEventPoll(envelope.data, runID, envelope.request_id);
   }
 
   private async request<T>(

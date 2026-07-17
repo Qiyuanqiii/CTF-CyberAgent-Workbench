@@ -17,6 +17,7 @@ export type OperatorSteeringQueueView = components["schemas"]["OperatorSteeringQ
 export type Page = components["schemas"]["Page"];
 export type PlanDeliveryStateView = components["schemas"]["PlanDeliveryStateView"];
 export type RunDetailView = components["schemas"]["RunDetailView"];
+export type RunEventPollView = components["schemas"]["RunEventPollView"];
 export type RunEventStreamView = components["schemas"]["RunEventStreamView"];
 export type RunModeView = components["schemas"]["RunModeView"];
 export type RunExecutionProfileControlView = components["schemas"]["RunExecutionProfileControlView"];

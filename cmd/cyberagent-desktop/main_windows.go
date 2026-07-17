@@ -1,4 +1,4 @@
-//go:build windows && desktop
+//go:build windows && desktop && wv2runtime.error
 
 package main
 
@@ -10,16 +10,16 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sync"
+	"strings"
 
 	"cyberagent-workbench/internal/app"
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/desktop"
 	"cyberagent-workbench/internal/httpapi"
-	"cyberagent-workbench/internal/store"
 	"cyberagent-workbench/internal/webui"
 	webassets "cyberagent-workbench/web"
 
+	"github.com/wailsapp/go-webview2/webviewloader"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -28,37 +28,35 @@ import (
 	syswindows "golang.org/x/sys/windows"
 )
 
-const desktopSingleInstanceID = "e3305a58-3d1e-4e2f-b4ca-d1032a737b96"
+const (
+	desktopSingleInstanceID       = "e3305a58-3d1e-4e2f-b4ca-d1032a737b96"
+	minimumWebView2RuntimeVersion = "94.0.992.31"
+)
+
+var errWebView2RuntimeRequired = errors.New("required WebView2 Runtime is unavailable")
+
+type webView2RuntimeProbe struct {
+	detect  func(string) (string, error)
+	compare func(string, string) (int, error)
+}
 
 type desktopOptions struct {
 	profileControl bool
 	version        bool
 }
 
-type desktopLifecycle struct {
-	mu  sync.RWMutex
-	ctx context.Context
-}
-
-func (l *desktopLifecycle) set(ctx context.Context) {
-	l.mu.Lock()
-	l.ctx = ctx
-	l.mu.Unlock()
-}
-
-func (l *desktopLifecycle) clear() {
-	l.mu.Lock()
-	l.ctx = nil
-	l.mu.Unlock()
-}
-
-func (l *desktopLifecycle) current() context.Context {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-	return l.ctx
-}
-
 type nativeSkillPackagePicker struct{}
+
+type wailsWindowRestorer struct{}
+
+func (wailsWindowRestorer) Unminimise(ctx context.Context) { runtime.WindowUnminimise(ctx) }
+func (wailsWindowRestorer) Show(ctx context.Context)       { runtime.WindowShow(ctx) }
+
+func secondInstanceHandler(lifecycle *desktop.Lifecycle) func(options.SecondInstanceData) {
+	return func(_ options.SecondInstanceData) {
+		lifecycle.RequestRestore()
+	}
+}
 
 func (nativeSkillPackagePicker) OpenSkillPackage(ctx context.Context) (string, error) {
 	if ctx == nil {
@@ -84,17 +82,21 @@ func (h inProcessAPIHandler) ServeHTTP(writer http.ResponseWriter, request *http
 		http.Error(writer, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+	if !trustedDesktopRendererOrigin(request) {
+		http.Error(writer, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
 	trusted := request.Clone(request.Context())
 	trusted.Host = "127.0.0.1"
 	trusted.RemoteAddr = "127.0.0.1:0"
+	trusted.URL.Scheme = ""
+	trusted.URL.Host = ""
 	if trusted.URL != nil && trusted.URL.Path == "" {
 		trusted.URL.Path = "/"
 	}
+	trusted.RequestURI = trusted.URL.RequestURI()
 	if trusted.RequestURI == "" {
-		trusted.RequestURI = trusted.URL.RequestURI()
-		if trusted.RequestURI == "" {
-			trusted.RequestURI = "/"
-		}
+		trusted.RequestURI = "/"
 	}
 	if (trusted.Method == http.MethodGet || trusted.Method == http.MethodHead) &&
 		trusted.ContentLength == -1 && len(trusted.TransferEncoding) == 0 && trusted.Body == http.NoBody &&
@@ -102,6 +104,15 @@ func (h inProcessAPIHandler) ServeHTTP(writer http.ResponseWriter, request *http
 		trusted.ContentLength = 0
 	}
 	h.next.ServeHTTP(writer, trusted)
+}
+
+func trustedDesktopRendererOrigin(request *http.Request) bool {
+	if request == nil || request.URL == nil || request.URL.User != nil || request.URL.Fragment != "" ||
+		request.URL.Opaque != "" {
+		return false
+	}
+	return strings.EqualFold(request.URL.Scheme, "http") &&
+		strings.EqualFold(request.URL.Hostname(), "wails.localhost") && request.URL.Port() == ""
 }
 
 type desktopBindingError struct {
@@ -137,6 +148,12 @@ func reportDesktopStartupFailure(err error) {
 }
 
 func desktopStartupFailureMessage(err error) string {
+	if errors.Is(err, errWebView2RuntimeRequired) {
+		return "CyberAgent Workbench requires Microsoft Edge WebView2 Runtime " +
+			minimumWebView2RuntimeVersion + " or newer.\r\n\r\n" +
+			"Install or update it through a trusted Windows software channel, then reopen the app.\r\n\r\n" +
+			"No download or installation was started."
+	}
 	code := apperror.CodeOf(apperror.Normalize(err))
 	return "CyberAgent Workbench could not start.\r\n\r\nError code: " + string(code) +
 		"\r\n\r\nLocal data was not deleted or reset. Keep it for diagnosis."
@@ -158,6 +175,12 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 }
 
 func runDesktop(config desktopOptions) error {
+	if err := requireWebView2Runtime(webView2RuntimeProbe{
+		detect:  webviewloader.GetAvailableCoreWebView2BrowserVersionString,
+		compare: webviewloader.CompareBrowserVersions,
+	}); err != nil {
+		return err
+	}
 	bundle, err := webui.LoadEmbeddedFS(webassets.Files, "dist")
 	if err != nil {
 		return apperror.Wrap(apperror.CodeFailedPrecondition,
@@ -176,24 +199,20 @@ func runDesktop(config desktopOptions) error {
 	}
 
 	databasePath := filepath.Join(app.DefaultHome(), "cyberagent.db")
-	stateStore, err := store.Open(databasePath)
+	controlPlane, err := desktop.OpenControlPlane(desktop.ControlPlaneConfig{
+		DatabasePath: databasePath, ReadToken: readToken, ControlToken: controlToken,
+		AppVersion: app.Version, UIHandler: bundle,
+	})
 	if err != nil {
 		return apperror.Wrap(apperror.CodeFailedPrecondition,
 			"desktop data store validation failed", err)
 	}
-	defer stateStore.Close()
-	api, err := httpapi.New(stateStore, httpapi.Config{
-		AccessToken: readToken, ControlToken: controlToken, AppVersion: app.Version,
-		UIHandler: bundle,
-	})
-	if err != nil {
-		return err
-	}
+	defer controlPlane.Close()
 
-	lifecycle := &desktopLifecycle{}
+	lifecycle := desktop.NewLifecycle(wailsWindowRestorer{})
 	selector, preview := desktop.NewSkillPackagePreviewBoundary()
 	bridge, err := desktop.NewDesktopBridge(desktop.DesktopBridgeConfig{
-		ContextProvider: lifecycle.current, FilePicker: nativeSkillPackagePicker{},
+		ContextProvider: lifecycle.Context, FilePicker: nativeSkillPackagePicker{},
 		ReadToken: readToken, ControlToken: controlToken, APIVersion: httpapi.Version,
 		AppVersion: app.Version, UIDigest: bundle.Digest(), Selector: selector, PreviewBridge: preview,
 	})
@@ -206,11 +225,11 @@ func runDesktop(config desktopOptions) error {
 		WindowStartState: options.Normal,
 		BackgroundColour: options.NewRGB(245, 247, 249),
 		AssetServer: &assetserver.Options{
-			Handler: inProcessAPIHandler{next: api.Handler()},
+			Handler: inProcessAPIHandler{next: controlPlane.Handler()},
 		},
-		OnStartup: lifecycle.set,
+		OnStartup: lifecycle.Start,
 		OnShutdown: func(context.Context) {
-			lifecycle.clear()
+			lifecycle.Stop()
 		},
 		Bind:                     []interface{}{bridge},
 		EnableDefaultContextMenu: false,
@@ -221,18 +240,14 @@ func runDesktop(config desktopOptions) error {
 			EnableFileDrop: false, DisableWebViewDrop: true,
 		},
 		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId: desktopSingleInstanceID,
-			OnSecondInstanceLaunch: func(options.SecondInstanceData) {
-				if ctx := lifecycle.current(); ctx != nil {
-					runtime.WindowUnminimise(ctx)
-					runtime.WindowShow(ctx)
-				}
-			},
+			UniqueId:               desktopSingleInstanceID,
+			OnSecondInstanceLaunch: secondInstanceHandler(lifecycle),
 		},
 		Windows: &windows.Options{
 			Theme: windows.SystemDefault, WebviewIsTransparent: false, WindowIsTranslucent: false,
 			DisablePinchZoom: true, IsZoomControlEnabled: true, EnableSwipeGestures: false,
 			WebviewDisableRendererCodeIntegrity: false, WindowClassName: "CyberAgentWorkbench",
+			Messages: desktopWebView2Messages(),
 		},
 		Debug: options.Debug{OpenInspectorOnStartup: false},
 		ErrorFormatter: func(err error) any {
@@ -240,4 +255,38 @@ func runDesktop(config desktopOptions) error {
 			return desktopBindingError{Code: string(apperror.CodeOf(normalized)), Message: normalized.Error()}
 		},
 	})
+}
+
+func requireWebView2Runtime(probe webView2RuntimeProbe) error {
+	if probe.detect == nil || probe.compare == nil {
+		return apperror.Wrap(apperror.CodeFailedPrecondition,
+			"desktop WebView2 prerequisite check is unavailable", errWebView2RuntimeRequired)
+	}
+	version, err := probe.detect("")
+	if err != nil || strings.TrimSpace(version) == "" {
+		return apperror.Wrap(apperror.CodeFailedPrecondition,
+			"desktop WebView2 prerequisite is not satisfied", errWebView2RuntimeRequired)
+	}
+	comparison, err := probe.compare(version, minimumWebView2RuntimeVersion)
+	if err != nil || comparison < 0 {
+		return apperror.Wrap(apperror.CodeFailedPrecondition,
+			"desktop WebView2 prerequisite is not satisfied", errWebView2RuntimeRequired)
+	}
+	return nil
+}
+
+func desktopWebView2Messages() *windows.Messages {
+	return &windows.Messages{
+		InstallationRequired: "Microsoft Edge WebView2 Runtime is required. Use a trusted Windows software channel, then reopen CyberAgent Workbench.",
+		UpdateRequired:       "Microsoft Edge WebView2 Runtime must be updated through a trusted Windows software channel before CyberAgent Workbench can start.",
+		MissingRequirements:  "CyberAgent Workbench prerequisite",
+		Webview2NotInstalled: "Microsoft Edge WebView2 Runtime is unavailable.",
+		Error:                "CyberAgent Workbench prerequisite",
+		FailedToInstall:      "Microsoft Edge WebView2 Runtime remains unavailable.",
+		DownloadPage:         "",
+		PressOKToInstall:     "",
+		ContactAdmin:         "Microsoft Edge WebView2 Runtime is required. Contact your administrator or use a trusted Windows software channel.",
+		InvalidFixedWebview2: "The configured WebView2 Runtime does not meet the required version.",
+		WebView2ProcessCrash: "The WebView2 process stopped. Reopen CyberAgent Workbench; local data was not reset.",
+	}
 }

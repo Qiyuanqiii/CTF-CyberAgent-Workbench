@@ -44,7 +44,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
-			"external-skills", "event-stream", "openapi"}
+			"external-skills", "event-stream", "event-poll", "openapi"}
 		if a.controlEnabled {
 			resources = append(resources, "model-cancellation-control",
 				"specialist-model-cancellation-control", "execution-profile-control")

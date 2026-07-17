@@ -134,6 +134,77 @@ describe("CyberAgentClient", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("polls Run events with a stream-compatible opaque cursor and validates the envelope", async () => {
+    const frame: RunEventStreamView = {
+      version: "run-events.v1",
+      request_id: "req-poll",
+      run_id: "run-1",
+      cursor: "opaque-2",
+      sequence: 2,
+      event: {
+        event_id: "event-2",
+        version: "event.v1",
+        run_id: "run-1",
+        mission_id: "mission-1",
+        sequence: 2,
+        type: "run.updated",
+        source: "test",
+        payload: {},
+        created_at: "2026-07-18T00:00:00Z",
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1",
+      request_id: "req-poll",
+      data: {
+        version: "run-event-poll.v1",
+        run_id: "run-1",
+        cursor: "opaque-2",
+        frames: [frame],
+        has_more: false,
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await new CyberAgentClient("read-secret").pollRunEvents("run-1", "opaque-1", 25);
+
+    expect(result.frames).toEqual([frame]);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/runs/run-1/events/poll?");
+    expect(url).toContain("cursor=opaque-1");
+    expect(url).toContain("limit=25");
+    expect(url).not.toContain("read-secret");
+    expect(init.headers).toMatchObject({ Authorization: "Bearer read-secret" });
+  });
+
+  it("rejects a poll cursor that does not match the final validated frame", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1",
+      request_id: "req-poll",
+      data: {
+        version: "run-event-poll.v1",
+        run_id: "run-1",
+        cursor: "forged-final",
+        has_more: false,
+        frames: [{
+          version: "run-events.v1",
+          request_id: "req-poll",
+          run_id: "run-1",
+          cursor: "actual-final",
+          sequence: 1,
+          event: {
+            event_id: "event-1", version: "event.v1", run_id: "run-1", mission_id: "mission-1",
+            sequence: 1, type: "run.created", source: "test", payload: {},
+            created_at: "2026-07-18T00:00:00Z",
+          },
+        }],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    await expect(new CyberAgentClient("read-secret").pollRunEvents("run-1"))
+      .rejects.toThrow("final frame");
+  });
+
   it("resumes SSE with Last-Event-ID and validates the matching cursor", async () => {
     const frame: RunEventStreamView = {
       version: "run-events.v1",

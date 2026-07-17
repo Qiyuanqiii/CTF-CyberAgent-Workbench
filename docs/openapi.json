@@ -1245,6 +1245,105 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/runs/{run_id}/events/poll": {
+      "get": {
+        "operationId": "pollRunEvents",
+        "summary": "Poll Run events",
+        "description": "Returns one bounded append-only event batch using the same Run-bound high-water cursor as the SSE stream. Intended for embedded renderers without response streaming.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque final cursor from a previous poll or SSE frame",
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum events returned in this bounded poll",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RunEventPollView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
     "/api/v1/runs/{run_id}/events/stream": {
       "get": {
         "operationId": "streamRunEvents",
@@ -4879,6 +4978,42 @@
           "execution_profile",
           "operator_steering",
           "tool_usage"
+        ],
+        "type": "object"
+      },
+      "RunEventPollView": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "frames": {
+            "items": {
+              "$ref": "#/components/schemas/RunEventStreamView"
+            },
+            "type": "array"
+          },
+          "has_more": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "run-event-poll.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "run_id",
+          "cursor",
+          "frames",
+          "has_more"
         ],
         "type": "object"
       },

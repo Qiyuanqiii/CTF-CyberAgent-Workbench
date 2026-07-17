@@ -80,6 +80,6 @@ jobs:
           npm ci
           npm run build
       - name: Test Desktop boundaries
-        run: go test -tags desktop -count=1 ./cmd/cyberagent-desktop ./internal/desktop ./internal/webui
+        run: go test -tags "desktop,wv2runtime.error" -count=1 ./cmd/cyberagent-desktop ./internal/desktop ./internal/webui
       - name: Build read-first Desktop shell
-        run: go build -tags "desktop,production" -trimpath -ldflags "-s -w -H=windowsgui" -o cyberagent-desktop.exe ./cmd/cyberagent-desktop
+        run: go build -tags "desktop,production,wv2runtime.error" -trimpath -ldflags "-s -w -H=windowsgui" -o cyberagent-desktop.exe ./cmd/cyberagent-desktop

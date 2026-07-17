@@ -326,6 +326,14 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		a.serveRunEventStream(tracked, request, requestID, runID)
 		return
 	}
+	if runID, matched := matchRunEventPollPath(request.URL.Path); matched {
+		if err := validatePathIdentity(runID); err != nil {
+			a.writeError(tracked, requestID, err, 0)
+			return
+		}
+		a.serveRunEventPoll(tracked, request, requestID, runID)
+		return
+	}
 	data, page, err := a.route(request)
 	if err != nil {
 		a.writeError(tracked, requestID, err, 0)

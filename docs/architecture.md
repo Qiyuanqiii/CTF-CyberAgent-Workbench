@@ -45,7 +45,7 @@ CLI / Bubble Tea TUI / Headless CI / Browser UI / Windows Desktop UI
                   SQLite Event and State Store
 ```
 
-Desktop D0-A is a presentation adapter, not another control plane. Wails v2.13.0 embeds the production React bundle and routes requests to the existing Go HTTP Handler in process without a listening socket. Its native binding surface is limited to memory-only bootstrap and pathless Skill-package selection/preview. It grants no process, Shell, Docker, installation, Scope, Policy, or path-input authority; ordinary Web retains SSE while Windows Desktop polls the same durable Run-event pages under bounded opaque cursors. See ADR 0034.
+Desktop D0-A/D0-B is a presentation adapter, not another control plane. Wails v2.13.0 embeds the production React bundle and routes requests to the existing Go HTTP Handler in process without a listening socket. Its native binding surface is limited to memory-only bootstrap and pathless Skill-package selection/preview. It grants no process, Shell, Docker, installation, Scope, Policy, or path-input authority. Ordinary Web retains SSE while Windows Desktop uses `run-event-poll.v1` with the same durable Run-bound high-water cursor and real event frames. Go owns same-database reopen, serialized window lifecycle, WebView2 prerequisite failure, and exact renderer-origin handling; renderer memory and navigation guards add no authority. See ADR 0034 and ADR 0035.
 
 Allowed external directions remain:
 

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,9 +22,13 @@ import (
 const (
 	RunEventStreamVersion      = "run-events.v1"
 	RunEventStreamPathTemplate = "/api/v1/runs/{run_id}/events/stream"
+	RunEventPollVersion        = "run-event-poll.v1"
+	RunEventPollPathTemplate   = "/api/v1/runs/{run_id}/events/poll"
 	MaxEventStreamCursorBytes  = 512
 	MaxEventStreamFrameBytes   = 2 * 1024 * 1024
 	MaxEventStreamBatchSize    = 32
+	DefaultEventPollBatchSize  = 50
+	MaxEventPollBatchSize      = 100
 
 	DefaultEventStreamPollInterval      = 250 * time.Millisecond
 	DefaultEventStreamHeartbeatInterval = 10 * time.Second
@@ -51,6 +56,17 @@ type RunEventStreamView struct {
 	Cursor    string    `json:"cursor"`
 	Sequence  int64     `json:"sequence"`
 	Event     EventView `json:"event"`
+}
+
+// RunEventPollView is the bounded non-streaming projection used by embedded
+// renderers that cannot consume response streaming. Cursor semantics are
+// identical to RunEventStreamView and remain bound to one Run.
+type RunEventPollView struct {
+	Version string               `json:"version"`
+	RunID   string               `json:"run_id"`
+	Cursor  string               `json:"cursor"`
+	Frames  []RunEventStreamView `json:"frames"`
+	HasMore bool                 `json:"has_more"`
 }
 
 type eventStreamCursor struct {
@@ -113,8 +129,15 @@ func normalizeEventStreamConfig(config EventStreamConfig) (EventStreamConfig, er
 }
 
 func matchRunEventStreamPath(requestPath string) (string, bool) {
+	return matchRunEventPath(requestPath, "/events/stream")
+}
+
+func matchRunEventPollPath(requestPath string) (string, bool) {
+	return matchRunEventPath(requestPath, "/events/poll")
+}
+
+func matchRunEventPath(requestPath string, suffix string) (string, bool) {
 	const prefix = "/api/v1/runs/"
-	const suffix = "/events/stream"
 	if !strings.HasPrefix(requestPath, prefix) || !strings.HasSuffix(requestPath, suffix) {
 		return "", false
 	}
@@ -123,6 +146,72 @@ func matchRunEventStreamPath(requestPath string) (string, bool) {
 		return "", false
 	}
 	return runID, true
+}
+
+func (a *API) serveRunEventPoll(writer http.ResponseWriter, request *http.Request,
+	requestID string, runID string,
+) {
+	values := request.URL.Query()
+	if err := validateSingleQueryValues(values, "cursor", "limit"); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	if len(request.Header.Values("Last-Event-ID")) != 0 {
+		a.writeError(writer, requestID, apperror.New(apperror.CodeInvalidArgument,
+			"Last-Event-ID is not accepted by bounded event polling"), 0)
+		return
+	}
+	limit := DefaultEventPollBatchSize
+	if raw, ok := singleQueryValue(values, "limit"); ok {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 || parsed > MaxEventPollBatchSize {
+			a.writeError(writer, requestID, apperror.New(apperror.CodeInvalidArgument,
+				fmt.Sprintf("event poll limit must be between 1 and %d", MaxEventPollBatchSize)), 0)
+			return
+		}
+		limit = parsed
+	}
+	afterSequence := int64(0)
+	if raw, ok := singleQueryValue(values, "cursor"); ok {
+		var err error
+		afterSequence, err = decodeEventStreamCursor(raw, runID)
+		if err != nil {
+			a.writeError(writer, requestID, err, 0)
+			return
+		}
+	}
+	if _, err := a.store.GetRun(request.Context(), runID); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	batch, err := a.store.ListRunEventsAfterSequence(request.Context(), runID,
+		afterSequence, limit+1)
+	if err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	if err := validateEventStreamBatch(batch, runID, afterSequence); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	hasMore := len(batch) > limit
+	if hasMore {
+		batch = batch[:limit]
+	}
+	frames := make([]RunEventStreamView, len(batch))
+	cursorSequence := afterSequence
+	for index, event := range batch {
+		cursorSequence = event.Sequence
+		frames[index] = RunEventStreamView{
+			Version: RunEventStreamVersion, RequestID: requestID, RunID: runID,
+			Cursor: encodeEventStreamCursor(runID, event.Sequence), Sequence: event.Sequence,
+			Event: eventView(event),
+		}
+	}
+	a.writeSuccess(writer, requestID, RunEventPollView{
+		Version: RunEventPollVersion, RunID: runID,
+		Cursor: encodeEventStreamCursor(runID, cursorSequence), Frames: frames, HasMore: hasMore,
+	}, nil)
 }
 
 func (a *API) serveRunEventStream(writer http.ResponseWriter, request *http.Request,
