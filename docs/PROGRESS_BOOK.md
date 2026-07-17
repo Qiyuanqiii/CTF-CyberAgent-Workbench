@@ -760,6 +760,8 @@ v67 的 16 项结果全部固定为 `observed_failed`、`production_verified_cou
 
 v67 最终本地门禁通过：全仓普通/race 分别 215.2 秒/233.1 秒，vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、9 个文件 21 项前端测试、OpenAPI 无漂移、production build、零漏洞 npm audit、51 份 Markdown、仓库隐私/产物/乱码/Docker 写入口/diff 扫描、隔离真实二进制 Workspace smoke 和 Linux test binary 交叉编译均为绿色。Sandbox/Store/Application/CLI 高频回归为 50/10/5/5 轮，关键 race 为 10/3/3/3 轮。审计收紧零生产验证、精确 selector、v66 control reconciliation、租约时序、direct-SQL 原子终态和 contact 文案，当前无未解决高/中风险。宿主策略拒绝递归清理，两个烟测目录留在系统临时根等待自动回收，无需人工操作。
 
+GitHub Actions run `29543385038` 已通过 v67 实现提交 `8bc0929`：Go/Linux 作业 2 分 50 秒，TypeScript 作业 24 秒；Linux 全仓测试、vet、govulncheck 与前端完整门禁全部通过。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。

@@ -184,6 +184,9 @@ The final v67 local gate is green. Full ordinary and race suites completed in 21
 
 The pre-release audit forced the production-verified count to exactly zero, recomputed the exact label selector, cross-bound the v66 control reconciliation, required evidence to precede lease expiry, and closed a direct-SQL timestamp mismatch that could otherwise leave a half-terminal record. CLI and failure events now report only evidence-backed daemon-contact state. No unresolved high- or medium-severity issue is known. The optional real Linux daemon integration test was not run on this host, so no v67 receipt is represented as production verification.
 
+实现提交 `8bc0929` 已通过 GitHub Actions run `29543385038`；远端 Go/Linux 作业用时 2 分 50 秒，TypeScript 作业用时 24 秒。<br>
+Implementation commit `8bc0929` passed GitHub Actions run `29543385038`; the remote Go/Linux job completed in 2m50s and TypeScript in 24s.
+
 ## 架构能力详解 / Architecture Details
 
 ### 中文详解
