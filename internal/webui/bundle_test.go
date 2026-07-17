@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func TestBundleLoadsImmutableSnapshotAndServesBoundedRoutes(t *testing.T) {
@@ -146,6 +148,75 @@ func TestBundleRejectsAssetSymlink(t *testing.T) {
 	}
 	if bundle, err := LoadDirectory(directory); err == nil || bundle != nil {
 		t.Fatal("Web UI asset symlink was accepted")
+	}
+}
+
+func TestEmbeddedBundleLoadsOneImmutableBoundedSnapshot(t *testing.T) {
+	source := fstest.MapFS{
+		"dist/index.html":                &fstest.MapFile{Data: []byte(testIndexBody)},
+		"dist/assets/index-AbCd1234.js":  &fstest.MapFile{Data: []byte(testScriptBody)},
+		"dist/assets/index-D0TcvGy-.css": &fstest.MapFile{Data: []byte("body { color: black; }")},
+	}
+	bundle, err := LoadEmbeddedFS(source, "dist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Source() != "embedded:dist" || bundle.AssetCount() != 2 || len(bundle.Digest()) != 64 {
+		t.Fatalf("unexpected embedded bundle: source=%q count=%d digest=%q",
+			bundle.Source(), bundle.AssetCount(), bundle.Digest())
+	}
+	delete(source, "dist/assets/index-AbCd1234.js")
+	response := requestBundle(t, bundle, http.MethodGet, "/assets/index-AbCd1234.js", "", "")
+	if response.Code != http.StatusOK || response.Body.String() != testScriptBody {
+		t.Fatalf("embedded snapshot changed with source: status=%d body=%q",
+			response.Code, response.Body.String())
+	}
+}
+
+func TestEmbeddedBundleRejectsMalformedOrExecutableTrees(t *testing.T) {
+	valid := func() fstest.MapFS {
+		return fstest.MapFS{
+			"dist/index.html":               &fstest.MapFile{Data: []byte(testIndexBody)},
+			"dist/assets/index-AbCd1234.js": &fstest.MapFile{Data: []byte(testScriptBody)},
+		}
+	}
+	tests := []struct {
+		name   string
+		root   string
+		source func() fs.FS
+	}{
+		{name: "nil source", root: "dist", source: func() fs.FS { return nil }},
+		{name: "dot root", root: ".", source: func() fs.FS { return valid() }},
+		{name: "traversal root", root: "../dist", source: func() fs.FS { return valid() }},
+		{name: "invalid UTF-8", root: "dist", source: func() fs.FS {
+			current := valid()
+			current["dist/index.html"] = &fstest.MapFile{Data: []byte{0xff}}
+			return current
+		}},
+		{name: "unhashed asset", root: "dist", source: func() fs.FS {
+			current := valid()
+			delete(current, "dist/assets/index-AbCd1234.js")
+			current["dist/assets/index.js"] = &fstest.MapFile{Data: []byte("unsafe")}
+			return current
+		}},
+		{name: "symlink asset", root: "dist", source: func() fs.FS {
+			current := valid()
+			current["dist/assets/link-AbCd1234.js"] = &fstest.MapFile{Mode: fs.ModeSymlink}
+			return current
+		}},
+		{name: "oversized index", root: "dist", source: func() fs.FS {
+			current := valid()
+			current["dist/index.html"] = &fstest.MapFile{Data: make([]byte, MaxIndexBytes+1)}
+			return current
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			bundle, err := LoadEmbeddedFS(test.source(), test.root)
+			if err == nil || bundle != nil {
+				t.Fatalf("unsafe embedded bundle loaded: %#v", bundle)
+			}
+		})
 	}
 }
 

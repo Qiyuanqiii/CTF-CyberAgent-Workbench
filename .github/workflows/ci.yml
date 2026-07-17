@@ -59,3 +59,27 @@ jobs:
             fi
           done
           exit 1
+
+  desktop:
+    name: Windows Desktop shell
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build embedded renderer
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+      - name: Test Desktop boundaries
+        run: go test -tags desktop -count=1 ./cmd/cyberagent-desktop ./internal/desktop ./internal/webui
+      - name: Build read-first Desktop shell
+        run: go build -tags "desktop,production" -trimpath -ldflags "-s -w -H=windowsgui" -o cyberagent-desktop.exe ./cmd/cyberagent-desktop

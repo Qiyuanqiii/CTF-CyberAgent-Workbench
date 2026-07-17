@@ -1,6 +1,6 @@
 # CyberAgent Workbench Desktop Plan
 
-状态：路线图已确定；非 schema 的 D1-A 路径隔离 Skill 预览 Go 桥已完成，D0 Wails 壳、原生文件对话框、桌面二进制与安装包尚未实现。
+状态：非 schema Desktop D0-A 已完成。Wails v2.13.0 Windows 只读壳、嵌入式 React bundle、进程内 Go API、内存令牌、原生 `.zip` 对话框和路径隔离 Skill 预览已经可构建并通过实机复核；安装包、正式便携发行、注册表、自启动、更新和高权限执行仍未实现。
 
 ## 目标
 
@@ -9,11 +9,11 @@
 ## 架构决定
 
 - Go 仍是唯一控制平面；Policy、Scope、预算、SQLite、模型、工具、文件、Docker、Shell 和密钥均由 Go 管理。
-- React/Vite 复用现有 `web/` 控制台，桌面外壳优先评估 Wails，并在技术验证后固定一个经过审计的稳定版本。
-- TypeScript 业务操作继续使用 Go 拥有的 HTTP/SSE/OpenAPI 契约；桌面绑定只处理窗口、通知和受控文件选择等操作系统能力，不建立第二套业务 API。
+- React/Vite 复用现有 `web/` 控制台；桌面外壳已固定 Wails v2.13.0 稳定版。v3 仍处于 Alpha，不进入当前主线。
+- TypeScript 业务操作继续使用 Go 拥有的 HTTP/OpenAPI 契约；普通 Web 保留 SSE，Windows Desktop 因 Wails v2 AssetServer 不支持流式响应而使用同一事件表的有界 cursor polling。桌面绑定只处理内存启动材料和受控文件选择，不建立第二套业务 API。
 - Electron 不作为默认方案，避免 Node 成为并行高权限控制面。Tauri 不作为默认方案，避免 Rust 从确定性分析工具变成桌面主控。
 - 桌面端不直接读取 API key，不直接控制 Docker/Shell，不实现 Scope 或文件权限判断，也不在 Local Storage、前端日志或注册表保存凭证。
-- CLI、TUI、Web 和 Desktop 必须投影同一 Run/Event/Approval 状态；关闭窗口不得隐式取消后台 Run。
+- CLI、TUI、Web 和 Desktop 必须投影同一 Run/Event/Approval 状态；关闭窗口不得隐式取消后台 Run。D0-A 只读取已有状态，不取得 Run execution lease。
 
 ## 目标布局
 
@@ -31,18 +31,36 @@
 - `desktop.NewSkillPackagePreviewBoundary` 把未来原生选择器和渲染桥拆成两个值：只有 Go selector 接收路径，renderer bridge 只接收 256-bit 不透明句柄。
 - Go 在发放句柄前完成严格包校验并立即丢弃路径/正文；内存最多保留 16 份投影，五分钟过期且单次消费。
 - `desktop_skill_package_preview.v1` 只返回有界风险元数据，排除路径、文件名、正文、Manifest description/content path/content digest，并固定安装、命令、网络、Provider、工具和能力授权为 false。
-- 该边界当前没有产品入口，不接入 HTTP/OpenAPI/React，也不创建数据库或运行事件；ADR 0033 记录了未来 Wails 只能绑定“打开原生对话框”的要求。
+- D0-A 已把该边界接入 Wails 原生对话框和 React 只读预览。渲染层仍不能提交路径、文件字节或安装请求，也不会因预览创建数据库事实或 Run 事件；ADR 0033 与 ADR 0034 分别记录路径隔离和桌面壳边界。
+
+## D0-A 当前实现
+
+- `cmd/cyberagent-desktop` 只在 Windows `desktop` build tag 下编译；默认 read-only，显式 `--enable-profile-control` 也只开放 schema v64 已审计的非授权档位选择。
+- `web/dist` 以 compile-time embed 进入二进制；Go 在启动前验证 index、内容哈希资源、类型、数量、单项/总大小并复制为不可变内存快照。
+- Wails AssetServer 直接调用现有 `httpapi.API` Handler，不监听 TCP 端口；同一 Go 层继续负责 Bearer、Host、CSP、Policy、SQLite 和 DTO。
+- Renderer 绑定面只有 `Bootstrap`、`SelectSkillPackage`、`PreviewSkillPackage` 三个方法。进程、Shell、Docker、Skill 安装和 renderer path input 权限全部固定为 false。
+- read/control token 每次进程启动随机生成，只驻留内存，不写 Local Storage、SQLite、日志、命令输出或注册表；两者不得相同。
+- 单实例、窗口恢复、禁用 WebView 文件拖放/默认右键菜单、renderer code integrity、路径隔离错误和 bounded startup dialog 已接入。
+- Windows production-tag 二进制已经在隔离 schema-v71 home 启动，主工作台、Skill modal 与原生 `.zip` 对话框通过视觉复核。
+
+本地构建：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
+```
+
+输出位于 `build/desktop/cyberagent-desktop.exe`，默认不开放 control token。该文件是未签名开发/便携测试产物，不是正式发行包。机器需要 Windows 10/11 和 WebView2 Evergreen Runtime。测试其他数据目录时，可在启动前设置 `CYBERAGENT_HOME`；桌面渲染层无法读取或更改这个路径。
 
 ## 分阶段交付
 
-### D0：桌面基础验证（现在可做）
+### D0：桌面基础验证（进行中）
 
-- 建立 Wails 技术验证和 `cmd/cyberagent-desktop` 边界。
-- 嵌入现有 React read-first 控制台，复用 Go 同源 API/SSE/OpenAPI；v64 档位选择仍只调用 Go control route。
-- 固定窗口生命周期、单实例策略、端口/令牌传递和 CLI 并存时的 SQLite/Run lease 行为。
-- 生产模式禁止远程导航和开发者工具，增加 CSP、资源完整性、窗口来源与外部链接边界测试。
-- 只输出开发版/便携测试二进制；不做安装器、注册表、自启动、自动更新、协议关联或后台服务。
-- 将 ADR 0033 的 Go selector 接到原生文件对话框；渲染层只能消费一次性句柄，不得提交路径、文件字节或 multipart upload。
+- [x] 固定 Wails v2.13.0 和 `cmd/cyberagent-desktop` Windows build-tag 边界。
+- [x] 嵌入现有 React read-first 控制台，以进程内 Handler 复用 Go API/OpenAPI；v64 档位选择仍只调用 Go control route。
+- [x] 建立随机内存令牌、单实例、窗口恢复、生产 bundle、CSP 与原生 `.zip` 对话框；渲染层只消费一次性句柄。
+- [x] 输出未签名开发/便携测试二进制，不创建安装器、注册表、自启动、更新、协议关联或后台服务。
+- [ ] D0-B 完成 CLI/Desktop 同库并发、崩溃重开、单实例恢复、event polling 续传与 WebView2 缺失诊断矩阵。
+- [ ] D0-B 增加 production navigation/renderer 权限回归和 Windows 10/11 CI/实机兼容记录；仍不增加业务 mutation。
 
 ### D1：日常工作台（产品可用度约 65-70%）
 
@@ -78,3 +96,5 @@
 - CLI 与 Desktop 同时运行时，SQLite 不损坏、operation 重放不分叉、Run lease 不被窗口生命周期偷取。
 - 安装、升级和卸载不会静默删除 Workspace、数据库、凭证或用户创建文件。
 - 未签名开发产物不得伪装成正式发布；正式包必须有可核验签名和哈希。
+
+ADR 0034 是 D0-A 的实现决策记录。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。

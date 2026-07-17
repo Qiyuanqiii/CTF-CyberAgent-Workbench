@@ -1,6 +1,6 @@
 # CyberAgent Workbench Custom Skill Package Plan
 
-状态：`skill_package.v1` 纯内存校验、schema v69 内容寻址本地 Registry、schema v70 外部 Skill Run 固定选择与最小上下文、schema v71 安全只读来源投影，以及非 schema Desktop D1-A 路径隔离 Go 预览桥均已完成。CLI 可显式确认导入、查询、选择和追加移除 tombstone；Wails 壳/原生对话框、HTTP/桌面安装上传、签名与 Marketplace 尚未实现。
+状态：`skill_package.v1` 纯内存校验、schema v69 内容寻址本地 Registry、schema v70 外部 Skill Run 固定选择与最小上下文、schema v71 安全只读来源投影、非 schema Desktop D1-A 路径隔离 Go 预览桥，以及 D0-A Wails 原生 `.zip` 风险预览入口均已完成。CLI 可显式确认导入、查询、选择和追加移除 tombstone；HTTP/桌面确认安装、签名与 Marketplace 尚未实现。
 
 ## 当前能力
 
@@ -68,7 +68,7 @@ cyberagent skill remove <name>@<version> --operation-key <stable-key> --confirm-
 Desktop D1 阶段：
 
 - ADR 0033 已完成 Go 预览边界：未来原生选择器只把路径交给 Go closure；TypeScript 只得到五分钟过期、单次消费的不透明句柄，不解压、不校验、不写 Registry，也不能提交任意路径。
-- Go 已可返回 metadata-only 验证预览、风险代码、Profile、声明工具和 package digest；Wails 原生对话框与可见 UI 仍需 D0 接线，显式确认安装继续后置。
+- Go 已可返回 metadata-only 验证预览、风险代码、Profile、声明工具和 package digest；Wails D0-A 原生对话框与可见 UI 已接线，显式确认安装继续后置并不得扩大 renderer binding。
 - 上传端点只能绑定回环地址，使用独立 control token、严格 Origin/Host、固定 Content-Type、流式大小上限、幂等 operation key 和无正文审计事件。
 - Web 远程上传、URL 安装、Git 仓库安装和在线 Marketplace 均后置，不允许第一版自动下载并信任内容。
 
@@ -84,7 +84,7 @@ Desktop D1 阶段：
 2. [x] schema v69 增加 content-addressed 本地 Registry、不可变安装/移除账本、原子导入/恢复和 CLI；导入保持惰性。
 3. [x] schema v70 将用户 Skill 纳入 Run 的精确版本选择、root/Specialist 最小上下文和 Code/Cyber 分离测试；安装与 Run 上下文使用两次独立确认。
 4. [x] schema v71 增加按 Run 隔离的有界只读来源/交付投影，并接入 HTTP/OpenAPI、TUI 与 React；所有内容、摘要和私有身份保持在边界内。
-5. [x] Desktop D1-A 增加路径隔离的 Go-owned 本地验证预览桥：原生 selector 先校验再发一次性句柄，renderer 永不接收路径/正文；Wails 对话框接线、确认安装及 HTTP mutation 仍作为后续独立切片审计。
+5. [x] Desktop D1-A 增加路径隔离的 Go-owned 本地验证预览桥，D0-A 再把原生 selector 接入 Wails `.zip` 对话框和只读 UI；renderer 永不接收路径/正文，确认安装及 HTTP mutation 仍作为后续独立切片审计。
 6. [ ] 最后评估签名包、团队 Catalog 与 Marketplace；远程自动安装不属于基础版本。
 
 ## 已验证基线

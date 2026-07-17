@@ -26,6 +26,8 @@ schema v71 的 External Skills 面板只读显示 Run 固定选择的 surface/pr
 
 浏览器不持久化 token，也不把 token 放入 URL、body 或静态资源请求。可选 control token 只驻留页面内存，当前界面只用它提交幂等的执行档位 ID；Go 决定 backend、scope、审批、风险、门禁和全部权限位。生产模式由 Go 在同一回环 origin 托管已构建资源；Vite 回环代理只用于前端开发，跨域代理目标会被拒绝。Artifact 正文、checkpoint pending input、操作者引导正文/摘要/身份、外部 Skill 正文/路径/摘要/私有身份、raw Fan-out report、审批/生命周期私有叙述、lease/fencing token、进程启动和其他执行类写操作仍不向 Web 开放。
 
+同一 bundle 也被 Desktop D0-A 编译进 Wails v2.13.0 Windows 壳。React 通过三个方法的严格 native bridge 自动取得内存连接材料并调用进程内 Go API，不监听端口、不使用 Local Storage。Windows AssetServer 不支持 response streaming，因此 Desktop 对现有 events page 做有界 cursor polling，浏览器仍使用 SSE。桌面专属 Skill 按钮只调用无参数原生 `.zip` picker，React 从不接收路径或 bytes，也没有安装按钮。
+
 ### 生产式本地运行
 
 ```powershell
@@ -66,6 +68,8 @@ This is the local read-first operations UI for CyberAgent Workbench. React/Vite 
 The current UI includes Run and Session browsing, read-only schema v42 three-direction Plan/Delivery state, schema v45 operator-steering counts and ordered metadata after schema v46 controls, a bounded root/Specialist Agent graph, operator-gated delegation summaries, read-only Fan-out plan/execution/shard metadata, Finding/Report projections, bounded pagination, authenticated resumable Run-event SSE, WorkItems, Notes, Artifact descriptors, Supervisor ToolRounds, budgets, leases, compacted message history, schema v64 execution-profile selection, and schema v71 bounded external-Skill provenance/delivery metadata. The Plan, steering, and External Skills panels remain read-only. Both bearers remain in page memory and never enter a URL or browser storage. The optional distinct control bearer is sent only in Authorization for an idempotent profile request; TypeScript submits no backend, scope, gate, approval, or authority field. Raw Fan-out reports, private decision narratives, Artifact content, external-Skill content/paths/digests/private identities, and lease/fencing identities are omitted from browser DTOs.
 
 For the production-style local path, run `npm run build`, then start `cyberagent api serve --ui-dir web/dist`. Go validates and snapshots the bundle at startup, serves it from the same loopback origin as `api.v1`, applies a strict CSP, disables HTML caching, and gives only hashed assets immutable caching. Static requests are anonymous but reject authorization headers, queries, bodies, and methods other than GET/HEAD. For frontend development, Vite can still proxy same-origin `/api` requests to a loopback Go service and rejects non-loopback targets.
+
+Desktop D0-A compiles the same bundle into a Wails v2.13.0 Windows shell. React obtains ephemeral connection material through a strict three-method native bridge and calls the Go API in process without a listening port or browser storage. Because Windows Wails AssetServer responses do not stream, Desktop polls the existing bounded event pages with opaque cursors while browser clients keep SSE. Its desktop-only Skill button opens a no-argument native `.zip` picker; React receives neither a path nor bytes and exposes no installation action.
 
 Open `http://127.0.0.1:8765` for the Go-hosted build or `http://127.0.0.1:5173` for Vite development, then enter the same read token shown or configured for the Go process. Enter the distinct control token only when profile selection is needed; selecting Docker or Local still cannot start a process.
 

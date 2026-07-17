@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, LoaderCircle, ShieldCheck } from "lucide-react";
 import { CyberAgentClient } from "../api/client";
+import { desktopBridgeAvailable, desktopErrorMessage, loadDesktopBootstrap } from "../lib/desktop-bridge";
 import { useConnectionStore } from "../state/connection";
 
 export function ConnectionGate() {
@@ -11,6 +12,39 @@ export function ConnectionGate() {
   const [connecting, setConnecting] = useState(false);
   const connect = useConnectionStore((state) => state.connect);
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!desktopBridgeAvailable()) {
+      return;
+    }
+    let active = true;
+    setConnecting(true);
+    setError("");
+    void loadDesktopBootstrap().then(async (bootstrap) => {
+      if (!bootstrap || !active) {
+        return;
+      }
+      const client = new CyberAgentClient(bootstrap.read_token, bootstrap.api_base_url,
+        bootstrap.control_token);
+      const health = await client.health();
+      if (!active) {
+        return;
+      }
+      queryClient.clear();
+      connect(bootstrap.read_token, health, bootstrap.control_token);
+    }).catch((caught: unknown) => {
+      if (active) {
+        setError(desktopErrorMessage(caught));
+      }
+    }).finally(() => {
+      if (active) {
+        setConnecting(false);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [connect, queryClient]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -48,6 +82,8 @@ export function ConnectionGate() {
           <h1>连接本地控制面</h1>
           <p>Go API / api.v1</p>
         </div>
+        {connecting && desktopBridgeAvailable() &&
+          <div className="desktop-connecting"><LoaderCircle aria-hidden="true" className="spin" size={16} />启动桌面工作台</div>}
         <label className="field-label" htmlFor="read-token">Read bearer token</label>
         <div className="token-row">
           <input

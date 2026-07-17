@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useConnectionStore } from "../state/connection";
 import { ConnectionGate } from "./connection-gate";
@@ -7,6 +7,7 @@ import { ConnectionGate } from "./connection-gate";
 describe("ConnectionGate", () => {
   beforeEach(() => {
     useConnectionStore.getState().disconnect();
+    delete window.go;
   });
 
   afterEach(() => {
@@ -35,5 +36,41 @@ describe("ConnectionGate", () => {
     expect(useConnectionStore.getState().controlToken).toBe("ephemeral-control-token");
     expect(input).toHaveValue("");
     expect(controlInput).toHaveValue("");
+  });
+
+  it("auto-connects a closed-authority Desktop bootstrap without rendering its token", async () => {
+    const bootstrap = vi.fn().mockResolvedValue({
+      protocol_version: "desktop_connection_bootstrap.v1",
+      api_base_url: "/api/v1",
+      api_version: "api.v1",
+      app_version: "v0.1.0",
+      ui_digest: "a".repeat(64),
+      read_token: "desktop-read-token-0123456789abcdef",
+      control_token: "",
+      control_enabled: false,
+      read_only_default: true,
+      process_execution_enabled: false,
+      shell_execution_enabled: false,
+      docker_execution_enabled: false,
+      skill_installation_enabled: false,
+      renderer_path_input_supported: false,
+    });
+    window.go = { desktop: { DesktopBridge: {
+      Bootstrap: bootstrap,
+      SelectSkillPackage: vi.fn(),
+      PreviewSkillPackage: vi.fn(),
+    } } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1",
+      request_id: "req-desktop-health",
+      data: { status: "ok", api_version: "api.v1", app_version: "test", schema_version: 71 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    render(<QueryClientProvider client={new QueryClient()}><ConnectionGate /></QueryClientProvider>);
+    await waitFor(() => expect(useConnectionStore.getState().token)
+      .toBe("desktop-read-token-0123456789abcdef"));
+    expect(useConnectionStore.getState().controlToken).toBe("");
+    expect(screen.queryByText("desktop-read-token-0123456789abcdef")).not.toBeInTheDocument();
+    expect(bootstrap).toHaveBeenCalledTimes(1);
   });
 });

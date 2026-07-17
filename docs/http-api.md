@@ -36,6 +36,16 @@ note: the API is loopback-only; control is separately authorized and tokens are 
 
 `--ui-dir` is optional. When set, Go validates the Vite bundle before opening the database or listener and loads `index.html` plus `assets/` into an immutable in-memory snapshot. On-disk changes cannot alter the served process. Without the option, root paths retain the existing authenticated API/404 behavior and no Web UI is enabled.
 
+### Windows Desktop 进程内传输 / Windows Desktop In-Process Transport
+
+Desktop D0-A 复用同一 `api.v1` Handler，但不调用 `ListenAndServe`，也不绑定回环端口。Wails AssetServer 在同一进程内把 React 请求交给 Go；适配层 clone 请求并固定 loopback Host/RemoteAddr，现有鉴权、DTO、CSP、错误和 Store 路径保持不变。默认只生成内存 read token；显式 `--enable-profile-control` 才生成不同的内存 control token，并且它仍只能调用非授权 execution-profile route。两个 token 都不写磁盘、日志、Local Storage 或注册表。
+
+Desktop D0-A reuses the same `api.v1` Handler without calling `ListenAndServe` or binding a loopback port. The Wails AssetServer passes React requests to Go in the same process; a narrow adapter clones requests and pins loopback Host/RemoteAddr while preserving the existing authorization, DTO, CSP, error, and Store paths. The default launch creates only an in-memory read token. Explicit `--enable-profile-control` creates a distinct in-memory control token, still limited to the non-authorizing execution-profile route. Neither token is written to disk, logs, Local Storage, or the registry.
+
+普通浏览器继续使用 `/events/stream` SSE。Wails v2 在 Windows 上不支持 AssetServer response streaming，因此 Desktop 只对现有 `GET /runs/{run_id}/events` opaque cursor pages 做一秒有界轮询、sequence 去重和最多 500 帧内存保留；分页 cursor 原样回传 API，UI 生成的 frame label 只在内存中显示且永不作为 cursor 发送。它不会建立新的事件真源。原生 Wails bridge 不是 HTTP 旁路，只提供 connection bootstrap 和路径隔离 Skill 选择/预览，不提供业务 mutation。
+
+Ordinary browser clients keep `/events/stream` SSE. Wails v2 does not support AssetServer response streaming on Windows, so Desktop polls the existing `GET /runs/{run_id}/events` opaque-cursor pages at a bounded one-second interval, deduplicates by durable sequence, and retains at most 500 frames in memory. Pagination cursors are returned to the API unchanged; synthetic frame labels exist only in renderer memory and are never sent as cursors. It creates no new event source. The native Wails bridge is not a business-API bypass: it provides only connection bootstrap and pathless Skill selection/preview, with no mutation surface.
+
 ```powershell
 $headers = @{ Authorization = "Bearer $env:CYBERAGENT_API_TOKEN" }
 Invoke-RestMethod http://127.0.0.1:8765/api/v1/health -Headers $headers

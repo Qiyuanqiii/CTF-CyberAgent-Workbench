@@ -1,11 +1,13 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { LogOut, RefreshCw, ShieldCheck } from "lucide-react";
+import { LogOut, PackageSearch, RefreshCw, ShieldCheck } from "lucide-react";
 import { CyberAgentClient } from "./api/client";
 import { ConnectionGate } from "./components/connection-gate";
+import { DesktopSkillPreviewDialog } from "./components/desktop-skill-preview";
 import { ResourceSidebar } from "./components/resource-sidebar";
 import { RunWorkspace } from "./components/run-workspace";
 import { SessionWorkspace } from "./components/session-workspace";
+import { desktopBridgeAvailable } from "./lib/desktop-bridge";
 import { useConnectionStore } from "./state/connection";
 
 export default function App() {
@@ -18,6 +20,8 @@ export default function App() {
 }
 
 function ConnectedWorkbench({ token, controlToken }: { token: string; controlToken: string }) {
+  const [skillPreviewOpen, setSkillPreviewOpen] = useState(false);
+  const desktop = desktopBridgeAvailable();
   const client = useMemo(() => new CyberAgentClient(token, undefined, controlToken), [token, controlToken]);
   const queryClient = useQueryClient();
   const health = useConnectionStore((state) => state.health);
@@ -40,33 +44,41 @@ function ConnectedWorkbench({ token, controlToken }: { token: string; controlTok
   }, [healthQuery.data, setHealth]);
 
   const leave = () => {
+    setSkillPreviewOpen(false);
     queryClient.clear();
     disconnect();
   };
 
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="brand-lockup compact">
-          <span className="brand-mark"><ShieldCheck aria-hidden="true" size={20} /></span>
-          <span><strong>CyberAgent Workbench</strong><small>Control console</small></span>
+    <>
+      <div className="app-shell">
+        <header className="topbar">
+          <div className="brand-lockup compact">
+            <span className="brand-mark"><ShieldCheck aria-hidden="true" size={20} /></span>
+            <span><strong>CyberAgent Workbench</strong><small>Control console</small></span>
+          </div>
+          <div className="topbar-actions">
+            <span className={`health-indicator ${healthQuery.isError ? "offline" : "online"}`}>
+              <i />{healthQuery.isError ? "API error" : `api.v1 / schema ${healthQuery.data?.schema_version ?? "-"}`}
+            </span>
+            {desktop &&
+              <button aria-label="预览 Skill 包" className="icon-button" onClick={() => setSkillPreviewOpen(true)} title="预览 Skill 包" type="button">
+                <PackageSearch aria-hidden="true" size={16} />
+              </button>}
+            <button aria-label="刷新" className="icon-button" disabled={healthQuery.isFetching} onClick={() => void healthQuery.refetch()} title="刷新" type="button">
+              <RefreshCw aria-hidden="true" className={healthQuery.isFetching ? "spin" : ""} size={16} />
+            </button>
+            {!desktop && <button aria-label="断开连接" className="icon-button" onClick={leave} title="断开连接" type="button"><LogOut aria-hidden="true" size={16} /></button>}
+          </div>
+        </header>
+        <div className="shell-body">
+          <ResourceSidebar client={client} />
+          <main className="main-workspace">
+            {resourceKind === "run" ? <RunWorkspace client={client} runID={selectedRunID} /> : <SessionWorkspace client={client} sessionID={selectedSessionID} />}
+          </main>
         </div>
-        <div className="topbar-actions">
-          <span className={`health-indicator ${healthQuery.isError ? "offline" : "online"}`}>
-            <i />{healthQuery.isError ? "API error" : `api.v1 / schema ${healthQuery.data?.schema_version ?? "-"}`}
-          </span>
-          <button aria-label="刷新" className="icon-button" disabled={healthQuery.isFetching} onClick={() => void healthQuery.refetch()} title="刷新" type="button">
-            <RefreshCw aria-hidden="true" className={healthQuery.isFetching ? "spin" : ""} size={16} />
-          </button>
-          <button aria-label="断开连接" className="icon-button" onClick={leave} title="断开连接" type="button"><LogOut aria-hidden="true" size={16} /></button>
-        </div>
-      </header>
-      <div className="shell-body">
-        <ResourceSidebar client={client} />
-        <main className="main-workspace">
-          {resourceKind === "run" ? <RunWorkspace client={client} runID={selectedRunID} /> : <SessionWorkspace client={client} sessionID={selectedSessionID} />}
-        </main>
       </div>
-    </div>
+      <DesktopSkillPreviewDialog open={skillPreviewOpen} onClose={() => setSkillPreviewOpen(false)} />
+    </>
   );
 }

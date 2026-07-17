@@ -154,6 +154,99 @@ func LoadDirectory(directory string) (*Bundle, error) {
 	return bundle, nil
 }
 
+// LoadEmbeddedFS snapshots a compile-time embedded production bundle. It is
+// intentionally separate from LoadDirectory so the Desktop shell never falls
+// back to mutable HTML or JavaScript beside the executable.
+func LoadEmbeddedFS(source fs.FS, root string) (*Bundle, error) {
+	root = strings.TrimSpace(root)
+	if source == nil || root == "" || root == "." || !fs.ValidPath(root) {
+		return nil, errors.New("embedded Web UI root is invalid")
+	}
+	rootInfo, err := fs.Stat(source, root)
+	if err != nil {
+		return nil, fmt.Errorf("inspect embedded Web UI root: %w", err)
+	}
+	if rootInfo.Mode()&fs.ModeSymlink != 0 || !rootInfo.IsDir() {
+		return nil, errors.New("embedded Web UI root must be a real directory")
+	}
+	sub, err := fs.Sub(source, root)
+	if err != nil {
+		return nil, fmt.Errorf("open embedded Web UI root: %w", err)
+	}
+	indexBody, err := readEmbeddedRegularFile(sub, "index.html", MaxIndexBytes)
+	if err != nil {
+		return nil, fmt.Errorf("load embedded Web UI index: %w", err)
+	}
+	if !utf8.Valid(indexBody) {
+		return nil, errors.New("embedded Web UI index must be valid UTF-8")
+	}
+	assetsInfo, err := fs.Stat(sub, "assets")
+	if err != nil {
+		return nil, fmt.Errorf("inspect embedded Web UI assets: %w", err)
+	}
+	if assetsInfo.Mode()&fs.ModeSymlink != 0 || !assetsInfo.IsDir() {
+		return nil, errors.New("embedded Web UI assets must be a real directory")
+	}
+
+	bundle := &Bundle{
+		source: "embedded:" + root,
+		assets: make(map[string]asset),
+		index:  makeAsset(indexBody, "text/html; charset=utf-8", false),
+	}
+	totalBytes := int64(len(indexBody))
+	err = fs.WalkDir(sub, "assets", func(name string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if name == "assets" {
+			return nil
+		}
+		if entry.Type()&fs.ModeSymlink != 0 {
+			return fmt.Errorf("embedded Web UI bundle contains symbolic link %q", name)
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("embedded Web UI bundle contains non-regular asset %q", name)
+		}
+		if len(bundle.assets) >= MaxAssetCount {
+			return fmt.Errorf("embedded Web UI bundle exceeds %d assets", MaxAssetCount)
+		}
+		extension := strings.ToLower(path.Ext(name))
+		contentType, allowed := allowedAssetTypes[extension]
+		if !allowed {
+			return fmt.Errorf("embedded Web UI asset %q has unsupported extension %q", name, extension)
+		}
+		if !assetNameHasDigest(path.Base(name), extension) {
+			return fmt.Errorf("embedded Web UI asset %q does not have a content-hashed name", name)
+		}
+		body, err := readEmbeddedRegularFile(sub, name, MaxAssetBytes)
+		if err != nil {
+			return fmt.Errorf("load embedded Web UI asset %q: %w", name, err)
+		}
+		totalBytes += int64(len(body))
+		if totalBytes > MaxBundleBytes {
+			return fmt.Errorf("embedded Web UI bundle exceeds %d bytes", MaxBundleBytes)
+		}
+		urlPath := "/" + path.Clean(name)
+		bundle.assets[urlPath] = makeAsset(body, contentType, true)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(bundle.assets) == 0 {
+		return nil, errors.New("embedded Web UI bundle must contain at least one hashed asset")
+	}
+	bundle.digest = bundleDigest(bundle.index, bundle.assets)
+	return bundle, nil
+}
+
 func (b *Bundle) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if b == nil || request == nil || request.URL == nil {
 		http.Error(writer, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -227,6 +320,39 @@ func readRegularFile(root *os.Root, name string, limit int64) ([]byte, error) {
 	}
 	if int64(len(body)) > limit {
 		return nil, fmt.Errorf("file exceeds %d bytes", limit)
+	}
+	return body, nil
+}
+
+func readEmbeddedRegularFile(source fs.FS, name string, limit int64) ([]byte, error) {
+	if !fs.ValidPath(name) || limit < 0 {
+		return nil, errors.New("embedded file request is invalid")
+	}
+	file, err := source.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	before, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if before.Mode()&fs.ModeSymlink != 0 || !before.Mode().IsRegular() ||
+		before.Size() < 0 || before.Size() > limit {
+		return nil, fmt.Errorf("embedded file exceeds %d bytes or is not regular", limit)
+	}
+	body, err := io.ReadAll(io.LimitReader(file, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	after, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit || int64(len(body)) != before.Size() ||
+		!after.Mode().IsRegular() || after.Size() != before.Size() ||
+		!after.ModTime().Equal(before.ModTime()) {
+		return nil, errors.New("embedded file changed or exceeded its bound during read")
 	}
 	return body, nil
 }

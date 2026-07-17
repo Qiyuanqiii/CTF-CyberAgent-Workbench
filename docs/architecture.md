@@ -9,14 +9,14 @@ CyberAgent Workbench is evolving from a CLI-first agent scaffold into a run-cent
 - Every state change is auditable and recoverable from SQLite.
 - Agent concurrency is coordinated by one owner, not by agents calling each other directly.
 - Privileged actions always cross policy, approval, scope, and sandbox boundaries.
-- CLI, TUI, the React/Vite read UI, and CI use the same Go-owned application and HTTP services.
+- CLI, TUI, browser React/Vite, Windows Desktop React/Vite, and CI use the same Go-owned application and HTTP services.
 - Rust analyzers remain deterministic tools behind Go.
 - CTF-specific behavior remains a late profile, not the runtime foundation.
 
 ## Control Plane
 
 ```text
-CLI / Bubble Tea TUI / Headless CI / React-Vite read UI
+CLI / Bubble Tea TUI / Headless CI / Browser UI / Windows Desktop UI
                               |
                     Go Application Services
                               |
@@ -44,6 +44,8 @@ CLI / Bubble Tea TUI / Headless CI / React-Vite read UI
                               |
                   SQLite Event and State Store
 ```
+
+Desktop D0-A is a presentation adapter, not another control plane. Wails v2.13.0 embeds the production React bundle and routes requests to the existing Go HTTP Handler in process without a listening socket. Its native binding surface is limited to memory-only bootstrap and pathless Skill-package selection/preview. It grants no process, Shell, Docker, installation, Scope, Policy, or path-input authority; ordinary Web retains SSE while Windows Desktop polls the same durable Run-event pages under bounded opaque cursors. See ADR 0034.
 
 Allowed external directions remain:
 

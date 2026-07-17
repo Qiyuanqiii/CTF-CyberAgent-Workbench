@@ -97,7 +97,7 @@ The embedded read-only `skill.v1` Registry exposes bounded version `1.1.0` workf
 
 `skill package validate` is a read-only, non-schema preview for external `skill_package.v1` files. The deterministic ZIP must contain exactly `manifest.json` and `SKILL.md` in that order and fit the structural, size, decompression, CRC, UTF-8, manifest, byte/token, and hash limits fixed by ADR 0024. The command rejects whitespace-rewritten paths, symlinks, and non-regular files, reads at most 64 KiB with identity rechecks, and prints only bounded manifest metadata, exact archive/semantic digests, trust/risk codes, and false authority flags. It does not print the body or source path and does not install, persist, execute, access the network, call a Provider/tool, or grant declared dependencies.
 
-The non-schema Desktop D1-A groundwork reuses the same reader and parser behind a Go-native selector. After validation, Go forgets the path and body and exposes only a five-minute, one-time opaque handle to a future renderer bridge. No desktop executable, Wails/native-dialog binding, HTTP upload, or installation control exists yet; ADR 0033 records this pathless boundary.
+The non-schema Desktop pathless boundary reuses the same reader and parser behind a Go-native selector. After validation, Go forgets the path and body and exposes only a five-minute, one-time opaque handle. Desktop D0-A now connects that selector to a Wails native `.zip` dialog and a bounded React risk preview. The renderer still cannot provide a path or bytes, and no Desktop/HTTP installation control exists. ADR 0033 records the pathless boundary and ADR 0034 records the visible shell.
 
 Schema v69 adds the inert local user Registry. `skill import` requires an explicit Code/Cyber surface, a normalized stable 16-256-byte operation key, and `--confirm-untrusted-skill`. It first commits an immutable installation intent, publishes the validated archive to content-addressed storage, verifies a complete readback, and then records completion. Same-key retries recover an interrupted import; reusing the key for changed content/surface/operator conflicts. Built-in names are reserved. Code accepts validated compatible Profiles, while Cyber accepts exactly `script`. Every imported package remains `operator_installed_untrusted` with command, hook, network, Provider, tool-grant, Run-selection, and context-injection authority false.
 
@@ -106,6 +106,29 @@ Schema v69 adds the inert local user Registry. `skill import` requires an explic
 Schema v40 loads the complete selected set for root Supervisor turns. Before every Provider call, Go reconstructs `skill_context.v1` from the persisted tuples and embedded Registry, rechecks exact version/hash/bytes/Profile, redacts it, and enforces a separate deterministic token budget. New selection sees only the current `1.1.0` manifests; a hard-bounded embedded history resolves existing `1.0.0` selections exactly and is not a user-controlled load path. A metadata-only preparation is committed with the first model-start event and safely replays after restart; neither SQLite nor Run events contain Skill text, paths, names, or hashes. A selected Skill never authorizes its declared tool dependencies.
 
 Schema v47 derives `specialist_skill_context.v1` for each active child Attempt. Go reloads the child after Attempt start, binds the current immutable Run mode and parent selection, requires delegated `model.chat`, and selects at most one already-pinned guide. Code uses the guide matching its Profile. Cyber receives no broad Code/Review/Learn guide and receives `script` only for the Script Profile. `plan-delivery` is root-only. The default child budget is 1,024 conservative tokens with a 2,048 hard maximum. Preparation is idempotent across concurrent Store callers and commits atomically with the first Specialist model start; a selected Run cannot start that call without preparation. Child assignment text, model output, HTTP, Tool Gateway, and external directories cannot select Skills. The body remains in the current Go Provider request only, while SQLite and events store aggregate metadata and fingerprints.
+
+## Windows Desktop D0-A
+
+Build the unsigned development/portable-test shell from the repository root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
+.\build\desktop\cyberagent-desktop.exe
+```
+
+The build script installs the locked frontend dependencies, checks the generated API contract, runs frontend and focused Go tests, builds the production renderer, and then compiles the Windows GUI binary with the `desktop,production` tags. The machine needs Windows 10/11 and WebView2 Evergreen Runtime. `web/dist` is generated and ignored by Git; a direct Desktop build intentionally fails if the production bundle is absent.
+
+The shell opens the same `$CYBERAGENT_HOME/cyberagent.db` as the CLI and defaults to read-only. It generates an ephemeral read token in memory and calls the existing Go API through Wails' in-process AssetServer Handler, so no TCP port or copied bearer token is required. Run events use bounded cursor polling on Windows because Wails v2 does not stream AssetServer responses there; ordinary Web clients continue to use SSE.
+
+To expose only the existing schema-v64 profile selector, launch explicitly:
+
+```powershell
+.\build\desktop\cyberagent-desktop.exe --enable-profile-control
+```
+
+This flag creates a distinct in-memory control token. It does not enable a backend: `preview`, `docker`, and `local` still return `process_enabled=false`, `execution_authorized=false`, and `capability_grant=false`. There is no Run/Session creation, chat mutation, terminal, LocalRunner, Docker start, Shell, Skill installation, upload, registry integration, startup entry, updater, or installer in D0-A.
+
+The top-bar package button opens the native `.zip` picker. The operating-system path stays inside Go and is immediately validated. React receives only an opaque one-time handle followed by bounded metadata and the fixed conclusion `installation_authorized=false`; cancellation creates no state. Set `CYBERAGENT_HOME` before launch only when intentionally using an isolated data directory for testing. The renderer cannot read or change that path.
 
 ## Headless NDJSON
 
