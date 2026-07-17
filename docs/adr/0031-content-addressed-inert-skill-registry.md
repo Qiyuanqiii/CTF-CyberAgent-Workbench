@@ -147,7 +147,8 @@ import and removal. Initial Linux CI run `29556933994` exposed concurrent nested
 directory preparation through `os.Root.MkdirAll`; publication now creates and
 `Lstat`-verifies every path component and rejects symlink redirection. Twelve
 independent Stores passed 100 ordinary and 20 race repetitions. No unresolved
-high- or medium-severity issue is known.
+high- or medium-severity issue is known. GitHub Actions run `29557803407`
+passed fix commit `d28b100` with Go/Linux in 3m21s and TypeScript in 23s.
 
 ## Follow-Up
 
