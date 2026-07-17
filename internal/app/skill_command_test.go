@@ -151,6 +151,11 @@ func TestSkillPackageValidateCLIRejectsUnsafePathsAndUnknownOperations(t *testin
 		!strings.Contains(stderr, "not found") || strings.Contains(stderr, missing) {
 		t.Fatalf("missing package error was unstable: code=%d stderr=%q", code, stderr)
 	}
+	whitespacePath := " " + missing + " "
+	if _, stderr, code := executeTestCommand(t, "skill", "package", "validate", whitespacePath); code != 2 ||
+		!strings.Contains(stderr, "whitespace is forbidden") || strings.Contains(stderr, missing) {
+		t.Fatalf("whitespace package path was unstable: code=%d stderr=%q", code, stderr)
+	}
 }
 
 func TestSkillPackageRegistryCLIImportsListsShowsAndTombstonesWithoutExecutingContent(t *testing.T) {

@@ -1,6 +1,6 @@
 # CyberAgent Workbench Desktop Plan
 
-状态：已纳入路线图，尚未开始实现。
+状态：路线图已确定；非 schema 的 D1-A 路径隔离 Skill 预览 Go 桥已完成，D0 Wails 壳、原生文件对话框、桌面二进制与安装包尚未实现。
 
 ## 目标
 
@@ -25,6 +25,14 @@
 
 所有高风险操作必须显示 Go 返回的结构化候选、Scope、风险代码和审批要求；前端文案不能自行推导授权结果。
 
+## 已完成的前置边界
+
+- `skills.ReadPackageFile` 已成为 CLI 与未来 Desktop 共用的有界普通文件读取器；它拒绝 symlink、目录、空/超限包和首尾空白改写路径，并在读取前后复核身份且不回显路径。
+- `desktop.NewSkillPackagePreviewBoundary` 把未来原生选择器和渲染桥拆成两个值：只有 Go selector 接收路径，renderer bridge 只接收 256-bit 不透明句柄。
+- Go 在发放句柄前完成严格包校验并立即丢弃路径/正文；内存最多保留 16 份投影，五分钟过期且单次消费。
+- `desktop_skill_package_preview.v1` 只返回有界风险元数据，排除路径、文件名、正文、Manifest description/content path/content digest，并固定安装、命令、网络、Provider、工具和能力授权为 false。
+- 该边界当前没有产品入口，不接入 HTTP/OpenAPI/React，也不创建数据库或运行事件；ADR 0033 记录了未来 Wails 只能绑定“打开原生对话框”的要求。
+
 ## 分阶段交付
 
 ### D0：桌面基础验证（现在可做）
@@ -34,6 +42,7 @@
 - 固定窗口生命周期、单实例策略、端口/令牌传递和 CLI 并存时的 SQLite/Run lease 行为。
 - 生产模式禁止远程导航和开发者工具，增加 CSP、资源完整性、窗口来源与外部链接边界测试。
 - 只输出开发版/便携测试二进制；不做安装器、注册表、自启动、自动更新、协议关联或后台服务。
+- 将 ADR 0033 的 Go selector 接到原生文件对话框；渲染层只能消费一次性句柄，不得提交路径、文件字节或 multipart upload。
 
 ### D1：日常工作台（产品可用度约 65-70%）
 

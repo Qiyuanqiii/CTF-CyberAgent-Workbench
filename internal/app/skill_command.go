@@ -4,12 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 	"time"
 
-	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/skills"
@@ -76,15 +73,11 @@ func (a *App) skillCommand(ctx context.Context, args []string) error {
 		if len(args) != 3 || args[1] != "validate" {
 			return errors.New("usage: cyberagent skill package validate <package.zip>")
 		}
-		raw, err := readSkillPackageArchive(args[2])
+		preview, err := skills.ValidatePackageFile(ctx, args[2])
 		if err != nil {
 			return err
 		}
-		validated, err := skills.ParsePackage(raw)
-		if err != nil {
-			return err
-		}
-		printSkillPackagePreview(a, validated.Preview())
+		printSkillPackagePreview(a, preview)
 		return nil
 	case "import":
 		flags := newFlagSet("skill import", a.errOut)
@@ -106,7 +99,7 @@ func (a *App) skillCommand(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		raw, err := readSkillPackageArchive(flags.Arg(0))
+		raw, err := skills.ReadPackageFile(ctx, flags.Arg(0))
 		if err != nil {
 			return err
 		}
@@ -342,54 +335,6 @@ func (a *App) skillCommand(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown skill subcommand %q", args[0])
 	}
-}
-
-func readSkillPackageArchive(value string) ([]byte, error) {
-	name := strings.TrimSpace(value)
-	if name == "" {
-		return nil, errors.New("invalid skill package path: path is required")
-	}
-	before, err := os.Lstat(name)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, apperror.Wrap(apperror.CodeNotFound, "skill package file not found", err)
-		}
-		return nil, apperror.Wrap(apperror.CodeInvalidArgument, "skill package file cannot be inspected", err)
-	}
-	if before.Mode()&os.ModeSymlink != 0 || !before.Mode().IsRegular() {
-		return nil, errors.New("invalid skill package path: package must be a non-symlink regular file")
-	}
-	if before.Size() <= 0 || before.Size() > skills.MaxPackageArchiveBytes {
-		return nil, fmt.Errorf("invalid skill package path: archive must contain between 1 and %d bytes", skills.MaxPackageArchiveBytes)
-	}
-	file, err := os.Open(name)
-	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeInvalidArgument, "skill package file cannot be opened", err)
-	}
-	defer file.Close()
-	opened, err := file.Stat()
-	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeInvalidArgument, "skill package file identity cannot be verified", err)
-	}
-	if !opened.Mode().IsRegular() || !os.SameFile(before, opened) {
-		return nil, errors.New("invalid skill package path: package changed before it was opened")
-	}
-	raw, err := io.ReadAll(io.LimitReader(file, skills.MaxPackageArchiveBytes+1))
-	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeInvalidArgument, "skill package file cannot be read", err)
-	}
-	after, err := file.Stat()
-	if err != nil {
-		return nil, apperror.Wrap(apperror.CodeInvalidArgument, "skill package file identity cannot be reverified", err)
-	}
-	if !os.SameFile(opened, after) || before.Size() != after.Size() ||
-		before.ModTime() != after.ModTime() || int64(len(raw)) != after.Size() {
-		return nil, errors.New("invalid skill package path: package changed while it was read")
-	}
-	if len(raw) == 0 || len(raw) > skills.MaxPackageArchiveBytes {
-		return nil, fmt.Errorf("invalid skill package path: archive must contain between 1 and %d bytes", skills.MaxPackageArchiveBytes)
-	}
-	return raw, nil
 }
 
 func printSkillPackagePreview(a *App, preview skills.PackagePreview) {

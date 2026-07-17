@@ -1,6 +1,6 @@
 # CyberAgent Workbench Custom Skill Package Plan
 
-状态：`skill_package.v1` 纯内存校验、schema v69 内容寻址本地 Registry、schema v70 外部 Skill Run 固定选择与最小上下文，以及 schema v71 安全只读来源投影均已完成。CLI 可显式确认导入、查询、选择和追加移除 tombstone；HTTP/桌面上传、签名与 Marketplace 尚未实现。
+状态：`skill_package.v1` 纯内存校验、schema v69 内容寻址本地 Registry、schema v70 外部 Skill Run 固定选择与最小上下文、schema v71 安全只读来源投影，以及非 schema Desktop D1-A 路径隔离 Go 预览桥均已完成。CLI 可显式确认导入、查询、选择和追加移除 tombstone；Wails 壳/原生对话框、HTTP/桌面安装上传、签名与 Marketplace 尚未实现。
 
 ## 当前能力
 
@@ -67,8 +67,8 @@ cyberagent skill remove <name>@<version> --operation-key <stable-key> --confirm-
 
 Desktop D1 阶段：
 
-- 文件选择器只把一个受限本地文件句柄/路径交给 Go；TypeScript 不解压、不校验、不写 Registry。
-- Go 先返回 metadata-only 验证预览、风险代码、Profile、声明工具和 package digest，再要求显式确认安装。
+- ADR 0033 已完成 Go 预览边界：未来原生选择器只把路径交给 Go closure；TypeScript 只得到五分钟过期、单次消费的不透明句柄，不解压、不校验、不写 Registry，也不能提交任意路径。
+- Go 已可返回 metadata-only 验证预览、风险代码、Profile、声明工具和 package digest；Wails 原生对话框与可见 UI 仍需 D0 接线，显式确认安装继续后置。
 - 上传端点只能绑定回环地址，使用独立 control token、严格 Origin/Host、固定 Content-Type、流式大小上限、幂等 operation key 和无正文审计事件。
 - Web 远程上传、URL 安装、Git 仓库安装和在线 Marketplace 均后置，不允许第一版自动下载并信任内容。
 
@@ -84,7 +84,7 @@ Desktop D1 阶段：
 2. [x] schema v69 增加 content-addressed 本地 Registry、不可变安装/移除账本、原子导入/恢复和 CLI；导入保持惰性。
 3. [x] schema v70 将用户 Skill 纳入 Run 的精确版本选择、root/Specialist 最小上下文和 Code/Cyber 分离测试；安装与 Run 上下文使用两次独立确认。
 4. [x] schema v71 增加按 Run 隔离的有界只读来源/交付投影，并接入 HTTP/OpenAPI、TUI 与 React；所有内容、摘要和私有身份保持在边界内。
-5. [ ] 在 Desktop D1-A 增加 Go-owned 本地验证预览；确认安装及 HTTP mutation 必须作为后续独立切片审计。
+5. [x] Desktop D1-A 增加路径隔离的 Go-owned 本地验证预览桥：原生 selector 先校验再发一次性句柄，renderer 永不接收路径/正文；Wails 对话框接线、确认安装及 HTTP mutation 仍作为后续独立切片审计。
 6. [ ] 最后评估签名包、团队 Catalog 与 Marketplace；远程自动安装不属于基础版本。
 
 ## 已验证基线
@@ -93,6 +93,7 @@ Desktop D1 阶段：
 - parser 的既有 20 秒约 2645 万次 fuzz 基线保持有效；新增对象发布、Store、Application 和 CLI 定向测试覆盖三轮 race、双 Store 收敛、崩溃恢复、腐坏/symlink/取消、伪造收据和 SQL 旁路；真实双 Service 独立生成候选身份的导入/移除收敛另通过 20 轮普通与 10 轮 race。首次 Linux CI run `29556933994` 暴露并发嵌套目录准备失败；逐级创建并验证真实目录后，12 个独立 Store 通过 100 轮普通与 20 轮 race。
 - TypeScript/OpenAPI/production build、9 个文件 22 项前端测试与零漏洞 npm audit 已在 v71 定向基线通过；v71 新增一个只读 GET path 和三个安全 DTO schema。
 - v71 最终全仓普通/race 分别通过于 227.1 秒/301.1 秒；vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、确定性生成、仓库隐私/diff 扫描与隔离真实 CLI schema-v71 smoke 全绿。空选择 Run 的 detail 省略/endpoint 404 普通与 race 回归也已通过。
+- Desktop D1-A 最终全仓普通/race 分别通过于 255.8 秒/314.0 秒；Desktop 普通 100 轮/race 25 轮、Skill 文件边界 100 轮、CLI 包链 10 轮与 32 方并发消费测试通过，vet、零告警 staticcheck、module verify/tidy diff、零可达漏洞 govulncheck、22 项前端测试、OpenAPI drift、production build、零漏洞 npm audit、60 份 Markdown/79 条相对链接及仓库隐私扫描全绿。该切片不改变 schema v71。
 - 审计修复旧 schema 夹具未先移除 v69 trigger、错误文本静态规则、冗余临时清理状态、对象收据接口绑定、发布前取消点、并发请求因独立 ID/时间被误判为改意图，以及 Manifest 自由文本 description 未脱敏进入 SQLite；当前无已知未解决高/中风险。
 - 首次 Linux CI run `29556933994` 暴露并发嵌套目录准备失败；修复提交 `d28b100` 的 GitHub Actions run `29557803407` 已全绿（Go/Linux 3 分 21 秒，TypeScript 23 秒）。
 
@@ -102,4 +103,4 @@ Desktop D1 阶段：
 - 导入前后不会执行命令、访问网络、调用模型或改变工具权限。
 - 并发导入、重启恢复和相同 operation 重放收敛到同一不可变版本。
 - v69 已保证安装与 tombstone 跨重启恢复；v70 已完成外部 Run 固定版本、Go/SQL 移除门禁、root/Specialist 上下文恢复与首次模型调用原子提交；v71 已完成按 Run 隔离、不可写且不含正文/摘要/私有身份的来源与交付投影。
-- CLI 与 Desktop 对同一包产生相同 digest、风险预览、错误码和安装结果。
+- CLI 与 Desktop Go 预览桥对同一包复用同一读取器/parser 并产生相同 digest 与风险事实；真正原生 Desktop 接线后还需补充跨入口 UI 契约，安装结果仍属于后续 mutation。
