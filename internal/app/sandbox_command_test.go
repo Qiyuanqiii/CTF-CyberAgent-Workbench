@@ -38,6 +38,47 @@ var sandboxDockerRuntimeInputResourceCleanupIDPattern = regexp.MustCompile(`sand
 var sandboxDockerStartGateReviewIDPattern = regexp.MustCompile(`sandbox-docker-start-gate-review-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerProductionEvidenceIDPattern = regexp.MustCompile(`sandbox-docker-production-evidence-[0-9]{14}-[a-f0-9]{12}`)
 var sandboxDockerProductionEvidenceAttemptIDPattern = regexp.MustCompile(`sandbox-docker-production-evidence-attempt-[0-9]{14}-[a-f0-9]{12}`)
+var sandboxDockerProductionEvidenceReviewIDPattern = regexp.MustCompile(`sandbox-docker-production-evidence-review-[0-9]{14}-[a-f0-9]{12}`)
+
+type cliDockerProductionEvidenceHarness struct{}
+
+func (cliDockerProductionEvidenceHarness) Capture(context.Context,
+	sandbox.DockerProductionEvidenceCaptureRequest,
+) (sandbox.DockerProductionEvidenceObservation, error) {
+	return sandbox.DockerProductionEvidenceObservation{},
+		fmt.Errorf("inert collector path must not run for CLI harness")
+}
+
+func (cliDockerProductionEvidenceHarness) HarnessEnabled() bool { return true }
+
+func (cliDockerProductionEvidenceHarness) ReconcileHarness(context.Context,
+	sandbox.DockerProductionEvidenceHarnessRequest,
+) (sandbox.DockerProductionEvidenceHarnessInventory, error) {
+	endpoint, err := sandbox.NewDockerObservationEndpoint(
+		sandbox.DockerObservationEndpointLocalUnix)
+	if err != nil {
+		return sandbox.DockerProductionEvidenceHarnessInventory{}, err
+	}
+	return sandbox.NewDockerProductionEvidenceHarnessInventory(endpoint, nil)
+}
+
+func (cliDockerProductionEvidenceHarness) CaptureHarness(_ context.Context,
+	request sandbox.DockerProductionEvidenceHarnessCaptureRequest,
+) (sandbox.DockerProductionEvidenceObservation, error) {
+	return sandbox.NewDockerProductionEvidenceHarnessObservation(
+		request.AuthorityFingerprint, strings.Repeat("9", 64))
+}
+
+func executeTestCommandWithDockerProductionEvidence(t *testing.T,
+	collector sandbox.DockerProductionEvidenceCollector, args ...string,
+) (string, string, int) {
+	t.Helper()
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	code := executeContextWithConfig(context.Background(), args, &out, &errOut,
+		func(app *App) { app.productionEvidence = collector })
+	return out.String(), errOut.String(), code
+}
 
 type cliDockerPlanObservationTransport struct {
 	imageDigest string
@@ -1462,6 +1503,148 @@ func TestSandboxCLICompilesMetadataOnlyDockerPlanWithFakeWriteTransaction(t *tes
 		strings.Contains(productionShown, "/workspace") || strings.Contains(productionShown, home) {
 		t.Fatalf("Docker production evidence show leaked data: output=%s stderr=%s code=%d",
 			productionShown, stderr, code)
+	}
+	harnessCaptured, stderr, code := executeTestCommandWithDockerProductionEvidence(t,
+		cliDockerProductionEvidenceHarness{}, "run", "sandbox",
+		"docker-production-evidence-capture", startGateReviewID,
+		"--operation-key", "docker-production-evidence-cli-harness",
+		"--confirm-machine-capture")
+	if code != 0 || stderr != "" ||
+		!strings.Contains(harnessCaptured, "status: capture_complete") ||
+		!strings.Contains(harnessCaptured, "observed_checks: 16") ||
+		!strings.Contains(harnessCaptured, "production_verified_checks: 0") ||
+		!strings.Contains(harnessCaptured, "real_daemon_contacted: true") ||
+		!strings.Contains(harnessCaptured, "container_start_authorized: false") ||
+		strings.Contains(harnessCaptured, "/workspace") ||
+		strings.Contains(harnessCaptured, home) {
+		t.Fatalf("CLI v67 harness evidence widened authority: output=%s stderr=%s code=%d",
+			harnessCaptured, stderr, code)
+	}
+	harnessEvidenceID := sandboxDockerProductionEvidenceIDPattern.FindString(harnessCaptured)
+	if harnessEvidenceID == "" || harnessEvidenceID == productionEvidenceID {
+		t.Fatalf("missing distinct CLI v67 evidence id: %s", harnessCaptured)
+	}
+	emptyEvidenceReviews, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-production-evidence-reviews", runID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(emptyEvidenceReviews, "no Docker production evidence reviews") {
+		t.Fatalf("unexpected pre-review list: output=%s stderr=%s code=%d",
+			emptyEvidenceReviews, stderr, code)
+	}
+	if _, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-production-evidence-review", harnessEvidenceID,
+		"--decision", "accepted", "--reason-code", "metadata_scope_accepted",
+		"--operation-key", "docker-production-evidence-review-cli"); code != 4 ||
+		!strings.Contains(stderr, "requires --confirm-evidence-review") {
+		t.Fatalf("CLI evidence review skipped confirmation: stderr=%s code=%d", stderr, code)
+	}
+	evidenceReviewed, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-production-evidence-review", harnessEvidenceID,
+		"--decision", "accepted", "--reason-code", "metadata_scope_accepted",
+		"--operation-key", "docker-production-evidence-review-cli",
+		"--confirm-evidence-review", "--operator", "evidence_reviewer")
+	if code != 0 || stderr != "" ||
+		!strings.Contains(evidenceReviewed, "decision: accepted") ||
+		!strings.Contains(evidenceReviewed, "reason_code: metadata_scope_accepted") ||
+		!strings.Contains(evidenceReviewed, "receipt_accepted: true") ||
+		!strings.Contains(evidenceReviewed, "production_verified_checks: 0") ||
+		!strings.Contains(evidenceReviewed, "blockers: 16") ||
+		!strings.Contains(evidenceReviewed, "start_gate_passed: false") ||
+		!strings.Contains(evidenceReviewed, "process_execution_authorized: false") ||
+		!strings.Contains(evidenceReviewed, "freeform_reason_stored: false") ||
+		strings.Contains(evidenceReviewed, "/workspace") ||
+		strings.Contains(evidenceReviewed, home) {
+		t.Fatalf("CLI evidence review leaked data or widened authority: output=%s stderr=%s code=%d",
+			evidenceReviewed, stderr, code)
+	}
+	evidenceReviewID := sandboxDockerProductionEvidenceReviewIDPattern.FindString(
+		evidenceReviewed)
+	if evidenceReviewID == "" {
+		t.Fatalf("missing CLI evidence review id: %s", evidenceReviewed)
+	}
+	evidenceReviewReplay, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-production-evidence-review", harnessEvidenceID,
+		"--decision", "accepted", "--reason-code", "metadata_scope_accepted",
+		"--operation-key", "docker-production-evidence-review-cli",
+		"--confirm-evidence-review", "--operator", "evidence_reviewer")
+	if code != 0 || stderr != "" || !strings.Contains(evidenceReviewReplay, "replayed: true") {
+		t.Fatalf("CLI evidence review replay failed: output=%s stderr=%s code=%d",
+			evidenceReviewReplay, stderr, code)
+	}
+	evidenceReviewList, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-production-evidence-reviews", runID, "--limit", "1")
+	if code != 0 || stderr != "" || !strings.Contains(evidenceReviewList, evidenceReviewID) ||
+		!strings.Contains(evidenceReviewList, "receipt_accepted=true") ||
+		!strings.Contains(evidenceReviewList, "verified=0") ||
+		!strings.Contains(evidenceReviewList, "start_authorized=false") ||
+		strings.Contains(evidenceReviewList, "/workspace") ||
+		strings.Contains(evidenceReviewList, home) {
+		t.Fatalf("CLI evidence review list leaked data: output=%s stderr=%s code=%d",
+			evidenceReviewList, stderr, code)
+	}
+	evidenceReviewShown, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-production-evidence-review-show", evidenceReviewID)
+	if code != 0 || stderr != "" ||
+		!strings.Contains(evidenceReviewShown, "review_fingerprint:") ||
+		!strings.Contains(evidenceReviewShown, "artifact_commit_authorized: false") ||
+		!strings.Contains(evidenceReviewShown, "raw_daemon_payload_stored: false") ||
+		strings.Contains(evidenceReviewShown, "/workspace") ||
+		strings.Contains(evidenceReviewShown, home) {
+		t.Fatalf("CLI evidence review show leaked data: output=%s stderr=%s code=%d",
+			evidenceReviewShown, stderr, code)
+	}
+	rejectedHarnessCaptured, stderr, code := executeTestCommandWithDockerProductionEvidence(t,
+		cliDockerProductionEvidenceHarness{}, "run", "sandbox",
+		"docker-production-evidence-capture", startGateReviewID,
+		"--operation-key", "docker-production-evidence-cli-harness-rejected",
+		"--confirm-machine-capture")
+	rejectedHarnessEvidenceID := sandboxDockerProductionEvidenceIDPattern.FindString(
+		rejectedHarnessCaptured)
+	if code != 0 || stderr != "" || rejectedHarnessEvidenceID == "" ||
+		rejectedHarnessEvidenceID == harnessEvidenceID {
+		t.Fatalf("create second CLI v67 evidence: output=%s stderr=%s code=%d",
+			rejectedHarnessCaptured, stderr, code)
+	}
+	rejectedReview, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-production-evidence-review", rejectedHarnessEvidenceID,
+		"--decision", "rejected", "--reason-code", "insufficient_evidence",
+		"--operation-key", "docker-production-evidence-review-cli-rejected",
+		"--confirm-evidence-review", "--operator", "evidence_reviewer")
+	if code != 0 || stderr != "" ||
+		!strings.Contains(rejectedReview, "decision: rejected") ||
+		!strings.Contains(rejectedReview, "reason_code: insufficient_evidence") ||
+		!strings.Contains(rejectedReview, "receipt_accepted: false") ||
+		!strings.Contains(rejectedReview, "production_verified_checks: 0") ||
+		!strings.Contains(rejectedReview, "blockers: 16") ||
+		!strings.Contains(rejectedReview, "process_execution_authorized: false") ||
+		strings.Contains(rejectedReview, "/workspace") ||
+		strings.Contains(rejectedReview, home) {
+		t.Fatalf("CLI rejected evidence review leaked data or widened authority: output=%s stderr=%s code=%d",
+			rejectedReview, stderr, code)
+	}
+	rejectedReviewID := sandboxDockerProductionEvidenceReviewIDPattern.FindString(rejectedReview)
+	if rejectedReviewID == "" || rejectedReviewID == evidenceReviewID {
+		t.Fatalf("missing distinct rejected evidence review id: %s", rejectedReview)
+	}
+	rejectedReviewReplay, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-production-evidence-review", rejectedHarnessEvidenceID,
+		"--decision", "rejected", "--reason-code", "insufficient_evidence",
+		"--operation-key", "docker-production-evidence-review-cli-rejected",
+		"--confirm-evidence-review", "--operator", "evidence_reviewer")
+	if code != 0 || stderr != "" ||
+		!strings.Contains(rejectedReviewReplay, "replayed: true") {
+		t.Fatalf("CLI rejected evidence review replay failed: output=%s stderr=%s code=%d",
+			rejectedReviewReplay, stderr, code)
+	}
+	allEvidenceReviews, stderr, code := executeTestCommand(t, "run", "sandbox",
+		"docker-production-evidence-reviews", runID, "--limit", "2")
+	if code != 0 || stderr != "" ||
+		!strings.Contains(allEvidenceReviews, evidenceReviewID) ||
+		!strings.Contains(allEvidenceReviews, rejectedReviewID) ||
+		!strings.Contains(allEvidenceReviews, "decision=rejected") ||
+		!strings.Contains(allEvidenceReviews, "receipt_accepted=false") {
+		t.Fatalf("CLI evidence review list omitted rejected decision: output=%s stderr=%s code=%d",
+			allEvidenceReviews, stderr, code)
 	}
 	attemptList, stderr, code := executeTestCommand(t, "run", "sandbox",
 		"docker-attempts", runID)

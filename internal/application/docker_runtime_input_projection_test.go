@@ -682,6 +682,69 @@ func TestDockerRuntimeInputProjectionPlansPersistsReplaysAndDoesNotWidenAuthorit
 			replayedHarnessEvidence, productionHarness.reconcileCalls,
 			productionHarness.captureCalls, err)
 	}
+	evidenceReviewRequest := ReviewDockerProductionEvidenceRequest{
+		EvidenceID: harnessEvidence.ID, OperationKey: "docker-production-evidence-review",
+		Decision:   sandbox.DockerProductionEvidenceReviewDecisionAccepted,
+		ReasonCode: sandbox.DockerProductionEvidenceReviewReasonMetadataScopeAccepted,
+		ReviewedBy: "evidence_reviewer",
+	}
+	if _, err := service.ReviewDockerProductionEvidence(ctx,
+		evidenceReviewRequest); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("evidence review skipped explicit confirmation: %v", err)
+	}
+	evidenceReviewRequest.OperatorConfirmed = true
+	evidenceReview, err := service.ReviewDockerProductionEvidence(ctx,
+		evidenceReviewRequest)
+	if err != nil || evidenceReview.Replayed || !evidenceReview.ReceiptAccepted ||
+		evidenceReview.ProductionVerifiedCount != 0 ||
+		evidenceReview.BlockerCount != sandbox.MaxBackendChecks ||
+		evidenceReview.StartGatePassed || evidenceReview.ContainerStartAuthorized ||
+		evidenceReview.ProcessExecutionAuthorized || evidenceReview.OutputExportAuthorized ||
+		evidenceReview.ArtifactCommitAuthorized || productionHarness.reconcileCalls != 1 ||
+		productionHarness.captureCalls != 1 {
+		t.Fatalf("v68 evidence review widened authority or contacted daemon: %#v err=%v",
+			evidenceReview, err)
+	}
+	replayedEvidenceReview, err := service.ReviewDockerProductionEvidence(ctx,
+		evidenceReviewRequest)
+	if err != nil || !replayedEvidenceReview.Replayed ||
+		replayedEvidenceReview.ID != evidenceReview.ID ||
+		productionHarness.reconcileCalls != 1 || productionHarness.captureCalls != 1 {
+		t.Fatalf("v68 evidence review replay contacted daemon: %#v err=%v",
+			replayedEvidenceReview, err)
+	}
+	changedEvidenceReview := evidenceReviewRequest
+	changedEvidenceReview.Decision = sandbox.DockerProductionEvidenceReviewDecisionRejected
+	changedEvidenceReview.ReasonCode = sandbox.DockerProductionEvidenceReviewReasonOperatorRejected
+	if _, err := service.ReviewDockerProductionEvidence(ctx,
+		changedEvidenceReview); apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("v68 review operation changed its decision: %v", err)
+	}
+	secondEvidenceReview := changedEvidenceReview
+	secondEvidenceReview.OperationKey = "docker-production-evidence-review-second"
+	if _, err := service.ReviewDockerProductionEvidence(ctx,
+		secondEvidenceReview); apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("v67 receipt accepted a second review: %v", err)
+	}
+	legacyEvidenceReview := evidenceReviewRequest
+	legacyEvidenceReview.EvidenceID = productionEvidence.ID
+	legacyEvidenceReview.OperationKey = "legacy-production-evidence-review"
+	if _, err := service.ReviewDockerProductionEvidence(ctx,
+		legacyEvidenceReview); apperror.CodeOf(err) != apperror.CodeFailedPrecondition {
+		t.Fatalf("v66 inert receipt was reviewable: %v", err)
+	}
+	loadedEvidenceReview, err := service.GetDockerProductionEvidenceReview(ctx,
+		evidenceReview.ID)
+	if err != nil || loadedEvidenceReview.ReviewFingerprint !=
+		evidenceReview.ReviewFingerprint {
+		t.Fatalf("load v68 evidence review: %#v err=%v", loadedEvidenceReview, err)
+	}
+	listedEvidenceReviews, err := service.ListDockerProductionEvidenceReviews(ctx,
+		run.ID, 10)
+	if err != nil || len(listedEvidenceReviews) != 1 ||
+		listedEvidenceReviews[0].ID != evidenceReview.ID {
+		t.Fatalf("list v68 evidence reviews: %#v err=%v", listedEvidenceReviews, err)
+	}
 	resourceInspector.targetState = sandbox.DockerRuntimeInputResourceTargetForeign
 	unsafeRequest := inspectionRequest
 	unsafeRequest.OperationKey = "docker-runtime-input-resource-inspection-after-cleanup"

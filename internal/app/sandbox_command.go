@@ -69,7 +69,7 @@ func (a *App) sandboxCommand(ctx context.Context, args []string) error {
 
 func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-runtime-input-plan|docker-runtime-input-plans|docker-runtime-input-plan-show|docker-runtime-input-apply|docker-runtime-input-apply-resume|docker-runtime-input-applications|docker-runtime-input-application-show|docker-runtime-input-resource-inspect|docker-runtime-input-resource-inspections|docker-runtime-input-resource-inspection-show|docker-runtime-input-resource-cleanup|docker-runtime-input-resource-cleanup-resume|docker-runtime-input-resource-cleanups|docker-runtime-input-resource-cleanup-show|docker-start-gate-review|docker-start-gate-reviews|docker-start-gate-review-show|docker-production-evidence-capture|docker-production-evidence-attempts|docker-production-evidence-attempt-show|docker-production-evidence-attempt-resume|docker-production-evidence-captures|docker-production-evidence-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
+		return errors.New("usage: cyberagent run sandbox prepare|list|show|request|review|candidate|candidates|candidate-show|begin|preflight|preflights|preflight-show|evidence|evidences|evidence-show|output-simulate|output-simulations|output-simulation-show|observe|observations|observation-show|docker-plan|docker-plans|docker-plan-show|docker-rehearse|docker-attempts|docker-attempt-show|docker-attempt-resume|docker-host-inputs|docker-host-input-show|docker-host-input-handoffs|docker-host-input-handoff-show|docker-runtime-input-plan|docker-runtime-input-plans|docker-runtime-input-plan-show|docker-runtime-input-apply|docker-runtime-input-apply-resume|docker-runtime-input-applications|docker-runtime-input-application-show|docker-runtime-input-resource-inspect|docker-runtime-input-resource-inspections|docker-runtime-input-resource-inspection-show|docker-runtime-input-resource-cleanup|docker-runtime-input-resource-cleanup-resume|docker-runtime-input-resource-cleanups|docker-runtime-input-resource-cleanup-show|docker-start-gate-review|docker-start-gate-reviews|docker-start-gate-review-show|docker-production-evidence-capture|docker-production-evidence-attempts|docker-production-evidence-attempt-show|docker-production-evidence-attempt-resume|docker-production-evidence-captures|docker-production-evidence-show|docker-production-evidence-review|docker-production-evidence-reviews|docker-production-evidence-review-show|docker-rehearsals|docker-rehearsal-show|cancel|cleanup|executions|execution-show")
 	}
 	service := application.NewSandboxManifestService(a.store, a.checker)
 	if a.dockerObserver != nil {
@@ -1526,6 +1526,76 @@ func (a *App) runSandboxManifest(ctx context.Context, args []string) error {
 		}
 		printSandboxDockerProductionEvidence(a, value)
 		return nil
+	case "docker-production-evidence-review":
+		fs := newFlagSet("run sandbox docker-production-evidence-review", a.errOut)
+		decision := fs.String("decision", "", "accepted or rejected")
+		reasonCode := fs.String("reason-code", "", "bounded evidence review reason code")
+		operationKey := fs.String("operation-key", "", "stable evidence review operation key")
+		operator := fs.String("operator", "cli_operator", "reviewing operator identity")
+		confirmed := fs.Bool("confirm-evidence-review", false,
+			"confirm immutable non-authorizing evidence review")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"decision": true, "reason-code": true, "operation-key": true,
+			"operator": true, "confirm-evidence-review": false,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || strings.TrimSpace(*decision) == "" ||
+			strings.TrimSpace(*reasonCode) == "" || strings.TrimSpace(*operationKey) == "" {
+			return errors.New("usage: cyberagent run sandbox docker-production-evidence-review <evidence-id> --decision accepted|rejected --reason-code <code> --operation-key <key> --confirm-evidence-review [--operator <id>]")
+		}
+		if !*confirmed {
+			return apperror.New(apperror.CodeFailedPrecondition,
+				"Docker production evidence review requires --confirm-evidence-review")
+		}
+		value, err := service.ReviewDockerProductionEvidence(ctx,
+			application.ReviewDockerProductionEvidenceRequest{
+				EvidenceID: fs.Arg(0), Decision: *decision, ReasonCode: *reasonCode,
+				OperationKey: *operationKey, ReviewedBy: *operator,
+				OperatorConfirmed: true,
+			})
+		if err != nil {
+			return err
+		}
+		printSandboxDockerProductionEvidenceReview(a, value)
+		return nil
+	case "docker-production-evidence-reviews":
+		fs := newFlagSet("run sandbox docker-production-evidence-reviews", a.errOut)
+		limit := fs.Int("limit", 100, "maximum Docker production evidence reviews")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{"limit": true})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-production-evidence-reviews <run-id> [--limit <n>]")
+		}
+		values, err := service.ListDockerProductionEvidenceReviews(ctx, fs.Arg(0), *limit)
+		if err != nil {
+			return err
+		}
+		if len(values) == 0 {
+			fmt.Fprintln(a.out, "no Docker production evidence reviews")
+			return nil
+		}
+		for _, value := range values {
+			fmt.Fprintf(a.out, "%s\tevidence=%s\tdecision=%s\treason=%s\treceipt_accepted=%t\tverified=0\tblockers=16\tstart_authorized=false\tcreated_at=%s\n",
+				value.ID, value.EvidenceID, value.Decision, value.ReasonCode,
+				value.ReceiptAccepted, value.CreatedAt.Format(timeFormatRFC3339Nano))
+		}
+		return nil
+	case "docker-production-evidence-review-show":
+		fs := newFlagSet("run sandbox docker-production-evidence-review-show", a.errOut)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run sandbox docker-production-evidence-review-show <review-id>")
+		}
+		value, err := service.GetDockerProductionEvidenceReview(ctx, fs.Arg(0))
+		if err != nil {
+			return err
+		}
+		printSandboxDockerProductionEvidenceReview(a, value)
+		return nil
 	case "docker-rehearsals":
 		fs := newFlagSet("run sandbox docker-rehearsals", a.errOut)
 		limit := fs.Int("limit", 100, "maximum Docker container rehearsals")
@@ -2195,6 +2265,22 @@ func printSandboxDockerProductionEvidence(a *App,
 			item.Ordinal, item.Name, item.ProbeCode, item.State, item.Observed,
 			item.ProductionVerified, item.BlockerCode)
 	}
+}
+
+func printSandboxDockerProductionEvidenceReview(a *App,
+	value sandbox.DockerProductionEvidenceReview,
+) {
+	fmt.Fprintf(a.out, "docker_production_evidence_review: %s\ndocker_production_evidence: %s\ndocker_production_evidence_attempt: %s\ndocker_start_gate_review: %s\nrun: %s\nmission: %s\nworkspace: %s\nprotocol: %s\ndecision: %s\nreason_code: %s\nreason_detail: %s\ntrust_class: %s\noperation_key_digest: %s\nevidence_operation_key_digest: %s\nevidence_capture_fingerprint: %s\nharness_result_fingerprint: %s\nauthority_fingerprint: %s\nthreat_model_fingerprint: %s\nsuite_fingerprint: %s\nenvironment_fingerprint: %s\nreview_fingerprint: %s\noperator_confirmed: true\nreceipt_accepted: %t\nreal_daemon_contacted: true\nrequired_checks: 16\nobserved_checks: 16\nproduction_verified_checks: 0\nsufficient_checks: 0\nblockers: 16\nstart_gate_passed: false\ncontainer_start_authorized: false\nprocess_execution_authorized: false\noutput_export_authorized: false\nartifact_commit_authorized: false\nraw_daemon_payload_stored: false\nraw_resource_identity_stored: false\nfreeform_reason_stored: false\nreviewed_by: %s\ncreated_at: %s\nreplayed: %t\n",
+		value.ID, value.EvidenceID, value.AttemptID, value.StartGateReviewID,
+		value.RunID, value.MissionID, value.WorkspaceID, value.ProtocolVersion,
+		value.Decision, value.ReasonCode,
+		sandbox.DockerProductionEvidenceReviewReasonDescription(value.ReasonCode),
+		value.TrustClass, value.OperationKeyDigest, value.EvidenceOperationKeyDigest,
+		value.EvidenceCaptureFingerprint, value.HarnessResultFingerprint,
+		value.AuthorityFingerprint, value.ThreatModelFingerprint,
+		value.SuiteFingerprint, value.EnvironmentFingerprint, value.ReviewFingerprint,
+		value.ReceiptAccepted, value.ReviewedBy,
+		value.CreatedAt.Format(timeFormatRFC3339Nano), value.Replayed)
 }
 
 func printSandboxLifecycle(a *App, value sandbox.Lifecycle) {

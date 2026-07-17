@@ -289,6 +289,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 65, Name: "non-authorizing Docker production evidence capture ledger", Statements: sandboxDockerProductionEvidenceStatements},
 		{Version: 66, Name: "recoverable Docker production evidence capture attempts", Statements: sandboxDockerProductionEvidenceAttemptStatements},
 		{Version: 67, Name: "Linux read-only Docker production evidence harness", Statements: sandboxDockerProductionEvidenceHarnessStatements},
+		{Version: 68, Name: "immutable Docker production evidence operator reviews", Statements: sandboxDockerProductionEvidenceReviewStatements},
 	})
 }
 

@@ -673,7 +673,7 @@ func removeSchemaV66ForTestStatements() []string {
 }
 
 func removeSchemaV67ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV68ForTestStatements(), []string{
 		`DROP TRIGGER trg_sandbox_docker_production_evidence_harness_result_delete_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_production_evidence_harness_result_update_immutable`,
 		`DROP TRIGGER trg_sandbox_docker_production_evidence_harness_reconciliation_delete_immutable`,
@@ -706,5 +706,19 @@ func removeSchemaV67ForTestStatements() []string {
 				SELECT RAISE(ABORT, 'Docker production evidence requires a write-ahead attempt');
 			END`,
 		`DELETE FROM schema_migrations WHERE version = 67`,
+	}...)
+}
+
+func removeSchemaV68ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_review_operation_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_review_operation_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_review_delete_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_review_update_immutable`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_review_insert`,
+		`DROP TRIGGER trg_sandbox_docker_production_evidence_review_operation_insert`,
+		`DROP TABLE sandbox_docker_production_evidence_review_operations`,
+		`DROP TABLE sandbox_docker_production_evidence_reviews`,
+		`DELETE FROM schema_migrations WHERE version = 68`,
 	}
 }

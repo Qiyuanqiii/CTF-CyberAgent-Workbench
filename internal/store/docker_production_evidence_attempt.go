@@ -576,6 +576,32 @@ func (s *SQLiteStore) GetDockerProductionEvidenceAttemptByOperation(ctx context.
 	return getDockerProductionEvidenceAttemptByOperation(ctx, s.db, keyDigest)
 }
 
+func (s *SQLiteStore) GetDockerProductionEvidenceAttemptByEvidence(ctx context.Context,
+	evidenceID string,
+) (sandbox.DockerProductionEvidenceAttemptRecord, bool, error) {
+	evidenceID = strings.TrimSpace(evidenceID)
+	if !domain.ValidAgentID(evidenceID) || strings.ContainsRune(evidenceID, 0) {
+		return sandbox.DockerProductionEvidenceAttemptRecord{}, false, apperror.New(
+			apperror.CodeInvalidArgument,
+			"Docker production evidence attempt evidence id is invalid")
+	}
+	var attemptID string
+	err := s.db.QueryRowContext(ctx, `SELECT attempt_id
+		FROM sandbox_docker_production_evidence_harness_results WHERE evidence_id = ?`,
+		evidenceID).Scan(&attemptID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return sandbox.DockerProductionEvidenceAttemptRecord{}, false, nil
+	}
+	if err != nil {
+		return sandbox.DockerProductionEvidenceAttemptRecord{}, false, err
+	}
+	value, err := getDockerProductionEvidenceAttempt(ctx, s.db, attemptID)
+	if err != nil {
+		return sandbox.DockerProductionEvidenceAttemptRecord{}, false, err
+	}
+	return value, true, nil
+}
+
 func (s *SQLiteStore) ListDockerProductionEvidenceAttempts(ctx context.Context,
 	runID string, limit int,
 ) ([]sandbox.DockerProductionEvidenceAttemptRecord, error) {

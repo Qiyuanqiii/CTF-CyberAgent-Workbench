@@ -264,8 +264,22 @@ type SandboxManifestStore interface {
 		id string) (sandbox.DockerProductionEvidenceAttemptRecord, error)
 	GetDockerProductionEvidenceAttemptByOperation(ctx context.Context,
 		keyDigest string) (sandbox.DockerProductionEvidenceAttemptRecord, bool, error)
+	GetDockerProductionEvidenceAttemptByEvidence(ctx context.Context,
+		evidenceID string) (sandbox.DockerProductionEvidenceAttemptRecord, bool, error)
 	ListDockerProductionEvidenceAttempts(ctx context.Context, runID string,
 		limit int) ([]sandbox.DockerProductionEvidenceAttemptRecord, error)
+	GetDockerProductionEvidenceReviewOperation(ctx context.Context,
+		keyDigest string) (sandbox.DockerProductionEvidenceReviewOperation, bool, error)
+	CreateDockerProductionEvidenceReview(ctx context.Context,
+		value sandbox.DockerProductionEvidenceReview,
+		operation sandbox.DockerProductionEvidenceReviewOperation) (
+		sandbox.DockerProductionEvidenceReview, bool, error)
+	GetDockerProductionEvidenceReview(ctx context.Context,
+		id string) (sandbox.DockerProductionEvidenceReview, error)
+	GetDockerProductionEvidenceReviewByEvidence(ctx context.Context,
+		evidenceID string) (sandbox.DockerProductionEvidenceReview, bool, error)
+	ListDockerProductionEvidenceReviews(ctx context.Context, runID string,
+		limit int) ([]sandbox.DockerProductionEvidenceReview, error)
 }
 
 type SandboxManifestService struct {

@@ -428,7 +428,7 @@ cyberagent run sandbox docker-start-gate-review-show <review-id>
 
 The only v63 outcome is `blocked/deny_start`. Output contains bounded evidence source codes, blocker codes, future gate names, and false authority bits. It omits resource names, raw container IDs, host paths, Manifest bodies, raw operation keys, and private ownership identities. A successful review records why start is still denied; it does not verify the Linux real-daemon chain and does not add start, wait, signal, logs, export, execution, or Artifact authority.
 
-Schemas v65-v67 add a non-authorizing production-evidence receipt, a recoverable write-ahead attempt, and an explicitly opted-in Linux read-only daemon harness:
+Schemas v65-v68 add a non-authorizing production-evidence receipt, a recoverable write-ahead attempt, an explicitly opted-in Linux read-only daemon harness, and one immutable operator decision over the resulting receipt:
 
 ```powershell
 cyberagent run sandbox docker-production-evidence-capture <review-id> `
@@ -439,6 +439,11 @@ cyberagent run sandbox docker-production-evidence-attempts <run-id>
 cyberagent run sandbox docker-production-evidence-attempt-show <attempt-id>
 cyberagent run sandbox docker-production-evidence-attempt-resume <attempt-id> `
   --confirm-machine-capture
+cyberagent run sandbox docker-production-evidence-review <evidence-id> `
+  --decision accepted --reason-code metadata_scope_accepted `
+  --operation-key <stable-key> --confirm-evidence-review
+cyberagent run sandbox docker-production-evidence-reviews <run-id>
+cyberagent run sandbox docker-production-evidence-review-show <review-id>
 ```
 
 `docker-production-evidence-capture` first commits an immutable attempt, digest-only operation, generation lease, and current-generation quiescent reconciliation checkpoint. Only then can it call the collector. A typed failure releases the lease, and resume acquires generation N+1 only after a release or expiry; stale generations cannot record reconciliation, failure, or evidence. Completion atomically binds the attempt result to the v65 receipt and its sixteen fixed items. SQL rejects a v65 evidence operation without a matching v66 or v67 result, while pre-v66 receipts and in-flight v66 attempts remain readable without fabricated v67 state.
@@ -446,6 +451,10 @@ cyberagent run sandbox docker-production-evidence-attempt-resume <attempt-id> `
 Windows records `unsupported_platform`, and Linux without `CYBERAGENT_DOCKER_PRODUCTION_EVIDENCE=1` records `opt_in_required`; neither path contacts a daemon. With explicit Linux opt-in, schema v67 persists a harness intent after the v66 zero-read checkpoint, performs one exact attempt-label container-list GET, requires an empty owned scope, persists daemon-aware reconciliation, and then GETs `_ping`, `version`, `info`, and the exact already-present image digest. Each call is bounded to four seconds and the complete attempt remains bounded to 30 seconds. The harness ignores `DOCKER_HOST`, never pulls, and exposes no create/start/exec/remove/delete method.
 
 The resulting sixteen items are all `observed_failed` with `production_verified_count=0`; they do not authorize start, process execution, output export, or Artifact commit. CLI output omits lease IDs/owners, raw errors, sockets, paths, image repository names, resource/container identities, and daemon payloads. A persisted v67 intent cannot fall back to the inert v66 result, and resume must repeat daemon-aware reconciliation under its new generation.
+
+`docker-production-evidence-review` accepts only an exact completed v67 harness receipt. It requires explicit confirmation and one bounded `accepted|rejected` decision. Acceptance must use `metadata_scope_accepted`; rejection must use `integrity_concern`, `environment_concern`, `scope_concern`, `insufficient_evidence`, or `operator_rejected`. There is no free-form reason or uploaded evidence body. Each evidence/attempt can receive only one immutable decision, and same-key replay must preserve the receipt, reviewer, decision, and reason.
+
+An accepted v68 decision classifies only the bounded metadata receipt. It still reports `production_verified_count=0`, `sufficient_check_count=0`, and `blocker_count=16`, with start, process, output, and Artifact authority all false. Review performs no Docker request and migration creates no decision for legacy or incomplete receipts. List/show output omits raw operation keys, daemon payloads, resources, paths, sockets, and free-form narratives.
 
 The full v67 five-GET harness has a default-skipped Linux integration test. It requires an exact image already present in the local daemon and never pulls, creates, starts, or deletes anything:
 
