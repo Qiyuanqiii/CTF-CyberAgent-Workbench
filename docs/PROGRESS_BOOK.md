@@ -894,6 +894,8 @@ D1-B1 在路径隔离预览后新增第四个窄 Wails 方法 `InstallSkillPacka
 
 最终普通整合门已通过：全仓 Go 333.1 秒、聚焦 race、Windows Desktop tag、20 个文件 85 项前端测试、strict TypeScript、确定性 OpenAPI/TypeScript、Vite/Windows production build、vet、module verify/tidy、npm 零漏洞、隔离 CLI smoke 和隐私/UTF-8/链接/产物/危险入口扫描均为绿色；未签名 GUI 为 23,107,584 字节，SHA-256 `309b0e556c44960d7739ab1159e61ede632a443a87ff0b006e6151a288a38626`。组合审计修复 prepared wake 过期重领/结算前取消、失败事件模型/工具事实失真、FileEdit prepared 恢复时权限过期、同 Edit 双 operation 与直接截断写入。当前无已知高/中风险；强杀发生在暂存后原子替换前可能留下一个已脱敏隐藏临时文件，作为已知低风险交由 D1-U1 recovery receipt 处理。本批是下一组六切片的前三片，不提前声称完整 race/staticcheck/govulncheck 门。双指标更新为架构完成度约 98%（V2 约 99%）、完整产品可用度约 70-74%、通用 Coding Agent 约 66%、Cyber 自动化约 20%。
 
+GitHub Actions run `29655417908` 已为实现提交 `79f07fb` 全绿：TypeScript console 28 秒、Windows Desktop shell 2 分 5 秒、Go control plane 3 分 57 秒；远端同时通过 API 漂移、前端测试/构建/依赖审计、Desktop 构建与边界测试、module verify、全仓 Go、vet 和 govulncheck。
+
 下一批建议依次完成 D1-U1 mutation receipt/recovery 统一呈现、D1-E1 Go-owned 有界只读 Workspace explorer、D1-W1 可复现便携构建诊断与 Windows 兼容清单；届时累计六片，执行全仓 ordinary/race/vet/staticcheck/govulncheck/依赖/隐私完整健壮性门。后台服务、真实宿主/容器进程、签名分发、Rust analyzer 和 CTF 自动化继续后置。
 
 ## 八、仓库同步与恢复约定
