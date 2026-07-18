@@ -318,6 +318,8 @@ Schema v74 adds `run_wake_control.v1`, allowing an operator to persist or cancel
 
 The cumulative six-slice robustness gate is green on the final code: full ordinary/race suites took 278.6s/296.1s; ordinary and secure-Desktop vet/staticcheck/govulncheck, module verification/tidy, 80 React tests across 20 files, strict TypeScript, Vite/Windows production builds, zero-vulnerability npm audit, deterministic OpenAPI, isolated CLI smoke, and UTF-8/local-link/changed-credential/runtime-artifact/new-process-entry scans all passed. The audit fixed an exact Diff read that still loaded file bodies, two-phase approval crash recovery, event ordering for an expired final wake lease, invalid delay/deadline combinations, and concurrent route persistence/memory reordering. No unresolved high- or medium-severity issue is known. The gate used only the mock Provider and made no live API-key, network-Provider, Shell, LocalRunner, Docker, or file-apply call.
 
+远端 GitHub Actions [run 29649564643](https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench/actions/runs/29649564643) 同样通过：TypeScript console 30 秒、Windows Desktop shell 1 分 58 秒、Go control plane 3 分 44 秒。Remote GitHub Actions run 29649564643 is also green: TypeScript console 30s, Windows Desktop shell 1m58s, and Go control plane 3m44s.
+
 ## Windows 桌面端 / Windows Desktop
 
 Desktop D0-A、D0-B 与 D1-R1 至 D1-Q1 自动化核心已完成，SQLite 当前为 v74。项目固定 Wails v2.13.0 稳定版，并提供 Windows `cyberagent-desktop` 开发/便携测试二进制。Vite production bundle 在编译期嵌入；现有 Go `api.v1` Handler 直接接入 Wails AssetServer，不监听 TCP 端口，也不建立第二套业务 API。桌面端默认只读，随机 read token 仅驻留 Go/React 内存；每类 mutation 都由独立显式 flag 开启，并共享一个不同于 read token 的内存 control token。Provider 诊断、路由选择、Diff 审阅和 wake 意图也是彼此独立的 Go capability；它们不授予 apply、后台执行或进程权限。

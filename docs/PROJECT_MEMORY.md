@@ -443,13 +443,16 @@ event ordering, invalid delay/deadline combinations, and concurrent durable/in-m
 route ordering. No live key, network Provider, Shell, LocalRunner, Docker, or file apply
 was used. No unresolved high/medium issue is known.
 
+GitHub Actions run `29649564643` passed for implementation commit `37fbfbf`:
+TypeScript console 30s, Windows Desktop shell 1m58s, and Go control plane 3m44s.
+
 Metrics after implementation: architecture remains about 98% (V2 about 99%);
 complete-product usability is about 67-71%, generic coding-agent workflow usability
 about 63%, and Cyber autonomous workflow usability about 20%.
 
 ## Next Slice
 
-After GitHub CI confirms this batch, the recommended next three-slice batch is:
+The recommended next three-slice batch is:
 
 1. D1-Q2: add an explicitly launched foreground wake consumer that claims due intent and hands off only through the existing RunSupervisor, budgets, Policy, cancellation, and generation fencing. Do not introduce a hidden service.
 2. D1-D2: add a separately authorized, idempotent apply control for an already approved FileEdit with fresh Run/Workspace/path/current-hash/Policy checks and no renderer path input.
