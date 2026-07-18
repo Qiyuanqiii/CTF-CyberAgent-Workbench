@@ -87,7 +87,8 @@ func TestDesktopBridgeBootstrapsMemoryOnlyClosedAuthority(t *testing.T) {
 		bootstrap.AppVersion != "test" || bootstrap.UIDigest != testDesktopUIDigest ||
 		bootstrap.ReadToken != testDesktopReadToken ||
 		bootstrap.ControlToken != testDesktopControlToken || !bootstrap.ControlEnabled ||
-		!bootstrap.RunCreationEnabled || bootstrap.ReadOnlyDefault || bootstrap.ProcessExecutionEnabled ||
+		!bootstrap.RunCreationEnabled || !bootstrap.SessionMessageEnabled ||
+		bootstrap.ReadOnlyDefault || bootstrap.ProcessExecutionEnabled ||
 		bootstrap.ShellExecutionEnabled || bootstrap.DockerExecutionEnabled ||
 		bootstrap.SkillInstallationEnabled || bootstrap.RendererPathInputSupported {
 		t.Fatalf("unexpected bootstrap: %#v", bootstrap)
@@ -100,8 +101,31 @@ func TestDesktopBridgeBootstrapsMemoryOnlyClosedAuthority(t *testing.T) {
 		"api_base_url", "api_version", "app_version", "control_enabled", "control_token",
 		"docker_execution_enabled", "process_execution_enabled", "protocol_version", "read_only_default",
 		"read_token", "renderer_path_input_supported", "run_creation_enabled", "shell_execution_enabled",
-		"skill_installation_enabled", "ui_digest",
+		"session_message_enabled", "skill_installation_enabled", "ui_digest",
 	})
+}
+
+func TestDesktopBridgeSeparatesSessionMessagesFromOtherControls(t *testing.T) {
+	selector, preview := NewSkillPackagePreviewBoundary()
+	bridge, err := NewDesktopBridge(DesktopBridgeConfig{
+		ContextProvider: func() context.Context { return context.Background() },
+		FilePicker:      &testSkillPackagePicker{}, ReadToken: testDesktopReadToken,
+		ControlToken: testDesktopControlToken, SessionMessageEnabled: true,
+		APIVersion: "api.v1", AppVersion: "test", UIDigest: testDesktopUIDigest,
+		Selector: selector, PreviewBridge: preview,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap, err := bridge.Bootstrap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bootstrap.ControlEnabled || bootstrap.RunCreationEnabled ||
+		!bootstrap.SessionMessageEnabled || bootstrap.ReadOnlyDefault ||
+		bootstrap.ControlToken == "" {
+		t.Fatalf("Session message submission widened another capability: %#v", bootstrap)
+	}
 }
 
 func TestDesktopBridgeSeparatesRunCreationFromExistingRunControls(t *testing.T) {
@@ -250,7 +274,7 @@ func newTestDesktopBridge(t *testing.T, ctx context.Context, picker SkillPackage
 	bridge, err := NewDesktopBridge(DesktopBridgeConfig{
 		ContextProvider: func() context.Context { return ctx }, FilePicker: picker,
 		ReadToken: testDesktopReadToken, ControlToken: testDesktopControlToken,
-		RunControlEnabled: true, RunCreationEnabled: true,
+		RunControlEnabled: true, RunCreationEnabled: true, SessionMessageEnabled: true,
 		APIVersion: "api.v1", AppVersion: "test", UIDigest: testDesktopUIDigest,
 		Selector: selector, PreviewBridge: preview,
 	})

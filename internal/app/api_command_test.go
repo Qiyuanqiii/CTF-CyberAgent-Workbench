@@ -150,6 +150,27 @@ func TestAPIServeCLIStartsAuthenticatedLoopbackServerWithoutPersistingToken(t *t
 		t.Fatalf("unexpected CLI API response: status=%d body=%s err=%v", response.StatusCode, body, readErr)
 	}
 
+	messageRequest, err := http.NewRequest(http.MethodPost,
+		baseURL+"/sessions/session-test/messages",
+		strings.NewReader(`{"version":"session_message_submission.v1","content":"queued"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageRequest.Header.Set("Authorization", "Bearer "+controlToken)
+	messageRequest.Header.Set("Content-Type", "application/json")
+	messageResponse, err := (&http.Client{Timeout: 2 * time.Second}).Do(messageRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageBody, readErr := io.ReadAll(messageResponse.Body)
+	_ = messageResponse.Body.Close()
+	if readErr != nil || messageResponse.StatusCode != http.StatusBadRequest ||
+		!bytes.Contains(messageBody, []byte(`"code":"INVALID_ARGUMENT"`)) ||
+		!bytes.Contains(messageBody, []byte("Idempotency-Key")) {
+		t.Fatalf("Session-message capability is not wired by api serve: status=%d body=%s err=%v",
+			messageResponse.StatusCode, messageBody, readErr)
+	}
+
 	cancel()
 	select {
 	case code := <-done:

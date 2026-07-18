@@ -10,6 +10,7 @@ const bootstrap = {
   control_token: "",
   control_enabled: false,
   run_creation_enabled: false,
+  session_message_enabled: false,
   read_only_default: true,
   process_execution_enabled: false,
   shell_execution_enabled: false,
@@ -83,6 +84,18 @@ describe("desktop native bridge", () => {
     installBridge({ Bootstrap: vi.fn().mockResolvedValue(creationOnly) });
     const module = await import("./desktop-bridge");
     await expect(module.loadDesktopBootstrap()).resolves.toEqual(creationOnly);
+  });
+
+  it("accepts Session messages without enabling other control capabilities", async () => {
+    const messagesOnly = {
+      ...bootstrap,
+      control_token: "control-token-0123456789abcdefghijkl",
+      session_message_enabled: true,
+      read_only_default: false,
+    };
+    installBridge({ Bootstrap: vi.fn().mockResolvedValue(messagesOnly) });
+    const module = await import("./desktop-bridge");
+    await expect(module.loadDesktopBootstrap()).resolves.toEqual(messagesOnly);
   });
 
   it("rejects authority widening and extra local-file fields", async () => {

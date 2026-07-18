@@ -34,6 +34,7 @@ export function ConnectionGate() {
       connect(bootstrap.read_token, health, bootstrap.control_token, {
         runControlEnabled: bootstrap.control_enabled,
         runCreationEnabled: bootstrap.run_creation_enabled,
+        sessionMessageEnabled: bootstrap.session_message_enabled,
       });
     }).catch((caught: unknown) => {
       if (active) {

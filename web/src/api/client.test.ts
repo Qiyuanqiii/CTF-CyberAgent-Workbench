@@ -26,6 +26,20 @@ const runCreationData = {
   replayed: false,
 };
 
+const sessionMessageData = {
+  version: "session_message_submission.v1",
+  run_id: "run-1",
+  session_id: "sess-1",
+  steering: {
+    id: "steer-1", sequence: 1, status: "pending", created_at: "2026-07-18T00:00:00Z",
+  },
+  replayed: false,
+  execution_started: false,
+  model_called: false,
+  tool_called: false,
+  capability_grant: false,
+};
+
 describe("CyberAgentClient", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -242,6 +256,70 @@ describe("CyberAgentClient", () => {
     await expect(client.createRun({ version: "run_creation.v1", goal: "Different goal",
       workspace_id: "workspace-1" }, "web-run-create-operation-0004"))
       .rejects.toThrow("closed authority");
+  });
+
+  it("separates Session messages and validates the closed submission response", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-session-message", data: sessionMessageData,
+    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false,
+      runCreationEnabled: false,
+      sessionMessageEnabled: true,
+    });
+    expect(client.hasControl).toBe(false);
+    expect(client.hasRunCreation).toBe(false);
+    expect(client.hasSessionMessages).toBe(true);
+    const result = await client.submitSessionMessage("sess-1", {
+      version: "session_message_submission.v1", content: "Review the latest change",
+    }, "web-session-message-operation-0001");
+    expect(result.steering.id).toBe("steer-1");
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/sessions/sess-1/messages");
+    expect(url).not.toContain("control-secret");
+    expect(init.headers).toMatchObject({
+      Authorization: "Bearer control-secret",
+      "Idempotency-Key": "web-session-message-operation-0001",
+    });
+    expect(init.body).toBe(JSON.stringify({
+      version: "session_message_submission.v1", content: "Review the latest change",
+    }));
+  });
+
+  it("rejects forged Session message authority and cross-Session responses", async () => {
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false,
+      runCreationEnabled: false,
+      sessionMessageEnabled: true,
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-session-forged",
+      data: { ...sessionMessageData, model_called: true },
+    }), { status: 202, headers: { "Content-Type": "application/json" } })).mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        version: "api.v1", request_id: "req-session-cross",
+        data: { ...sessionMessageData, session_id: "sess-other" },
+      }), { status: 202, headers: { "Content-Type": "application/json" } }),
+    ));
+    const request = { version: "session_message_submission.v1" as const, content: "Review" };
+    await expect(client.submitSessionMessage("sess-1", request,
+      "web-session-message-operation-0002")).rejects.toThrow("invalid");
+    await expect(client.submitSessionMessage("sess-1", request,
+      "web-session-message-operation-0003")).rejects.toThrow("invalid");
+  });
+
+  it("does not expose Session messages without their distinct capability", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false,
+      runCreationEnabled: true,
+      sessionMessageEnabled: false,
+    });
+    await expect(client.submitSessionMessage("sess-1", {
+      version: "session_message_submission.v1", content: "Review",
+    }, "web-session-message-operation-0004")).rejects.toThrow("capability");
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("polls Run events with a stream-compatible opaque cursor and validates the envelope", async () => {

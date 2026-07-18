@@ -67,8 +67,9 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 	api, err := httpapi.New(a.store, httpapi.Config{
 		AccessToken: accessToken, ControlToken: controlToken,
 		RunControlEnabled: controlToken != "", RunCreationEnabled: controlToken != "",
-		AppVersion: Version,
-		UIHandler:  uiBundle,
+		SessionMessageEnabled: controlToken != "",
+		AppVersion:            Version,
+		UIHandler:             uiBundle,
 	})
 	if err != nil {
 		return err

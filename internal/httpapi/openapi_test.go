@@ -67,7 +67,9 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 					item.Post.OperationID == "requestSpecialistModelCancellation") ||
 				(path == RunExecutionProfileControlPathTemplate &&
 					item.Post.OperationID == "selectRunExecutionProfile") ||
-				(path == RunCreationControlPath && item.Post.OperationID == "createRun")
+				(path == RunCreationControlPath && item.Post.OperationID == "createRun") ||
+				(path == SessionMessageControlPathTemplate &&
+					item.Post.OperationID == "submitSessionMessage")
 			if !validControl ||
 				item.Post.ReadOnly || item.Post.Responses["202"] == nil || item.Post.RequestBody == nil ||
 				len(item.Post.Security) != 1 || item.Post.Security[0]["ControlBearerAuth"] == nil {
@@ -76,7 +78,7 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 			operations = append(operations, item.Post)
 		}
 		expectedOperations := 1
-		if path == RunCreationControlPath {
+		if path == RunCreationControlPath || path == SessionMessageControlPathTemplate {
 			expectedOperations = 2
 		}
 		if len(operations) != expectedOperations {
@@ -106,7 +108,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 			if method != "get" && !((path == ModelCancellationPathTemplate ||
 				path == SpecialistModelCancellationPathTemplate ||
 				path == RunExecutionProfileControlPathTemplate ||
-				path == RunCreationControlPath) && method == "post") {
+				path == RunCreationControlPath || path == SessionMessageControlPathTemplate) &&
+				method == "post") {
 				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
 			}
 		}
@@ -197,6 +200,9 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 				if spec.Path == RunCreationControlPath {
 					body = `{"version":"run_creation.v1","goal":"OpenAPI live Run",` +
 						`"workspace_id":"` + fixture.workspace.ID + `"}`
+				} else if spec.Path == SessionMessageControlPathTemplate {
+					body = `{"version":"session_message_submission.v1",` +
+						`"content":"OpenAPI live Session message"}`
 				} else if spec.Path != RunExecutionProfileControlPathTemplate {
 					attemptID := fixture.checkpoint.AttemptID
 					modelAttempt := 1

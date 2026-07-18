@@ -12,6 +12,8 @@ import (
 )
 
 const (
+	SessionMessageSubmissionProtocolVersion = "session_message_submission.v1"
+
 	MaxOperatorSteeringContentBytes  = 16 * 1024
 	MaxOperatorSteeringReasonBytes   = 2 * 1024
 	MaxOperatorSteeringIdentityRunes = 256

@@ -1,6 +1,6 @@
 # CyberAgent Workbench Desktop Plan
 
-状态：Desktop D0-A、D0-B 与 schema-v72 D1-R1 自动化核心已完成。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill 预览和显式 capability 下的受控 Run 创建已经通过完整本地发布门；Windows 10 实机矩阵、Session/Plan/审批/Diff/Skill mutation、安装包、正式便携发行、注册表、自启动、更新和高权限执行仍未实现。
+状态：Desktop D0-A、D0-B、schema-v72 D1-R1 与非 schema D1-S1 自动化核心已完成。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill 预览、显式 capability 下的受控 Run 创建和现有 Run-bound Session 消息排队已经通过批次功能门；Windows 10 实机矩阵、自动 Run start/resume/drain、Plan/审批/Diff/Skill mutation、安装包、正式便携发行、注册表、自启动、更新和高权限执行仍未实现。
 
 ## 目标
 
@@ -13,7 +13,7 @@
 - TypeScript 业务操作继续使用 Go 拥有的 HTTP/OpenAPI 契约；普通 Web 保留 SSE，Windows Desktop 因 Wails v2 AssetServer 不支持流式响应而使用同一事件表、同一 Run-bound 高水位 cursor 的 `run-event-poll.v1`。桌面绑定只处理内存启动材料和受控文件选择，不建立第二套业务 API。
 - Electron 不作为默认方案，避免 Node 成为并行高权限控制面。Tauri 不作为默认方案，避免 Rust 从确定性分析工具变成桌面主控。
 - 桌面端不直接读取 API key，不直接控制 Docker/Shell，不实现 Scope 或文件权限判断，也不在 Local Storage、前端日志或注册表保存凭证。
-- CLI、TUI、Web 和 Desktop 必须投影同一 Run/Event/Approval 状态；关闭窗口不得隐式取消后台 Run。D0-A/D0-B 只读取已有状态，D1-R1 只创建关闭的 Run 图；两者都不取得 Run execution lease。
+- CLI、TUI、Web 和 Desktop 必须投影同一 Run/Event/Approval 状态；关闭窗口不得隐式取消后台 Run。D0-A/D0-B 只读取已有状态，D1-R1 只创建关闭的 Run 图，D1-S1 只把输入写入现有 v45-v46 队列；三者都不取得 Run execution lease。
 
 ## 目标布局
 
@@ -33,9 +33,9 @@
 - `desktop_skill_package_preview.v1` 只返回有界风险元数据，排除路径、文件名、正文、Manifest description/content path/content digest，并固定安装、命令、网络、Provider、工具和能力授权为 false。
 - D0-A 已把该边界接入 Wails 原生对话框和 React 只读预览。渲染层仍不能提交路径、文件字节或安装请求，也不会因预览创建数据库事实或 Run 事件；ADR 0033 与 ADR 0034 分别记录路径隔离和桌面壳边界。
 
-## D0-A/D0-B/D1-R1 当前实现
+## D0-A/D0-B/D1-R1/D1-S1 当前实现
 
-- `cmd/cyberagent-desktop` 只在 Windows `desktop,wv2runtime.error` build tags 下编译，production 构建再增加 `production`；默认 read-only。显式 `--enable-profile-control` 只开放 schema v64 非授权档位选择，显式 `--enable-run-creation` 只开放 schema v72 受控 Run 创建；两项 capability 独立，creation-only 不能访问取消/档位 route。
+- `cmd/cyberagent-desktop` 只在 Windows `desktop,wv2runtime.error` build tags 下编译，production 构建再增加 `production`；默认 read-only。显式 `--enable-profile-control` 只开放 schema v64 非授权档位选择，`--enable-run-creation` 只开放 schema v72 受控 Run 创建，`--enable-session-messages` 只开放现有 Run-bound Session 的消息排队；三项 capability 独立，单项启用不能访问其他 route。
 - `web/dist` 以 compile-time embed 进入二进制；Go 在启动前验证 index、内容哈希资源、类型、数量、单项/总大小并复制为不可变内存快照。
 - Wails AssetServer 直接调用现有 `httpapi.API` Handler，不监听 TCP 端口；同一 Go 层继续负责 Bearer、Host、CSP、Policy、SQLite 和 DTO。
 - Renderer 绑定面只有 `Bootstrap`、`SelectSkillPackage`、`PreviewSkillPackage` 三个方法。进程、Shell、Docker、Skill 安装和 renderer path input 权限全部固定为 false。
@@ -44,7 +44,7 @@
 - `desktop.ControlPlane` 与 `desktop.Lifecycle` 固定同库 API 所有权、幂等关闭、崩溃重开、第二实例让位和停止后永久静默；第二实例参数与工作目录不会进入主实例。
 - Desktop 通过 `GET /api/v1/runs/{run_id}/events/poll` 消费与 SSE 相同的真实事件 frame/cursor；React 最多在内存保留 16 个 Run、每个 500 帧，不写浏览器存储。
 - WebView2 `94.0.992.31` 以上只读预检发生在 bundle/数据库之前；失败时不下载、不安装、不打开 URL。进程内适配器只接受精确 `http://wails.localhost`，外部链接、表单和 popup 在 Desktop renderer 中被阻止。
-- secure production-tag 二进制已经在隔离数据目录通过 Windows 11 强制结束/重开与第二实例实机烟测；主工作台、Skill modal 与原生 `.zip` 对话框也已通过视觉复核。D1-R1 的 Run 创建 route、能力分离和 React 对话框由自动化覆盖，正式发布前仍需随最终二进制复跑完整 Windows 10/11 人工矩阵。
+- secure production-tag 二进制已经在隔离数据目录通过 Windows 11 强制结束/重开与第二实例实机烟测；主工作台、Skill modal 与原生 `.zip` 对话框也已通过视觉复核。D1-R1 Run 创建和 D1-S1 Session composer 的 route、能力分离与 React 交互由自动化覆盖，正式发布前仍需随最终二进制复跑完整 Windows 10/11 人工矩阵。
 
 本地构建：
 
@@ -65,6 +65,17 @@ powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
 
 创建只接受已注册 Workspace，并固定默认预算、禁用网络/目标和 `preview/noop` 执行档位；它不会自动发送 Session 消息、调用模型、取得 execution lease 或启动进程。
 
+显式启用 Session 消息排队：
+
+```powershell
+.\build\desktop\cyberagent-desktop.exe --enable-session-messages
+
+# 三项 capability 可组合，但仍不授予执行权。
+.\build\desktop\cyberagent-desktop.exe --enable-run-creation --enable-profile-control --enable-session-messages
+```
+
+消息提交只接受精确绑定到 running/paused Run 的现有 Session，按既有 v45-v46 规则脱敏、持久化和幂等重放。它不会启动 created Run、恢复 paused Run、drain 队列、调用模型/工具或取得 lease。
+
 ## 分阶段交付
 
 ### D0：桌面基础验证（自动化核心完成，Windows 10 实机待补）
@@ -82,7 +93,12 @@ powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
 - [x] D1-R1 / schema v72：Go API 受控创建 Mission/Run/Session，严格注册 Workspace、Scope、默认预算、幂等 operation、事务事件和关闭 execution profile；React 可选择 Workspace/Profile/Surface/Phase 并在成功后刷新、选中新 Run。
 - [x] D1-R1 capability 与 `--enable-profile-control` 独立；creation-only token 不能访问旧控制 route，Wails native bridge 不增加方法。
 - [x] D1-R1 完整门禁通过全仓普通/race、普通/secure-Desktop 检查、45 项前端测试、确定性契约、生产构建、依赖/隐私/Markdown 扫描和隔离 CLI smoke；没有已知未解决高/中风险。
-- [ ] D1-S1：增加 Run-bound Session 对话与操作者引导提交，复用 RunSupervisor、队列、预算、Policy、脱敏和事件语义。
+- [x] D1-S1：三个切片完成 Go/Application 与严格 HTTP message submission、独立 Desktop bootstrap capability、React composer/内存重试/metadata-only 反馈；复用既有队列而不启动执行。
+- [x] D1-S1 功能门通过全仓普通 Go、Desktop-tag 聚焦、52 项前端测试、严格 TypeScript、Vite 与 Windows production build；完整六切片健壮性门排在下一批结束。
+- [ ] D1-S2：增加独立 pending-only steering cancellation control/UI，不能取消 prepared/committed 项。
+- [ ] D1-L1：增加幂等 operator Run start/pause/resume，独立复核状态、quiescence、lease 和 capability。
+- [ ] D1-X1：增加 Go-owned bounded execution handoff，通过既有 Supervisor/预算/Policy/lease/model/event 路径消费队列，不建立 native executor。
+- [ ] D1-X1 后执行累计六片完整健壮性门：ordinary/race、vet、staticcheck、govulncheck、依赖/隐私、契约、Windows/Vite build、重启与并发功能复核。
 - [ ] 随后的独立切片增加 Plan 选择/阶段切换、审批、Diff 审查和 Skill 管理；每类 mutation 分别做状态、幂等、权限与重启审计。
 - [ ] 所有 mutation 使用独立 control token、Origin/Host 校验、幂等 operation key 和 typed errors；CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。
@@ -115,4 +131,4 @@ powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
 - 安装、升级和卸载不会静默删除 Workspace、数据库、凭证或用户创建文件。
 - 未签名开发产物不得伪装成正式发布；正式包必须有可核验签名和哈希。
 
-ADR 0034、ADR 0035 与 ADR 0036 分别记录 D0-A 可见壳、D0-B 生命周期/事件续传加固和 D1-R1 受控 Run 创建。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。
+ADR 0034、ADR 0035、ADR 0036 与 ADR 0037 分别记录 D0-A 可见壳、D0-B 生命周期/事件续传加固、D1-R1 受控 Run 创建和 D1-S1 受控 Session message submission。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。

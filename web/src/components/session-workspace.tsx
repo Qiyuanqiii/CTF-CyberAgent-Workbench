@@ -6,6 +6,7 @@ import type { MessageView, SessionDetailView } from "../api/types";
 import { usePagedResource } from "../hooks/use-paged-resource";
 import { formatDate, formatNumber, shortID } from "../lib/format";
 import { EmptyState, ErrorState, KeyValue, LoadMoreButton, LoadingState, StatusBadge } from "./common";
+import { SessionComposer } from "./session-composer";
 
 export function SessionWorkspace({ client, sessionID }: { client: CyberAgentClient; sessionID: string }) {
   const detailQuery = useQuery({
@@ -45,6 +46,8 @@ export function SessionWorkspace({ client, sessionID }: { client: CyberAgentClie
           <KeyValue label="Updated" value={formatDate(detail.session.updated_at)} />
         </dl>
       </div>
+      <SessionComposer client={client} key={sessionID} run={detail.run ?? null}
+        sessionID={sessionID} />
       <div className="workspace-content session-content">
         <div className="section-heading"><h2>Messages</h2><span>{formatNumber(messages.length)}</span></div>
         {messagesQuery.isLoading && <LoadingState />}

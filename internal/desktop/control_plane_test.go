@@ -183,6 +183,66 @@ func TestControlPlaneSeparatesRunCreationFromExistingRunControls(t *testing.T) {
 	}
 }
 
+func TestControlPlaneSeparatesSessionMessagesFromOtherControls(t *testing.T) {
+	plane, err := OpenControlPlane(ControlPlaneConfig{
+		DatabasePath: filepath.Join(t.TempDir(), "messages.db"),
+		ReadToken:    desktopControlPlaneTestToken, ControlToken: desktopControlPlaneControlToken,
+		SessionMessageEnabled: true, AppVersion: "desktop-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plane.Close()
+	runs := application.NewRunService(plane.stateStore)
+	_, created, err := runs.Create(t.Context(), application.CreateRunRequest{
+		Goal: "Desktop Session message", Profile: "review",
+		Budget: domain.Budget{MaxTurns: 2},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := runs.Start(t.Context(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestPath := "/api/v1/sessions/" + run.SessionID + "/messages"
+	submitted := desktopControlRequest(plane.Handler(), http.MethodPost, requestPath,
+		"desktop-session-message-operation-0001",
+		`{"version":"session_message_submission.v1","content":"Review the current diff"}`)
+	if submitted.Code != http.StatusAccepted {
+		t.Fatalf("Session message status=%d body=%s", submitted.Code, submitted.Body.String())
+	}
+	var envelope desktopAPIEnvelope
+	if err := json.Unmarshal(submitted.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	var result httpapi.SessionMessageControlView
+	if err := json.Unmarshal(envelope.Data, &result); err != nil ||
+		result.RunID != run.ID || result.SessionID != run.SessionID ||
+		result.Steering.Status != string(domain.OperatorSteeringPending) ||
+		result.ExecutionStarted || result.ModelCalled || result.ToolCalled || result.CapabilityGrant {
+		t.Fatalf("Session message response=%#v err=%v", result, err)
+	}
+	history, err := plane.stateStore.ListSessionMessages(t.Context(), run.SessionID, true)
+	if err != nil || len(history) != 0 {
+		t.Fatalf("Session message was committed before Supervisor delivery: %#v err=%v", history, err)
+	}
+	creation := desktopControlRequest(plane.Handler(), http.MethodPost, "/api/v1/runs",
+		"desktop-session-message-operation-0002",
+		`{"version":"run_creation.v1","goal":"blocked","workspace_id":"workspace"}`)
+	if creation.Code != http.StatusNotFound {
+		t.Fatalf("Session capability widened Run creation: status=%d body=%s",
+			creation.Code, creation.Body.String())
+	}
+	profile := desktopControlRequest(plane.Handler(), http.MethodPost,
+		"/api/v1/runs/"+run.ID+"/execution-profile",
+		"desktop-session-message-operation-0003", `{"profile":"preview"}`)
+	if profile.Code != http.StatusNotFound {
+		t.Fatalf("Session capability widened profile control: status=%d body=%s",
+			profile.Code, profile.Body.String())
+	}
+}
+
 func desktopControlRequest(handler http.Handler, method string, path string,
 	key string, body string,
 ) *httptest.ResponseRecorder {

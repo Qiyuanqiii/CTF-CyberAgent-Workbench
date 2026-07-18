@@ -22,13 +22,14 @@ type ControlPlane struct {
 }
 
 type ControlPlaneConfig struct {
-	DatabasePath       string
-	ReadToken          string
-	ControlToken       string
-	RunControlEnabled  bool
-	RunCreationEnabled bool
-	AppVersion         string
-	UIHandler          http.Handler
+	DatabasePath          string
+	ReadToken             string
+	ControlToken          string
+	RunControlEnabled     bool
+	RunCreationEnabled    bool
+	SessionMessageEnabled bool
+	AppVersion            string
+	UIHandler             http.Handler
 }
 
 func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
@@ -42,9 +43,10 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 	}
 	api, err := httpapi.New(stateStore, httpapi.Config{
 		AccessToken: config.ReadToken, ControlToken: config.ControlToken,
-		RunControlEnabled:  config.RunControlEnabled,
-		RunCreationEnabled: config.RunCreationEnabled,
-		AppVersion:         config.AppVersion, UIHandler: config.UIHandler,
+		RunControlEnabled:     config.RunControlEnabled,
+		RunCreationEnabled:    config.RunCreationEnabled,
+		SessionMessageEnabled: config.SessionMessageEnabled,
+		AppVersion:            config.AppVersion, UIHandler: config.UIHandler,
 	})
 	if err != nil {
 		_ = stateStore.Close()

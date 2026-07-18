@@ -12,8 +12,10 @@ interface ConnectionState {
   controlToken: string;
   runControlEnabled: boolean;
   runCreationEnabled: boolean;
+  sessionMessageEnabled: boolean;
   connect: (token: string, health: HealthView, controlToken?: string,
-    capabilities?: { runControlEnabled?: boolean; runCreationEnabled?: boolean }) => void;
+    capabilities?: { runControlEnabled?: boolean; runCreationEnabled?: boolean;
+      sessionMessageEnabled?: boolean }) => void;
   disconnect: () => void;
   selectRun: (runID: string) => void;
   selectSession: (sessionID: string) => void;
@@ -34,15 +36,18 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   controlToken: "",
   runControlEnabled: false,
   runCreationEnabled: false,
+  sessionMessageEnabled: false,
   connect: (token, health, controlToken = "", capabilities = {}) => {
     const present = controlToken.trim() !== "";
     set({ token, health, controlToken,
       runControlEnabled: present && (capabilities.runControlEnabled ?? true),
       runCreationEnabled: present && (capabilities.runCreationEnabled ?? true),
+      sessionMessageEnabled: present && (capabilities.sessionMessageEnabled ?? true),
     });
   },
   disconnect: () => set({ token: "", controlToken: "", health: null,
-    runControlEnabled: false, runCreationEnabled: false, ...initialSelection }),
+    runControlEnabled: false, runCreationEnabled: false, sessionMessageEnabled: false,
+    ...initialSelection }),
   selectRun: (selectedRunID) => set({ selectedRunID, resourceKind: "run" }),
   selectSession: (selectedSessionID) => set({ selectedSessionID, resourceKind: "session" }),
   setHealth: (health) => set({ health }),

@@ -35,6 +35,7 @@ type ConnectionBootstrap struct {
 	ControlToken               string `json:"control_token"`
 	ControlEnabled             bool   `json:"control_enabled"`
 	RunCreationEnabled         bool   `json:"run_creation_enabled"`
+	SessionMessageEnabled      bool   `json:"session_message_enabled"`
 	ReadOnlyDefault            bool   `json:"read_only_default"`
 	ProcessExecutionEnabled    bool   `json:"process_execution_enabled"`
 	ShellExecutionEnabled      bool   `json:"shell_execution_enabled"`
@@ -66,17 +67,18 @@ type SkillPackageFilePicker interface {
 }
 
 type DesktopBridgeConfig struct {
-	ContextProvider    func() context.Context
-	FilePicker         SkillPackageFilePicker
-	ReadToken          string
-	ControlToken       string
-	RunControlEnabled  bool
-	RunCreationEnabled bool
-	APIVersion         string
-	AppVersion         string
-	UIDigest           string
-	Selector           NativeSkillPackageSelector
-	PreviewBridge      *SkillPackagePreviewBridge
+	ContextProvider       func() context.Context
+	FilePicker            SkillPackageFilePicker
+	ReadToken             string
+	ControlToken          string
+	RunControlEnabled     bool
+	RunCreationEnabled    bool
+	SessionMessageEnabled bool
+	APIVersion            string
+	AppVersion            string
+	UIDigest              string
+	Selector              NativeSkillPackageSelector
+	PreviewBridge         *SkillPackagePreviewBridge
 }
 
 // DesktopBridge is the complete renderer binding surface for D0-A. Keep this
@@ -101,11 +103,13 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop bridge tokens must be normalized bounded values")
 	}
-	if (config.RunControlEnabled || config.RunCreationEnabled) && config.ControlToken == "" {
+	if (config.RunControlEnabled || config.RunCreationEnabled || config.SessionMessageEnabled) &&
+		config.ControlToken == "" {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop control capabilities require a control token")
 	}
-	if config.ControlToken != "" && !config.RunControlEnabled && !config.RunCreationEnabled {
+	if config.ControlToken != "" && !config.RunControlEnabled && !config.RunCreationEnabled &&
+		!config.SessionMessageEnabled {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop control token requires an enabled control capability")
 	}
@@ -131,9 +135,11 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 			ProtocolVersion: ConnectionBootstrapProtocolVersion,
 			APIBaseURL:      DesktopAPIBasePath, APIVersion: apiVersion, AppVersion: appVersion,
 			UIDigest: config.UIDigest, ReadToken: config.ReadToken, ControlToken: config.ControlToken,
-			ControlEnabled:          config.RunControlEnabled,
-			RunCreationEnabled:      config.RunCreationEnabled,
-			ReadOnlyDefault:         !config.RunControlEnabled && !config.RunCreationEnabled,
+			ControlEnabled:        config.RunControlEnabled,
+			RunCreationEnabled:    config.RunCreationEnabled,
+			SessionMessageEnabled: config.SessionMessageEnabled,
+			ReadOnlyDefault: !config.RunControlEnabled && !config.RunCreationEnabled &&
+				!config.SessionMessageEnabled,
 			ProcessExecutionEnabled: false, ShellExecutionEnabled: false, DockerExecutionEnabled: false,
 			SkillInstallationEnabled: false, RendererPathInputSupported: false,
 		},

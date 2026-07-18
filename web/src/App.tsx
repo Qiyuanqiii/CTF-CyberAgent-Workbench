@@ -16,25 +16,29 @@ export default function App() {
   const controlToken = useConnectionStore((state) => state.controlToken);
   const runControlEnabled = useConnectionStore((state) => state.runControlEnabled);
   const runCreationEnabled = useConnectionStore((state) => state.runCreationEnabled);
+  const sessionMessageEnabled = useConnectionStore((state) => state.sessionMessageEnabled);
   if (!token) {
     return <ConnectionGate />;
   }
   return <ConnectedWorkbench token={token} controlToken={controlToken}
-    runControlEnabled={runControlEnabled} runCreationEnabled={runCreationEnabled} />;
+    runControlEnabled={runControlEnabled} runCreationEnabled={runCreationEnabled}
+    sessionMessageEnabled={sessionMessageEnabled} />;
 }
 
-function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreationEnabled }: {
+function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreationEnabled,
+  sessionMessageEnabled }: {
   token: string;
   controlToken: string;
   runControlEnabled: boolean;
   runCreationEnabled: boolean;
+  sessionMessageEnabled: boolean;
 }) {
   const [skillPreviewOpen, setSkillPreviewOpen] = useState(false);
   const [runCreationOpen, setRunCreationOpen] = useState(false);
   const desktop = desktopBridgeAvailable();
   const client = useMemo(() => new CyberAgentClient(token, undefined, controlToken, {
-    runControlEnabled, runCreationEnabled,
-  }), [token, controlToken, runControlEnabled, runCreationEnabled]);
+    runControlEnabled, runCreationEnabled, sessionMessageEnabled,
+  }), [token, controlToken, runControlEnabled, runCreationEnabled, sessionMessageEnabled]);
   const queryClient = useQueryClient();
   const health = useConnectionStore((state) => state.health);
   const setHealth = useConnectionStore((state) => state.setHealth);

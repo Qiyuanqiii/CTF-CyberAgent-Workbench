@@ -7,6 +7,8 @@ import type {
   RunCreationControlView,
   RunEventPollView,
   RunEventStreamView,
+  SessionMessageControlRequestView,
+  SessionMessageControlView,
   SuccessEnvelope,
 } from "./types";
 
@@ -140,6 +142,41 @@ function parseRunCreationControl(value: unknown,
   return value as unknown as RunCreationControlView;
 }
 
+function parseSessionMessageControl(value: unknown,
+  expectedSessionID: string): SessionMessageControlView {
+  if (!hasExactKeys(value, ["capability_grant", "execution_started", "model_called", "replayed",
+    "run_id", "session_id", "steering", "tool_called", "version"]) ||
+    value.version !== "session_message_submission.v1" ||
+    value.session_id !== expectedSessionID || !boundedIdentity(value.run_id) ||
+    !boundedIdentity(value.session_id) || typeof value.replayed !== "boolean" ||
+    value.execution_started !== false || value.model_called !== false ||
+    value.tool_called !== false || value.capability_grant !== false ||
+    !isRecord(value.steering) || !hasOnlyKeys(value.steering,
+      ["cancelled_at", "committed_at", "created_at", "id", "sequence", "status"]) ||
+    !boundedIdentity(value.steering.id) ||
+    typeof value.steering.sequence !== "number" ||
+    !Number.isSafeInteger(value.steering.sequence) || value.steering.sequence <= 0 ||
+    typeof value.steering.created_at !== "string" ||
+    !Number.isFinite(Date.parse(value.steering.created_at)) ||
+    (value.steering.status !== "pending" && value.steering.status !== "committed" &&
+      value.steering.status !== "cancelled")) {
+    throw new APIRequestError("Session message response is invalid", "INVALID_RESPONSE", 502);
+  }
+  const committedAt = value.steering.committed_at;
+  const cancelledAt = value.steering.cancelled_at;
+  if ((committedAt !== undefined && (typeof committedAt !== "string" ||
+      !Number.isFinite(Date.parse(committedAt)))) ||
+    (cancelledAt !== undefined && (typeof cancelledAt !== "string" ||
+      !Number.isFinite(Date.parse(cancelledAt)))) ||
+    (value.steering.status === "pending" && (committedAt !== undefined || cancelledAt !== undefined)) ||
+    (value.steering.status === "committed" && (committedAt === undefined || cancelledAt !== undefined)) ||
+    (value.steering.status === "cancelled" && (cancelledAt === undefined || committedAt !== undefined))) {
+    throw new APIRequestError("Session message response violated its steering state contract",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as SessionMessageControlView;
+}
+
 function hasNoAllowedTargets(scope: Record<string, unknown>): boolean {
   return scope.allowed_targets === undefined ||
     (Array.isArray(scope.allowed_targets) && scope.allowed_targets.length === 0);
@@ -158,6 +195,11 @@ function hasExactKeys(value: unknown, expected: string[]): value is Record<strin
   return actual.length === wanted.length && actual.every((key, index) => key === wanted[index]);
 }
 
+function hasOnlyKeys(value: Record<string, unknown>, allowed: string[]): boolean {
+  const accepted = new Set(allowed);
+  return Object.keys(value).every((key) => accepted.has(key));
+}
+
 function boundedIdentity(value: unknown): string {
   return typeof value === "string" && value.trim() === value && value.length > 0 && value.length <= 256
     ? value
@@ -168,12 +210,14 @@ export class CyberAgentClient {
   readonly baseURL: string;
   readonly hasControl: boolean;
   readonly hasRunCreation: boolean;
+  readonly hasSessionMessages: boolean;
 
   constructor(
     private readonly token: string,
     baseURL = import.meta.env.VITE_API_BASE_URL || "/api/v1",
     private readonly controlToken = "",
-    capabilities: { runControlEnabled?: boolean; runCreationEnabled?: boolean } = {},
+    capabilities: { runControlEnabled?: boolean; runCreationEnabled?: boolean;
+      sessionMessageEnabled?: boolean } = {},
   ) {
     if (token.trim() === "") {
       throw new Error("A read bearer token is required");
@@ -182,6 +226,7 @@ export class CyberAgentClient {
     const controlPresent = controlToken.trim() !== "";
     this.hasControl = controlPresent && (capabilities.runControlEnabled ?? true);
     this.hasRunCreation = controlPresent && (capabilities.runCreationEnabled ?? true);
+    this.hasSessionMessages = controlPresent && (capabilities.sessionMessageEnabled ?? true);
   }
 
   async health(signal?: AbortSignal): Promise<HealthView> {
@@ -226,6 +271,21 @@ export class CyberAgentClient {
     }
     const result = await this.sendControl<unknown>("/runs", body, idempotencyKey, signal);
     return parseRunCreationControl(result, body);
+  }
+
+  async submitSessionMessage(sessionID: string, body: SessionMessageControlRequestView,
+    idempotencyKey: string, signal?: AbortSignal): Promise<SessionMessageControlView> {
+    if (!this.hasSessionMessages) {
+      throw new Error("Session message capability is required for this operation");
+    }
+    const normalizedSessionID = boundedIdentity(sessionID);
+    if (!normalizedSessionID || normalizedSessionID !== sessionID) {
+      throw new Error("A normalized Session identity is required");
+    }
+    const result = await this.sendControl<unknown>(
+      `/sessions/${encodeURIComponent(sessionID)}/messages`, body, idempotencyKey, signal,
+    );
+    return parseSessionMessageControl(result, sessionID);
   }
 
   private async sendControl<T>(path: string, body: unknown, idempotencyKey: string,

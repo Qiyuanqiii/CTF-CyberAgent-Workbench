@@ -85,7 +85,7 @@ func (a *API) serveRunCreationControl(writer http.ResponseWriter,
 			"Run creation body must be valid UTF-8 JSON"), 0)
 		return
 	}
-	if err := rejectDuplicateJSONObjectFields(body); err != nil {
+	if err := rejectDuplicateJSONObjectFields(body, "Run creation"); err != nil {
 		a.writeError(writer, requestID, err, 0)
 		return
 	}
@@ -131,44 +131,44 @@ func runCreationIdempotencyKey(header http.Header) (string, error) {
 	return value, nil
 }
 
-func rejectDuplicateJSONObjectFields(body []byte) error {
+func rejectDuplicateJSONObjectFields(body []byte, label string) error {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	opening, err := decoder.Token()
 	if err != nil || opening != json.Delim('{') {
 		return apperror.New(apperror.CodeInvalidArgument,
-			"Run creation body must be one JSON object")
+			label+" body must be one JSON object")
 	}
 	seen := make(map[string]struct{})
 	for decoder.More() {
 		key, err := decoder.Token()
 		if err != nil {
 			return apperror.New(apperror.CodeInvalidArgument,
-				"Run creation body must be one JSON object")
+				label+" body must be one JSON object")
 		}
 		name, ok := key.(string)
 		if !ok {
 			return apperror.New(apperror.CodeInvalidArgument,
-				"Run creation body contains an invalid field")
+				label+" body contains an invalid field")
 		}
 		if _, duplicate := seen[name]; duplicate {
 			return apperror.New(apperror.CodeInvalidArgument,
-				fmt.Sprintf("Run creation body contains duplicate field %q", name))
+				fmt.Sprintf("%s body contains duplicate field %q", label, name))
 		}
 		seen[name] = struct{}{}
 		var value json.RawMessage
 		if err := decoder.Decode(&value); err != nil {
 			return apperror.New(apperror.CodeInvalidArgument,
-				"Run creation body contains an invalid field value")
+				label+" body contains an invalid field value")
 		}
 	}
 	closing, err := decoder.Token()
 	if err != nil || closing != json.Delim('}') {
 		return apperror.New(apperror.CodeInvalidArgument,
-			"Run creation body must be one JSON object")
+			label+" body must be one JSON object")
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return apperror.New(apperror.CodeInvalidArgument,
-			"Run creation body contains trailing data")
+			label+" body contains trailing data")
 	}
 	return nil
 }

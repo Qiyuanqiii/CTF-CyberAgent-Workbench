@@ -521,7 +521,11 @@ export interface paths {
          */
         get: operations["listSessionMessages"];
         put?: never;
-        post?: never;
+        /**
+         * Submit a Run-bound Session message
+         * @description Creates or replays one redacted durable operator-steering record for the exact Run-bound Session. It does not append Session history early, start or resume the Run, acquire a lease, call a model or tool, or grant a capability.
+         */
+        post: operations["submitSessionMessage"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1312,6 +1316,23 @@ export interface components {
         SessionDetailView: {
             run?: components["schemas"]["RunView"];
             session: components["schemas"]["SessionView"];
+        };
+        SessionMessageControlRequestView: {
+            content: string;
+            /** @enum {string} */
+            version: "session_message_submission.v1";
+        };
+        SessionMessageControlView: {
+            capability_grant: boolean;
+            execution_started: boolean;
+            model_called: boolean;
+            replayed: boolean;
+            run_id: string;
+            session_id: string;
+            steering: components["schemas"]["OperatorSteeringMessageView"];
+            tool_called: boolean;
+            /** @enum {string} */
+            version: "session_message_submission.v1";
         };
         SessionView: {
             /** Format: date-time */
@@ -2604,6 +2625,52 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    submitSessionMessage: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Session identity */
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionMessageControlRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SessionMessageControlView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];
         };

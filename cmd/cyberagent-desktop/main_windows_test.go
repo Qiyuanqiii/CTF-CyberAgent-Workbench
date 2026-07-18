@@ -30,22 +30,30 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if defaults.profileControl || defaults.runCreation || defaults.version {
+	if defaults.profileControl || defaults.runCreation || defaults.sessionMessages || defaults.version {
 		t.Fatalf("unexpected defaults: %#v", defaults)
 	}
 	enabled, err := parseDesktopOptions([]string{"--enable-profile-control"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !enabled.profileControl || enabled.runCreation || enabled.version {
+	if !enabled.profileControl || enabled.runCreation || enabled.sessionMessages || enabled.version {
 		t.Fatalf("profile control was not explicit: %#v", enabled)
 	}
 	creation, err := parseDesktopOptions([]string{"--enable-run-creation"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if creation.profileControl || !creation.runCreation || creation.version {
+	if creation.profileControl || !creation.runCreation || creation.sessionMessages || creation.version {
 		t.Fatalf("Run creation was not independently explicit: %#v", creation)
+	}
+	messages, err := parseDesktopOptions([]string{"--enable-session-messages"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if messages.profileControl || messages.runCreation || !messages.sessionMessages ||
+		messages.version {
+		t.Fatalf("Session messages were not independently explicit: %#v", messages)
 	}
 	if _, err := parseDesktopOptions([]string{"unexpected"}); err == nil {
 		t.Fatal("desktop positional argument was accepted")

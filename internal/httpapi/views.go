@@ -433,16 +433,20 @@ func operatorSteeringQueueView(summary domain.OperatorSteeringQueueSummary,
 ) OperatorSteeringQueueView {
 	messages := make([]OperatorSteeringMessageView, len(values))
 	for index, value := range values {
-		messages[index] = OperatorSteeringMessageView{
-			ID: value.ID, Sequence: value.Sequence, Status: string(value.Status),
-			CreatedAt: value.CreatedAt, CommittedAt: value.CommittedAt,
-			CancelledAt: value.CancelledAt,
-		}
+		messages[index] = operatorSteeringMessageView(value)
 	}
 	return OperatorSteeringQueueView{
 		Pending: summary.Pending, Prepared: summary.Prepared,
 		Committed: summary.Committed, Cancelled: summary.Cancelled,
 		Messages: messages,
+	}
+}
+
+func operatorSteeringMessageView(value domain.OperatorSteeringMessage) OperatorSteeringMessageView {
+	return OperatorSteeringMessageView{
+		ID: value.ID, Sequence: value.Sequence, Status: string(value.Status),
+		CreatedAt: value.CreatedAt, CommittedAt: value.CommittedAt,
+		CancelledAt: value.CancelledAt,
 	}
 }
 

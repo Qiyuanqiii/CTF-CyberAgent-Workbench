@@ -230,6 +230,18 @@ td code { font-size: 11px; }
 .finding-detail { min-width: 0; padding: 12px; }
 .finding-item > p { padding: 0 15px; }
 .session-summary { padding: 0 28px 20px; border-bottom: 1px solid var(--border); }
+.session-composer { margin: 18px 28px 0; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--surface); }
+.session-composer textarea { width: 100%; min-height: 76px; display: block; padding: 11px 12px; resize: vertical; border: 0; border-radius: 6px 6px 0 0; background: transparent; color: var(--ink); line-height: 1.5; }
+.session-composer textarea:focus-visible { outline: 2px solid #168f82; outline-offset: -2px; }
+.session-composer textarea:disabled { background: var(--surface-subtle); color: var(--muted); resize: none; }
+.session-composer-footer { min-height: 42px; display: grid; grid-template-columns: minmax(0, 1fr) auto 34px; align-items: center; gap: 10px; padding: 4px 6px 4px 10px; border-top: 1px solid var(--border); }
+.session-composer-state { min-width: 0; display: flex; align-items: center; gap: 7px; overflow: hidden; color: var(--muted); font-size: 11px; }
+.session-composer-state > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-composer-state .connection-error { margin: 0; color: #9b2c2c; }
+.byte-count { color: var(--muted); font-size: 10px; white-space: nowrap; }
+.byte-count.invalid { color: #9b2c2c; }
+.session-send-button { width: 34px; height: 34px; display: grid; place-items: center; padding: 0; border: 1px solid #087f73; border-radius: 5px; background: #087f73; color: #ffffff; cursor: pointer; }
+.session-send-button:disabled { border-color: var(--border-strong); background: #e6ebed; color: #84919a; cursor: default; }
 .session-content { padding-top: 20px; }
 .message-list { margin-top: 14px; border-top: 1px solid var(--border); }
 .message-row { padding: 14px 4px; border-bottom: 1px solid var(--border); }
@@ -367,6 +379,9 @@ td code { font-size: 11px; }
   .report-picker > button { min-width: 210px; }
   .note-item footer, .tool-round > header { flex-wrap: wrap; }
   .session-summary { padding: 0 14px 17px; }
+  .session-composer { margin: 14px 14px 0; }
+  .session-composer-footer { grid-template-columns: minmax(0, 1fr) 34px; }
+  .session-composer-footer .byte-count { display: none; }
   .message-row header { flex-wrap: wrap; }
   .message-row header time { width: 100%; margin-left: 0; }
   .external-skill-list li { grid-template-columns: 28px minmax(0, 1fr); align-items: start; gap: 5px 10px; }
