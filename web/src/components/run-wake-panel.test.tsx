@@ -32,11 +32,41 @@ describe("RunWakePanel", () => {
     const button = await screen.findByRole("button", { name: "Schedule" });
     expect(button).toBeDisabled();
   });
+
+  it("consumes one due intent only after an explicit foreground action", async () => {
+    const queuedState = {
+      protocol_version: "run_wake_intent.v1", run_id: "run-1", found: true,
+      intent: wakeIntent("queued"),
+    };
+    const completedState = {
+      protocol_version: "run_wake_intent.v1", run_id: "run-1", found: true,
+      intent: wakeIntent("completed"),
+    };
+    const consumeRunWake = vi.fn().mockResolvedValue({
+      protocol_version: "run_wake_consumer.v1", run_id: "run-1",
+      intent: completedState.intent, consumption_status: "completed",
+      replayed: false, execution_started: true, model_called: true, tool_called: false,
+      background_loop_enabled: false, stop_reason: "waiting",
+    });
+    const client = {
+      hasRunWakeControl: false, hasRunWakeExecution: true,
+      runWakeState: vi.fn().mockResolvedValueOnce(queuedState).mockResolvedValue(completedState),
+      consumeRunWake,
+    } as unknown as CyberAgentClient;
+    const user = userEvent.setup();
+    renderPanel(client, runDetail(1, 0));
+    await user.click(await screen.findByRole("button", { name: "Consume" }));
+    await waitFor(() => expect(consumeRunWake).toHaveBeenCalledWith("run-1", {
+      version: "run_wake_consumer.v1", max_steps: 1,
+    }));
+    expect(await screen.findByText("completed")).toBeInTheDocument();
+  });
 });
 
 function wakeClient(scheduleRunWake: ReturnType<typeof vi.fn>): CyberAgentClient {
   return {
     hasRunWakeControl: true,
+    hasRunWakeExecution: false,
     runWakeState: vi.fn().mockResolvedValue({
       protocol_version: "run_wake_intent.v1", run_id: "run-1", found: false,
     }),
@@ -54,12 +84,12 @@ function runDetail(pending: number, prepared: number): RunDetailView {
   } as unknown as RunDetailView;
 }
 
-function wakeIntent(status: "queued") {
+function wakeIntent(status: "queued" | "completed") {
   return {
     id: "wake-1", protocol_version: "run_wake_intent.v1", run_id: "run-1",
     session_id: "session-1", status, max_attempts: 3, attempt_count: 0,
     initial_delay_seconds: 0, base_backoff_seconds: 5, max_backoff_seconds: 60,
-    max_elapsed_seconds: 300, next_wake_at: "2026-07-18T00:00:00Z",
+    max_elapsed_seconds: 300, next_wake_at: "2020-01-01T00:00:00Z",
     deadline_at: "2026-07-18T00:05:00Z", execution_enabled: false,
     background_loop_enabled: false, created_at: "2026-07-18T00:00:00Z",
     updated_at: "2026-07-18T00:00:00Z",

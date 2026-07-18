@@ -1,20 +1,32 @@
-import { useEffect, useState } from "react";
-import { FileArchive, FolderOpen, LoaderCircle, ShieldCheck, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { FileArchive, FolderOpen, LoaderCircle, PackageCheck, ShieldCheck, X } from "lucide-react";
 import {
   desktopErrorMessage,
+  installDesktopSkillPackage,
   selectDesktopSkillPreview,
+  type DesktopSkillInstallResult,
   type DesktopSkillPreview,
 } from "../lib/desktop-bridge";
 import { formatBytes, formatNumber } from "../lib/format";
 
-export function DesktopSkillPreviewDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function DesktopSkillPreviewDialog({ open, onClose, installationEnabled = false }: {
+  open: boolean;
+  onClose: () => void;
+  installationEnabled?: boolean;
+}) {
   const [preview, setPreview] = useState<DesktopSkillPreview | null>(null);
+  const [installed, setInstalled] = useState<DesktopSkillInstallResult | null>(null);
+  const [surface, setSurface] = useState<"code" | "cyber">("code");
+  const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const operationKey = useRef("");
 
   useEffect(() => {
     if (!open) {
       setPreview(null);
+      setInstalled(null);
+      setConfirmed(false);
       setError("");
       setLoading(false);
       return;
@@ -42,7 +54,23 @@ export function DesktopSkillPreviewDialog({ open, onClose }: { open: boolean; on
       const selected = await selectDesktopSkillPreview();
       if (selected) {
         setPreview(selected);
+        setInstalled(null);
+        setConfirmed(false);
+        operationKey.current = `desktop-skill-install-${globalThis.crypto.randomUUID()}`;
       }
+    } catch (caught) {
+      setError(desktopErrorMessage(caught));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const install = async () => {
+    if (!preview || !installationEnabled || !confirmed || loading || installed) return;
+    setLoading(true);
+    setError("");
+    try {
+      setInstalled(await installDesktopSkillPackage(preview, surface, operationKey.current));
     } catch (caught) {
       setError(desktopErrorMessage(caught));
     } finally {
@@ -74,16 +102,40 @@ export function DesktopSkillPreviewDialog({ open, onClose }: { open: boolean; on
             </div>
           )}
           {preview && <SkillPreviewDetails preview={preview} />}
+          {preview && installationEnabled && !installed && <div className="desktop-install-controls">
+            <div aria-label="Skill surface" className="segmented-control" role="group">
+              <button aria-pressed={surface === "code"} onClick={() => setSurface("code")}
+                type="button">Code</button>
+              <button aria-pressed={surface === "cyber"} onClick={() => setSurface("cyber")}
+                type="button">Cyber</button>
+            </div>
+            <label className="desktop-install-confirmation">
+              <input checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)}
+                type="checkbox" />
+              <span>确认按不受信任包登记，不授予执行权</span>
+            </label>
+          </div>}
+          {installed && <div className="desktop-install-success" role="status">
+            <PackageCheck aria-hidden="true" size={17} />
+            <span>{installed.name} {installed.version} 已登记到 {installed.surface}</span>
+          </div>}
           {error && <div className="connection-error" role="alert">{error}</div>}
         </div>
 
         {preview && (
           <footer>
-            <span><ShieldCheck aria-hidden="true" size={15} />已验证，未安装</span>
-            <button className="desktop-select-command" disabled={loading} onClick={() => void select()} type="button">
-              {loading ? <LoaderCircle aria-hidden="true" className="spin" size={16} /> : <FolderOpen aria-hidden="true" size={16} />}
-              重新选择
-            </button>
+            <span><ShieldCheck aria-hidden="true" size={15} />{installed ? "已安全登记" : "已验证，未安装"}</span>
+            <div className="desktop-dialog-actions">
+              {installationEnabled && !installed &&
+                <button className="desktop-select-command" disabled={loading || !confirmed}
+                  onClick={() => void install()} type="button">
+                  {loading ? <LoaderCircle aria-hidden="true" className="spin" size={16} />
+                    : <PackageCheck aria-hidden="true" size={16} />}安装
+                </button>}
+              <button className="desktop-select-command" disabled={loading} onClick={() => void select()} type="button">
+                <FolderOpen aria-hidden="true" size={16} />重新选择
+              </button>
+            </div>
           </footer>
         )}
       </section>

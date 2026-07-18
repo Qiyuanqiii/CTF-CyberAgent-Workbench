@@ -27,7 +27,10 @@ export default function App() {
   const approvalControlEnabled = useConnectionStore((state) => state.approvalControlEnabled);
   const modelControlEnabled = useConnectionStore((state) => state.modelControlEnabled);
   const fileEditReviewEnabled = useConnectionStore((state) => state.fileEditReviewEnabled);
+  const fileEditApplyEnabled = useConnectionStore((state) => state.fileEditApplyEnabled);
   const runWakeControlEnabled = useConnectionStore((state) => state.runWakeControlEnabled);
+  const runWakeExecutionEnabled = useConnectionStore((state) => state.runWakeExecutionEnabled);
+  const skillInstallationEnabled = useConnectionStore((state) => state.skillInstallationEnabled);
   if (!token) {
     return <ConnectionGate />;
   }
@@ -38,13 +41,17 @@ export default function App() {
     runLifecycleEnabled={runLifecycleEnabled} runExecutionEnabled={runExecutionEnabled}
     planDeliveryControlEnabled={planDeliveryControlEnabled}
     approvalControlEnabled={approvalControlEnabled} modelControlEnabled={modelControlEnabled}
-    fileEditReviewEnabled={fileEditReviewEnabled} runWakeControlEnabled={runWakeControlEnabled} />;
+    fileEditReviewEnabled={fileEditReviewEnabled} fileEditApplyEnabled={fileEditApplyEnabled}
+    runWakeControlEnabled={runWakeControlEnabled}
+    runWakeExecutionEnabled={runWakeExecutionEnabled}
+    skillInstallationEnabled={skillInstallationEnabled} />;
 }
 
 function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreationEnabled,
   sessionMessageEnabled, sessionSteeringControlEnabled, runLifecycleEnabled,
   runExecutionEnabled, planDeliveryControlEnabled, approvalControlEnabled,
-  modelControlEnabled, fileEditReviewEnabled, runWakeControlEnabled }: {
+  modelControlEnabled, fileEditReviewEnabled, fileEditApplyEnabled, runWakeControlEnabled,
+  runWakeExecutionEnabled, skillInstallationEnabled }: {
   token: string;
   controlToken: string;
   runControlEnabled: boolean;
@@ -57,7 +64,10 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
   approvalControlEnabled: boolean;
   modelControlEnabled: boolean;
   fileEditReviewEnabled: boolean;
+  fileEditApplyEnabled: boolean;
   runWakeControlEnabled: boolean;
+  runWakeExecutionEnabled: boolean;
+  skillInstallationEnabled: boolean;
 }) {
   const [skillPreviewOpen, setSkillPreviewOpen] = useState(false);
   const [runCreationOpen, setRunCreationOpen] = useState(false);
@@ -68,11 +78,13 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
     sessionSteeringControlEnabled,
     runLifecycleEnabled, runExecutionEnabled,
     planDeliveryControlEnabled, approvalControlEnabled, modelControlEnabled,
-    fileEditReviewEnabled, runWakeControlEnabled,
+    fileEditReviewEnabled, fileEditApplyEnabled, runWakeControlEnabled,
+    runWakeExecutionEnabled, skillInstallationEnabled,
   }), [token, controlToken, runControlEnabled, runCreationEnabled, sessionMessageEnabled,
     sessionSteeringControlEnabled, runLifecycleEnabled, runExecutionEnabled,
     planDeliveryControlEnabled, approvalControlEnabled, modelControlEnabled,
-    fileEditReviewEnabled, runWakeControlEnabled]);
+    fileEditReviewEnabled, fileEditApplyEnabled, runWakeControlEnabled,
+    runWakeExecutionEnabled, skillInstallationEnabled]);
   const queryClient = useQueryClient();
   const health = useConnectionStore((state) => state.health);
   const setHealth = useConnectionStore((state) => state.setHealth);
@@ -138,7 +150,8 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
           </main>
         </div>
       </div>
-      <DesktopSkillPreviewDialog open={skillPreviewOpen} onClose={() => setSkillPreviewOpen(false)} />
+      <DesktopSkillPreviewDialog installationEnabled={skillInstallationEnabled}
+        open={skillPreviewOpen} onClose={() => setSkillPreviewOpen(false)} />
       <ModelAvailabilityDialog client={client} open={modelsOpen}
         onClose={() => setModelsOpen(false)} />
       <RunCreationDialog client={client} open={runCreationOpen}

@@ -17,8 +17,10 @@ import (
 	"time"
 
 	"cyberagent-workbench/internal/apperror"
+	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/skills"
+	"cyberagent-workbench/internal/store"
 	"cyberagent-workbench/internal/toolgateway"
 )
 
@@ -63,7 +65,9 @@ func TestDesktopSkillPackagePreviewUsesOneTimePathlessSnapshot(t *testing.T) {
 		preview.Profiles[0] != string(domain.ProfileReview) ||
 		preview.DeclaredToolCount != 2 || len(preview.DeclaredTools) != 2 ||
 		preview.TrustClass != string(skills.PackageTrustOperatorInstalledUntrusted) ||
-		len(preview.RiskCodes) != 2 || !preview.Validated {
+		len(preview.RiskCodes) != 2 || !preview.Validated ||
+		len(preview.ConfirmationHandle) != skillPackageSelectionTokenLength ||
+		!preview.ConfirmationExpiresAt.After(time.Now().UTC()) {
 		t.Fatalf("unexpected desktop package preview: %#v", preview)
 	}
 	if preview.ExecutableAssetCount != 0 || preview.InstallHookCount != 0 ||
@@ -83,6 +87,7 @@ func TestDesktopSkillPackagePreviewUsesOneTimePathlessSnapshot(t *testing.T) {
 	}
 	assertExactJSONKeys(t, previewJSON, []string{
 		"archive_bytes", "archive_sha256", "content_bytes", "content_token_upper_bound",
+		"confirmation_expires_at", "confirmation_handle",
 		"declared_tool_count", "declared_tools", "entry_count", "executable_asset_count",
 		"import_command_execution", "import_network_access", "import_provider_calls",
 		"install_hook_count", "installation_authorized", "name", "package_fingerprint",
@@ -91,6 +96,78 @@ func TestDesktopSkillPackagePreviewUsesOneTimePathlessSnapshot(t *testing.T) {
 	})
 	if _, err := bridge.Preview(context.Background(), selection.Handle); apperror.CodeOf(err) != apperror.CodeNotFound {
 		t.Fatalf("replayed handle error = %v, code = %s", err, apperror.CodeOf(err))
+	}
+	raw, installPreview, err := bridge.ConsumeInstall(context.Background(),
+		preview.ConfirmationHandle)
+	if err != nil || installPreview.ArchiveSHA256 != preview.ArchiveSHA256 {
+		t.Fatalf("confirmation material preview=%#v err=%v", installPreview, err)
+	}
+	if _, err := skills.ParsePackage(raw); err != nil {
+		t.Fatalf("retained validated package was changed through source path: %v", err)
+	}
+	if _, _, err := bridge.ConsumeInstall(context.Background(),
+		preview.ConfirmationHandle); apperror.CodeOf(err) != apperror.CodeNotFound {
+		t.Fatalf("replayed confirmation handle error=%v", err)
+	}
+}
+
+func TestDesktopSkillPackageInstallConsumesConfirmationIntoInertRegistry(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	packagePath := filepath.Join(home, "install.zip")
+	writeDesktopSkillPackage(t, packagePath, "Install confirmation.", []byte("# Install\n"))
+	state, err := store.Open(filepath.Join(home, "desktop-install.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer state.Close()
+	objects, err := skills.NewLocalPackageObjectStore(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := skills.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
+	installer := application.NewSkillPackageRegistryService(state, objects, registry)
+	selector, previewBridge := NewSkillPackagePreviewBoundary()
+	bridge, err := NewDesktopBridge(DesktopBridgeConfig{
+		ContextProvider: func() context.Context { return ctx },
+		FilePicker:      &testSkillPackagePicker{path: packagePath},
+		ReadToken:       testDesktopReadToken, ControlToken: testDesktopControlToken,
+		SkillInstallationEnabled: true, SkillInstaller: installer,
+		APIVersion: "api.v1", AppVersion: "test", UIDigest: testDesktopUIDigest,
+		Selector: selector, PreviewBridge: previewBridge,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialog, err := bridge.SelectSkillPackage()
+	if err != nil || dialog.Selection == nil {
+		t.Fatalf("dialog=%#v err=%v", dialog, err)
+	}
+	preview, err := bridge.PreviewSkillPackage(dialog.Selection.Handle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := bridge.InstallSkillPackage(SkillPackageInstallRequest{
+		ProtocolVersion:    SkillPackageInstallProtocolVersion,
+		ConfirmationHandle: preview.ConfirmationHandle, Surface: "code",
+		OperationKey: "desktop-skill-install-0001", ConfirmUntrusted: true,
+	})
+	if err != nil || result.Name != preview.Name || result.Version != preview.Version ||
+		result.ArchiveSHA256 != preview.ArchiveSHA256 || result.Replayed ||
+		result.ImportCommandExecution || result.ImportNetworkAccess ||
+		result.ImportProviderCalls || result.ToolCapabilityGrant ||
+		result.RunSelectionAuthorized || result.ContextInjectionAuthorized {
+		t.Fatalf("install result=%#v err=%v", result, err)
+	}
+	if _, err := bridge.InstallSkillPackage(SkillPackageInstallRequest{
+		ProtocolVersion:    SkillPackageInstallProtocolVersion,
+		ConfirmationHandle: preview.ConfirmationHandle, Surface: "code",
+		OperationKey: "desktop-skill-install-0001", ConfirmUntrusted: true,
+	}); apperror.CodeOf(err) != apperror.CodeNotFound {
+		t.Fatalf("confirmation handle replay error=%v", err)
 	}
 }
 

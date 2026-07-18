@@ -52,12 +52,12 @@ func (p *testSkillPackagePicker) OpenSkillPackage(ctx context.Context) (string, 
 	return path, err
 }
 
-func TestDesktopBridgeBindsOnlyThreePathlessMethods(t *testing.T) {
+func TestDesktopBridgeBindsOnlyFourPathlessMethods(t *testing.T) {
 	typ := reflect.TypeFor[*DesktopBridge]()
-	if typ.NumMethod() != 3 {
-		t.Fatalf("exported method count = %d, want 3", typ.NumMethod())
+	if typ.NumMethod() != 4 {
+		t.Fatalf("exported method count = %d, want 4", typ.NumMethod())
 	}
-	want := []string{"Bootstrap", "PreviewSkillPackage", "SelectSkillPackage"}
+	want := []string{"Bootstrap", "InstallSkillPackage", "PreviewSkillPackage", "SelectSkillPackage"}
 	for index, name := range want {
 		if method := typ.Method(index); method.Name != name {
 			t.Fatalf("method %d = %s, want %s", index, method.Name, name)
@@ -91,7 +91,8 @@ func TestDesktopBridgeBootstrapsMemoryOnlyClosedAuthority(t *testing.T) {
 		!bootstrap.RunLifecycleEnabled || !bootstrap.RunExecutionEnabled ||
 		bootstrap.PlanDeliveryControlEnabled || bootstrap.ApprovalControlEnabled ||
 		bootstrap.ModelControlEnabled || bootstrap.FileEditReviewEnabled ||
-		bootstrap.RunWakeControlEnabled ||
+		bootstrap.RunWakeControlEnabled || bootstrap.FileEditApplyEnabled ||
+		bootstrap.RunWakeExecutionEnabled ||
 		bootstrap.ReadOnlyDefault || bootstrap.ProcessExecutionEnabled ||
 		bootstrap.ShellExecutionEnabled || bootstrap.DockerExecutionEnabled ||
 		bootstrap.SkillInstallationEnabled || bootstrap.RendererPathInputSupported {
@@ -105,10 +106,12 @@ func TestDesktopBridgeBootstrapsMemoryOnlyClosedAuthority(t *testing.T) {
 		"api_base_url", "api_version", "app_version", "approval_control_enabled",
 		"control_enabled", "control_token",
 		"docker_execution_enabled", "file_edit_review_enabled", "model_control_enabled",
+		"file_edit_apply_enabled",
 		"process_execution_enabled", "protocol_version", "read_only_default",
 		"plan_delivery_control_enabled", "read_token", "renderer_path_input_supported",
 		"run_creation_enabled", "shell_execution_enabled",
 		"run_execution_enabled", "run_lifecycle_enabled", "run_wake_control_enabled",
+		"run_wake_execution_enabled",
 		"session_message_enabled", "session_steering_control_enabled",
 		"skill_installation_enabled", "ui_digest",
 	})

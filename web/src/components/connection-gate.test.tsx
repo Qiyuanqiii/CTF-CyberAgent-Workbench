@@ -58,6 +58,8 @@ describe("ConnectionGate", () => {
       model_control_enabled: false,
       file_edit_review_enabled: false,
       run_wake_control_enabled: false,
+      file_edit_apply_enabled: false,
+      run_wake_execution_enabled: false,
       read_only_default: true,
       process_execution_enabled: false,
       shell_execution_enabled: false,
@@ -67,6 +69,7 @@ describe("ConnectionGate", () => {
     });
     window.go = { desktop: { DesktopBridge: {
       Bootstrap: bootstrap,
+      InstallSkillPackage: vi.fn(),
       SelectSkillPackage: vi.fn(),
       PreviewSkillPackage: vi.fn(),
     } } };

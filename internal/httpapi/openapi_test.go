@@ -1,7 +1,11 @@
 package httpapi
 
 import (
+	"archive/zip"
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -20,6 +24,7 @@ import (
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
+	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/toolgateway"
 )
 
@@ -91,10 +96,16 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 					item.Post.OperationID == "diagnoseProvider") ||
 				(path == FileEditReviewPathTemplate &&
 					item.Post.OperationID == "reviewRunFileEdit") ||
+				(path == FileEditApplyPathTemplate &&
+					item.Post.OperationID == "applyRunFileEdit") ||
 				(path == RunWakeIntentPathTemplate &&
 					item.Post.OperationID == "scheduleRunWake") ||
 				(path == RunWakeCancellationPathTemplate &&
-					item.Post.OperationID == "cancelRunWake")
+					item.Post.OperationID == "cancelRunWake") ||
+				(path == RunWakeExecutionPathTemplate &&
+					item.Post.OperationID == "consumeRunWake") ||
+				(path == SkillPackageInstallPath &&
+					item.Post.OperationID == "installSkillPackage")
 			if !validControl ||
 				item.Post.ReadOnly || item.Post.Responses["202"] == nil || item.Post.RequestBody == nil ||
 				len(item.Post.Security) != 1 || item.Post.Security[0]["ControlBearerAuth"] == nil {
@@ -143,8 +154,11 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				path == RunExecutionControlPathTemplate ||
 				path == ModelRouteControlPathTemplate ||
 				path == ProviderDiagnosticPath || path == FileEditReviewPathTemplate ||
+				path == FileEditApplyPathTemplate ||
 				path == RunWakeIntentPathTemplate ||
-				path == RunWakeCancellationPathTemplate) &&
+				path == RunWakeCancellationPathTemplate ||
+				path == RunWakeExecutionPathTemplate ||
+				path == SkillPackageInstallPath) &&
 				method == "post") {
 				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
 			}
@@ -157,6 +171,10 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 			"OperatorSteeringMessageView", field)
 	}
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "ArtifactView", "content")
+	for _, field := range []string{"path", "content", "command", "hook"} {
+		assertOpenAPISchemaOmits(t, document.Components.Schemas,
+			"SkillPackageInstallRequestView", field)
+	}
 	for _, field := range []string{"command", "content", "path", "request_fingerprint",
 		"decision_reason", "requested_by", "reviewed_by", "grant_id"} {
 		assertOpenAPISchemaOmits(t, document.Components.Schemas,
@@ -274,6 +292,40 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 			RequestedBy: "openapi_test"}); err != nil {
 		t.Fatal(err)
 	}
+	_, wakeExecutionCreated, err := application.NewRunService(fixture.store).Create(t.Context(),
+		application.CreateRunRequest{Goal: "OpenAPI wake execution target", Profile: "code",
+			ModelRoute: "mock/mock-code", Budget: domain.Budget{MaxTurns: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wakeExecutionRun, err := application.NewRunService(fixture.store).Start(t.Context(),
+		wakeExecutionCreated.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.store.EnqueueOperatorSteering(t.Context(),
+		domain.EnqueueOperatorSteeringRequest{RunID: wakeExecutionRun.ID,
+			SessionID: wakeExecutionRun.SessionID, Content: "OpenAPI foreground wake input",
+			OperationKey: "openapi-wake-execution-queue-0001",
+			RequestedBy:  "openapi_test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.NewRunWakeControlService(fixture.store).Schedule(t.Context(),
+		application.ScheduleRunWakeRequest{Version: domain.RunWakeControlProtocolVersion,
+			RunID: wakeExecutionRun.ID, OperationKey: "openapi-wake-execution-schedule-0001",
+			RequestedBy: "openapi_test", MaxAttempts: 2, BaseBackoffSeconds: 5,
+			MaxBackoffSeconds: 30, MaxElapsedSeconds: 120}); err != nil {
+		t.Fatal(err)
+	}
+	skillArchive := buildOpenAPISkillPackage(t)
+	objects, err := skills.NewLocalPackageObjectStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	builtins, err := skills.BuiltinRegistry()
+	if err != nil {
+		t.Fatal(err)
+	}
 	fixture.api.runLifecycleEnabled = true
 	fixture.api.runExecutionEnabled = true
 	fixture.api.planDeliveryControlEnabled = true
@@ -281,9 +333,13 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 	fixture.api.modelControlEnabled = true
 	fixture.api.fileEditReviewEnabled = true
 	fixture.api.runWakeControlEnabled = true
+	fixture.api.fileEditApplyEnabled = true
+	fixture.api.runWakeExecutionEnabled = true
+	fixture.api.skillInstallationEnabled = true
 	fixture.api.runLifecycleController = application.NewRunLifecycleControlService(fixture.store)
-	fixture.api.runExecutionController = application.NewRunExecutionHandoffService(
+	executionController := application.NewRunExecutionHandoffService(
 		fixture.store, llm.NewDefaultRouter(), policy.NewDefaultChecker())
+	fixture.api.runExecutionController = executionController
 	fixture.api.planDeliveryController = application.NewPlanDeliveryControlService(fixture.store)
 	fixture.api.approvalController = application.NewApprovalControlService(fixture.store,
 		gateway, checker)
@@ -291,6 +347,11 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		fixture.api.modelRegistry, fixture.store)
 	fixture.api.fileEditReviewController = application.NewFileEditReviewService(fixture.store)
 	fixture.api.runWakeController = application.NewRunWakeControlService(fixture.store)
+	fixture.api.fileEditApplyController = application.NewFileEditApplyService(fixture.store, checker)
+	fixture.api.runWakeExecutionController = application.NewForegroundRunWakeConsumer(
+		fixture.store, executionController)
+	fixture.api.skillInstallationController = application.NewSkillPackageRegistryService(
+		fixture.store, objects, builtins)
 	steering, err := fixture.store.EnqueueOperatorSteering(t.Context(),
 		domain.EnqueueOperatorSteeringRequest{
 			RunID: fixture.run.ID, SessionID: fixture.run.SessionID,
@@ -334,6 +395,8 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		} else if spec.Path == RunWakeIntentPathTemplate ||
 			spec.Path == RunWakeCancellationPathTemplate {
 			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", wakeRun.ID)
+		} else if spec.Path == RunWakeExecutionPathTemplate {
+			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", wakeExecutionRun.ID)
 		}
 		t.Run(spec.OperationID, func(t *testing.T) {
 			var response *httptest.ResponseRecorder
@@ -369,12 +432,20 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 					body = `{"version":"provider_diagnostic.v1","provider":"mock","model":"mock-code","confirm_diagnostic":true}`
 				} else if spec.Path == FileEditReviewPathTemplate {
 					body = `{"version":"file_edit_review.v1","action":"approve_intent"}`
+				} else if spec.Path == FileEditApplyPathTemplate {
+					body = `{"version":"file_edit_apply.v1"}`
 				} else if spec.Path == RunWakeIntentPathTemplate {
 					body = `{"version":"run_wake_control.v1","max_attempts":3,` +
 						`"initial_delay_seconds":0,"base_backoff_seconds":5,` +
 						`"max_backoff_seconds":60,"max_elapsed_seconds":300}`
 				} else if spec.Path == RunWakeCancellationPathTemplate {
 					body = `{"version":"run_wake_control.v1"}`
+				} else if spec.Path == RunWakeExecutionPathTemplate {
+					body = `{"version":"run_wake_consumer.v1","max_steps":1}`
+				} else if spec.Path == SkillPackageInstallPath {
+					body = `{"version":"skill_package_installation.v1","archive_base64":"` +
+						base64.StdEncoding.EncodeToString(skillArchive) +
+						`","surface":"code","confirm_untrusted":true}`
 				} else if spec.Path != RunExecutionProfileControlPathTemplate {
 					attemptID := fixture.checkpoint.AttemptID
 					modelAttempt := 1
@@ -418,6 +489,44 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		"127.0.0.1:8765", "127.0.0.1:45000", nil)
 	assertAPIError(t, unauthorized, http.StatusUnauthorized, "POLICY_DENIED")
 	assertAPIError(t, fixture.get(t, OpenAPIPath+"?format=yaml"), http.StatusBadRequest, "INVALID_ARGUMENT")
+}
+
+func buildOpenAPISkillPackage(t *testing.T) []byte {
+	t.Helper()
+	content := []byte("# OpenAPI external review\n\nInspect workspace evidence only.\n")
+	digest := sha256.Sum256(content)
+	manifest := skills.Manifest{
+		Protocol: skills.ProtocolVersion, Name: "openapi-external-review", Version: "1.0.0",
+		Description: "OpenAPI inert Skill installation fixture.",
+		Profiles:    []domain.Profile{domain.ProfileReview},
+		ToolDependencies: []toolgateway.ToolName{
+			toolgateway.ListWorkspaceTool, toolgateway.ReadFileTool,
+		},
+		ContentPath: skills.PackageContentPath, ContentSHA256: hex.EncodeToString(digest[:]),
+		ContentBytes: len(content), ContentTokenUpperBound: skills.ContentTokenUpperBound(content),
+	}
+	manifestRaw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	for _, entry := range []struct {
+		name string
+		data []byte
+	}{{skills.PackageManifestPath, manifestRaw}, {skills.PackageContentPath, content}} {
+		file, createErr := writer.CreateHeader(&zip.FileHeader{Name: entry.name, Method: zip.Deflate})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		if _, writeErr := file.Write(entry.data); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
 }
 
 func prepareOpenAPIPlanControlTarget(t *testing.T,

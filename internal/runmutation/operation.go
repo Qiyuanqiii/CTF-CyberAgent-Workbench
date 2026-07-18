@@ -138,6 +138,23 @@ func RunWakeCancelRequestFingerprint(runID string, requestedBy string) string {
 	return Fingerprint("run_wake_cancel_request.v1", runID, requestedBy)
 }
 
+func RunWakeConsumptionOperationKey(intentID string, generation int) string {
+	return "wake-consume-" + Fingerprint("run_wake_consumption_handoff.v1",
+		intentID, strconv.Itoa(generation))
+}
+
+func FileEditApplyOperationDigest(runID string, editID string,
+	operationKey string,
+) string {
+	return Fingerprint("file_edit_apply_operation.v1", runID, editID, operationKey)
+}
+
+func FileEditApplyRequestFingerprint(runID string, editID string,
+	appliedBy string,
+) string {
+	return Fingerprint("file_edit_apply_request.v1", runID, editID, appliedBy)
+}
+
 func SupervisorToolOperationKey(runID string, turn int, toolName string, payloadJSON string) string {
 	return Fingerprint("supervisor_structured_tool.v1", strings.TrimSpace(runID), strconv.Itoa(turn),
 		strings.TrimSpace(toolName), strings.TrimSpace(payloadJSON))

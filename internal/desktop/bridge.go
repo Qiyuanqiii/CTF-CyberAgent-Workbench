@@ -11,11 +11,14 @@ import (
 	"unicode/utf8"
 
 	"cyberagent-workbench/internal/apperror"
+	"cyberagent-workbench/internal/application"
+	"cyberagent-workbench/internal/domain"
 )
 
 const (
 	ConnectionBootstrapProtocolVersion = "desktop_connection_bootstrap.v1"
 	SkillPackageDialogProtocolVersion  = "desktop_skill_package_dialog.v1"
+	SkillPackageInstallProtocolVersion = "desktop_skill_package_install.v1"
 	DesktopAPIBasePath                 = "/api/v1"
 
 	desktopTokenMinBytes = 32
@@ -44,6 +47,8 @@ type ConnectionBootstrap struct {
 	ModelControlEnabled           bool   `json:"model_control_enabled"`
 	FileEditReviewEnabled         bool   `json:"file_edit_review_enabled"`
 	RunWakeControlEnabled         bool   `json:"run_wake_control_enabled"`
+	FileEditApplyEnabled          bool   `json:"file_edit_apply_enabled"`
+	RunWakeExecutionEnabled       bool   `json:"run_wake_execution_enabled"`
 	ReadOnlyDefault               bool   `json:"read_only_default"`
 	ProcessExecutionEnabled       bool   `json:"process_execution_enabled"`
 	ShellExecutionEnabled         bool   `json:"shell_execution_enabled"`
@@ -74,6 +79,37 @@ type SkillPackageFilePicker interface {
 	OpenSkillPackage(context.Context) (string, error)
 }
 
+type SkillPackageInstaller interface {
+	Import(context.Context, application.ImportSkillPackageRequest) (
+		application.ImportSkillPackageResult, error)
+}
+
+type SkillPackageInstallRequest struct {
+	ProtocolVersion    string `json:"protocol_version"`
+	ConfirmationHandle string `json:"confirmation_handle"`
+	Surface            string `json:"surface"`
+	OperationKey       string `json:"operation_key"`
+	ConfirmUntrusted   bool   `json:"confirm_untrusted"`
+}
+
+type SkillPackageInstallResult struct {
+	ProtocolVersion            string `json:"protocol_version"`
+	Name                       string `json:"name"`
+	Version                    string `json:"version"`
+	Surface                    string `json:"surface"`
+	TrustClass                 string `json:"trust_class"`
+	ArchiveSHA256              string `json:"archive_sha256"`
+	PackageFingerprint         string `json:"package_fingerprint"`
+	Replayed                   bool   `json:"replayed"`
+	RecoveredPending           bool   `json:"recovered_pending"`
+	ImportCommandExecution     bool   `json:"import_command_execution"`
+	ImportNetworkAccess        bool   `json:"import_network_access"`
+	ImportProviderCalls        bool   `json:"import_provider_calls"`
+	ToolCapabilityGrant        bool   `json:"tool_capability_grant"`
+	RunSelectionAuthorized     bool   `json:"run_selection_authorized"`
+	ContextInjectionAuthorized bool   `json:"context_injection_authorized"`
+}
+
 type DesktopBridgeConfig struct {
 	ContextProvider               func() context.Context
 	FilePicker                    SkillPackageFilePicker
@@ -90,11 +126,15 @@ type DesktopBridgeConfig struct {
 	ModelControlEnabled           bool
 	FileEditReviewEnabled         bool
 	RunWakeControlEnabled         bool
+	FileEditApplyEnabled          bool
+	RunWakeExecutionEnabled       bool
+	SkillInstallationEnabled      bool
 	APIVersion                    string
 	AppVersion                    string
 	UIDigest                      string
 	Selector                      NativeSkillPackageSelector
 	PreviewBridge                 *SkillPackagePreviewBridge
+	SkillInstaller                SkillPackageInstaller
 }
 
 // DesktopBridge is the complete renderer binding surface for D0-A. Keep this
@@ -104,6 +144,7 @@ type DesktopBridge struct {
 	filePicker      SkillPackageFilePicker
 	selector        NativeSkillPackageSelector
 	previewBridge   *SkillPackagePreviewBridge
+	skillInstaller  SkillPackageInstaller
 	bootstrap       ConnectionBootstrap
 	dialogActive    atomic.Bool
 }
@@ -125,6 +166,8 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 		config.RunExecutionEnabled || config.PlanDeliveryControlEnabled ||
 		config.ApprovalControlEnabled || config.ModelControlEnabled ||
 		config.FileEditReviewEnabled || config.RunWakeControlEnabled
+	controlEnabled = controlEnabled || config.FileEditApplyEnabled ||
+		config.RunWakeExecutionEnabled || config.SkillInstallationEnabled
 	if controlEnabled && config.ControlToken == "" {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop control capabilities require a control token")
@@ -132,6 +175,10 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 	if config.ControlToken != "" && !controlEnabled {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop control token requires an enabled control capability")
+	}
+	if config.SkillInstallationEnabled && config.SkillInstaller == nil {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"desktop Skill installation requires the Go Registry installer")
 	}
 	readHash := sha256.Sum256([]byte(config.ReadToken))
 	controlHash := sha256.Sum256([]byte(config.ControlToken))
@@ -151,6 +198,7 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 		filePicker:      config.FilePicker,
 		selector:        config.Selector,
 		previewBridge:   config.PreviewBridge,
+		skillInstaller:  config.SkillInstaller,
 		bootstrap: ConnectionBootstrap{
 			ProtocolVersion: ConnectionBootstrapProtocolVersion,
 			APIBaseURL:      DesktopAPIBasePath, APIVersion: apiVersion, AppVersion: appVersion,
@@ -166,9 +214,12 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 			ModelControlEnabled:           config.ModelControlEnabled,
 			FileEditReviewEnabled:         config.FileEditReviewEnabled,
 			RunWakeControlEnabled:         config.RunWakeControlEnabled,
+			FileEditApplyEnabled:          config.FileEditApplyEnabled,
+			RunWakeExecutionEnabled:       config.RunWakeExecutionEnabled,
 			ReadOnlyDefault:               !controlEnabled,
 			ProcessExecutionEnabled:       false, ShellExecutionEnabled: false, DockerExecutionEnabled: false,
-			SkillInstallationEnabled: false, RendererPathInputSupported: false,
+			SkillInstallationEnabled:   config.SkillInstallationEnabled,
+			RendererPathInputSupported: false,
 		},
 	}, nil
 }
@@ -238,6 +289,67 @@ func (b *DesktopBridge) PreviewSkillPackage(handle string) (SkillPackagePreview,
 		return SkillPackagePreview{}, err
 	}
 	return b.previewBridge.Preview(ctx, handle)
+}
+
+// InstallSkillPackage consumes a short-lived preview confirmation. Package
+// bytes remain in Go and flow only through the inert content-addressed
+// Registry; this method cannot execute scripts, hooks, commands, tools,
+// provider calls, or network requests.
+func (b *DesktopBridge) InstallSkillPackage(
+	request SkillPackageInstallRequest,
+) (SkillPackageInstallResult, error) {
+	if b == nil || !b.bootstrap.SkillInstallationEnabled || b.skillInstaller == nil ||
+		b.previewBridge == nil {
+		return SkillPackageInstallResult{}, apperror.New(apperror.CodeNotFound,
+			"desktop Skill installation is disabled")
+	}
+	if request.ProtocolVersion != SkillPackageInstallProtocolVersion ||
+		!request.ConfirmUntrusted {
+		return SkillPackageInstallResult{}, apperror.New(apperror.CodeFailedPrecondition,
+			"desktop Skill installation requires explicit untrusted-content confirmation")
+	}
+	surface, err := domain.ParseExecutionSurface(request.Surface)
+	if err != nil {
+		return SkillPackageInstallResult{}, apperror.Normalize(err)
+	}
+	ctx, err := b.lifecycleContext()
+	if err != nil {
+		return SkillPackageInstallResult{}, err
+	}
+	raw, preview, err := b.previewBridge.ConsumeInstall(ctx,
+		request.ConfirmationHandle)
+	if err != nil {
+		return SkillPackageInstallResult{}, err
+	}
+	result, err := b.skillInstaller.Import(ctx, application.ImportSkillPackageRequest{
+		Raw: raw, Surface: surface, OperationKey: request.OperationKey,
+		InstalledBy: "desktop_operator", ConfirmUntrusted: true,
+	})
+	if err != nil {
+		return SkillPackageInstallResult{}, apperror.Normalize(err)
+	}
+	installation := result.Package.Installation
+	if installation.Name != preview.Name || installation.Version != preview.Version ||
+		installation.ArchiveSHA256 != preview.ArchiveSHA256 ||
+		installation.PackageFingerprint != preview.PackageFingerprint ||
+		installation.Surface != surface {
+		return SkillPackageInstallResult{}, apperror.New(apperror.CodeInternal,
+			"desktop Skill installation result violated its preview binding")
+	}
+	return SkillPackageInstallResult{
+		ProtocolVersion: SkillPackageInstallProtocolVersion,
+		Name:            installation.Name, Version: installation.Version,
+		Surface: string(installation.Surface), TrustClass: string(installation.TrustClass),
+		ArchiveSHA256:      installation.ArchiveSHA256,
+		PackageFingerprint: installation.PackageFingerprint,
+		Replayed:           result.Replayed, RecoveredPending: result.RecoveredPending,
+		ImportCommandExecution:     installation.ImportCommandExecution,
+		ImportNetworkAccess:        installation.ImportNetworkAccess,
+		ImportProviderCalls:        installation.ImportProviderCalls,
+		ToolCapabilityGrant:        installation.ToolCapabilityGrant,
+		RunSelectionAuthorized:     installation.RunSelectionAuthorized,
+		ContextInjectionAuthorized: installation.ContextInjectionAuthorized,
+	}, nil
 }
 
 func (b *DesktopBridge) lifecycleContext() (context.Context, error) {

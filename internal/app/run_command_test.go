@@ -941,8 +941,13 @@ func TestRunCLIEndToEndLifecycle(t *testing.T) {
 	if editID == "" {
 		t.Fatalf("missing edit id in output: %s", editOutput)
 	}
-	if _, stderr, code := executeTestCommand(t, "edit", "approve", editID); code != 0 {
-		t.Fatalf("file edit approval failed: %s", stderr)
+	if _, stderr, code := executeTestCommand(t, "edit", "review-approve", runID, editID); code != 0 {
+		t.Fatalf("file edit review failed: %s", stderr)
+	}
+	applyOutput, stderr, code := executeTestCommand(t, "edit", "apply", runID, editID,
+		"--operation-key", "run-cli-file-apply-0001")
+	if code != 0 || !strings.Contains(applyOutput, "file_written: true") {
+		t.Fatalf("file edit apply failed: output=%s stderr=%s", applyOutput, stderr)
 	}
 	for _, step := range []struct {
 		action string

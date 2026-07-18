@@ -233,9 +233,36 @@ func (m *Manager) Approve(ctx context.Context, id string, workspaceRoot string) 
 	} else if !os.IsNotExist(statErr) {
 		return m.fail(ctx, edit, statErr)
 	}
-	if err := os.WriteFile(target, []byte(edit.ProposedText), mode); err != nil {
+	stagedPath, err := stageAtomicReplacement(target, edit.ProposedText, mode)
+	if err != nil {
 		return m.fail(ctx, edit, err)
 	}
+	defer func() {
+		if stagedPath != "" {
+			_ = os.Remove(stagedPath)
+		}
+	}()
+	finalTarget, err := tools.NewWorkspaceFS(workspaceRoot).ResolveForWrite(edit.Path)
+	if err != nil {
+		return m.fail(ctx, edit, err)
+	}
+	if finalTarget != target {
+		return m.fail(ctx, edit, errors.New(
+			"workspace path changed before atomic replacement; refusing to write"))
+	}
+	latest, latestExists, err = readCurrentText(finalTarget)
+	if err != nil {
+		return m.fail(ctx, edit, err)
+	}
+	if contentHash(latest, latestExists) != edit.OriginalHash {
+		return m.fail(ctx, edit, errors.New(
+			"workspace file changed before atomic replacement; refusing to overwrite"))
+	}
+	if err := os.Rename(stagedPath, finalTarget); err != nil {
+		return m.fail(ctx, edit, err)
+	}
+	stagedPath = ""
+	syncParentDirectory(finalTarget)
 
 	written, writtenExists, err := readCurrentText(target)
 	if err != nil {
@@ -248,6 +275,44 @@ func (m *Manager) Approve(ctx context.Context, id string, workspaceRoot string) 
 	edit.Reason = ""
 	edit.UpdatedAt = time.Now().UTC()
 	return m.store.SaveFileEdit(ctx, edit)
+}
+
+func stageAtomicReplacement(target string, content string, mode os.FileMode) (string, error) {
+	file, err := os.CreateTemp(filepath.Dir(target), ".cyberagent-edit-*")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	complete := false
+	defer func() {
+		if !complete {
+			_ = file.Close()
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err := io.WriteString(file, content); err != nil {
+		return "", err
+	}
+	if err := file.Chmod(mode); err != nil {
+		return "", err
+	}
+	if err := file.Sync(); err != nil {
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		return "", err
+	}
+	complete = true
+	return path, nil
+}
+
+func syncParentDirectory(path string) {
+	directory, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return
+	}
+	_ = directory.Sync()
+	_ = directory.Close()
 }
 
 // ApproveIntent records an operator review without touching the workspace.
@@ -366,6 +431,28 @@ func contentHash(content string, exists bool) string {
 
 func HashText(content string) string {
 	return contentHash(content, true)
+}
+
+// CurrentHash resolves a persisted workspace-relative path through the same
+// workspace boundary used for writes and returns either its SHA-256 or the
+// stable "missing" sentinel.
+func CurrentHash(workspaceRoot string, path string) (string, error) {
+	if strings.TrimSpace(workspaceRoot) == "" {
+		return "", errors.New("workspace root is required")
+	}
+	relPath, err := normalizePath(path)
+	if err != nil {
+		return "", err
+	}
+	target, err := tools.NewWorkspaceFS(workspaceRoot).ResolveForWrite(relPath)
+	if err != nil {
+		return "", err
+	}
+	current, exists, err := readCurrentText(target)
+	if err != nil {
+		return "", err
+	}
+	return contentHash(current, exists), nil
 }
 
 func newID(prefix string) string {

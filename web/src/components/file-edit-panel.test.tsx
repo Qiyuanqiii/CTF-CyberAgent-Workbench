@@ -38,6 +38,37 @@ describe("FileEditPanel", () => {
       "run-1", "edit-1", { version: "file_edit_review.v1", action: "approve_intent" },
     ]);
   });
+
+  it("applies only an approved edit with a memory-only retry key", async () => {
+    const user = userEvent.setup();
+    const edit = {
+      id: "edit-approved", session_id: "session-1", workspace_id: "workspace-1",
+      path: "safe.txt", status: "approved", diff: "--- safe.txt\n+++ safe.txt\n+value",
+      original_hash: "a".repeat(64), proposed_hash: "b".repeat(64),
+      secrets_redacted: false, allowed_actions: [], apply_enabled: true,
+      created_at: "2026-07-18T00:00:00Z", updated_at: "2026-07-18T00:00:00Z",
+    } as const;
+    const applyFileEdit = vi.fn().mockResolvedValue({
+      protocol_version: "file_edit_apply.v1", run_id: "run-1", status: "applied",
+      edit: { ...edit, status: "applied", apply_enabled: false },
+      replayed: false, file_written: true, policy_rechecked: true,
+    });
+    const client = {
+      hasFileEditReview: true, hasFileEditApply: true,
+      fileEditQueue: vi.fn().mockResolvedValue({
+        protocol_version: "file_edit_review.v1", run_id: "run-1", items: [edit],
+        truncated: false, apply_enabled: true,
+      }),
+      reviewFileEdit: vi.fn(), applyFileEdit,
+    } as unknown as CyberAgentClient;
+    renderPanel(client);
+    await user.click(await screen.findByRole("button", { name: "Apply safe.txt" }));
+    await waitFor(() => expect(applyFileEdit).toHaveBeenCalledTimes(1));
+    expect(applyFileEdit.mock.calls[0]?.slice(0, 3)).toEqual([
+      "run-1", "edit-approved", { version: "file_edit_apply.v1" },
+    ]);
+    expect(applyFileEdit.mock.calls[0]?.[3]).toMatch(/^web-file-apply-/);
+  });
 });
 
 function renderPanel(client: CyberAgentClient) {

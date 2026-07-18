@@ -44,11 +44,38 @@ func (a *App) editCommand(ctx context.Context, args []string) error {
 		return a.editReview(ctx, application.FileEditApproveIntent, args[1:])
 	case "review-deny":
 		return a.editReview(ctx, application.FileEditDeny, args[1:])
+	case "apply":
+		return a.editApply(ctx, args[1:])
 	case "deny":
 		return a.editDeny(ctx, manager, args[1:])
 	default:
 		return fmt.Errorf("unknown edit subcommand %q", args[0])
 	}
+}
+
+func (a *App) editApply(ctx context.Context, args []string) error {
+	fs := newFlagSet("edit apply", a.errOut)
+	operationKey := fs.String("operation-key", "", "stable apply operation key")
+	operator := fs.String("operator", "cli_operator", "operator identity")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{
+		"operation-key": true, "operator": true,
+	})); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 || strings.TrimSpace(*operationKey) == "" {
+		return errors.New("usage: cyberagent edit apply <run-id> <edit-id> --operation-key <key> [--operator <id>]")
+	}
+	result, err := application.NewFileEditApplyService(a.store, a.checker).Apply(ctx,
+		application.ApplyFileEditRequest{
+			Version: fileedit.FileEditApplyProtocolVersion, RunID: fs.Arg(0),
+			EditID: fs.Arg(1), OperationKey: *operationKey, AppliedBy: *operator,
+		})
+	if result.Edit.ID != "" {
+		fmt.Fprintf(a.out, "file edit %s %s\nrun: %s\npath: %s\napply_status: %s\nreplayed: %t\nfile_written: %t\npolicy_rechecked: true\n",
+			result.Edit.ID, result.Edit.Status, fs.Arg(0), result.Edit.Path,
+			result.Result.Status, result.Replayed, result.FileWritten)
+	}
+	return err
 }
 
 func (a *App) editReview(ctx context.Context, action application.FileEditReviewAction,
@@ -183,6 +210,14 @@ func (a *App) editApprove(ctx context.Context, manager fileEditManager, args []s
 	edit, err := manager.Get(ctx, fs.Arg(0))
 	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(edit.SessionID) != "" {
+		if run, found, lookupErr := a.store.GetRunBySession(ctx, edit.SessionID); lookupErr != nil {
+			return lookupErr
+		} else if found {
+			return fmt.Errorf("Run-bound file edit %s cannot use legacy approve; use `cyberagent edit review-approve %s %s`, then `cyberagent edit apply %s %s --operation-key <key>`",
+				edit.ID, run.ID, edit.ID, run.ID, edit.ID)
+		}
 	}
 	rec, err := a.store.GetWorkspaceByID(ctx, edit.WorkspaceID)
 	if err != nil {

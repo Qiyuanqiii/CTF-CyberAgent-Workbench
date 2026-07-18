@@ -531,7 +531,7 @@ func removeSchemaV73ForTestStatements() []string {
 }
 
 func removeSchemaV74ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV75ForTestStatements(), []string{
 		`DROP TRIGGER trg_run_wake_operation_delete_immutable`,
 		`DROP TRIGGER trg_run_wake_operation_update_immutable`,
 		`DROP TRIGGER trg_run_wake_operation_insert`,
@@ -545,5 +545,35 @@ func removeSchemaV74ForTestStatements() []string {
 		`DROP TABLE run_wake_leases`,
 		`DROP TABLE run_wake_intents`,
 		`DELETE FROM schema_migrations WHERE version = 74`,
+	}...)
+}
+
+func removeSchemaV75ForTestStatements() []string {
+	return append(removeSchemaV76ForTestStatements(), []string{
+		`DROP TRIGGER trg_run_wake_consumption_delete_immutable`,
+		`DROP TRIGGER trg_run_wake_consumption_update`,
+		`DROP TRIGGER trg_run_wake_consumption_insert`,
+		`DROP TRIGGER trg_run_wake_intent_update`,
+		`DROP TRIGGER trg_run_wake_lease_update`,
+		`DROP INDEX idx_run_wake_consumptions_intent_created`,
+		`DROP TABLE run_wake_consumptions`,
+		runWakeOwnershipStatements[8],
+		runWakeOwnershipStatements[11],
+		`DELETE FROM schema_migrations WHERE version = 75`,
+	}...)
+}
+
+func removeSchemaV76ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_file_edit_apply_result_delete_immutable`,
+		`DROP TRIGGER trg_file_edit_apply_result_update_immutable`,
+		`DROP TRIGGER trg_file_edit_apply_result_insert`,
+		`DROP TRIGGER trg_file_edit_apply_operation_delete_immutable`,
+		`DROP TRIGGER trg_file_edit_apply_operation_update_immutable`,
+		`DROP TRIGGER trg_file_edit_apply_operation_insert`,
+		`DROP TABLE file_edit_apply_results`,
+		`DROP INDEX idx_file_edit_apply_operations_run_created`,
+		`DROP TABLE file_edit_apply_operations`,
+		`DELETE FROM schema_migrations WHERE version = 76`,
 	}
 }

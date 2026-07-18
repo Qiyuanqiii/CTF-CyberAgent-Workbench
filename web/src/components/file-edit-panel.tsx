@@ -1,5 +1,6 @@
+import { useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, FileDiff, LoaderCircle, X } from "lucide-react";
+import { Check, FileCheck2, FileDiff, LoaderCircle, X } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import type { FileEditReviewRequestView } from "../api/types";
 import { formatDate, shortID } from "../lib/format";
@@ -7,6 +8,7 @@ import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
 
 export function FileEditPanel({ client, runID }: { client: CyberAgentClient; runID: string }) {
   const queryClient = useQueryClient();
+  const applyKeys = useRef(new Map<string, string>());
   const query = useQuery({
     queryKey: ["run", runID, "file-edits"],
     queryFn: ({ signal }) => client.fileEditQueue(runID, signal),
@@ -20,9 +22,26 @@ export function FileEditPanel({ client, runID }: { client: CyberAgentClient; run
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "events"] });
     },
   });
+  const apply = useMutation({
+    mutationFn: ({ editID }: { editID: string }) => {
+      let operationKey = applyKeys.current.get(editID);
+      if (!operationKey) {
+        operationKey = `web-file-apply-${globalThis.crypto.randomUUID()}`;
+        applyKeys.current.set(editID, operationKey);
+      }
+      return client.applyFileEdit(runID, editID, { version: "file_edit_apply.v1" },
+        operationKey);
+    },
+    onSuccess: (result) => {
+      applyKeys.current.delete(result.edit.id);
+      void queryClient.invalidateQueries({ queryKey: ["run", runID, "file-edits"] });
+      void queryClient.invalidateQueries({ queryKey: ["run", runID, "events"] });
+    },
+  });
   if (query.isLoading) return <LoadingState label="Loading file edit previews" />;
   if (query.isError || !query.data) return <ErrorState error={query.error} />;
   if (query.data.items.length === 0) return <EmptyState>No file edit proposals</EmptyState>;
+  const operationError = apply.error ?? review.error;
   return <section className="file-edit-panel" aria-label="File edit previews">
     <header className="projection-heading">
       <div><FileDiff aria-hidden="true" size={17} /><h2>Diff review</h2></div>
@@ -31,6 +50,7 @@ export function FileEditPanel({ client, runID }: { client: CyberAgentClient; run
     <div className="file-edit-list">
       {query.data.items.map((edit) => {
         const active = review.isPending && review.variables?.editID === edit.id;
+        const applying = apply.isPending && apply.variables?.editID === edit.id;
         return <details className="file-edit-row" key={edit.id} open={edit.status === "proposed" || undefined}>
           <summary>
             <code>{edit.path}</code>
@@ -42,7 +62,15 @@ export function FileEditPanel({ client, runID }: { client: CyberAgentClient; run
             <pre>{edit.diff}</pre>
             <footer>
               <time dateTime={edit.updated_at}>{formatDate(edit.updated_at)}</time>
-              <span>Apply authority: disabled</span>
+              <span>Apply authority: {edit.apply_enabled ? "ready" : "disabled"}</span>
+              {client.hasFileEditApply && query.data.apply_enabled && edit.apply_enabled &&
+                <button aria-label={`Apply ${edit.path}`} className="icon-button"
+                  disabled={apply.isPending || review.isPending}
+                  onClick={() => apply.mutate({ editID: edit.id })}
+                  title="Apply approved file edit" type="button">
+                  {applying ? <LoaderCircle aria-hidden="true" className="spin" size={15} />
+                    : <FileCheck2 aria-hidden="true" size={15} />}
+                </button>}
               {client.hasFileEditReview && edit.allowed_actions.length > 0 && <div>
                 {edit.allowed_actions.includes("approve_intent") &&
                   <button aria-label={`Approve intent ${edit.path}`} className="icon-button"
@@ -68,8 +96,8 @@ export function FileEditPanel({ client, runID }: { client: CyberAgentClient; run
         </details>;
       })}
     </div>
-    {review.isError && <div className="inline-warning" role="alert">
-      {review.error instanceof Error ? review.error.message : "File edit review failed"}
+    {(review.isError || apply.isError) && <div className="inline-warning" role="alert">
+      {operationError instanceof Error ? operationError.message : "File edit operation failed"}
     </div>}
   </section>;
 }

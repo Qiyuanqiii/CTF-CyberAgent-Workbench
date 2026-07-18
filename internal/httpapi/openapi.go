@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -432,6 +433,17 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 			DataType:    reflect.TypeOf(FileEditReviewView{}),
 			RequestType: reflect.TypeOf(FileEditReviewRequestView{}), Control: true,
 			NotFound: true, Parameters: []openAPIParameter{runID, editID}},
+		{Path: FileEditApplyPathTemplate, Method: http.MethodPost,
+			OperationID: "applyRunFileEdit", Summary: "Apply an approved file edit",
+			Tag:         "Control",
+			Description: "Separately applies one exact Run-bound approved edit after fresh Run, Workspace, approval, Policy, path, and current-hash checks. The renderer supplies no path or file content, and retries replay the durable operation result.",
+			DataType:    reflect.TypeOf(FileEditApplyView{}),
+			RequestType: reflect.TypeOf(FileEditApplyRequestView{}), Control: true,
+			NotFound: true, Parameters: []openAPIParameter{runID, editID,
+				{Name: "Idempotency-Key", In: "header", Description: "Opaque retry key; only a domain-separated digest is persisted",
+					Required: true, Schema: map[string]any{"type": "string",
+						"minLength": domain.MinAgentOperationKeyBytes,
+						"maxLength": domain.MaxAgentOperationKeyBytes, "pattern": `^\S+$`}}}},
 		{Path: RunWakeIntentPathTemplate, OperationID: "getRunWakeIntent",
 			Summary: "Inspect the latest Run wake intent", Tag: "Runs",
 			Description: "Returns a closed-authority wake projection without lease owner or fencing metadata.",
@@ -459,6 +471,25 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 					Required: true, Schema: map[string]any{"type": "string",
 						"minLength": domain.MinAgentOperationKeyBytes,
 						"maxLength": domain.MaxAgentOperationKeyBytes, "pattern": `^\S+$`}}}},
+		{Path: RunWakeExecutionPathTemplate, Method: http.MethodPost,
+			OperationID: "consumeRunWake", Summary: "Consume one due Run wake intent",
+			Tag:         "Control",
+			Description: "Explicitly claims one due wake generation and hands its bounded queued selection to the existing Go RunSupervisor. It starts no hidden worker or background loop; retries replay the generation-fenced durable handoff.",
+			DataType:    reflect.TypeOf(RunWakeExecutionView{}),
+			RequestType: reflect.TypeOf(RunWakeExecutionRequestView{}), Control: true,
+			NotFound: true, Parameters: []openAPIParameter{runID}},
+		{Path: SkillPackageInstallPath, Method: http.MethodPost,
+			OperationID: "installSkillPackage", Summary: "Install one inert Skill package",
+			Tag:         "Control",
+			Description: "Imports one explicitly confirmed, strictly validated, bounded archive into the content-addressed untrusted Skill Registry. Import executes no scripts, hooks, commands, tools, Provider calls, or network requests and grants no Run-selection or context-delivery authority.",
+			DataType:    reflect.TypeOf(SkillPackageInstallView{}),
+			RequestType: reflect.TypeOf(SkillPackageInstallRequestView{}), Control: true,
+			Parameters: []openAPIParameter{
+				{Name: "Idempotency-Key", In: "header", Description: "Opaque retry key; only a domain-separated digest is persisted",
+					Required: true, Schema: map[string]any{"type": "string",
+						"minLength": domain.MinAgentOperationKeyBytes,
+						"maxLength": domain.MaxAgentOperationKeyBytes, "pattern": `^\S+$`}},
+			}},
 		{Path: ApprovalDecisionControlPathTemplate, Method: http.MethodPost,
 			OperationID: "decideRunApproval", Summary: "Approve once or deny a pending request",
 			Tag:         "Control",
@@ -873,13 +904,24 @@ var openAPIFieldEnums = map[string][]string{
 	"FileEditReviewView.protocol_version":               {application.FileEditReviewProtocolVersion},
 	"FileEditReviewView.action":                         {string(application.FileEditApproveIntent), string(application.FileEditDeny)},
 	"FileEditPreviewView.status":                        {fileedit.StatusProposed, fileedit.StatusApproved, fileedit.StatusApplied, fileedit.StatusDenied, fileedit.StatusFailed},
+	"FileEditApplyRequestView.version":                  {fileedit.FileEditApplyProtocolVersion},
+	"FileEditApplyView.protocol_version":                {fileedit.FileEditApplyProtocolVersion},
+	"FileEditApplyView.status":                          {string(fileedit.ApplyCompleted), string(fileedit.ApplyFailed)},
 	"RunWakeScheduleRequestView.version":                {domain.RunWakeControlProtocolVersion},
 	"RunWakeCancelRequestView.version":                  {domain.RunWakeControlProtocolVersion},
 	"RunWakeStateView.protocol_version":                 {domain.RunWakeIntentProtocolVersion},
 	"RunWakeIntentView.protocol_version":                {domain.RunWakeIntentProtocolVersion},
-	"RunWakeIntentView.status":                          {string(domain.RunWakeQueued), string(domain.RunWakeLeased), string(domain.RunWakeCancelled), string(domain.RunWakeExhausted)},
+	"RunWakeIntentView.status":                          {string(domain.RunWakeQueued), string(domain.RunWakeLeased), string(domain.RunWakeCompleted), string(domain.RunWakeCancelled), string(domain.RunWakeExhausted)},
 	"RunWakeControlView.protocol_version":               {domain.RunWakeControlProtocolVersion},
 	"RunWakeControlView.action":                         {string(domain.RunWakeSchedule), string(domain.RunWakeCancel)},
+	"RunWakeExecutionRequestView.version":               {domain.RunWakeConsumerProtocolVersion},
+	"RunWakeExecutionView.protocol_version":             {domain.RunWakeConsumerProtocolVersion},
+	"RunWakeExecutionView.consumption_status":           {string(domain.RunWakeConsumptionPrepared), string(domain.RunWakeConsumptionCompleted), string(domain.RunWakeConsumptionFailed)},
+	"SkillPackageInstallRequestView.version":            {skills.PackageInstallationProtocolVersion},
+	"SkillPackageInstallRequestView.surface":            {string(domain.ExecutionSurfaceCode), string(domain.ExecutionSurfaceCyber)},
+	"SkillPackageInstallView.protocol_version":          {skills.PackageInstallationProtocolVersion},
+	"SkillPackageInstallView.surface":                   {string(domain.ExecutionSurfaceCode), string(domain.ExecutionSurfaceCyber)},
+	"SkillPackageInstallView.trust_class":               {string(skills.PackageTrustOperatorInstalledUntrusted)},
 	"ProviderAvailabilityView.kind":                     {modelregistry.ProviderKindLocal, modelregistry.ProviderKindAnthropicCompatible},
 	"ProviderAvailabilityView.status":                   {modelregistry.ProviderAvailable, modelregistry.ProviderNotConfigured, modelregistry.ProviderInvalidConfiguration},
 	"ProviderAvailabilityView.credential_source":        {"none", "environment"},
@@ -1053,6 +1095,7 @@ var openAPIFieldMinimums = map[string]float64{
 	"RunWakeScheduleRequestView.max_elapsed_seconds":      domain.MinRunWakeElapsedSeconds,
 	"RunWakeIntentView.max_attempts":                      1,
 	"RunWakeIntentView.attempt_count":                     0,
+	"RunWakeExecutionRequestView.max_steps":               1,
 }
 
 var openAPIFieldMaximums = map[string]float64{
@@ -1072,6 +1115,7 @@ var openAPIFieldMaximums = map[string]float64{
 	"RunWakeScheduleRequestView.base_backoff_seconds":  domain.MaxRunWakeBackoffSeconds,
 	"RunWakeScheduleRequestView.max_backoff_seconds":   domain.MaxRunWakeBackoffSeconds,
 	"RunWakeScheduleRequestView.max_elapsed_seconds":   domain.MaxRunWakeElapsedSeconds,
+	"RunWakeExecutionRequestView.max_steps":            domain.MaxRunExecutionHandoffSteps,
 }
 
 var openAPIFieldMaxLengths = map[string]int{
@@ -1083,6 +1127,7 @@ var openAPIFieldMaxLengths = map[string]int{
 	"ApprovalDecisionControlRequestView.reason":     approval.MaxReasonRunes,
 	"MessageView.source_ref":                        session.MaxContextSourceRefRunes,
 	"MessageView.content_sha256":                    64,
+	"SkillPackageInstallRequestView.archive_base64": base64.StdEncoding.EncodedLen(skills.MaxPackageArchiveBytes),
 }
 
 func runStatuses() []string {

@@ -13,7 +13,7 @@ import (
 
 func (a *App) runWake(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: cyberagent run wake schedule|show|cancel")
+		return errors.New("usage: cyberagent run wake schedule|show|cancel|consume")
 	}
 	service := application.NewRunWakeControlService(a.store)
 	switch args[0] {
@@ -89,6 +89,37 @@ func (a *App) runWake(ctx context.Context, args []string) error {
 		printRunWakeIntent(a.out, result.Intent)
 		fmt.Fprintf(a.out, "replayed: %t\n", result.Replayed)
 		return nil
+	case "consume":
+		fs := newFlagSet("run wake consume", a.errOut)
+		operator := fs.String("operator", "cli_foreground", "foreground owner identity")
+		maxSteps := fs.Int("max-steps", 1, "bounded Run Supervisor handoff steps")
+		if err := fs.Parse(reorderFlags(args[1:], map[string]bool{
+			"operator": true, "max-steps": true,
+		})); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 {
+			return errors.New("usage: cyberagent run wake consume <run-id> [--max-steps 1..8] [--operator <id>]")
+		}
+		handoff := application.NewRunExecutionHandoffService(a.store, a.router,
+			a.checker).WithActiveCalls(a.calls)
+		result, err := application.NewForegroundRunWakeConsumer(a.store, handoff).
+			Consume(ctx, application.ConsumeRunWakeRequest{
+				Version: domain.RunWakeConsumerProtocolVersion, RunID: fs.Arg(0),
+				OwnerID: *operator, MaxSteps: *maxSteps,
+			})
+		if result.Intent.ID != "" {
+			printRunWakeIntent(a.out, result.Intent)
+			fmt.Fprintf(a.out, "consumer_protocol: %s\nconsumption_status: %s\nreplayed: %t\nbackground_loop_enabled: false\n",
+				domain.RunWakeConsumerProtocolVersion, result.Consumption.Status,
+				result.Replayed)
+			if result.Handoff.Result != nil {
+				fmt.Fprintf(a.out, "handoff_status: %s\nstop_reason: %s\nmodel_called: %t\ntool_called: %t\n",
+					result.Handoff.Result.Status, result.Handoff.Result.StopReason,
+					result.Handoff.Result.ModelCalled, result.Handoff.Result.ToolCalled)
+			}
+		}
+		return err
 	default:
 		return fmt.Errorf("unknown run wake subcommand %q", args[0])
 	}

@@ -9,10 +9,10 @@
 从 schema v49 起采用“双指标”，不再使用容易混淆的单一“整体产品愿景”百分比：
 
 - 架构完成度：约 98%；其中 V2 Run-centric 控制平面约 99%。该指标衡量 Go 主控、持久化状态机和模块边界的覆盖程度。
-- 产品可用度：完整 Code + Cyber 产品约 67-71%；其中通用 Coding Agent 工作流约 63%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
+- 产品可用度：完整 Code + Cyber 产品约 70-74%；其中通用 Coding Agent 工作流约 66%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
 - 上述数值是依据已测试任务切片给出的工程估算，不是性能基准，也不代表仍被安全关闭的功能已经可用。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程 root 活动模型取消。P3 主体已落地 WorkItem/Note/Context，P4 已完成 schema v19-v38 的单 root Coordinator、最多两个核心 child 和独立 1/2/4/6 只读 Fan-out，P5 已落地统一 Tool Gateway、审批/Grant、预算、ScriptProcess、Artifact 和结构化工具。P9 已推进到 schema v74 / D1-Q1：除 Run/Session/Plan/审批/有界执行外，现有 CLI/API/Desktop 还支持显式无正文 Provider 诊断、持久化模型路由、只审阅不 apply 的 Diff 和可取消 wake/retry 意图。真实 Local/Docker/Shell 进程、后台 wake worker、独立 Diff apply 和 Skill Web mutation 继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程 root 活动模型取消。P3 主体已落地 WorkItem/Note/Context，P4 已完成 schema v19-v38 的单 root Coordinator、最多两个核心 child 和独立 1/2/4/6 只读 Fan-out，P5 已落地统一 Tool Gateway、审批/Grant、预算、ScriptProcess、Artifact 和结构化工具。P9 已推进到 schema v76 / D1-B1：除 Run/Session/Plan/审批/有界执行外，现有 CLI/API/Desktop 还支持显式无正文 Provider 诊断、持久化模型路由、Diff 独立审阅/apply、可取消 wake/retry 意图与一次前台消费，以及确认后写入惰性 Registry 的 Skill 安装。真实 Local/Docker/Shell 进程、后台 wake worker、安装脚本/钩子和远程 Skill 分发继续关闭。
 
 P8 已推进到 schema v37 及其只读 CI 投影：v35 把完成的 Fan-out execution 投影为通用 `draft` Finding、不可变 `model_assertion` Evidence 和可重建的 Markdown/JSON Report；v36 增加同 Run 冻结 Artifact Evidence、一次性 operator `validated/rejected` 决定与完整复核；v37 以独立不可变事实完成 `validated -> accepted -> fixed`，并强制修复 Evidence 来自接受后新建且未用于验证的同 Run Artifact。验证、接受和修复始终分离；SARIF、通用 CI gate 与 GitHub Actions annotations 均为同一持久化事实上的 Go 只读投影。
 
@@ -886,10 +886,20 @@ GitHub Actions run `29649564643` 已为实现提交 `37fbfbf` 全绿：TypeScrip
 
 双指标更新为架构完成度约 98%（V2 约 99%）、完整产品可用度约 67-71%、通用 Coding Agent 约 63%、Cyber 自动化约 20%。下一批建议依次完成 D1-Q2 显式前台 wake 消费、D1-D2 独立 Diff apply 和 D1-B1 inert Skill 安装确认；后台服务、真实宿主/容器进程、安装 hook 和 CTF 自动化继续后置。
 
+schema v75/D1-Q2、schema v76/D1-D2 与非 schema D1-B1 三切片批次已完成实现，任务 ID 为 `P9-Foreground-Wake-File-Apply-Inert-Skill-Install-v76`。D1-Q2 新增 `run_wake_consumer.v1`：只有 CLI 命令或显式 control 请求才能领取一条到期 intent，并通过既有 `run_execution_handoff.v1`、RunSupervisor、Policy、累计预算、取消、checkpoint、模型/工具账本和 execution lease 消费最多八步。prepare、精确 handoff 绑定、结果与事件均持久化；`prepared` generation 不会因租约过期重领，结果未知时不能取消或伪造失败，失败事件的模型/工具事实只能来自持久化 handoff 结果，也不建立后台 goroutine、服务或隐藏轮询。
+
+D1-D2 新增 `file_edit_apply.v1`：Go 精确重载 Run/Mission/Session/Workspace/Edit/Approval，每个 Edit 只允许一个 apply operation，并在最终写入边界重新检查运行 Run、活动 Session、当前 Policy、Workspace 路径和原始哈希；正文先写入同目录临时文件并同步，再经最终路径/哈希复核原子替换，随后验证目标 SHA-256 并持久化幂等结果。HTTP/React 不提交路径或正文，重放不会二次写入。Run-bound Edit 已禁止旧 `edit approve` 旁路。
+
+D1-B1 在路径隔离预览后新增第四个窄 Wails 方法 `InstallSkillPackage` 和独立 HTTP control。Desktop 只提交短期单次确认句柄，HTTP 只接受严格有界 canonical base64；两者复用 schema v69 内容寻址惰性 Registry，并要求明确确认 `operator_installed_untrusted`。安装不执行正文、脚本、钩子、命令、工具、Provider 或网络，不自动选择到 Run，也不授权上下文交付或声明工具。三项 capability 均默认关闭且彼此独立。OpenAPI 更新为 46 个 path、102 个 schema、30 个 GET 和 19 个 control POST，边界见 ADR 0041。
+
+最终普通整合门已通过：全仓 Go 333.1 秒、聚焦 race、Windows Desktop tag、20 个文件 85 项前端测试、strict TypeScript、确定性 OpenAPI/TypeScript、Vite/Windows production build、vet、module verify/tidy、npm 零漏洞、隔离 CLI smoke 和隐私/UTF-8/链接/产物/危险入口扫描均为绿色；未签名 GUI 为 23,107,584 字节，SHA-256 `309b0e556c44960d7739ab1159e61ede632a443a87ff0b006e6151a288a38626`。组合审计修复 prepared wake 过期重领/结算前取消、失败事件模型/工具事实失真、FileEdit prepared 恢复时权限过期、同 Edit 双 operation 与直接截断写入。当前无已知高/中风险；强杀发生在暂存后原子替换前可能留下一个已脱敏隐藏临时文件，作为已知低风险交由 D1-U1 recovery receipt 处理。本批是下一组六切片的前三片，不提前声称完整 race/staticcheck/govulncheck 门。双指标更新为架构完成度约 98%（V2 约 99%）、完整产品可用度约 70-74%、通用 Coding Agent 约 66%、Cyber 自动化约 20%。
+
+下一批建议依次完成 D1-U1 mutation receipt/recovery 统一呈现、D1-E1 Go-owned 有界只读 Workspace explorer、D1-W1 可复现便携构建诊断与 Windows 兼容清单；届时累计六片，执行全仓 ordinary/race/vet/staticcheck/govulncheck/依赖/隐私完整健壮性门。后台服务、真实宿主/容器进程、签名分发、Rust analyzer 和 CTF 自动化继续后置。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0040-provider-diff-wake-controls.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0041-explicit-wake-file-apply-and-inert-skill-install.md`。

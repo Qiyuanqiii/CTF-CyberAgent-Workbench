@@ -2,6 +2,7 @@ export const desktopConnectionProtocol = "desktop_connection_bootstrap.v1";
 export const desktopSkillDialogProtocol = "desktop_skill_package_dialog.v1";
 export const desktopSkillSelectionProtocol = "desktop_file_selection.v1";
 export const desktopSkillPreviewProtocol = "desktop_skill_package_preview.v1";
+export const desktopSkillInstallProtocol = "desktop_skill_package_install.v1";
 
 export interface DesktopConnectionBootstrap {
   protocol_version: typeof desktopConnectionProtocol;
@@ -22,11 +23,13 @@ export interface DesktopConnectionBootstrap {
   model_control_enabled: boolean;
   file_edit_review_enabled: boolean;
   run_wake_control_enabled: boolean;
+  file_edit_apply_enabled: boolean;
+  run_wake_execution_enabled: boolean;
   read_only_default: boolean;
   process_execution_enabled: false;
   shell_execution_enabled: false;
   docker_execution_enabled: false;
-  skill_installation_enabled: false;
+  skill_installation_enabled: boolean;
   renderer_path_input_supported: false;
 }
 
@@ -68,10 +71,39 @@ export interface DesktopSkillPreview {
   tool_capability_grant: false;
   installation_authorized: false;
   validated: true;
+  confirmation_handle: string;
+  confirmation_expires_at: string;
+}
+
+export interface DesktopSkillInstallRequest {
+  protocol_version: typeof desktopSkillInstallProtocol;
+  confirmation_handle: string;
+  surface: "code" | "cyber";
+  operation_key: string;
+  confirm_untrusted: true;
+}
+
+export interface DesktopSkillInstallResult {
+  protocol_version: typeof desktopSkillInstallProtocol;
+  name: string;
+  version: string;
+  surface: "code" | "cyber";
+  trust_class: "operator_installed_untrusted";
+  archive_sha256: string;
+  package_fingerprint: string;
+  replayed: boolean;
+  recovered_pending: boolean;
+  import_command_execution: false;
+  import_network_access: false;
+  import_provider_calls: false;
+  tool_capability_grant: false;
+  run_selection_authorized: false;
+  context_injection_authorized: false;
 }
 
 interface NativeDesktopBridge {
   Bootstrap: () => Promise<unknown>;
+  InstallSkillPackage: (request: DesktopSkillInstallRequest) => Promise<unknown>;
   PreviewSkillPackage: (handle: string) => Promise<unknown>;
   SelectSkillPackage: () => Promise<unknown>;
 }
@@ -144,6 +176,28 @@ export async function selectDesktopSkillPreview(): Promise<DesktopSkillPreview |
   return previewValue;
 }
 
+export async function installDesktopSkillPackage(preview: DesktopSkillPreview,
+  surface: "code" | "cyber", operationKey: string): Promise<DesktopSkillInstallResult> {
+  const bridge = getBridge();
+  if (!bridge || !activeBootstrap?.skill_installation_enabled) {
+    throw new Error("Desktop Skill installation is disabled");
+  }
+  if (!validPreview(preview) || !boundedText(operationKey, 16, 256) || /\s/u.test(operationKey)) {
+    throw new Error("Desktop Skill installation request was rejected");
+  }
+  const value = await bridge.InstallSkillPackage({
+    protocol_version: desktopSkillInstallProtocol,
+    confirmation_handle: preview.confirmation_handle,
+    surface,
+    operation_key: operationKey,
+    confirm_untrusted: true,
+  });
+  if (!validInstallResult(value, preview, surface)) {
+    throw new Error("Desktop Skill installation result was rejected");
+  }
+  return value;
+}
+
 export function desktopErrorMessage(value: unknown): string {
   if (value instanceof Error && value.message.trim()) {
     return value.message;
@@ -157,6 +211,7 @@ export function desktopErrorMessage(value: unknown): string {
 function getBridge(): NativeDesktopBridge | null {
   const candidate = window.go?.desktop?.DesktopBridge;
   if (!candidate || typeof candidate.Bootstrap !== "function" ||
+    typeof candidate.InstallSkillPackage !== "function" ||
     typeof candidate.SelectSkillPackage !== "function" ||
     typeof candidate.PreviewSkillPackage !== "function") {
     return null;
@@ -167,12 +222,13 @@ function getBridge(): NativeDesktopBridge | null {
 function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
   if (!hasExactKeys(value, [
     "api_base_url", "api_version", "app_version", "approval_control_enabled",
-    "control_enabled", "control_token",
-	"docker_execution_enabled", "file_edit_review_enabled", "model_control_enabled",
-	"process_execution_enabled", "protocol_version", "read_only_default",
+    "control_enabled", "control_token", "docker_execution_enabled", "file_edit_apply_enabled",
+    "file_edit_review_enabled", "model_control_enabled", "process_execution_enabled",
+    "protocol_version", "read_only_default",
     "plan_delivery_control_enabled", "read_token", "renderer_path_input_supported",
     "run_creation_enabled", "shell_execution_enabled",
 	"run_execution_enabled", "run_lifecycle_enabled", "run_wake_control_enabled",
+    "run_wake_execution_enabled",
     "session_message_enabled", "skill_installation_enabled", "ui_digest",
     "session_steering_control_enabled",
   ])) {
@@ -192,12 +248,16 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
 	typeof value.model_control_enabled === "boolean" &&
 	typeof value.file_edit_review_enabled === "boolean" &&
 	typeof value.run_wake_control_enabled === "boolean" &&
+    typeof value.file_edit_apply_enabled === "boolean" &&
+    typeof value.run_wake_execution_enabled === "boolean" &&
+    typeof value.skill_installation_enabled === "boolean" &&
     (value.control_token !== "") === (value.control_enabled || value.run_creation_enabled ||
       value.session_message_enabled || value.session_steering_control_enabled ||
       value.run_lifecycle_enabled || value.run_execution_enabled ||
 	  value.plan_delivery_control_enabled || value.approval_control_enabled ||
 	  value.model_control_enabled || value.file_edit_review_enabled ||
-	  value.run_wake_control_enabled) &&
+	  value.run_wake_control_enabled || value.file_edit_apply_enabled ||
+      value.run_wake_execution_enabled || value.skill_installation_enabled) &&
     (value.control_token === "" || validToken(value.control_token)) &&
     value.control_token !== value.read_token &&
     value.read_only_default === !(value.control_enabled || value.run_creation_enabled ||
@@ -205,9 +265,10 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
       value.run_lifecycle_enabled || value.run_execution_enabled ||
 	  value.plan_delivery_control_enabled || value.approval_control_enabled ||
 	  value.model_control_enabled || value.file_edit_review_enabled ||
-	  value.run_wake_control_enabled) &&
+	  value.run_wake_control_enabled || value.file_edit_apply_enabled ||
+      value.run_wake_execution_enabled || value.skill_installation_enabled) &&
     value.process_execution_enabled === false && value.shell_execution_enabled === false &&
-    value.docker_execution_enabled === false && value.skill_installation_enabled === false &&
+    value.docker_execution_enabled === false &&
     value.renderer_path_input_supported === false;
 }
 
@@ -232,7 +293,8 @@ function validSelection(value: unknown): value is DesktopSkillSelection {
 
 function validPreview(value: unknown): value is DesktopSkillPreview {
   if (!hasExactKeys(value, [
-    "archive_bytes", "archive_sha256", "content_bytes", "content_token_upper_bound",
+    "archive_bytes", "archive_sha256", "confirmation_expires_at", "confirmation_handle",
+    "content_bytes", "content_token_upper_bound",
     "declared_tool_count", "declared_tools", "entry_count", "executable_asset_count",
     "import_command_execution", "import_network_access", "import_provider_calls",
     "install_hook_count", "installation_authorized", "name", "package_fingerprint",
@@ -253,7 +315,28 @@ function validPreview(value: unknown): value is DesktopSkillPreview {
     value.executable_asset_count === 0 && value.install_hook_count === 0 &&
     value.import_command_execution === false && value.import_network_access === false &&
     value.import_provider_calls === false && value.tool_capability_grant === false &&
-    value.installation_authorized === false && value.validated === true;
+    value.installation_authorized === false && value.validated === true &&
+    typeof value.confirmation_handle === "string" &&
+    /^[A-Za-z0-9_-]{43}$/.test(value.confirmation_handle) &&
+    typeof value.confirmation_expires_at === "string" &&
+    Number.isFinite(Date.parse(value.confirmation_expires_at));
+}
+
+function validInstallResult(value: unknown, preview: DesktopSkillPreview,
+  surface: "code" | "cyber"): value is DesktopSkillInstallResult {
+  return hasExactKeys(value, ["archive_sha256", "context_injection_authorized",
+    "import_command_execution", "import_network_access", "import_provider_calls", "name",
+    "package_fingerprint", "protocol_version", "recovered_pending", "replayed",
+    "run_selection_authorized", "surface", "tool_capability_grant", "trust_class", "version"]) &&
+    value.protocol_version === desktopSkillInstallProtocol && value.name === preview.name &&
+    value.version === preview.version && value.surface === surface &&
+    value.trust_class === "operator_installed_untrusted" &&
+    value.archive_sha256 === preview.archive_sha256 &&
+    value.package_fingerprint === preview.package_fingerprint &&
+    typeof value.replayed === "boolean" && typeof value.recovered_pending === "boolean" &&
+    value.import_command_execution === false && value.import_network_access === false &&
+    value.import_provider_calls === false && value.tool_capability_grant === false &&
+    value.run_selection_authorized === false && value.context_injection_authorized === false;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

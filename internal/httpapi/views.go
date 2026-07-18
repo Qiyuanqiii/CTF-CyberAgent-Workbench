@@ -96,6 +96,16 @@ type FileEditReviewView struct {
 	FileWritten     bool                `json:"file_written"`
 }
 
+type FileEditApplyView struct {
+	ProtocolVersion string              `json:"protocol_version"`
+	RunID           string              `json:"run_id"`
+	Edit            FileEditPreviewView `json:"edit"`
+	Status          string              `json:"status"`
+	Replayed        bool                `json:"replayed"`
+	FileWritten     bool                `json:"file_written"`
+	PolicyRechecked bool                `json:"policy_rechecked"`
+}
+
 type RunWakeIntentView struct {
 	ID                    string     `json:"id"`
 	ProtocolVersion       string     `json:"protocol_version"`
@@ -132,6 +142,19 @@ type RunWakeControlView struct {
 	ExecutionStarted bool              `json:"execution_started"`
 	ModelCalled      bool              `json:"model_called"`
 	ToolCalled       bool              `json:"tool_called"`
+}
+
+type RunWakeExecutionView struct {
+	ProtocolVersion       string            `json:"protocol_version"`
+	RunID                 string            `json:"run_id"`
+	Intent                RunWakeIntentView `json:"intent"`
+	ConsumptionStatus     string            `json:"consumption_status"`
+	StopReason            string            `json:"stop_reason,omitempty"`
+	Replayed              bool              `json:"replayed"`
+	ExecutionStarted      bool              `json:"execution_started"`
+	ModelCalled           bool              `json:"model_called"`
+	ToolCalled            bool              `json:"tool_called"`
+	BackgroundLoopEnabled bool              `json:"background_loop_enabled"`
 }
 
 type ApprovalQueueItemView struct {

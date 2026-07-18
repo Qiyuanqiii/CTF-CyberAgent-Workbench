@@ -21,7 +21,10 @@ interface ConnectionState {
   approvalControlEnabled: boolean;
   modelControlEnabled: boolean;
   fileEditReviewEnabled: boolean;
+  fileEditApplyEnabled: boolean;
   runWakeControlEnabled: boolean;
+  runWakeExecutionEnabled: boolean;
+  skillInstallationEnabled: boolean;
   connect: (token: string, health: HealthView, controlToken?: string,
     capabilities?: ClientCapabilities) => void;
   disconnect: () => void;
@@ -52,7 +55,10 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   approvalControlEnabled: false,
   modelControlEnabled: false,
   fileEditReviewEnabled: false,
+  fileEditApplyEnabled: false,
   runWakeControlEnabled: false,
+  runWakeExecutionEnabled: false,
+  skillInstallationEnabled: false,
   connect: (token, health, controlToken = "", capabilities = {}) => {
     const present = controlToken.trim() !== "";
     set({ token, health, controlToken,
@@ -68,7 +74,10 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
       approvalControlEnabled: present && (capabilities.approvalControlEnabled ?? true),
 	  modelControlEnabled: present && (capabilities.modelControlEnabled ?? true),
 	  fileEditReviewEnabled: present && (capabilities.fileEditReviewEnabled ?? true),
+	  fileEditApplyEnabled: present && (capabilities.fileEditApplyEnabled ?? true),
 	  runWakeControlEnabled: present && (capabilities.runWakeControlEnabled ?? true),
+	  runWakeExecutionEnabled: present && (capabilities.runWakeExecutionEnabled ?? true),
+	  skillInstallationEnabled: present && (capabilities.skillInstallationEnabled ?? true),
     });
   },
   disconnect: () => set({ token: "", controlToken: "", health: null,
@@ -76,7 +85,8 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
     sessionSteeringControlEnabled: false,
     runLifecycleEnabled: false, runExecutionEnabled: false,
 	planDeliveryControlEnabled: false, approvalControlEnabled: false,
-	modelControlEnabled: false, fileEditReviewEnabled: false, runWakeControlEnabled: false,
+	modelControlEnabled: false, fileEditReviewEnabled: false, fileEditApplyEnabled: false,
+	runWakeControlEnabled: false, runWakeExecutionEnabled: false, skillInstallationEnabled: false,
     ...initialSelection }),
   selectRun: (selectedRunID) => set({ selectedRunID, resourceKind: "run" }),
   selectSession: (selectedSessionID) => set({ selectedSessionID, resourceKind: "session" }),

@@ -12,6 +12,7 @@ import (
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/httpapi"
+	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/webui"
 )
 
@@ -73,7 +74,20 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 		a.newToolGateway(), a.checker)
 	modelControl := application.NewModelControlService(a.models, a.store)
 	fileEditReview := application.NewFileEditReviewService(a.store)
+	fileEditApply := application.NewFileEditApplyService(a.store, a.checker)
 	runWakeControl := application.NewRunWakeControlService(a.store)
+	runWakeExecution := application.NewForegroundRunWakeConsumer(a.store,
+		executionControl)
+	builtinSkills, err := skills.BuiltinRegistry()
+	if err != nil {
+		return err
+	}
+	skillObjects, err := skills.NewLocalPackageObjectStore(a.home)
+	if err != nil {
+		return err
+	}
+	skillInstallation := application.NewSkillPackageRegistryService(a.store,
+		skillObjects, builtinSkills)
 	api, err := httpapi.New(a.store, httpapi.Config{
 		AccessToken: accessToken, ControlToken: controlToken,
 		RunControlEnabled: controlToken != "", RunCreationEnabled: controlToken != "",
@@ -86,6 +100,9 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 		ModelControlEnabled:           controlToken != "",
 		FileEditReviewEnabled:         controlToken != "",
 		RunWakeControlEnabled:         controlToken != "",
+		FileEditApplyEnabled:          controlToken != "",
+		RunWakeExecutionEnabled:       controlToken != "",
+		SkillInstallationEnabled:      controlToken != "",
 		RunLifecycleController:        lifecycleControl,
 		RunExecutionController:        executionControl,
 		PlanDeliveryController:        planDeliveryControl,
@@ -93,6 +110,9 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 		ModelControlController:        modelControl,
 		FileEditReviewController:      fileEditReview,
 		RunWakeController:             runWakeControl,
+		FileEditApplyController:       fileEditApply,
+		RunWakeExecutionController:    runWakeExecution,
+		SkillInstallationController:   skillInstallation,
 		ModelRegistry:                 a.models,
 		AppVersion:                    Version,
 		UIHandler:                     uiBundle,

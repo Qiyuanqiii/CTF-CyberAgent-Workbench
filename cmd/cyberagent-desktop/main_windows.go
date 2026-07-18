@@ -52,6 +52,9 @@ type desktopOptions struct {
 	modelControl           bool
 	fileEditReview         bool
 	runWakeControl         bool
+	fileEditApply          bool
+	runWakeExecution       bool
+	skillInstallation      bool
 	version                bool
 }
 
@@ -194,6 +197,12 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 		"enable review-only file edit approval or denial without applying files")
 	runWakeControl := fs.Bool("enable-run-wake", false,
 		"enable durable bounded Run wake intent scheduling and cancellation")
+	fileEditApply := fs.Bool("enable-file-edit-apply", false,
+		"enable independently authorized approved FileEdit application")
+	runWakeExecution := fs.Bool("enable-run-wake-execution", false,
+		"enable explicitly launched foreground wake execution")
+	skillInstallation := fs.Bool("enable-skill-installation", false,
+		"enable confirmed inert Skill package installation")
 	version := fs.Bool("version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
 		return desktopOptions{}, err
@@ -211,6 +220,9 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 		modelControl:           *modelControl,
 		fileEditReview:         *fileEditReview,
 		runWakeControl:         *runWakeControl,
+		fileEditApply:          *fileEditApply,
+		runWakeExecution:       *runWakeExecution,
+		skillInstallation:      *skillInstallation,
 		version:                *version}, nil
 }
 
@@ -234,16 +246,19 @@ func runDesktop(config desktopOptions) error {
 	if config.profileControl || config.runCreation || config.sessionMessages ||
 		config.sessionSteeringControl || config.runLifecycle || config.runExecution ||
 		config.planDeliveryControl || config.approvalControl || config.modelControl ||
-		config.fileEditReview || config.runWakeControl {
+		config.fileEditReview || config.runWakeControl || config.fileEditApply ||
+		config.runWakeExecution || config.skillInstallation {
 		controlToken, err = httpapi.GenerateAccessToken()
 		if err != nil {
 			return err
 		}
 	}
 
-	databasePath := filepath.Join(app.DefaultHome(), "cyberagent.db")
+	homePath := app.DefaultHome()
+	databasePath := filepath.Join(homePath, "cyberagent.db")
 	controlPlane, err := desktop.OpenControlPlane(desktop.ControlPlaneConfig{
-		DatabasePath: databasePath, ReadToken: readToken, ControlToken: controlToken,
+		DatabasePath: databasePath, HomePath: homePath, ReadToken: readToken,
+		ControlToken:      controlToken,
 		RunControlEnabled: config.profileControl, RunCreationEnabled: config.runCreation,
 		SessionMessageEnabled:         config.sessionMessages,
 		SessionSteeringControlEnabled: config.sessionSteeringControl,
@@ -254,6 +269,9 @@ func runDesktop(config desktopOptions) error {
 		ModelControlEnabled:           config.modelControl,
 		FileEditReviewEnabled:         config.fileEditReview,
 		RunWakeControlEnabled:         config.runWakeControl,
+		FileEditApplyEnabled:          config.fileEditApply,
+		RunWakeExecutionEnabled:       config.runWakeExecution,
+		SkillInstallationEnabled:      config.skillInstallation,
 		AppVersion:                    app.Version, UIHandler: bundle,
 	})
 	if err != nil {
@@ -277,7 +295,11 @@ func runDesktop(config desktopOptions) error {
 		ModelControlEnabled:           config.modelControl,
 		FileEditReviewEnabled:         config.fileEditReview,
 		RunWakeControlEnabled:         config.runWakeControl,
-		AppVersion:                    app.Version, UIDigest: bundle.Digest(), Selector: selector, PreviewBridge: preview,
+		FileEditApplyEnabled:          config.fileEditApply,
+		RunWakeExecutionEnabled:       config.runWakeExecution,
+		SkillInstallationEnabled:      config.skillInstallation,
+		AppVersion:                    app.Version, UIDigest: bundle.Digest(), Selector: selector,
+		PreviewBridge: preview, SkillInstaller: controlPlane.SkillInstaller(),
 	})
 	if err != nil {
 		return err

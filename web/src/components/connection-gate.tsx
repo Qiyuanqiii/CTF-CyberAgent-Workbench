@@ -42,7 +42,10 @@ export function ConnectionGate() {
         approvalControlEnabled: bootstrap.approval_control_enabled,
 		modelControlEnabled: bootstrap.model_control_enabled,
 		fileEditReviewEnabled: bootstrap.file_edit_review_enabled,
+		fileEditApplyEnabled: bootstrap.file_edit_apply_enabled,
 		runWakeControlEnabled: bootstrap.run_wake_control_enabled,
+		runWakeExecutionEnabled: bootstrap.run_wake_execution_enabled,
+		skillInstallationEnabled: bootstrap.skill_installation_enabled,
       });
     }).catch((caught: unknown) => {
       if (active) {

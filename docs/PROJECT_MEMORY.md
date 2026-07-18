@@ -53,26 +53,27 @@ Read in this order after a long context break:
 43. `docs/adr/0038-idempotent-run-control-and-bounded-handoff.md`
 44. `docs/adr/0039-model-plan-and-approval-controls.md`
 45. `docs/adr/0040-provider-diff-wake-controls.md`
-46. `docs/DESKTOP_PLAN.md`
-47. `docs/SKILL_PACKAGE_PLAN.md`
+46. `docs/adr/0041-explicit-wake-file-apply-and-inert-skill-install.md`
+47. `docs/DESKTOP_PLAN.md`
+48. `docs/SKILL_PACKAGE_PLAN.md`
 
 ## Current Baseline
 
 - Architecture completion: about 98%; the V2 run-centric control plane is about 99% complete.
-- Product usability: about 67-71% for the complete Code + Cyber product.
-- Generic coding-agent workflow usability: about 63%.
+- Product usability: about 70-74% for the complete Code + Cyber product.
+- Generic coding-agent workflow usability: about 66%.
 - Cyber autonomous-workflow usability: about 20%.
 - These are engineering estimates based on tested roadmap slices, not performance benchmarks. Do not reuse the retired single-axis "overall product vision" percentage.
-- Database schema: v74.
-- `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v74` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
+- Database schema: v76.
+- `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v76` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
 - Main languages: Go control plane, TypeScript React/Vite local console; Rust has not started.
-- Desktop status: D0-A/D0-B and D1-R1 through D1-Q1 pin Wails v2.13.0 and build a Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics and persisted routes, body-free Diff review, and durable wake scheduling/cancellation. Control flags are independent; capability-only launches cannot reach sibling routes. Windows 10 release coverage remains pending. It has no installer, formal portable release, registry/startup/update behavior, background wake worker, terminal, real Shell/Local/Docker process execution, Desktop provider-secret settings, independently authorized Diff apply, or Skill installation. See ADR 0033 through ADR 0040 and `docs/DESKTOP_PLAN.md`.
-- Custom Skill status: the five embedded `skill.v1` guides and explicitly selected external packages are Run-loadable through separate protocols. Schema v69 adds persistent content-addressed import/history; schema v70 adds a second explicitly confirmed exact Run selection and redacted user-role root/Specialist context; schema v71 adds bounded read-only provenance across HTTP/TUI/Web. D1-A adds a pathless, one-time-handle preview boundary for a future native shell. External packages remain untrusted and grant no declared tools; HTTP/Desktop install upload is absent. See ADR 0024, ADR 0031, ADR 0032, ADR 0033, and `docs/SKILL_PACKAGE_PLAN.md`.
+- Desktop status: D0-A/D0-B and D1-R1 through D1-B1 pin Wails v2.13.0 and build a Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics and persisted routes, body-free Diff review, independently authorized apply, durable wake intent plus explicit foreground consumption, and confirmed inert Skill installation. Control flags are independent; capability-only launches cannot reach sibling routes. Windows 10 release coverage remains pending. It has no installer, formal portable release, registry/startup/update behavior, background wake worker, terminal, real Shell/Local/Docker process execution, or Desktop provider-secret settings. See ADR 0033 through ADR 0041 and `docs/DESKTOP_PLAN.md`.
+- Custom Skill status: the five embedded `skill.v1` guides and explicitly selected external packages are Run-loadable through separate protocols. Schema v69 adds persistent content-addressed import/history; schema v70 adds a second explicitly confirmed exact Run selection and redacted user-role root/Specialist context; schema v71 adds bounded read-only provenance across HTTP/TUI/Web. D1-A adds a pathless, one-time-handle preview boundary; D1-B1 adds explicit HTTP/Desktop registration through the same inert Registry. External packages remain untrusted and grant no declared tools. Installation executes no content and still does not select a package for a Run. See ADR 0024, ADR 0031 through ADR 0033, ADR 0041, and `docs/SKILL_PACKAGE_PLAN.md`.
 - Protected-delete status: explicit recursive, absolute/traversing/wildcard, environment-derived, command-substituted, current-home, PowerShell/`cmd`, and common interpreter deletion intents are permanently denied before approval across Shell, ScriptProcess, and Sandbox Policy. This is defense in depth; Local/container process execution remains disabled and a future executor still requires OS/container isolation. See ADR 0025.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
 
-Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, one Go Provider Registry with persisted routes and redacted availability, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, parent-selected minimal Specialist Skill context, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with explicit operator selection and separate Deliver transition, safe-boundary operator steering with pending-only cancellation and explicit drain, controlled HTTP/Desktop submission into that existing queue, constrained metadata-only approval decisions, embedded Skills, strict external-package validation, a content-addressed inert user Skill Registry, explicitly confirmed external-Skill Run pinning with redacted root/Specialist delivery, a pathless one-time-handle Desktop Skill preview boundary, a Windows Wails shell with embedded React, an in-process Go API, same-database lifecycle recovery, shared SSE/poll high-water cursors, fail-closed WebView2/origin handling, and idempotent closed Run creation, plus the existing non-authorizing Sandbox/Docker evidence architecture, loopback API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and React/Vite console.
+Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, one Go Provider Registry with persisted routes and redacted availability, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, parent-selected minimal Specialist Skill context, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with explicit operator selection and separate Deliver transition, safe-boundary operator steering with pending-only cancellation and explicit drain, controlled HTTP/Desktop submission into that existing queue, constrained metadata-only approval decisions, embedded Skills, strict external-package validation, a content-addressed inert user Skill Registry, explicitly confirmed external-Skill Run pinning with redacted root/Specialist delivery, pathless Desktop Skill preview plus confirmed inert registration, independently reviewed/applied FileEdits, explicit foreground wake consumption, a Windows Wails shell with embedded React, an in-process Go API, same-database lifecycle recovery, shared SSE/poll high-water cursors, fail-closed WebView2/origin handling, and idempotent closed Run creation, plus the existing non-authorizing Sandbox/Docker evidence architecture, loopback API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and React/Vite console.
 
 Schema v73 and non-schema D1-S2 additionally complete independent pending-only HTTP/Desktop steering cancellation, digest-idempotent Run start/pause/resume, and an at-most-eight-item frozen execution handoff through the existing RunSupervisor. These controls add no Desktop-native worker and no Local/Docker/Shell process authority; ADR 0038 records the boundary.
 
@@ -80,13 +81,15 @@ Non-schema D1-M1/P1/A1 adds one no-probe redacted Provider/model Registry projec
 
 Non-schema D1-M2/D1-D1 and schema-v74 D1-Q1 add explicit content-free Provider diagnostics plus persist-before-memory route selection, exact body-free Diff review without apply authority, and durable bounded wake/retry intent with one generation-fenced owner. The wake API manages intent only and starts no background worker, Run, model, tool, or process. ADR 0040 records the boundary.
 
+Schema-v75 D1-Q2, schema-v76 D1-D2, and non-schema D1-B1 add one explicit foreground wake consumer, a separately authorized current-hash/Policy-checked FileEdit apply, and confirmed HTTP/Desktop import into the inert Skill Registry. All three are independent and default off. They add no hidden worker, renderer path/body input, install-time execution, or general host/container process authority. ADR 0041 records the boundary.
+
 ## Security Invariants
 
 - Go owns Policy, scope, budgets, state transitions, Docker/process control, API-key access, and file permissions.
 - `model_availability.v1` is a deterministic no-probe projection. API keys, Base URLs, environment-variable names, clients, and raw errors never enter it; secret-like or malformed model/route identifiers fail closed or are redacted.
 - `provider_diagnostic.v1` is explicit and content-free. Each invocation may make one bounded model request, but model text, secrets, endpoints, environment-variable names, clients, and raw errors never enter the result. Route persistence succeeds before the in-memory Router changes.
-- File-edit review exact-binds Run/Mission/Session/Workspace/proposal/approval and returns metadata plus bounded redacted Diff only. `approve_intent` never writes a file; approval/edit crash windows recover only toward the same decision, and apply remains separately gated.
-- Schema v74 wake intent is not a scheduler. It bounds attempts/backoff/deadline and generation-fences one owner, while public state omits lease identity and fixes background/model/tool/execution authority false.
+- File-edit review exact-binds Run/Mission/Session/Workspace/proposal/approval and returns metadata plus bounded redacted Diff only. `approve_intent` never writes a file. Schema v76 apply is a separate capability that rechecks Policy, Workspace resolution, original/current hash, target hash, and idempotent result; browsers submit neither path nor body.
+- Schema v74 wake intent is not a scheduler. Schema v75 can consume one due intent only after an explicit foreground action and only through the existing bounded RunSupervisor handoff. Public state omits private lease/owner identity, and no background loop exists.
 - Plan direction selection and Deliver transition are separate operator operations. Neither can start/resume execution, call a model/tool, acquire a lease, or grant capability.
 - Desktop/Web approval can only deny or approve-once under a fresh Policy check. Shell is dry-run, ScriptProcess is process-disabled, replace-file is deny-only, permanent denial is non-overridable, and no Session Grant, file write, or real process can result.
 - Core Specialist delegation is capped at two children and requires explicit operator review, application, and scheduling.
@@ -94,7 +97,7 @@ Non-schema D1-M2/D1-D1 and schema-v74 D1-Q1 add explicit content-free Provider d
 - `skill_package.v1` is accepted only as bounded untrusted input to a pure in-memory validator. Schema v69 may persist an explicitly confirmed validated archive and metadata, but import never selects, executes, injects context, calls a Provider/network/tool, or grants declared dependencies. Object reads revalidate archive and semantic identity; every authority bit remains false.
 - Schema v69 stores external archives by SHA-256 behind non-executing write/verify and read-only loader interfaces plus immutable installation/result/removal ledgers. Code and Cyber catalogs are separate, Cyber accepts only `script`, built-in names are reserved, and removal retains bytes. See ADR 0031.
 - Schema v70 requires a second explicit confirmation to pin one to four exact active packages to a created Run. At most one item is operator-designated for Specialist delivery. Every load revalidates the exact object and Manifest, redacts secrets, obeys separate root/child budgets, and appears only in a user-role untrusted-guidance envelope. SQLite/events store metadata only; first-call commits are atomic; Policy/tool/Shell/network/secret/scope/delegation authority remains false. Pinned installations cannot be removed in Go or SQL. See ADR 0032.
-- Desktop through D1-Q1 exposes exactly three Wails-bound methods. It opens no TCP listener; embeds one validated production renderer; keeps tokens, retry keys, and its bounded 16-Run/500-frame event cache only in memory; defaults to read-only; accepts no renderer path or bytes; and fixes host/container process, Shell, Docker, Skill-installation, file-apply, background-worker, and path-input authority false. Independent flags gate each control class, including model diagnostics/routes, FileEdit review, and wake intent. Approval cannot create a Grant or process, Diff review cannot write a file, and wake intent cannot execute. Capability-only launches cannot unlock sibling routes. Polling and SSE share one persisted Run sequence/cursor; exact-origin and secure WebView2 preflight failures close before database use and never start a download or installer. See ADR 0034 through ADR 0040.
+- Desktop through D1-B1 exposes exactly four Wails-bound methods: connection bootstrap, native Skill selection, pathless preview, and handle-only inert installation. It opens no TCP listener; embeds one validated production renderer; keeps tokens, retry keys, confirmation handles, and its bounded 16-Run/500-frame event cache only in memory; defaults to read-only; and accepts no renderer path or archive bytes. Independent flags gate every control class, including model diagnostics/routes, FileEdit review/apply, wake intent/foreground consumption, and Skill installation. None creates a Grant, background worker, install hook, or general host/container process authority. Capability-only launches cannot unlock sibling routes. Polling and SSE share one persisted Run sequence/cursor; exact-origin and secure WebView2 preflight failures close before database use and never start a download or installer. See ADR 0034 through ADR 0041.
 - The 1/2/4/6 Fan-out pool is separate, read-only, tool-free, network-free, write-free, and creates no Agent.
 - Dangerous cyber commands remain permanently denied; approval cannot override permanent Policy denial.
 - Protected or unresolved deletion through executable Shell/ScriptProcess/Sandbox intent is a critical permanent denial. Non-executable evidence is not reclassified as a command, and passing the classifier can never authorize host execution.
@@ -450,18 +453,55 @@ Metrics after implementation: architecture remains about 98% (V2 about 99%);
 complete-product usability is about 67-71%, generic coding-agent workflow usability
 about 63%, and Cyber autonomous workflow usability about 20%.
 
+## Completed Foreground Wake, File Apply, And Inert Skill Installation (schema v75-v76 / D1-Q2/D1-D2/D1-B1)
+
+Schema v75 adds `run_wake_consumer.v1`. An operator action claims one due intent and
+routes at most eight steps through the existing durable handoff and RunSupervisor. The
+claim, exact handoff binding, completion/failure, and events are restart-safe. A
+crash-uncertain handoff without a result remains prepared, cannot be reclaimed after
+lease expiry, and cannot be cancelled or failed as though no model call occurred.
+There is no background goroutine, service, startup task, or hidden polling loop.
+
+Schema v76 adds `file_edit_apply.v1`. Go reloads the exact Run/Mission/Session/
+Workspace/proposal/approval, rechecks the running Run, active Session, current Policy,
+and original/current SHA-256 at the final write boundary, then uses same-directory
+staging and atomic replacement before verifying the proposed digest. One Edit admits
+one apply operation and persists one idempotent result. Run-bound edits must use
+`review-approve` followed by `apply`; the
+legacy approve command cannot bypass the separate capability. HTTP and React receive no
+path or file body.
+
+Non-schema D1-B1 adds a fourth narrow native method, `InstallSkillPackage`, and one
+independent HTTP control. Desktop consumes a short-lived confirmation handle; HTTP
+accepts strict bounded canonical base64. Both call the existing content-addressed inert
+Registry and require explicit untrusted-package confirmation. No content, script, hook,
+command, tool, Provider, network request, Run selection, or context delivery runs during
+installation. ADR 0041 records all three boundaries.
+
+The final ordinary Go suite passes in 333.1s, along with focused race, Windows Desktop
+tags, 85 React tests, strict TypeScript, deterministic OpenAPI/TypeScript, Vite/Windows
+production builds, vet, module verification/tidy, npm audit, isolated CLI smoke, and
+privacy/UTF-8/link/artifact/entry scans. The audit fixed prepared-wake reclaim/cancel,
+failed-call fact binding, stale FileEdit recovery authority, duplicate apply operations,
+and direct-truncation writes. No high/medium issue remains known. A forced kill before
+atomic replacement may leave one redacted hidden staging file; D1-U1 owns this low-risk
+recovery receipt and cleanup design. Current
+metrics are architecture about 98% (V2 about 99%), complete-product usability about
+70-74%, generic coding-agent workflow usability about 66%, and Cyber autonomous
+workflow usability about 20%.
+
 ## Next Slice
 
 The recommended next three-slice batch is:
 
-1. D1-Q2: add an explicitly launched foreground wake consumer that claims due intent and hands off only through the existing RunSupervisor, budgets, Policy, cancellation, and generation fencing. Do not introduce a hidden service.
-2. D1-D2: add a separately authorized, idempotent apply control for an already approved FileEdit with fresh Run/Workspace/path/current-hash/Policy checks and no renderer path input.
-3. D1-B1: expose strict Desktop/HTTP Skill installation confirmation over the existing inert content-addressed Registry; archive import must not run scripts, hooks, commands, tools, or network calls.
-4. Windows 10 release coverage, Docker start, output Artifact commit, Local OS sandboxing, signatures, Rust analyzers, network/secret grants, and CTF solving remain later separately gated work.
+1. D1-U1: consolidate apply/wake/install operation receipts and recovery guidance in the Go API and React console without exposing private identities or inventing client-side state.
+2. D1-E1: add a bounded, read-only Workspace explorer through Go-owned path resolution and provenance so coding users can inspect files without granting renderer filesystem authority.
+3. D1-W1: add reproducible portable-build diagnostics, release metadata, and an automated Windows compatibility checklist before the still-manual Windows 10 matrix.
+4. This batch reaches six slices and therefore must run the full race/vet/staticcheck/govulncheck/dependency/privacy robustness gate. Docker start, Local OS sandboxing, signatures, Rust analyzers, network/secret grants, and CTF solving remain later separately gated work.
 
 ## Local Machine Note
 
-The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v72-v74 and D0-A through D1-Q1 slices did not modify migrations 1-71, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the OS temporary root.
+The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v76 and D1-Q2/D1-D2/D1-B1 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the OS temporary root.
 
 ## Delivery Loop
 

@@ -528,6 +528,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/file-edits/{edit_id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply an approved file edit
+         * @description Separately applies one exact Run-bound approved edit after fresh Run, Workspace, approval, Policy, path, and current-hash checks. The renderer supplies no path or file content, and retries replay the durable operation result.
+         */
+        post: operations["applyRunFileEdit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/file-edits/{edit_id}/review": {
         parameters: {
             query?: never;
@@ -732,6 +752,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/wake-intent/consume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Consume one due Run wake intent
+         * @description Explicitly claims one due wake generation and hands its bounded queued selection to the existing Go RunSupervisor. It starts no hidden worker or background loop; retries replay the generation-fenced durable handoff.
+         */
+        post: operations["consumeRunWake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/work-items": {
         parameters: {
             query?: never;
@@ -830,6 +870,26 @@ export interface paths {
          * @description Cancels one exact pending operator-steering message for the bound Session. Prepared, committed, and already consumed input is immutable; this operation does not stop a model call or start execution.
          */
         post: operations["cancelSessionSteering"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/skills/packages/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install one inert Skill package
+         * @description Imports one explicitly confirmed, strictly validated, bounded archive into the content-addressed untrusted Skill Registry. Import executes no scripts, hooks, commands, tools, Provider calls, or network requests and grants no Run-selection or context-delivery authority.
+         */
+        post: operations["installSkillPackage"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1248,6 +1308,21 @@ export interface components {
             /** Format: int64 */
             total_bytes: number;
             workspace_id: string;
+        };
+        FileEditApplyRequestView: {
+            /** @enum {string} */
+            version: "file_edit_apply.v1";
+        };
+        FileEditApplyView: {
+            edit: components["schemas"]["FileEditPreviewView"];
+            file_written: boolean;
+            policy_rechecked: boolean;
+            /** @enum {string} */
+            protocol_version: "file_edit_apply.v1";
+            replayed: boolean;
+            run_id: string;
+            /** @enum {string} */
+            status: "applied" | "failed";
         };
         FileEditPreviewView: {
             allowed_actions: string[];
@@ -1889,6 +1964,26 @@ export interface components {
             replayed: boolean;
             tool_called: boolean;
         };
+        RunWakeExecutionRequestView: {
+            /** Format: int32 */
+            max_steps: number;
+            /** @enum {string} */
+            version: "run_wake_consumer.v1";
+        };
+        RunWakeExecutionView: {
+            background_loop_enabled: boolean;
+            /** @enum {string} */
+            consumption_status: "prepared" | "completed" | "failed";
+            execution_started: boolean;
+            intent: components["schemas"]["RunWakeIntentView"];
+            model_called: boolean;
+            /** @enum {string} */
+            protocol_version: "run_wake_consumer.v1";
+            replayed: boolean;
+            run_id: string;
+            stop_reason?: string;
+            tool_called: boolean;
+        };
         RunWakeIntentView: {
             /** Format: int32 */
             attempt_count: number;
@@ -1918,7 +2013,7 @@ export interface components {
             run_id: string;
             session_id: string;
             /** @enum {string} */
-            status: "queued" | "leased" | "cancelled" | "exhausted";
+            status: "queued" | "leased" | "completed" | "cancelled" | "exhausted";
             /** Format: date-time */
             updated_at: string;
         };
@@ -2001,6 +2096,34 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
             workspace_id?: string;
+        };
+        SkillPackageInstallRequestView: {
+            archive_base64: string;
+            confirm_untrusted: boolean;
+            /** @enum {string} */
+            surface: "code" | "cyber";
+            /** @enum {string} */
+            version: "skill_package_installation.v1";
+        };
+        SkillPackageInstallView: {
+            archive_sha256: string;
+            context_injection_authorized: boolean;
+            import_command_execution: boolean;
+            import_network_access: boolean;
+            import_provider_calls: boolean;
+            name: string;
+            package_fingerprint: string;
+            /** @enum {string} */
+            protocol_version: "skill_package_installation.v1";
+            recovered_pending: boolean;
+            replayed: boolean;
+            run_selection_authorized: boolean;
+            /** @enum {string} */
+            surface: "code" | "cyber";
+            tool_capability_grant: boolean;
+            /** @enum {string} */
+            trust_class: "operator_installed_untrusted";
+            version: string;
         };
         SpecialistModelCancellationView: {
             agent_id: string;
@@ -3262,6 +3385,54 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    applyRunFileEdit: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Run identity */
+                run_id: string;
+                /** @description File edit identity */
+                edit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FileEditApplyRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FileEditApplyView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     reviewRunFileEdit: {
         parameters: {
             query?: never;
@@ -3746,6 +3917,49 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    consumeRunWake: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunWakeExecutionRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RunWakeExecutionView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     listRunWorkItems: {
         parameters: {
             query?: {
@@ -3993,6 +4207,48 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    installSkillPackage: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillPackageInstallRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SkillPackageInstallView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             412: components["responses"]["FailedPrecondition"];
             413: components["responses"]["RequestEntityTooLarge"];

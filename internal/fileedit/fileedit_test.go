@@ -84,6 +84,9 @@ func TestManagerProposeAndApproveExistingFile(t *testing.T) {
 	if string(after) != "# New\n\nBody\n" {
 		t.Fatalf("unexpected applied content: %q", after)
 	}
+	if leftovers, err := filepath.Glob(filepath.Join(root, ".cyberagent-edit-*")); err != nil || len(leftovers) != 0 {
+		t.Fatalf("atomic replacement leftovers=%v err=%v", leftovers, err)
+	}
 }
 
 func TestManagerApproveIntentDoesNotWriteWorkspace(t *testing.T) {

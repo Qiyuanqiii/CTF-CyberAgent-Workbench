@@ -25,119 +25,38 @@ type testWindowRestorer struct {
 func (r *testWindowRestorer) Unminimise(context.Context) { r.unminimised++ }
 func (r *testWindowRestorer) Show(context.Context)       { r.shown++ }
 
-func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *testing.T) {
+func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitCapabilities(t *testing.T) {
 	defaults, err := parseDesktopOptions(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if defaults.profileControl || defaults.runCreation || defaults.sessionMessages ||
-		defaults.sessionSteeringControl || defaults.runLifecycle || defaults.runExecution ||
-		defaults.planDeliveryControl || defaults.approvalControl ||
-		defaults.modelControl || defaults.fileEditReview || defaults.runWakeControl ||
-		defaults.version {
+	if defaults != (desktopOptions{}) {
 		t.Fatalf("unexpected defaults: %#v", defaults)
 	}
-	enabled, err := parseDesktopOptions([]string{"--enable-profile-control"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !enabled.profileControl || enabled.runCreation || enabled.sessionMessages ||
-		enabled.sessionSteeringControl || enabled.runLifecycle || enabled.runExecution ||
-		enabled.planDeliveryControl || enabled.approvalControl ||
-		enabled.modelControl || enabled.fileEditReview || enabled.runWakeControl ||
-		enabled.version {
-		t.Fatalf("profile control was not explicit: %#v", enabled)
-	}
-	creation, err := parseDesktopOptions([]string{"--enable-run-creation"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if creation.profileControl || !creation.runCreation || creation.sessionMessages ||
-		creation.sessionSteeringControl || creation.runLifecycle || creation.runExecution ||
-		creation.planDeliveryControl || creation.approvalControl ||
-		creation.modelControl || creation.fileEditReview || creation.runWakeControl ||
-		creation.version {
-		t.Fatalf("Run creation was not independently explicit: %#v", creation)
-	}
-	messages, err := parseDesktopOptions([]string{"--enable-session-messages"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if messages.profileControl || messages.runCreation || !messages.sessionMessages ||
-		messages.sessionSteeringControl || messages.runLifecycle || messages.runExecution ||
-		messages.planDeliveryControl || messages.approvalControl ||
-		messages.modelControl || messages.fileEditReview || messages.runWakeControl ||
-		messages.version {
-		t.Fatalf("Session messages were not independently explicit: %#v", messages)
-	}
-	steering, err := parseDesktopOptions([]string{"--enable-session-steering-control"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if steering.profileControl || steering.runCreation || steering.sessionMessages ||
-		!steering.sessionSteeringControl || steering.runLifecycle || steering.runExecution ||
-		steering.planDeliveryControl || steering.approvalControl ||
-		steering.modelControl || steering.fileEditReview || steering.runWakeControl ||
-		steering.version {
-		t.Fatalf("Session steering cancellation was not independently explicit: %#v", steering)
-	}
-	lifecycle, err := parseDesktopOptions([]string{"--enable-run-lifecycle"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !lifecycle.runLifecycle || lifecycle.runExecution || lifecycle.profileControl ||
-		lifecycle.runCreation || lifecycle.sessionMessages || lifecycle.sessionSteeringControl ||
-		lifecycle.planDeliveryControl || lifecycle.approvalControl {
-		t.Fatalf("Run lifecycle was not independently explicit: %#v", lifecycle)
-	}
-	execution, err := parseDesktopOptions([]string{"--enable-run-execution"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !execution.runExecution || execution.runLifecycle || execution.profileControl ||
-		execution.runCreation || execution.sessionMessages || execution.sessionSteeringControl ||
-		execution.planDeliveryControl || execution.approvalControl {
-		t.Fatalf("Run execution was not independently explicit: %#v", execution)
-	}
-	plan, err := parseDesktopOptions([]string{"--enable-plan-delivery"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !plan.planDeliveryControl || plan.approvalControl || plan.runExecution ||
-		plan.runLifecycle || plan.profileControl || plan.runCreation || plan.sessionMessages ||
-		plan.sessionSteeringControl {
-		t.Fatalf("Plan/Delivery control was not independently explicit: %#v", plan)
-	}
-	approvals, err := parseDesktopOptions([]string{"--enable-approvals"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !approvals.approvalControl || approvals.planDeliveryControl || approvals.runExecution ||
-		approvals.runLifecycle || approvals.profileControl || approvals.runCreation ||
-		approvals.sessionMessages || approvals.sessionSteeringControl {
-		t.Fatalf("Approval control was not independently explicit: %#v", approvals)
-	}
 	for _, current := range []struct {
-		flag  string
-		check func(desktopOptions) bool
+		flag string
+		want desktopOptions
 	}{
-		{flag: "--enable-model-control", check: func(value desktopOptions) bool {
-			return value.modelControl && !value.fileEditReview && !value.runWakeControl
-		}},
-		{flag: "--enable-file-edit-review", check: func(value desktopOptions) bool {
-			return !value.modelControl && value.fileEditReview && !value.runWakeControl
-		}},
-		{flag: "--enable-run-wake", check: func(value desktopOptions) bool {
-			return !value.modelControl && !value.fileEditReview && value.runWakeControl
-		}},
+		{flag: "--enable-profile-control", want: desktopOptions{profileControl: true}},
+		{flag: "--enable-run-creation", want: desktopOptions{runCreation: true}},
+		{flag: "--enable-session-messages", want: desktopOptions{sessionMessages: true}},
+		{flag: "--enable-session-steering-control", want: desktopOptions{sessionSteeringControl: true}},
+		{flag: "--enable-run-lifecycle", want: desktopOptions{runLifecycle: true}},
+		{flag: "--enable-run-execution", want: desktopOptions{runExecution: true}},
+		{flag: "--enable-plan-delivery", want: desktopOptions{planDeliveryControl: true}},
+		{flag: "--enable-approvals", want: desktopOptions{approvalControl: true}},
+		{flag: "--enable-model-control", want: desktopOptions{modelControl: true}},
+		{flag: "--enable-file-edit-review", want: desktopOptions{fileEditReview: true}},
+		{flag: "--enable-run-wake", want: desktopOptions{runWakeControl: true}},
+		{flag: "--enable-file-edit-apply", want: desktopOptions{fileEditApply: true}},
+		{flag: "--enable-run-wake-execution", want: desktopOptions{runWakeExecution: true}},
+		{flag: "--enable-skill-installation", want: desktopOptions{skillInstallation: true}},
 	} {
 		parsed, err := parseDesktopOptions([]string{current.flag})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !current.check(parsed) || parsed.profileControl || parsed.runCreation ||
-			parsed.sessionMessages || parsed.sessionSteeringControl || parsed.runLifecycle ||
-			parsed.runExecution || parsed.planDeliveryControl || parsed.approvalControl {
+		if parsed != current.want {
 			t.Fatalf("%s was not independently explicit: %#v", current.flag, parsed)
 		}
 	}

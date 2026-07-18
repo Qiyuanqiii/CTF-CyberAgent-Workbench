@@ -38,31 +38,33 @@ type SkillPackageSelection struct {
 // descriptions, content paths, bodies, and source paths are excluded because
 // they are untrusted input rather than UI authority.
 type SkillPackagePreview struct {
-	ProtocolVersion        string   `json:"protocol_version"`
-	PackageProtocol        string   `json:"package_protocol"`
-	SkillProtocol          string   `json:"skill_protocol"`
-	Name                   string   `json:"name"`
-	Version                string   `json:"version"`
-	Profiles               []string `json:"profiles"`
-	DeclaredTools          []string `json:"declared_tools"`
-	DeclaredToolCount      int      `json:"declared_tool_count"`
-	ContentBytes           int      `json:"content_bytes"`
-	ContentTokenUpperBound int      `json:"content_token_upper_bound"`
-	ArchiveSHA256          string   `json:"archive_sha256"`
-	PackageFingerprint     string   `json:"package_fingerprint"`
-	ArchiveBytes           int      `json:"archive_bytes"`
-	UncompressedBytes      int      `json:"uncompressed_bytes"`
-	EntryCount             int      `json:"entry_count"`
-	TrustClass             string   `json:"trust_class"`
-	RiskCodes              []string `json:"risk_codes"`
-	ExecutableAssetCount   int      `json:"executable_asset_count"`
-	InstallHookCount       int      `json:"install_hook_count"`
-	ImportCommandExecution bool     `json:"import_command_execution"`
-	ImportNetworkAccess    bool     `json:"import_network_access"`
-	ImportProviderCalls    bool     `json:"import_provider_calls"`
-	ToolCapabilityGrant    bool     `json:"tool_capability_grant"`
-	InstallationAuthorized bool     `json:"installation_authorized"`
-	Validated              bool     `json:"validated"`
+	ProtocolVersion        string    `json:"protocol_version"`
+	PackageProtocol        string    `json:"package_protocol"`
+	SkillProtocol          string    `json:"skill_protocol"`
+	Name                   string    `json:"name"`
+	Version                string    `json:"version"`
+	Profiles               []string  `json:"profiles"`
+	DeclaredTools          []string  `json:"declared_tools"`
+	DeclaredToolCount      int       `json:"declared_tool_count"`
+	ContentBytes           int       `json:"content_bytes"`
+	ContentTokenUpperBound int       `json:"content_token_upper_bound"`
+	ArchiveSHA256          string    `json:"archive_sha256"`
+	PackageFingerprint     string    `json:"package_fingerprint"`
+	ArchiveBytes           int       `json:"archive_bytes"`
+	UncompressedBytes      int       `json:"uncompressed_bytes"`
+	EntryCount             int       `json:"entry_count"`
+	TrustClass             string    `json:"trust_class"`
+	RiskCodes              []string  `json:"risk_codes"`
+	ExecutableAssetCount   int       `json:"executable_asset_count"`
+	InstallHookCount       int       `json:"install_hook_count"`
+	ImportCommandExecution bool      `json:"import_command_execution"`
+	ImportNetworkAccess    bool      `json:"import_network_access"`
+	ImportProviderCalls    bool      `json:"import_provider_calls"`
+	ToolCapabilityGrant    bool      `json:"tool_capability_grant"`
+	InstallationAuthorized bool      `json:"installation_authorized"`
+	Validated              bool      `json:"validated"`
+	ConfirmationHandle     string    `json:"confirmation_handle"`
+	ConfirmationExpiresAt  time.Time `json:"confirmation_expires_at"`
 }
 
 // NativeSkillPackageSelector is held only by the future Go native-shell
@@ -71,16 +73,24 @@ type NativeSkillPackageSelector func(context.Context, string) (SkillPackageSelec
 
 type pendingSkillPackagePreview struct {
 	preview   SkillPackagePreview
+	raw       []byte
+	expiresAt time.Time
+}
+
+type pendingSkillPackageInstall struct {
+	preview   SkillPackagePreview
+	raw       []byte
 	expiresAt time.Time
 }
 
 type skillPackagePreviewBroker struct {
-	mu      sync.Mutex
-	now     func() time.Time
-	random  io.Reader
-	ttl     time.Duration
-	limit   int
-	pending map[string]pendingSkillPackagePreview
+	mu       sync.Mutex
+	now      func() time.Time
+	random   io.Reader
+	ttl      time.Duration
+	limit    int
+	pending  map[string]pendingSkillPackagePreview
+	installs map[string]pendingSkillPackageInstall
 }
 
 // SkillPackagePreviewBridge is safe to bind to a renderer: its only input is
@@ -101,17 +111,22 @@ func newSkillPackagePreviewBoundary(now func() time.Time, random io.Reader, ttl 
 ) (NativeSkillPackageSelector, *SkillPackagePreviewBridge) {
 	broker := &skillPackagePreviewBroker{
 		now: now, random: random, ttl: ttl, limit: limit,
-		pending: make(map[string]pendingSkillPackagePreview),
+		pending:  make(map[string]pendingSkillPackagePreview),
+		installs: make(map[string]pendingSkillPackageInstall),
 	}
 	selector := func(ctx context.Context, path string) (SkillPackageSelection, error) {
 		if err := ctx.Err(); err != nil {
 			return SkillPackageSelection{}, apperror.Normalize(err)
 		}
-		preview, err := skills.ValidatePackageFile(ctx, path)
+		raw, err := skills.ReadPackageFile(ctx, path)
 		if err != nil {
 			return SkillPackageSelection{}, apperror.Normalize(err)
 		}
-		return broker.issue(ctx, projectSkillPackagePreview(preview))
+		parsed, err := skills.ParsePackage(raw)
+		if err != nil {
+			return SkillPackageSelection{}, apperror.Normalize(err)
+		}
+		return broker.issue(ctx, projectSkillPackagePreview(parsed.Preview()), raw)
 	}
 	return selector, &SkillPackagePreviewBridge{broker: broker}
 }
@@ -138,16 +153,62 @@ func (b *SkillPackagePreviewBridge) Preview(ctx context.Context, handle string) 
 	if found {
 		delete(b.broker.pending, handle)
 	}
-	b.broker.mu.Unlock()
 	if !found {
+		b.broker.mu.Unlock()
 		return SkillPackagePreview{}, apperror.New(apperror.CodeNotFound,
 			"desktop skill package selection handle is unavailable")
 	}
-	return cloneSkillPackagePreview(pending.preview), nil
+	confirmationHandle, err := b.broker.issueTokenLocked()
+	if err != nil {
+		b.broker.mu.Unlock()
+		return SkillPackagePreview{}, err
+	}
+	expiresAt := now.Add(b.broker.ttl)
+	b.broker.installs[confirmationHandle] = pendingSkillPackageInstall{
+		preview: cloneSkillPackagePreview(pending.preview),
+		raw:     append([]byte(nil), pending.raw...), expiresAt: expiresAt,
+	}
+	b.broker.mu.Unlock()
+	preview := cloneSkillPackagePreview(pending.preview)
+	preview.ConfirmationHandle = confirmationHandle
+	preview.ConfirmationExpiresAt = expiresAt
+	return preview, nil
+}
+
+// ConsumeInstall consumes one preview-issued confirmation handle and returns
+// validated archive bytes only to Go. The renderer never supplies a path or
+// receives package content through this boundary.
+func (b *SkillPackagePreviewBridge) ConsumeInstall(ctx context.Context,
+	handle string,
+) ([]byte, SkillPackagePreview, error) {
+	if b == nil || b.broker == nil {
+		return nil, SkillPackagePreview{}, apperror.New(apperror.CodeFailedPrecondition,
+			"desktop skill package installation bridge is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, SkillPackagePreview{}, apperror.Normalize(err)
+	}
+	if !validSkillPackageSelectionHandle(handle) {
+		return nil, SkillPackagePreview{}, apperror.New(apperror.CodeInvalidArgument,
+			"desktop skill package confirmation handle is invalid")
+	}
+	now := b.broker.now().UTC()
+	b.broker.mu.Lock()
+	b.broker.purgeExpired(now)
+	pending, found := b.broker.installs[handle]
+	if found {
+		delete(b.broker.installs, handle)
+	}
+	b.broker.mu.Unlock()
+	if !found {
+		return nil, SkillPackagePreview{}, apperror.New(apperror.CodeNotFound,
+			"desktop skill package confirmation handle is unavailable")
+	}
+	return append([]byte(nil), pending.raw...), cloneSkillPackagePreview(pending.preview), nil
 }
 
 func (b *skillPackagePreviewBroker) issue(ctx context.Context,
-	preview SkillPackagePreview,
+	preview SkillPackagePreview, raw []byte,
 ) (SkillPackageSelection, error) {
 	if b == nil || b.now == nil || b.random == nil || b.ttl <= 0 || b.limit <= 0 {
 		return SkillPackageSelection{}, apperror.New(apperror.CodeFailedPrecondition,
@@ -162,31 +223,20 @@ func (b *skillPackagePreviewBroker) issue(ctx context.Context,
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.purgeExpired(now)
-	if len(b.pending) >= b.limit {
+	if len(b.pending)+len(b.installs) >= b.limit {
 		return SkillPackageSelection{}, apperror.New(apperror.CodeResourceExhausted,
 			"desktop skill package selection capacity is exhausted")
 	}
-	for range skillPackageSelectionAttempts {
-		var token [skillPackageSelectionTokenBytes]byte
-		if _, err := io.ReadFull(b.random, token[:]); err != nil {
-			return SkillPackageSelection{}, apperror.New(apperror.CodeInternal,
-				"desktop skill package selection handle cannot be generated")
-		}
-		handle := base64.RawURLEncoding.EncodeToString(token[:])
-		if _, exists := b.pending[handle]; exists {
-			continue
-		}
-		b.pending[handle] = pendingSkillPackagePreview{
-			preview: cloneSkillPackagePreview(preview), expiresAt: expiresAt,
-		}
-		return SkillPackageSelection{
-			ProtocolVersion: SkillPackageSelectionProtocolVersion,
-			Handle:          handle,
-			ExpiresAt:       expiresAt,
-		}, nil
+	handle, err := b.issueTokenLocked()
+	if err != nil {
+		return SkillPackageSelection{}, err
 	}
-	return SkillPackageSelection{}, apperror.New(apperror.CodeInternal,
-		"desktop skill package selection handle collision limit was reached")
+	b.pending[handle] = pendingSkillPackagePreview{
+		preview: cloneSkillPackagePreview(preview), raw: append([]byte(nil), raw...),
+		expiresAt: expiresAt,
+	}
+	return SkillPackageSelection{ProtocolVersion: SkillPackageSelectionProtocolVersion,
+		Handle: handle, ExpiresAt: expiresAt}, nil
 }
 
 func (b *skillPackagePreviewBroker) purgeExpired(now time.Time) {
@@ -195,6 +245,31 @@ func (b *skillPackagePreviewBroker) purgeExpired(now time.Time) {
 			delete(b.pending, handle)
 		}
 	}
+	for handle, pending := range b.installs {
+		if !now.Before(pending.expiresAt) {
+			delete(b.installs, handle)
+		}
+	}
+}
+
+func (b *skillPackagePreviewBroker) issueTokenLocked() (string, error) {
+	for range skillPackageSelectionAttempts {
+		var token [skillPackageSelectionTokenBytes]byte
+		if _, err := io.ReadFull(b.random, token[:]); err != nil {
+			return "", apperror.New(apperror.CodeInternal,
+				"desktop skill package selection handle cannot be generated")
+		}
+		handle := base64.RawURLEncoding.EncodeToString(token[:])
+		if _, selected := b.pending[handle]; selected {
+			continue
+		}
+		if _, installable := b.installs[handle]; installable {
+			continue
+		}
+		return handle, nil
+	}
+	return "", apperror.New(apperror.CodeInternal,
+		"desktop skill package selection handle collision limit was reached")
 }
 
 func validSkillPackageSelectionHandle(value string) bool {

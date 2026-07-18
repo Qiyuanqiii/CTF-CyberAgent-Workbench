@@ -4,6 +4,8 @@ import type {
   ApprovalDecisionControlView,
   ApprovalQueueView,
   ErrorEnvelope,
+  FileEditApplyRequestView,
+  FileEditApplyView,
   FileEditQueueView,
   FileEditReviewRequestView,
   FileEditReviewView,
@@ -27,6 +29,10 @@ import type {
   RunWakeControlView,
   RunWakeScheduleRequestView,
   RunWakeStateView,
+  RunWakeExecutionRequestView,
+  RunWakeExecutionView,
+  SkillPackageInstallRequestView,
+  SkillPackageInstallView,
   RunEventPollView,
   RunEventStreamView,
   SessionMessageControlRequestView,
@@ -49,7 +55,10 @@ export interface ClientCapabilities {
   approvalControlEnabled?: boolean;
   modelControlEnabled?: boolean;
   fileEditReviewEnabled?: boolean;
+  fileEditApplyEnabled?: boolean;
   runWakeControlEnabled?: boolean;
+  runWakeExecutionEnabled?: boolean;
+  skillInstallationEnabled?: boolean;
 }
 
 export class APIRequestError extends Error {
@@ -484,11 +493,13 @@ function parseFileEditPreview(value: unknown): FileEditQueueView["items"][number
     !boundedIdentity(value.workspace_id) || !boundedText(value.path, 4096) ||
     typeof value.diff !== "string" || value.diff.length > 1_100_000 ||
     !boundedText(value.original_hash, 128) || !boundedText(value.proposed_hash, 128) ||
-    typeof value.secrets_redacted !== "boolean" || value.apply_enabled !== false ||
+    typeof value.secrets_redacted !== "boolean" || typeof value.apply_enabled !== "boolean" ||
     !Array.isArray(value.allowed_actions) || value.allowed_actions.length > 2 ||
     !value.allowed_actions.every((action) => action === "approve_intent" || action === "deny") ||
     !validDate(value.created_at) || !validDate(value.updated_at) ||
-    (value.reason !== undefined && typeof value.reason !== "string")) {
+    (value.reason !== undefined && typeof value.reason !== "string") ||
+    (value.apply_enabled === true &&
+      (value.status !== "approved" || value.allowed_actions.length !== 0))) {
     throw new APIRequestError("File edit preview violated its metadata-only contract",
       "INVALID_RESPONSE", 502);
   }
@@ -498,11 +509,15 @@ function parseFileEditPreview(value: unknown): FileEditQueueView["items"][number
 function parseFileEditQueue(value: unknown, runID: string): FileEditQueueView {
   if (!hasExactKeys(value, ["apply_enabled", "items", "protocol_version", "run_id", "truncated"]) ||
     value.protocol_version !== "file_edit_review.v1" || value.run_id !== runID ||
-    value.apply_enabled !== false || typeof value.truncated !== "boolean" ||
+    typeof value.apply_enabled !== "boolean" || typeof value.truncated !== "boolean" ||
     !Array.isArray(value.items) || value.items.length > 100) {
     throw new APIRequestError("File edit queue response is invalid", "INVALID_RESPONSE", 502);
   }
-  return { ...value, items: value.items.map(parseFileEditPreview) } as unknown as FileEditQueueView;
+  const items = value.items.map(parseFileEditPreview);
+  if (!value.apply_enabled && items.some((item) => item.apply_enabled)) {
+    throw new APIRequestError("File edit queue widened apply authority", "INVALID_RESPONSE", 502);
+  }
+  return { ...value, items } as unknown as FileEditQueueView;
 }
 
 function parseFileEditReview(value: unknown, runID: string, editID: string,
@@ -522,6 +537,25 @@ function parseFileEditReview(value: unknown, runID: string, editID: string,
   return { ...value, edit } as unknown as FileEditReviewView;
 }
 
+function parseFileEditApply(value: unknown, runID: string, editID: string): FileEditApplyView {
+  if (!hasExactKeys(value, ["edit", "file_written", "policy_rechecked", "protocol_version",
+    "replayed", "run_id", "status"]) || value.protocol_version !== "file_edit_apply.v1" ||
+    value.run_id !== runID || (value.status !== "applied" && value.status !== "failed") ||
+    typeof value.replayed !== "boolean" || typeof value.file_written !== "boolean" ||
+    value.policy_rechecked !== true) {
+    throw new APIRequestError("File edit apply response violated its audited contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const edit = parseFileEditPreview(value.edit);
+  if (edit.id !== editID || edit.apply_enabled !== false ||
+    (value.status === "applied" && edit.status !== "applied") ||
+    (value.status === "failed" && edit.status !== "failed")) {
+    throw new APIRequestError("File edit apply result does not match the requested edit",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, edit } as unknown as FileEditApplyView;
+}
+
 function parseRunWakeIntent(value: unknown, runID: string): NonNullable<RunWakeStateView["intent"]> {
   if (!isRecord(value) || !hasOnlyKeys(value, ["attempt_count", "background_loop_enabled",
     "base_backoff_seconds", "cancelled_at", "created_at", "deadline_at", "execution_enabled",
@@ -529,7 +563,7 @@ function parseRunWakeIntent(value: unknown, runID: string): NonNullable<RunWakeS
     "max_elapsed_seconds", "next_wake_at", "protocol_version", "run_id", "session_id",
     "status", "updated_at"]) || value.protocol_version !== "run_wake_intent.v1" ||
     value.run_id !== runID || !boundedIdentity(value.id) || !boundedIdentity(value.session_id) ||
-    !["queued", "leased", "cancelled", "exhausted"].includes(String(value.status)) ||
+    !["queued", "leased", "completed", "cancelled", "exhausted"].includes(String(value.status)) ||
     !safeBoundedCount(value.attempt_count, 8) || !safePositiveInteger(value.max_attempts) ||
     Number(value.attempt_count) > Number(value.max_attempts) ||
     !safeBoundedCount(value.initial_delay_seconds, 3600) ||
@@ -567,6 +601,46 @@ function parseRunWakeControl(value: unknown, runID: string,
       "INVALID_RESPONSE", 502);
   }
   return { ...value, intent: parseRunWakeIntent(value.intent, runID) } as unknown as RunWakeControlView;
+}
+
+function parseRunWakeExecution(value: unknown, runID: string): RunWakeExecutionView {
+  if (!isRecord(value) || !hasOnlyKeys(value, ["background_loop_enabled", "consumption_status",
+    "execution_started", "intent", "model_called", "protocol_version", "replayed", "run_id",
+    "stop_reason", "tool_called"]) || value.protocol_version !== "run_wake_consumer.v1" ||
+    value.run_id !== runID || value.consumption_status !== "completed" ||
+    value.execution_started !== true || typeof value.model_called !== "boolean" ||
+    typeof value.tool_called !== "boolean" || value.background_loop_enabled !== false ||
+    typeof value.replayed !== "boolean" ||
+    (value.stop_reason !== undefined && !boundedText(value.stop_reason, 64))) {
+    throw new APIRequestError("Foreground Run wake response violated its bounded contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const intent = parseRunWakeIntent(value.intent, runID);
+  if (intent.status !== "completed") {
+    throw new APIRequestError("Foreground Run wake did not settle its exact intent",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, intent } as unknown as RunWakeExecutionView;
+}
+
+function parseSkillPackageInstall(value: unknown,
+  request: SkillPackageInstallRequestView): SkillPackageInstallView {
+  if (!hasExactKeys(value, ["archive_sha256", "context_injection_authorized",
+    "import_command_execution", "import_network_access", "import_provider_calls", "name",
+    "package_fingerprint", "protocol_version", "recovered_pending", "replayed",
+    "run_selection_authorized", "surface", "tool_capability_grant", "trust_class", "version"]) ||
+    value.protocol_version !== "skill_package_installation.v1" ||
+    value.surface !== request.surface || value.trust_class !== "operator_installed_untrusted" ||
+    !boundedText(value.name, 128) || !boundedText(value.version, 64) ||
+    !isSHA256(value.archive_sha256) || !isSHA256(value.package_fingerprint) ||
+    typeof value.replayed !== "boolean" || typeof value.recovered_pending !== "boolean" ||
+    value.import_command_execution !== false || value.import_network_access !== false ||
+    value.import_provider_calls !== false || value.tool_capability_grant !== false ||
+    value.run_selection_authorized !== false || value.context_injection_authorized !== false) {
+    throw new APIRequestError("Skill package installation widened inert Registry authority",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as SkillPackageInstallView;
 }
 
 function hasNoAllowedTargets(scope: Record<string, unknown>): boolean {
@@ -607,6 +681,10 @@ function validDate(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
 
+function isSHA256(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+}
+
 function safePositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
@@ -628,7 +706,10 @@ export class CyberAgentClient {
   readonly hasApprovalControl: boolean;
   readonly hasModelControl: boolean;
   readonly hasFileEditReview: boolean;
+  readonly hasFileEditApply: boolean;
   readonly hasRunWakeControl: boolean;
+  readonly hasRunWakeExecution: boolean;
+  readonly hasSkillInstallation: boolean;
 
   constructor(
     private readonly token: string,
@@ -652,7 +733,10 @@ export class CyberAgentClient {
     this.hasApprovalControl = controlPresent && (capabilities.approvalControlEnabled ?? true);
     this.hasModelControl = controlPresent && (capabilities.modelControlEnabled ?? true);
     this.hasFileEditReview = controlPresent && (capabilities.fileEditReviewEnabled ?? true);
+    this.hasFileEditApply = controlPresent && (capabilities.fileEditApplyEnabled ?? true);
     this.hasRunWakeControl = controlPresent && (capabilities.runWakeControlEnabled ?? true);
+    this.hasRunWakeExecution = controlPresent && (capabilities.runWakeExecutionEnabled ?? true);
+    this.hasSkillInstallation = controlPresent && (capabilities.skillInstallationEnabled ?? true);
   }
 
   async health(signal?: AbortSignal): Promise<HealthView> {
@@ -705,6 +789,18 @@ export class CyberAgentClient {
     return parseFileEditReview(result, runID, editID, body);
   }
 
+  async applyFileEdit(runID: string, editID: string, body: FileEditApplyRequestView,
+    idempotencyKey: string, signal?: AbortSignal): Promise<FileEditApplyView> {
+    if (!this.hasFileEditApply || !boundedIdentity(runID) || !boundedIdentity(editID)) {
+      throw new Error("File edit apply capability and normalized identities are required");
+    }
+    const result = await this.sendControl<unknown>(
+      `/runs/${encodeURIComponent(runID)}/file-edits/${encodeURIComponent(editID)}/apply`,
+      body, idempotencyKey, signal,
+    );
+    return parseFileEditApply(result, runID, editID);
+  }
+
   async runWakeState(runID: string, signal?: AbortSignal): Promise<RunWakeStateView> {
     if (!boundedIdentity(runID) || runID.trim() !== runID) {
       throw new Error("A normalized Run identity is required");
@@ -732,6 +828,26 @@ export class CyberAgentClient {
     return parseRunWakeControl(await this.sendControl<unknown>(
       `/runs/${encodeURIComponent(runID)}/wake-intent/cancel`, body, idempotencyKey, signal,
     ), runID, "cancel");
+  }
+
+  async consumeRunWake(runID: string, body: RunWakeExecutionRequestView,
+    signal?: AbortSignal): Promise<RunWakeExecutionView> {
+    if (!this.hasRunWakeExecution || !boundedIdentity(runID) || runID.trim() !== runID) {
+      throw new Error("Foreground Run wake capability and a normalized Run are required");
+    }
+    return parseRunWakeExecution(await this.sendControlRequest<unknown>(
+      `/runs/${encodeURIComponent(runID)}/wake-intent/consume`, body, signal,
+    ), runID);
+  }
+
+  async installSkillPackage(body: SkillPackageInstallRequestView,
+    idempotencyKey: string, signal?: AbortSignal): Promise<SkillPackageInstallView> {
+    if (!this.hasSkillInstallation || body.confirm_untrusted !== true) {
+      throw new Error("Explicit untrusted Skill installation capability is required");
+    }
+    return parseSkillPackageInstall(await this.sendControl<unknown>(
+      "/skills/packages/install", body, idempotencyKey, signal,
+    ), body);
   }
 
   async get<T>(path: string, query: Record<string, QueryValue> = {}, signal?: AbortSignal): Promise<T> {

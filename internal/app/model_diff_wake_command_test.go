@@ -47,6 +47,23 @@ func TestModelRouteFileReviewAndWakeCommandsUseDurableBoundaries(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	_, consumeCreated, err := application.NewRunService(st).Create(t.Context(),
+		application.CreateRunRequest{Goal: "consume foreground CLI wake", Profile: "code",
+			WorkspaceID: workspace.ID, Budget: domain.Budget{MaxTurns: 4, MaxToolCalls: 4}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumeRun, err := application.NewRunService(st).Start(t.Context(), consumeCreated.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.EnqueueOperatorSteering(t.Context(), domain.EnqueueOperatorSteeringRequest{
+		RunID: consumeRun.ID, SessionID: consumeRun.SessionID,
+		Content:      "consume queued CLI wake input",
+		OperationKey: "cli-wake-consume-queue-0001", RequestedBy: "cli_test",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	edit, err := fileedit.NewManager(st).Propose(t.Context(), fileedit.Proposal{
 		SessionID: run.SessionID, WorkspaceID: workspace.ID, WorkspaceRoot: root,
 		Path: "review-only.txt", ProposedText: "do not write during review\n",
@@ -66,6 +83,16 @@ func TestModelRouteFileReviewAndWakeCommandsUseDurableBoundaries(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "review-only.txt")); !os.IsNotExist(err) {
 		t.Fatalf("CLI review wrote the file: %v", err)
 	}
+	output, stderr, code = executeTestCommand(t, "edit", "apply", run.ID, edit.ID,
+		"--operation-key", "cli-file-apply-0001")
+	if code != 0 || stderr != "" || !strings.Contains(output, "file_written: true") ||
+		!strings.Contains(output, "policy_rechecked: true") {
+		t.Fatalf("edit apply output=%q stderr=%q code=%d", output, stderr, code)
+	}
+	written, err := os.ReadFile(filepath.Join(root, "review-only.txt"))
+	if err != nil || string(written) != "do not write during review\n" {
+		t.Fatalf("CLI apply wrote %q err=%v", written, err)
+	}
 
 	output, stderr, code = executeTestCommand(t, "run", "wake", "schedule", run.ID,
 		"--operation-key", "cli-wake-schedule-0001")
@@ -77,5 +104,17 @@ func TestModelRouteFileReviewAndWakeCommandsUseDurableBoundaries(t *testing.T) {
 		"--operation-key", "cli-wake-cancel-0001")
 	if code != 0 || stderr != "" || !strings.Contains(output, "status: cancelled") {
 		t.Fatalf("wake cancel output=%q stderr=%q code=%d", output, stderr, code)
+	}
+	output, stderr, code = executeTestCommand(t, "run", "wake", "schedule", consumeRun.ID,
+		"--operation-key", "cli-wake-consume-schedule-0001")
+	if code != 0 || stderr != "" || !strings.Contains(output, "status: queued") {
+		t.Fatalf("consumable wake schedule output=%q stderr=%q code=%d", output, stderr, code)
+	}
+	output, stderr, code = executeTestCommand(t, "run", "wake", "consume", consumeRun.ID,
+		"--max-steps", "1")
+	if code != 0 || stderr != "" || !strings.Contains(output, "status: completed") ||
+		!strings.Contains(output, "consumption_status: completed") ||
+		!strings.Contains(output, "background_loop_enabled: false") {
+		t.Fatalf("wake consume output=%q stderr=%q code=%d", output, stderr, code)
 	}
 }

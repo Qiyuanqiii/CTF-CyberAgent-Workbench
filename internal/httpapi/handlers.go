@@ -76,6 +76,15 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		if a.runWakeControlEnabled {
 			resources = append(resources, "run-wake-control")
 		}
+		if a.fileEditApplyEnabled {
+			resources = append(resources, "file-edit-apply-control")
+		}
+		if a.runWakeExecutionEnabled {
+			resources = append(resources, "run-wake-execution-control")
+		}
+		if a.skillInstallationEnabled {
+			resources = append(resources, "skill-installation-control")
+		}
 		return IndexView{APIVersion: Version, AppVersion: a.appVersion, Resources: resources}, nil, nil
 	case "/api/v1/health":
 		if err := rejectQuery(request.URL.Query()); err != nil {
@@ -242,9 +251,12 @@ func (a *API) runFileEdits(request *http.Request, runID string) (any, *Page, err
 				"file edit queue contains a mismatched record")
 		}
 		items[index] = fileEditPreviewView(value, run.Terminal())
+		items[index].ApplyEnabled = a.fileEditApplyEnabled &&
+			value.Status == fileedit.StatusApproved && !run.Terminal()
 	}
 	return FileEditQueueView{ProtocolVersion: application.FileEditReviewProtocolVersion,
-		RunID: run.ID, Items: items, Truncated: truncated, ApplyEnabled: false}, nil, nil
+		RunID: run.ID, Items: items, Truncated: truncated,
+		ApplyEnabled: a.fileEditApplyEnabled}, nil, nil
 }
 
 func (a *API) runFileEdit(request *http.Request, runID string,
@@ -265,7 +277,10 @@ func (a *API) runFileEdit(request *http.Request, runID string,
 		return nil, nil, apperror.New(apperror.CodeNotFound,
 			"file edit does not belong to the requested Run")
 	}
-	return fileEditPreviewView(value, run.Terminal()), nil, nil
+	view := fileEditPreviewView(value, run.Terminal())
+	view.ApplyEnabled = a.fileEditApplyEnabled && value.Status == fileedit.StatusApproved &&
+		!run.Terminal()
+	return view, nil, nil
 }
 
 func (a *API) fileEditRunBinding(request *http.Request,

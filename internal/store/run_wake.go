@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
 )
@@ -172,6 +173,20 @@ func (s *SQLiteStore) CancelRunWakeIntent(ctx context.Context,
 		return domain.RunWakeIntent{}, domain.RunWakeOperation{}, false, err
 	}
 	operation.IntentID = intent.ID
+	if intent.Status == domain.RunWakeLeased {
+		var prepared int
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+			SELECT 1 FROM run_wake_consumptions
+			WHERE intent_id = ? AND generation = ? AND lease_id = ? AND status = 'prepared'
+		)`, intent.ID, intent.AttemptCount, intent.ActiveLeaseID).Scan(&prepared); err != nil {
+			return domain.RunWakeIntent{}, domain.RunWakeOperation{}, false, err
+		}
+		if prepared == 1 {
+			return domain.RunWakeIntent{}, domain.RunWakeOperation{}, false,
+				apperror.New(apperror.CodeConflict,
+					"prepared Run wake handoff must settle before cancellation")
+		}
+	}
 	event, err := appendRunWakeEventTx(ctx, tx, intent.RunID,
 		events.RunWakeCancelledEvent, "run_wake_control", intent.ID, map[string]any{
 			"attempt_count": intent.AttemptCount, "execution_started": false,
@@ -378,7 +393,10 @@ func (s *SQLiteStore) ReleaseRunWakeForRetry(ctx context.Context,
 	return stored, nil
 }
 
-const runWakeIntentSelect = `SELECT id, protocol_version, run_id, session_id, status,
+const runWakeIntentSelect = `SELECT id, protocol_version, run_id, session_id,
+	CASE WHEN EXISTS (SELECT 1 FROM run_wake_consumptions consumption
+		WHERE consumption.intent_id = run_wake_intents.id
+			AND consumption.status = 'completed') THEN 'completed' ELSE status END,
 	max_attempts, attempt_count, initial_delay_seconds, base_backoff_seconds,
 	max_backoff_seconds, max_elapsed_seconds, next_wake_at, deadline_at,
 	active_lease_id, execution_enabled, background_loop_enabled,
@@ -538,6 +556,18 @@ func reconcileExpiredRunWakeTx(ctx context.Context, tx *sql.Tx,
 		return domain.RunWakeIntent{}, err
 	}
 	if lease.Status != domain.RunWakeLeaseActive || now.Before(lease.ExpiresAt) {
+		return intent, nil
+	}
+	var prepared int
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+		SELECT 1 FROM run_wake_consumptions
+		WHERE intent_id = ? AND generation = ? AND lease_id = ? AND status = 'prepared'
+	)`, intent.ID, intent.AttemptCount, lease.ID).Scan(&prepared); err != nil {
+		return domain.RunWakeIntent{}, err
+	}
+	if prepared == 1 {
+		// A prepared consumption owns this generation durably. Lease expiry cannot
+		// manufacture a second generation while its exact handoff is recoverable.
 		return intent, nil
 	}
 	if intent.AttemptCount >= intent.MaxAttempts || !now.Before(intent.DeadlineAt) {

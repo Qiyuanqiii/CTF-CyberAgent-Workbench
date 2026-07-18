@@ -317,6 +317,15 @@ td code { font-size: 11px; }
 .desktop-package-list small { color: var(--muted); }
 .desktop-package-digests { display: flex; flex-wrap: wrap; gap: 10px 22px; padding-top: 14px; border-top: 1px solid var(--border); color: var(--muted); font-size: 10px; }
 .desktop-package-digests code { color: #3f4e5a; }
+.desktop-install-controls { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 14px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border); }
+.segmented-control { display: inline-grid; grid-template-columns: repeat(2, minmax(64px, 1fr)); overflow: hidden; border: 1px solid var(--border-strong); border-radius: 5px; }
+.segmented-control button { min-height: 32px; padding: 5px 10px; border: 0; border-right: 1px solid var(--border-strong); background: var(--surface); color: var(--muted); font: inherit; cursor: pointer; }
+.segmented-control button:last-child { border-right: 0; }
+.segmented-control button[aria-pressed="true"] { background: #e8f2ee; color: #125f45; font-weight: 600; }
+.desktop-install-confirmation { min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+.desktop-install-confirmation input { width: 15px; height: 15px; flex: 0 0 auto; accent-color: #167052; }
+.desktop-install-success { display: flex; align-items: center; gap: 8px; margin-top: 18px; padding: 10px 12px; border: 1px solid #abd6c6; border-radius: 5px; background: #eef8f4; color: #125f45; font-size: 11px; }
+.desktop-dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .desktop-dialog > footer { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 11px 16px; border-top: 1px solid var(--border); background: var(--surface-subtle); }
 .desktop-dialog > footer > span { display: inline-flex; align-items: center; gap: 7px; color: #146c4e; font-size: 11px; }
 .model-availability-dialog { width: min(820px, 100%); }
@@ -456,6 +465,7 @@ td code { font-size: 11px; }
   .desktop-package-metrics > div, .desktop-package-metrics > div:nth-child(3n) { border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
   .desktop-package-metrics > div:nth-child(2n) { border-right: 0; }
   .desktop-package-metrics > div:nth-last-child(-n+2) { border-bottom: 0; }
+  .desktop-install-controls { grid-template-columns: minmax(0, 1fr); }
   .model-provider-row, .model-route-row { grid-template-columns: minmax(0, 1fr) auto; }
   .model-provider-row > span { grid-column: 1; }
 	.file-edit-row summary { grid-template-columns: minmax(0, 1fr) auto; }

@@ -297,6 +297,8 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 72, Name: "idempotent operator-controlled Run creation", Statements: runCreationOperationStatements},
 		{Version: 73, Name: "idempotent Run lifecycle and bounded execution handoff", Statements: controlledRunOperationsStatements},
 		{Version: 74, Name: "durable Run wake retry intents and ownership", Statements: runWakeOwnershipStatements},
+		{Version: 75, Name: "foreground Run wake execution consumption", Statements: runWakeConsumptionStatements},
+		{Version: 76, Name: "independently authorized FileEdit apply operations", Statements: fileEditApplyStatements},
 	})
 }
 

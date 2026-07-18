@@ -2575,6 +2575,135 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/runs/{run_id}/file-edits/{edit_id}/apply": {
+      "post": {
+        "operationId": "applyRunFileEdit",
+        "summary": "Apply an approved file edit",
+        "description": "Separately applies one exact Run-bound approved edit after fresh Run, Workspace, approval, Policy, path, and current-hash checks. The renderer supplies no path or file content, and retries replay the durable operation result.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "edit_id",
+            "in": "path",
+            "description": "File edit identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque retry key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FileEditApplyView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileEditApplyRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
     "/api/v1/runs/{run_id}/file-edits/{edit_id}/review": {
       "post": {
         "operationId": "reviewRunFileEdit",
@@ -3873,6 +4002,111 @@
         "x-cyberagent-read-only": false
       }
     },
+    "/api/v1/runs/{run_id}/wake-intent/consume": {
+      "post": {
+        "operationId": "consumeRunWake",
+        "summary": "Consume one due Run wake intent",
+        "description": "Explicitly claims one due wake generation and hands its bounded queued selection to the existing Go RunSupervisor. It starts no hidden worker or background loop; retries replay the generation-fenced durable handoff.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RunWakeExecutionView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunWakeExecutionRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
     "/api/v1/runs/{run_id}/work-items": {
       "get": {
         "operationId": "listRunWorkItems",
@@ -4543,6 +4777,108 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SessionSteeringCancellationRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
+    "/api/v1/skills/packages/install": {
+      "post": {
+        "operationId": "installSkillPackage",
+        "summary": "Install one inert Skill package",
+        "description": "Imports one explicitly confirmed, strictly validated, bounded archive into the content-addressed untrusted Skill Registry. Import executes no scripts, hooks, commands, tools, Provider calls, or network requests and grants no Run-selection or context-delivery authority.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque retry key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SkillPackageInstallView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SkillPackageInstallRequestView"
               }
             }
           }
@@ -6063,6 +6399,66 @@
           "shard_count",
           "requested_by",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "FileEditApplyRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "enum": [
+              "file_edit_apply.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "FileEditApplyView": {
+        "additionalProperties": false,
+        "properties": {
+          "edit": {
+            "$ref": "#/components/schemas/FileEditPreviewView"
+          },
+          "file_written": {
+            "type": "boolean"
+          },
+          "policy_rechecked": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "file_edit_apply.v1"
+            ],
+            "type": "string"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "applied",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "edit",
+          "status",
+          "replayed",
+          "file_written",
+          "policy_rechecked"
         ],
         "type": "object"
       },
@@ -8572,6 +8968,85 @@
         ],
         "type": "object"
       },
+      "RunWakeExecutionRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "max_steps": {
+            "format": "int32",
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "version": {
+            "enum": [
+              "run_wake_consumer.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "max_steps"
+        ],
+        "type": "object"
+      },
+      "RunWakeExecutionView": {
+        "additionalProperties": false,
+        "properties": {
+          "background_loop_enabled": {
+            "type": "boolean"
+          },
+          "consumption_status": {
+            "enum": [
+              "prepared",
+              "completed",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "execution_started": {
+            "type": "boolean"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/RunWakeIntentView"
+          },
+          "model_called": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "run_wake_consumer.v1"
+            ],
+            "type": "string"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "stop_reason": {
+            "type": "string"
+          },
+          "tool_called": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "intent",
+          "consumption_status",
+          "replayed",
+          "execution_started",
+          "model_called",
+          "tool_called",
+          "background_loop_enabled"
+        ],
+        "type": "object"
+      },
       "RunWakeIntentView": {
         "additionalProperties": false,
         "properties": {
@@ -8648,6 +9123,7 @@
             "enum": [
               "queued",
               "leased",
+              "completed",
               "cancelled",
               "exhausted"
             ],
@@ -8996,6 +9472,116 @@
           "status",
           "created_at",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "SkillPackageInstallRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_base64": {
+            "maxLength": 87384,
+            "type": "string"
+          },
+          "confirm_untrusted": {
+            "type": "boolean"
+          },
+          "surface": {
+            "enum": [
+              "code",
+              "cyber"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "skill_package_installation.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "archive_base64",
+          "surface",
+          "confirm_untrusted"
+        ],
+        "type": "object"
+      },
+      "SkillPackageInstallView": {
+        "additionalProperties": false,
+        "properties": {
+          "archive_sha256": {
+            "type": "string"
+          },
+          "context_injection_authorized": {
+            "type": "boolean"
+          },
+          "import_command_execution": {
+            "type": "boolean"
+          },
+          "import_network_access": {
+            "type": "boolean"
+          },
+          "import_provider_calls": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "package_fingerprint": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "enum": [
+              "skill_package_installation.v1"
+            ],
+            "type": "string"
+          },
+          "recovered_pending": {
+            "type": "boolean"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "run_selection_authorized": {
+            "type": "boolean"
+          },
+          "surface": {
+            "enum": [
+              "code",
+              "cyber"
+            ],
+            "type": "string"
+          },
+          "tool_capability_grant": {
+            "type": "boolean"
+          },
+          "trust_class": {
+            "enum": [
+              "operator_installed_untrusted"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "name",
+          "version",
+          "surface",
+          "trust_class",
+          "archive_sha256",
+          "package_fingerprint",
+          "replayed",
+          "recovered_pending",
+          "import_command_execution",
+          "import_network_access",
+          "import_provider_calls",
+          "tool_capability_grant",
+          "run_selection_authorized",
+          "context_injection_authorized"
         ],
         "type": "object"
       },

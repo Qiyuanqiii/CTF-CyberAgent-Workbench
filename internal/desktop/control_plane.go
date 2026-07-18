@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -12,6 +13,7 @@ import (
 	"cyberagent-workbench/internal/httpapi"
 	"cyberagent-workbench/internal/modelregistry"
 	"cyberagent-workbench/internal/policy"
+	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/store"
 	"cyberagent-workbench/internal/toolgateway"
 )
@@ -20,14 +22,16 @@ import (
 // It does not listen on a socket and it adds no renderer authority beyond the
 // tokens explicitly supplied in ControlPlaneConfig.
 type ControlPlane struct {
-	stateStore *store.SQLiteStore
-	handler    http.Handler
-	closeOnce  sync.Once
-	closeErr   error
+	stateStore     *store.SQLiteStore
+	handler        http.Handler
+	closeOnce      sync.Once
+	closeErr       error
+	skillInstaller *application.SkillPackageRegistryService
 }
 
 type ControlPlaneConfig struct {
 	DatabasePath                  string
+	HomePath                      string
 	ReadToken                     string
 	ControlToken                  string
 	RunControlEnabled             bool
@@ -41,6 +45,9 @@ type ControlPlaneConfig struct {
 	ModelControlEnabled           bool
 	FileEditReviewEnabled         bool
 	RunWakeControlEnabled         bool
+	FileEditApplyEnabled          bool
+	RunWakeExecutionEnabled       bool
+	SkillInstallationEnabled      bool
 	AppVersion                    string
 	UIHandler                     http.Handler
 }
@@ -69,7 +76,29 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 		toolgateway.New(stateStore, checker), checker)
 	modelControl := application.NewModelControlService(models, stateStore)
 	fileEditReview := application.NewFileEditReviewService(stateStore)
+	fileEditApply := application.NewFileEditApplyService(stateStore, checker)
 	runWakeControl := application.NewRunWakeControlService(stateStore)
+	runWakeExecution := application.NewForegroundRunWakeConsumer(stateStore,
+		executionControl)
+	var skillInstaller *application.SkillPackageRegistryService
+	if config.SkillInstallationEnabled {
+		home := strings.TrimSpace(config.HomePath)
+		if home == "" {
+			home = filepath.Dir(config.DatabasePath)
+		}
+		objects, objectErr := skills.NewLocalPackageObjectStore(home)
+		if objectErr != nil {
+			_ = stateStore.Close()
+			return nil, objectErr
+		}
+		registry, registryErr := skills.BuiltinRegistry()
+		if registryErr != nil {
+			_ = stateStore.Close()
+			return nil, registryErr
+		}
+		skillInstaller = application.NewSkillPackageRegistryService(stateStore,
+			objects, registry)
+	}
 	api, err := httpapi.New(stateStore, httpapi.Config{
 		AccessToken: config.ReadToken, ControlToken: config.ControlToken,
 		RunControlEnabled:             config.RunControlEnabled,
@@ -83,6 +112,9 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 		ModelControlEnabled:           config.ModelControlEnabled,
 		FileEditReviewEnabled:         config.FileEditReviewEnabled,
 		RunWakeControlEnabled:         config.RunWakeControlEnabled,
+		FileEditApplyEnabled:          config.FileEditApplyEnabled,
+		RunWakeExecutionEnabled:       config.RunWakeExecutionEnabled,
+		SkillInstallationEnabled:      config.SkillInstallationEnabled,
 		RunLifecycleController:        lifecycleControl,
 		RunExecutionController:        executionControl,
 		PlanDeliveryController:        planDeliveryControl,
@@ -90,6 +122,9 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 		ModelControlController:        modelControl,
 		FileEditReviewController:      fileEditReview,
 		RunWakeController:             runWakeControl,
+		FileEditApplyController:       fileEditApply,
+		RunWakeExecutionController:    runWakeExecution,
+		SkillInstallationController:   skillInstaller,
 		ModelRegistry:                 models,
 		AppVersion:                    config.AppVersion, UIHandler: config.UIHandler,
 	})
@@ -97,7 +132,8 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 		_ = stateStore.Close()
 		return nil, err
 	}
-	return &ControlPlane{stateStore: stateStore, handler: api.Handler()}, nil
+	return &ControlPlane{stateStore: stateStore, handler: api.Handler(),
+		skillInstaller: skillInstaller}, nil
 }
 
 func (c *ControlPlane) Handler() http.Handler {
@@ -105,6 +141,13 @@ func (c *ControlPlane) Handler() http.Handler {
 		return nil
 	}
 	return c.handler
+}
+
+func (c *ControlPlane) SkillInstaller() SkillPackageInstaller {
+	if c == nil {
+		return nil
+	}
+	return c.skillInstaller
 }
 
 func (c *ControlPlane) Close() error {

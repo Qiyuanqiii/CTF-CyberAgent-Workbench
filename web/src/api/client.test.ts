@@ -716,6 +716,66 @@ describe("CyberAgentClient", () => {
     }, "web-wake-operation-0002")).rejects.toThrow("authority");
   });
 
+  it("validates apply, foreground wake, and inert Skill installation boundaries", async () => {
+    const appliedEdit = { id: "edit-1", session_id: "session-1", workspace_id: "workspace-1",
+      path: "safe.txt", status: "applied", diff: "--- safe.txt\n+++ safe.txt\n+ok\n",
+      original_hash: "missing", proposed_hash: "a".repeat(64), secrets_redacted: false,
+      allowed_actions: [], created_at: "2026-07-18T00:00:00Z",
+      updated_at: "2026-07-18T00:00:01Z", apply_enabled: false };
+    const applyResult = { protocol_version: "file_edit_apply.v1", run_id: "run-1",
+      edit: appliedEdit, status: "applied", replayed: false, file_written: true,
+      policy_rechecked: true };
+    const completedIntent = { id: "wake-1", protocol_version: "run_wake_intent.v1",
+      run_id: "run-1", session_id: "session-1", status: "completed", max_attempts: 3,
+      attempt_count: 1, initial_delay_seconds: 0, base_backoff_seconds: 5,
+      max_backoff_seconds: 60, max_elapsed_seconds: 300,
+      next_wake_at: "2026-07-18T00:05:00Z", deadline_at: "2026-07-18T00:05:00Z",
+      execution_enabled: false, background_loop_enabled: false,
+      created_at: "2026-07-18T00:00:00Z", updated_at: "2026-07-18T00:00:01Z" };
+    const wakeResult = { protocol_version: "run_wake_consumer.v1", run_id: "run-1",
+      intent: completedIntent, consumption_status: "completed", stop_reason: "waiting",
+      replayed: false, execution_started: true, model_called: true, tool_called: false,
+      background_loop_enabled: false };
+    const skillResult = { protocol_version: "skill_package_installation.v1",
+      name: "review-helper", version: "1.0.0", surface: "code",
+      trust_class: "operator_installed_untrusted", archive_sha256: "b".repeat(64),
+      package_fingerprint: "c".repeat(64), replayed: false, recovered_pending: false,
+      import_command_execution: false, import_network_access: false,
+      import_provider_calls: false, tool_capability_grant: false,
+      run_selection_authorized: false, context_injection_authorized: false };
+    const envelope = (requestID: string, data: unknown) => new Response(JSON.stringify({
+      version: "api.v1", request_id: requestID, data,
+    }), { status: 202, headers: { "Content-Type": "application/json" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(envelope("req-apply", applyResult))
+      .mockResolvedValueOnce(envelope("req-consume", wakeResult))
+      .mockResolvedValueOnce(envelope("req-skill", skillResult))
+      .mockResolvedValueOnce(envelope("req-skill-forged", {
+        ...skillResult, import_command_execution: true,
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false, fileEditApplyEnabled: true,
+      runWakeExecutionEnabled: true, skillInstallationEnabled: true,
+    });
+    await expect(client.applyFileEdit("run-1", "edit-1", {
+      version: "file_edit_apply.v1",
+    }, "web-file-apply-operation-0001")).resolves.toEqual(applyResult);
+    await expect(client.consumeRunWake("run-1", {
+      version: "run_wake_consumer.v1", max_steps: 1,
+    })).resolves.toEqual(wakeResult);
+    const skillRequest = { version: "skill_package_installation.v1" as const,
+      archive_base64: "UEsDBA==", surface: "code" as const, confirm_untrusted: true };
+    await expect(client.installSkillPackage(skillRequest,
+      "web-skill-install-operation-0001")).resolves.toEqual(skillResult);
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).headers)
+      .toMatchObject({ "Idempotency-Key": "web-file-apply-operation-0001" });
+    expect((fetchMock.mock.calls[1]?.[1] as RequestInit).headers)
+      .not.toHaveProperty("Idempotency-Key");
+    await expect(client.installSkillPackage(skillRequest,
+      "web-skill-install-operation-0002")).rejects.toThrow("inert Registry authority");
+  });
+
   it("polls Run events with a stream-compatible opaque cursor and validates the envelope", async () => {
     const frame: RunEventStreamView = {
       version: "run-events.v1",

@@ -23,6 +23,16 @@ type FileEditReviewController interface {
 		application.ReviewFileEditResult, error)
 }
 
+type FileEditApplyController interface {
+	Apply(context.Context, application.ApplyFileEditRequest) (
+		application.ApplyFileEditResult, error)
+}
+
+type RunWakeExecutionController interface {
+	Consume(context.Context, application.ConsumeRunWakeRequest) (
+		application.ConsumeRunWakeResult, error)
+}
+
 type RunWakeController interface {
 	Schedule(context.Context, application.ScheduleRunWakeRequest) (
 		application.RunWakeControlResult, error)
@@ -36,8 +46,10 @@ const (
 	ProviderDiagnosticPath          = "/api/v1/models/diagnostics"
 	FileEditQueuePathTemplate       = "/api/v1/runs/{run_id}/file-edits"
 	FileEditReviewPathTemplate      = "/api/v1/runs/{run_id}/file-edits/{edit_id}/review"
+	FileEditApplyPathTemplate       = "/api/v1/runs/{run_id}/file-edits/{edit_id}/apply"
 	RunWakeIntentPathTemplate       = "/api/v1/runs/{run_id}/wake-intent"
 	RunWakeCancellationPathTemplate = "/api/v1/runs/{run_id}/wake-intent/cancel"
+	RunWakeExecutionPathTemplate    = "/api/v1/runs/{run_id}/wake-intent/consume"
 )
 
 type ModelRouteControlRequestView struct {
@@ -58,6 +70,10 @@ type FileEditReviewRequestView struct {
 	Action  application.FileEditReviewAction `json:"action"`
 }
 
+type FileEditApplyRequestView struct {
+	Version string `json:"version"`
+}
+
 type RunWakeScheduleRequestView struct {
 	Version             string `json:"version"`
 	MaxAttempts         int    `json:"max_attempts"`
@@ -69,6 +85,11 @@ type RunWakeScheduleRequestView struct {
 
 type RunWakeCancelRequestView struct {
 	Version string `json:"version"`
+}
+
+type RunWakeExecutionRequestView struct {
+	Version  string `json:"version"`
+	MaxSteps int    `json:"max_steps"`
 }
 
 func matchModelControlPath(requestPath string) (string, bool, bool) {
@@ -96,6 +117,19 @@ func matchFileEditReviewControlPath(requestPath string) (string, string, bool) {
 	return segments[0], segments[2], true
 }
 
+func matchFileEditApplyControlPath(requestPath string) (string, string, bool) {
+	const prefix = "/api/v1/runs/"
+	if !strings.HasPrefix(requestPath, prefix) {
+		return "", "", false
+	}
+	segments := strings.Split(strings.TrimPrefix(requestPath, prefix), "/")
+	if len(segments) != 4 || segments[0] == "" || segments[1] != "file-edits" ||
+		segments[2] == "" || segments[3] != "apply" {
+		return "", "", false
+	}
+	return segments[0], segments[2], true
+}
+
 func matchRunWakeControlPath(requestPath string) (string, bool, bool) {
 	const prefix = "/api/v1/runs/"
 	if !strings.HasPrefix(requestPath, prefix) {
@@ -110,6 +144,16 @@ func matchRunWakeControlPath(requestPath string) (string, bool, bool) {
 		return segments[0], true, true
 	}
 	return "", false, false
+}
+
+func matchRunWakeExecutionPath(requestPath string) (string, bool) {
+	const prefix = "/api/v1/runs/"
+	const suffix = "/wake-intent/consume"
+	if !strings.HasPrefix(requestPath, prefix) || !strings.HasSuffix(requestPath, suffix) {
+		return "", false
+	}
+	runID := strings.TrimSuffix(strings.TrimPrefix(requestPath, prefix), suffix)
+	return runID, runID != "" && !strings.Contains(runID, "/")
 }
 
 func (a *API) serveModelControl(writer http.ResponseWriter, request *http.Request,
@@ -207,6 +251,51 @@ func (a *API) serveFileEditReviewControl(writer http.ResponseWriter,
 	}, nil, http.StatusAccepted)
 }
 
+func (a *API) serveFileEditApplyControl(writer http.ResponseWriter,
+	request *http.Request, requestID string, runID string, editID string,
+) {
+	const label = "File edit apply"
+	if !a.authorizeRunOperation(writer, request, requestID,
+		a.fileEditApplyEnabled, label) {
+		return
+	}
+	if err := validatePathIdentity(runID); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	if err := validatePathIdentity(editID); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	if err := validateJSONContentType(request.Header); err != nil {
+		a.writeError(writer, requestID, err, http.StatusUnsupportedMediaType)
+		return
+	}
+	operationKey, body, err := a.readRunOperationRequest(request, label)
+	if err != nil {
+		a.writeError(writer, requestID, err, runOperationErrorStatus(err))
+		return
+	}
+	var view FileEditApplyRequestView
+	if err := decodeStrictRunOperation(body, &view, label); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	result, err := a.fileEditApplyController.Apply(request.Context(),
+		application.ApplyFileEditRequest{Version: view.Version, RunID: runID,
+			EditID: editID, OperationKey: operationKey, AppliedBy: "http_operator"})
+	if err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	a.writeSuccessStatus(writer, requestID, FileEditApplyView{
+		ProtocolVersion: fileedit.FileEditApplyProtocolVersion, RunID: runID,
+		Edit: fileEditView(result.Edit, false), Status: string(result.Result.Status),
+		Replayed: result.Replayed, FileWritten: result.FileWritten,
+		PolicyRechecked: true,
+	}, nil, http.StatusAccepted)
+}
+
 func (a *API) serveRunWakeControl(writer http.ResponseWriter, request *http.Request,
 	requestID string, runID string, cancel bool,
 ) {
@@ -264,6 +353,53 @@ func (a *API) serveRunWakeControl(writer http.ResponseWriter, request *http.Requ
 		ProtocolVersion: domain.RunWakeControlProtocolVersion, Action: string(action),
 		Intent: *runWakeIntentView(result.Intent, true), Replayed: result.Replayed,
 		ExecutionStarted: false, ModelCalled: false, ToolCalled: false,
+	}, nil, http.StatusAccepted)
+}
+
+func (a *API) serveRunWakeExecutionControl(writer http.ResponseWriter,
+	request *http.Request, requestID string, runID string,
+) {
+	const label = "Foreground Run wake execution"
+	if !a.authorizeRunOperation(writer, request, requestID,
+		a.runWakeExecutionEnabled, label) {
+		return
+	}
+	if err := validatePathIdentity(runID); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	body, err := readStrictControlBody(request, label)
+	if err != nil {
+		a.writeError(writer, requestID, err, runOperationErrorStatus(err))
+		return
+	}
+	var view RunWakeExecutionRequestView
+	if err := decodeStrictRunOperation(body, &view, label); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	result, err := a.runWakeExecutionController.Consume(request.Context(),
+		application.ConsumeRunWakeRequest{Version: view.Version, RunID: runID,
+			OwnerID: "http_wake_foreground", MaxSteps: view.MaxSteps})
+	if err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	modelCalled, toolCalled, stopReason := false, false, ""
+	if result.Handoff.Result != nil {
+		modelCalled = result.Handoff.Result.ModelCalled
+		toolCalled = result.Handoff.Result.ToolCalled
+		stopReason = result.Handoff.Result.StopReason
+	}
+	a.writeSuccessStatus(writer, requestID, RunWakeExecutionView{
+		ProtocolVersion: domain.RunWakeConsumerProtocolVersion, RunID: runID,
+		Intent:            *runWakeIntentView(result.Intent, true),
+		ConsumptionStatus: string(result.Consumption.Status),
+		StopReason:        stopReason, Replayed: result.Replayed,
+		ExecutionStarted: result.Consumption.HandoffOperationID != "" ||
+			result.Handoff.Operation.ID != "",
+		ModelCalled: modelCalled, ToolCalled: toolCalled,
+		BackgroundLoopEnabled: false,
 	}, nil, http.StatusAccepted)
 }
 

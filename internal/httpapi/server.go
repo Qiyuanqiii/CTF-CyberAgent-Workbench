@@ -144,6 +144,9 @@ type Config struct {
 	ModelControlEnabled           bool
 	FileEditReviewEnabled         bool
 	RunWakeControlEnabled         bool
+	FileEditApplyEnabled          bool
+	RunWakeExecutionEnabled       bool
+	SkillInstallationEnabled      bool
 	RunLifecycleController        RunLifecycleController
 	RunExecutionController        RunExecutionController
 	PlanDeliveryController        PlanDeliveryController
@@ -151,6 +154,9 @@ type Config struct {
 	ModelControlController        ModelControlController
 	FileEditReviewController      FileEditReviewController
 	RunWakeController             RunWakeController
+	FileEditApplyController       FileEditApplyController
+	RunWakeExecutionController    RunWakeExecutionController
+	SkillInstallationController   SkillInstallationController
 	ModelRegistry                 *modelregistry.Registry
 	AppVersion                    string
 	EventStream                   EventStreamConfig
@@ -172,6 +178,9 @@ type API struct {
 	modelControlEnabled           bool
 	fileEditReviewEnabled         bool
 	runWakeControlEnabled         bool
+	fileEditApplyEnabled          bool
+	runWakeExecutionEnabled       bool
+	skillInstallationEnabled      bool
 	runLifecycleController        RunLifecycleController
 	runExecutionController        RunExecutionController
 	planDeliveryController        PlanDeliveryController
@@ -179,6 +188,9 @@ type API struct {
 	modelControlController        ModelControlController
 	fileEditReviewController      FileEditReviewController
 	runWakeController             RunWakeController
+	fileEditApplyController       FileEditApplyController
+	runWakeExecutionController    RunWakeExecutionController
+	skillInstallationController   SkillInstallationController
 	modelRegistry                 *modelregistry.Registry
 	appVersion                    string
 	openAPI                       []byte
@@ -213,7 +225,9 @@ func New(store Store, config Config) (*API, error) {
 		config.SessionSteeringControlEnabled || config.RunLifecycleEnabled ||
 		config.RunExecutionEnabled || config.PlanDeliveryControlEnabled ||
 		config.ApprovalControlEnabled || config.ModelControlEnabled ||
-		config.FileEditReviewEnabled || config.RunWakeControlEnabled) &&
+		config.FileEditReviewEnabled || config.RunWakeControlEnabled ||
+		config.FileEditApplyEnabled || config.RunWakeExecutionEnabled ||
+		config.SkillInstallationEnabled) &&
 		!controlTokenPresent {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"HTTP API control capabilities require a control token")
@@ -246,6 +260,18 @@ func New(store Store, config Config) (*API, error) {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"HTTP API Run wake controller is required when enabled")
 	}
+	if config.FileEditApplyEnabled && config.FileEditApplyController == nil {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API FileEdit apply controller is required when enabled")
+	}
+	if config.RunWakeExecutionEnabled && config.RunWakeExecutionController == nil {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API foreground Run wake controller is required when enabled")
+	}
+	if config.SkillInstallationEnabled && config.SkillInstallationController == nil {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API Skill installation controller is required when enabled")
+	}
 	version := strings.TrimSpace(config.AppVersion)
 	if version == "" {
 		version = "unknown"
@@ -275,6 +301,9 @@ func New(store Store, config Config) (*API, error) {
 		modelControlEnabled:           controlTokenPresent && config.ModelControlEnabled,
 		fileEditReviewEnabled:         controlTokenPresent && config.FileEditReviewEnabled,
 		runWakeControlEnabled:         controlTokenPresent && config.RunWakeControlEnabled,
+		fileEditApplyEnabled:          controlTokenPresent && config.FileEditApplyEnabled,
+		runWakeExecutionEnabled:       controlTokenPresent && config.RunWakeExecutionEnabled,
+		skillInstallationEnabled:      controlTokenPresent && config.SkillInstallationEnabled,
 		runLifecycleController:        config.RunLifecycleController,
 		runExecutionController:        config.RunExecutionController,
 		planDeliveryController:        config.PlanDeliveryController,
@@ -282,6 +311,9 @@ func New(store Store, config Config) (*API, error) {
 		modelControlController:        config.ModelControlController,
 		fileEditReviewController:      config.FileEditReviewController,
 		runWakeController:             config.RunWakeController,
+		fileEditApplyController:       config.FileEditApplyController,
+		runWakeExecutionController:    config.RunWakeExecutionController,
+		skillInstallationController:   config.SkillInstallationController,
 		modelRegistry:                 modelRegistry,
 		openAPI:                       document, eventStream: eventStream,
 		eventStreamSlots: make(chan struct{}, eventStream.MaxConnections),
@@ -433,9 +465,21 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		a.serveFileEditReviewControl(tracked, request, requestID, runID, editID)
 		return
 	}
+	if runID, editID, matched := matchFileEditApplyControlPath(request.URL.Path); matched {
+		a.serveFileEditApplyControl(tracked, request, requestID, runID, editID)
+		return
+	}
 	if runID, cancel, matched := matchRunWakeControlPath(request.URL.Path); matched &&
 		request.Method != http.MethodGet {
 		a.serveRunWakeControl(tracked, request, requestID, runID, cancel)
+		return
+	}
+	if runID, matched := matchRunWakeExecutionPath(request.URL.Path); matched {
+		a.serveRunWakeExecutionControl(tracked, request, requestID, runID)
+		return
+	}
+	if request.URL.Path == SkillPackageInstallPath {
+		a.serveSkillPackageInstallControl(tracked, request, requestID)
 		return
 	}
 	if runID, matched := matchRunExecutionControlPath(request.URL.Path); matched {

@@ -6,6 +6,7 @@ describe("Desktop renderer navigation guard", () => {
       desktop: {
         DesktopBridge: {
           Bootstrap: async () => ({}),
+          InstallSkillPackage: async () => ({}),
           SelectSkillPackage: async () => ({}),
           PreviewSkillPackage: async () => ({}),
         },

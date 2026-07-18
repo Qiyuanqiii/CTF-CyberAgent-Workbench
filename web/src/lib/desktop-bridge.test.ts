@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { DesktopSkillPreview } from "./desktop-bridge";
+
 const bootstrap = {
   protocol_version: "desktop_connection_bootstrap.v1",
   api_base_url: "/api/v1",
@@ -19,6 +21,8 @@ const bootstrap = {
   model_control_enabled: false,
   file_edit_review_enabled: false,
   run_wake_control_enabled: false,
+  file_edit_apply_enabled: false,
+  run_wake_execution_enabled: false,
   read_only_default: true,
   process_execution_enabled: false,
   shell_execution_enabled: false,
@@ -33,7 +37,7 @@ const selection = {
   expires_at: "2026-07-18T10:00:00Z",
 };
 
-const preview = {
+const preview: DesktopSkillPreview = {
   protocol_version: "desktop_skill_package_preview.v1",
   package_protocol: "skill_package.v1",
   skill_protocol: "skill.v1",
@@ -59,6 +63,8 @@ const preview = {
   tool_capability_grant: false,
   installation_authorized: false,
   validated: true,
+  confirmation_handle: "D".repeat(43),
+  confirmation_expires_at: "2026-07-18T10:05:00Z",
 };
 
 describe("desktop native bridge", () => {
@@ -177,6 +183,39 @@ describe("desktop native bridge", () => {
     expect(consume).toHaveBeenCalledWith(selection.handle);
   });
 
+  it("installs only after an enabled bootstrap and validates inert authority", async () => {
+    const enabled = {
+      ...bootstrap,
+      control_token: "control-token-0123456789abcdefghijkl",
+      skill_installation_enabled: true,
+      read_only_default: false,
+    };
+    const result = {
+      protocol_version: "desktop_skill_package_install.v1",
+      name: preview.name, version: preview.version, surface: "code",
+      trust_class: "operator_installed_untrusted",
+      archive_sha256: preview.archive_sha256,
+      package_fingerprint: preview.package_fingerprint,
+      replayed: false, recovered_pending: false,
+      import_command_execution: false, import_network_access: false,
+      import_provider_calls: false, tool_capability_grant: false,
+      run_selection_authorized: false, context_injection_authorized: false,
+    };
+    const install = vi.fn().mockResolvedValue(result);
+    installBridge({ Bootstrap: vi.fn().mockResolvedValue(enabled), InstallSkillPackage: install });
+    const module = await import("./desktop-bridge");
+    await module.loadDesktopBootstrap();
+    await expect(module.installDesktopSkillPackage(preview, "code",
+      "desktop-install-operation-0001")).resolves.toEqual(result);
+    expect(install).toHaveBeenCalledWith({
+      protocol_version: "desktop_skill_package_install.v1",
+      confirmation_handle: preview.confirmation_handle,
+      surface: "code",
+      operation_key: "desktop-install-operation-0001",
+      confirm_untrusted: true,
+    });
+  });
+
   it("does not consume a cancelled selection or path-bearing preview", async () => {
     const consume = vi.fn().mockResolvedValue(preview);
     installBridge({
@@ -207,6 +246,7 @@ describe("desktop native bridge", () => {
 
 function installBridge(overrides: Partial<{
   Bootstrap: () => Promise<unknown>;
+  InstallSkillPackage: (request: unknown) => Promise<unknown>;
   PreviewSkillPackage: (handle: string) => Promise<unknown>;
   SelectSkillPackage: () => Promise<unknown>;
 }>) {
@@ -214,6 +254,7 @@ function installBridge(overrides: Partial<{
     desktop: {
       DesktopBridge: {
         Bootstrap: vi.fn().mockResolvedValue(bootstrap),
+        InstallSkillPackage: vi.fn().mockRejectedValue(new Error("disabled")),
         PreviewSkillPackage: vi.fn().mockResolvedValue(preview),
         SelectSkillPackage: vi.fn().mockResolvedValue({
           protocol_version: "desktop_skill_package_dialog.v1",

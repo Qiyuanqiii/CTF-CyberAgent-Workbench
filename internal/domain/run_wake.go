@@ -8,15 +8,17 @@ import (
 )
 
 const (
-	RunWakeIntentProtocolVersion  = "run_wake_intent.v1"
-	RunWakeControlProtocolVersion = "run_wake_control.v1"
-	MaxRunWakeAttempts            = 8
-	MaxRunWakeInitialDelaySeconds = 3600
-	MinRunWakeBackoffSeconds      = 5
-	MaxRunWakeBackoffSeconds      = 6 * 60 * 60
-	MinRunWakeElapsedSeconds      = 60
-	MaxRunWakeElapsedSeconds      = 24 * 60 * 60
-	RunWakeLeaseSeconds           = 30
+	RunWakeIntentProtocolVersion      = "run_wake_intent.v1"
+	RunWakeControlProtocolVersion     = "run_wake_control.v1"
+	RunWakeConsumerProtocolVersion    = "run_wake_consumer.v1"
+	RunWakeConsumptionProtocolVersion = "run_wake_consumption.v1"
+	MaxRunWakeAttempts                = 8
+	MaxRunWakeInitialDelaySeconds     = 3600
+	MinRunWakeBackoffSeconds          = 5
+	MaxRunWakeBackoffSeconds          = 6 * 60 * 60
+	MinRunWakeElapsedSeconds          = 60
+	MaxRunWakeElapsedSeconds          = 24 * 60 * 60
+	RunWakeLeaseSeconds               = 30
 )
 
 type RunWakeStatus string
@@ -26,15 +28,95 @@ const (
 	RunWakeLeased    RunWakeStatus = "leased"
 	RunWakeCancelled RunWakeStatus = "cancelled"
 	RunWakeExhausted RunWakeStatus = "exhausted"
+	RunWakeCompleted RunWakeStatus = "completed"
 )
 
 func (s RunWakeStatus) Valid() bool {
 	switch s {
-	case RunWakeQueued, RunWakeLeased, RunWakeCancelled, RunWakeExhausted:
+	case RunWakeQueued, RunWakeLeased, RunWakeCancelled, RunWakeExhausted, RunWakeCompleted:
 		return true
 	default:
 		return false
 	}
+}
+
+type RunWakeConsumptionStatus string
+
+const (
+	RunWakeConsumptionPrepared  RunWakeConsumptionStatus = "prepared"
+	RunWakeConsumptionCompleted RunWakeConsumptionStatus = "completed"
+	RunWakeConsumptionFailed    RunWakeConsumptionStatus = "failed"
+)
+
+func (s RunWakeConsumptionStatus) Valid() bool {
+	return s == RunWakeConsumptionPrepared || s == RunWakeConsumptionCompleted ||
+		s == RunWakeConsumptionFailed
+}
+
+// RunWakeConsumption binds one wake generation to exactly one bounded
+// RunExecutionHandoff. It contains ownership metadata for store fencing, but
+// is never projected to browser clients verbatim.
+type RunWakeConsumption struct {
+	ID                        string
+	ProtocolVersion           string
+	IntentID                  string
+	RunID                     string
+	SessionID                 string
+	LeaseID                   string
+	Generation                int
+	OwnerID                   string
+	HandoffOperationKeyDigest string
+	MaxSteps                  int
+	Status                    RunWakeConsumptionStatus
+	HandoffOperationID        string
+	StopReason                string
+	ErrorCode                 string
+	PreparedEventSequence     int64
+	CompletionEventSequence   int64
+	CreatedAt                 time.Time
+	CompletedAt               *time.Time
+}
+
+func (c RunWakeConsumption) Validate() error {
+	if c.ProtocolVersion != RunWakeConsumptionProtocolVersion || !c.Status.Valid() {
+		return errors.New("Run wake consumption protocol or status is invalid")
+	}
+	for _, value := range []string{c.ID, c.IntentID, c.RunID, c.SessionID, c.LeaseID, c.OwnerID} {
+		if !ValidAgentID(value) || strings.ContainsRune(value, 0) {
+			return errors.New("Run wake consumption identities must be normalized and bounded")
+		}
+	}
+	if !validLowerHexDigest(c.HandoffOperationKeyDigest) || c.Generation < 1 ||
+		c.Generation > MaxRunWakeAttempts || c.MaxSteps < 1 ||
+		c.MaxSteps > MaxRunExecutionHandoffSteps || c.PreparedEventSequence <= 0 ||
+		c.CreatedAt.IsZero() {
+		return errors.New("Run wake consumption bounds are invalid")
+	}
+	if c.Status == RunWakeConsumptionPrepared {
+		if c.HandoffOperationID != "" || c.StopReason != "" || c.ErrorCode != "" ||
+			c.CompletionEventSequence != 0 || c.CompletedAt != nil {
+			return errors.New("prepared Run wake consumption cannot contain a result")
+		}
+		return nil
+	}
+	if c.CompletedAt == nil || c.CompletedAt.Before(c.CreatedAt) ||
+		c.CompletionEventSequence <= 0 || strings.TrimSpace(c.StopReason) == "" ||
+		len(c.StopReason) > 64 || strings.ContainsRune(c.StopReason, 0) ||
+		len(c.ErrorCode) > 64 || strings.ContainsRune(c.ErrorCode, 0) {
+		return errors.New("terminal Run wake consumption result is invalid")
+	}
+	if c.Status == RunWakeConsumptionCompleted {
+		if c.HandoffOperationID == "" || c.ErrorCode != "" {
+			return errors.New("completed Run wake consumption requires a successful handoff")
+		}
+	} else if c.ErrorCode == "" {
+		return errors.New("failed Run wake consumption requires an error code")
+	}
+	if c.HandoffOperationID != "" &&
+		(!ValidAgentID(c.HandoffOperationID) || strings.ContainsRune(c.HandoffOperationID, 0)) {
+		return errors.New("Run wake handoff operation identity is invalid")
+	}
+	return nil
 }
 
 type RunWakeIntent struct {

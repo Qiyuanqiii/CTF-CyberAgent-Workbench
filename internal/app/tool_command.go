@@ -308,7 +308,7 @@ func (a *App) reviewToolProposal(ctx context.Context, request toolgateway.Review
 		return err
 	}
 	if tool == toolgateway.ReplaceFileTool {
-		return errors.New("file edit proposals are reviewed with `cyberagent edit approve|deny`")
+		return errors.New("file edits use `cyberagent edit review-approve|review-deny`; approved Run-bound edits require a separate `cyberagent edit apply`")
 	}
 	request.Tool = tool
 	outcome, err := a.newToolGateway().Review(ctx, request)
