@@ -63,6 +63,9 @@ type Store interface {
 	GetRunBySession(ctx context.Context, sessionID string) (domain.Run, bool, error)
 	EnqueueOperatorSteering(ctx context.Context,
 		request domain.EnqueueOperatorSteeringRequest) (domain.OperatorSteeringEnqueueResult, error)
+	GetOperatorSteering(ctx context.Context, id string) (domain.OperatorSteeringMessage, error)
+	CancelOperatorSteering(ctx context.Context,
+		request domain.CancelOperatorSteeringRequest) (domain.OperatorSteeringCancellationResult, error)
 	ListRuns(ctx context.Context, filter domain.RunFilter) ([]domain.Run, error)
 	ListRunEventsPage(ctx context.Context, runID string, offset int, limit int) ([]events.Event, error)
 	ListRunEventsAfterSequence(ctx context.Context, runID string, afterSequence int64, limit int) ([]events.Event, error)
@@ -120,28 +123,38 @@ type Store interface {
 }
 
 type Config struct {
-	AccessToken           string
-	ControlToken          string
-	RunControlEnabled     bool
-	RunCreationEnabled    bool
-	SessionMessageEnabled bool
-	AppVersion            string
-	EventStream           EventStreamConfig
-	UIHandler             http.Handler
+	AccessToken                   string
+	ControlToken                  string
+	RunControlEnabled             bool
+	RunCreationEnabled            bool
+	SessionMessageEnabled         bool
+	SessionSteeringControlEnabled bool
+	RunLifecycleEnabled           bool
+	RunExecutionEnabled           bool
+	RunLifecycleController        RunLifecycleController
+	RunExecutionController        RunExecutionController
+	AppVersion                    string
+	EventStream                   EventStreamConfig
+	UIHandler                     http.Handler
 }
 
 type API struct {
-	store                 Store
-	tokenHash             [sha256.Size]byte
-	controlTokenHash      [sha256.Size]byte
-	controlEnabled        bool
-	runCreationEnabled    bool
-	sessionMessageEnabled bool
-	appVersion            string
-	openAPI               []byte
-	eventStream           EventStreamConfig
-	eventStreamSlots      chan struct{}
-	uiHandler             http.Handler
+	store                         Store
+	tokenHash                     [sha256.Size]byte
+	controlTokenHash              [sha256.Size]byte
+	controlEnabled                bool
+	runCreationEnabled            bool
+	sessionMessageEnabled         bool
+	sessionSteeringControlEnabled bool
+	runLifecycleEnabled           bool
+	runExecutionEnabled           bool
+	runLifecycleController        RunLifecycleController
+	runExecutionController        RunExecutionController
+	appVersion                    string
+	openAPI                       []byte
+	eventStream                   EventStreamConfig
+	eventStreamSlots              chan struct{}
+	uiHandler                     http.Handler
 }
 
 func New(store Store, config Config) (*API, error) {
@@ -166,10 +179,20 @@ func New(store Store, config Config) (*API, error) {
 				"HTTP API read and control tokens must be distinct")
 		}
 	}
-	if (config.RunControlEnabled || config.RunCreationEnabled || config.SessionMessageEnabled) &&
+	if (config.RunControlEnabled || config.RunCreationEnabled || config.SessionMessageEnabled ||
+		config.SessionSteeringControlEnabled || config.RunLifecycleEnabled ||
+		config.RunExecutionEnabled) &&
 		!controlTokenPresent {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"HTTP API control capabilities require a control token")
+	}
+	if config.RunLifecycleEnabled && config.RunLifecycleController == nil {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API Run lifecycle controller is required when enabled")
+	}
+	if config.RunExecutionEnabled && config.RunExecutionController == nil {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API Run execution controller is required when enabled")
 	}
 	version := strings.TrimSpace(config.AppVersion)
 	if version == "" {
@@ -187,8 +210,13 @@ func New(store Store, config Config) (*API, error) {
 		controlTokenHash:   controlTokenHash,
 		controlEnabled:     controlTokenPresent && config.RunControlEnabled,
 		runCreationEnabled: controlTokenPresent && config.RunCreationEnabled, appVersion: version,
-		sessionMessageEnabled: controlTokenPresent && config.SessionMessageEnabled,
-		openAPI:               document, eventStream: eventStream,
+		sessionMessageEnabled:         controlTokenPresent && config.SessionMessageEnabled,
+		sessionSteeringControlEnabled: controlTokenPresent && config.SessionSteeringControlEnabled,
+		runLifecycleEnabled:           controlTokenPresent && config.RunLifecycleEnabled,
+		runExecutionEnabled:           controlTokenPresent && config.RunExecutionEnabled,
+		runLifecycleController:        config.RunLifecycleController,
+		runExecutionController:        config.RunExecutionController,
+		openAPI:                       document, eventStream: eventStream,
 		eventStreamSlots: make(chan struct{}, eventStream.MaxConnections),
 		uiHandler:        config.UIHandler}, nil
 }
@@ -308,6 +336,18 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if sessionID, matched := matchSessionMessageControlPath(request.URL.Path); matched &&
 		request.Method != http.MethodGet {
 		a.serveSessionMessageControl(tracked, request, requestID, sessionID)
+		return
+	}
+	if sessionID, messageID, matched := matchSessionSteeringCancellationPath(request.URL.Path); matched {
+		a.serveSessionSteeringCancellation(tracked, request, requestID, sessionID, messageID)
+		return
+	}
+	if runID, matched := matchRunLifecycleControlPath(request.URL.Path); matched {
+		a.serveRunLifecycleControl(tracked, request, requestID, runID)
+		return
+	}
+	if runID, matched := matchRunExecutionControlPath(request.URL.Path); matched {
+		a.serveRunExecutionControl(tracked, request, requestID, runID)
 		return
 	}
 	if runID, matched := matchRunExecutionProfileControlPath(request.URL.Path); matched {

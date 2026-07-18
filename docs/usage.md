@@ -73,7 +73,7 @@ Schema v46 adds local operator controls without changing queue authority. `run s
 
 `run steer drain` processes one queued turn by default and at most 64 per invocation. It acquires the Run execution lease before explicitly resuming a paused Run. A conflicting lease leaves the Run paused. The steering-only begin path refuses to generate a Mission-goal turn or recover an unrelated failed ordinary input, and every real turn still consumes the existing token/turn/time budgets and passes Policy. Empty queues do not wake paused Runs. This is an explicit local operation, not a background worker or new execution capability.
 
-Use `session send <id> "message" --operation-key <stable-key>` when a Run-bound client needs durable retry identity. With this flag, the command always enqueues or replays steering, even when the running Run is otherwise idle, and never performs a synchronous model call. The same key and intent converge across process restart and after committed delivery; changed intent conflicts. The flag is rejected for slash commands and unbound Sessions. D1-S1 now exposes the same enqueue/replay semantic through a separately enabled HTTP/Desktop capability for an exact running or paused Run-bound Session. HTTP/OpenAPI/React still have no cancel, reorder, wake, drain, model-call, tool-call, or lease authority; TUI, models, and child Agents retain no queue mutation authority.
+Use `session send <id> "message" --operation-key <stable-key>` when a Run-bound client needs durable retry identity. With this flag, the command always enqueues or replays steering and never performs a synchronous model call. D1-S1 exposes the same enqueue/replay through HTTP/Desktop; D1-S2 separately exposes exact pending-only cancellation; schema v73 exposes strict Run lifecycle and an explicit at-most-eight-item frozen RunSupervisor handoff. HTTP/OpenAPI/React still cannot edit/reorder input, hold a private lease, bypass Policy/budgets, or grant tool/process authority; TUI, models, and child Agents retain no queue control capability.
 
 ## Skills
 
@@ -107,7 +107,7 @@ Schema v40 loads the complete selected set for root Supervisor turns. Before eve
 
 Schema v47 derives `specialist_skill_context.v1` for each active child Attempt. Go reloads the child after Attempt start, binds the current immutable Run mode and parent selection, requires delegated `model.chat`, and selects at most one already-pinned guide. Code uses the guide matching its Profile. Cyber receives no broad Code/Review/Learn guide and receives `script` only for the Script Profile. `plan-delivery` is root-only. The default child budget is 1,024 conservative tokens with a 2,048 hard maximum. Preparation is idempotent across concurrent Store callers and commits atomically with the first Specialist model start; a selected Run cannot start that call without preparation. Child assignment text, model output, HTTP, Tool Gateway, and external directories cannot select Skills. The body remains in the current Go Provider request only, while SQLite and events store aggregate metadata and fingerprints.
 
-## Windows Desktop D0-A/D0-B/D1-R1/D1-S1
+## Windows Desktop D0-A Through D1-X1
 
 Build the unsigned development/portable-test shell from the repository root:
 
@@ -133,16 +133,23 @@ To expose only schema-v72 controlled Run creation, or both narrow capabilities:
 .\build\desktop\cyberagent-desktop.exe --enable-run-creation --enable-profile-control
 ```
 
-To expose only Session message queuing, or all three narrow capabilities:
+To expose only Session message queuing:
 
 ```powershell
 .\build\desktop\cyberagent-desktop.exe --enable-session-messages
-.\build\desktop\cyberagent-desktop.exe --enable-run-creation --enable-profile-control --enable-session-messages
 ```
 
-Any flag creates one distinct in-memory control token, while capability bits keep their routes independent. Profile selection does not enable a backend: `preview`, `docker`, and `local` still return `process_enabled=false`, `execution_authorized=false`, and `capability_grant=false`. Run creation requires an existing registered Workspace and creates only a default-budget, network-disabled, `preview/noop` Mission/Run/Session with no model call or execution lease. Session submission requires an existing exact Run binding and a running or paused Run; it queues or replays one redacted item and does not start/resume/drain the Run. There is no automatic execution handoff, terminal, LocalRunner, Docker start, Shell, Skill installation, upload, registry integration, startup entry, updater, or installer in D0-A/D0-B/D1-R1/D1-S1.
+To expose pending cancellation, Run lifecycle, or explicit bounded execution:
 
-The New Run dialog selects a Workspace, Profile, Code/Cyber surface, and Plan/Deliver phase. It keeps the bearer and uncertain-response retry key in memory only, and the Go API performs the authoritative validation and idempotent transaction. The Session composer applies the same memory-only retry rule to unchanged content, checks 16 KiB in UTF-8 bytes, and displays only queue metadata after success. A creation-only or Session-only launch does not unlock active-call cancellation or profile selection.
+```powershell
+.\build\desktop\cyberagent-desktop.exe --enable-session-steering-control
+.\build\desktop\cyberagent-desktop.exe --enable-run-lifecycle
+.\build\desktop\cyberagent-desktop.exe --enable-run-execution
+```
+
+Any flag creates one distinct in-memory control token, while capability bits keep routes independent. Profile selection does not enable a backend. Run creation makes only a default-budget, network-disabled `preview/noop` graph. Session submission queues one redacted item; cancellation applies only before preparation. Lifecycle performs strict start/pause/resume. Execution freezes at most eight pending identities and invokes only the existing Go RunSupervisor, Policy, budgets, model/tool ledgers, checkpoints, and private execution lease. There is no background wake/retry worker, terminal, LocalRunner, Docker start, Shell, Skill installation, upload, registry integration, startup entry, updater, or installer.
+
+The New Run dialog selects a Workspace, Profile, Code/Cyber surface, and Plan/Deliver phase. The Session composer, pending Cancel action, Start/Pause/Resume, and Run Queue control retain intent-bound retry keys only in memory. Changing message, lifecycle action, or `maxSteps` rotates the key. Go performs authoritative validation and transactions. A single-capability launch does not unlock sibling controls.
 
 The top-bar package button opens the native `.zip` picker. The operating-system path stays inside Go and is immediately validated. React receives only an opaque one-time handle followed by bounded metadata and the fixed conclusion `installation_authorized=false`; cancellation creates no state. Set `CYBERAGENT_HOME` before launch only when intentionally using an isolated data directory for testing. The renderer cannot read or change that path.
 

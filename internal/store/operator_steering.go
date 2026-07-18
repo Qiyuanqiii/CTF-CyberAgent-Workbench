@@ -19,9 +19,13 @@ import (
 	"cyberagent-workbench/internal/session"
 )
 
-const operatorSteeringSelect = `SELECT id, run_id, session_id, sequence, status, content,
-	content_sha256, requested_by, session_message_id, created_at, committed_at, cancelled_at
-	FROM operator_steering_messages`
+const operatorSteeringSelect = `SELECT message.id, message.run_id, message.session_id,
+	message.sequence, message.status, message.content, message.content_sha256,
+	message.requested_by, message.session_message_id, message.created_at,
+	message.committed_at, message.cancelled_at,
+	EXISTS (SELECT 1 FROM operator_steering_deliveries delivery
+		WHERE delivery.message_id = message.id AND delivery.status = 'prepared')
+	FROM operator_steering_messages message`
 
 const operatorSteeringCancellationSelect = `SELECT id, message_id, run_id, kind,
 	requested_by, reason, reason_sha256, created_at FROM operator_steering_cancellations`
@@ -364,10 +368,14 @@ func (s *SQLiteStore) ListOperatorSteering(ctx context.Context, runID string,
 			fmt.Sprintf("operator steering list limit must be between 1 and %d",
 				domain.MaxOperatorSteeringListLimit))
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id, run_id, session_id, sequence, status, content,
-		content_sha256, requested_by, session_message_id, created_at, committed_at, cancelled_at
+	rows, err := s.db.QueryContext(ctx, `SELECT message.id, message.run_id,
+		message.session_id, message.sequence, message.status, message.content,
+		message.content_sha256, message.requested_by, message.session_message_id,
+		message.created_at, message.committed_at, message.cancelled_at,
+		EXISTS (SELECT 1 FROM operator_steering_deliveries delivery
+			WHERE delivery.message_id = message.id AND delivery.status = 'prepared')
 		FROM (SELECT * FROM operator_steering_messages WHERE run_id = ?
-			ORDER BY sequence DESC LIMIT ?) ORDER BY sequence`, runID, limit)
+			ORDER BY sequence DESC LIMIT ?) message ORDER BY message.sequence`, runID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -407,10 +415,10 @@ func (s *SQLiteStore) GetOperatorSteeringQueueSummary(ctx context.Context,
 		return domain.OperatorSteeringQueueSummary{}, err
 	}
 	next, err := getOperatorSteeringMessageRow(s.db.QueryRowContext(ctx, operatorSteeringSelect+
-		` message WHERE run_id = ? AND status = 'pending' AND NOT EXISTS
+		` WHERE message.run_id = ? AND message.status = 'pending' AND NOT EXISTS
 			(SELECT 1 FROM operator_steering_deliveries delivery
 			 WHERE delivery.message_id = message.id AND delivery.status = 'prepared')
-		 ORDER BY sequence LIMIT 1`, runID))
+		 ORDER BY message.sequence LIMIT 1`, runID))
 	if err == nil {
 		summary.Next = &next
 	} else if !errors.Is(err, sql.ErrNoRows) {
@@ -440,15 +448,15 @@ func operatorSteeringBusyTx(ctx context.Context, tx *sql.Tx, runID string,
 func selectOperatorSteeringForTurnTx(ctx context.Context, tx *sql.Tx, runID string,
 	preferredMessageID string,
 ) (domain.OperatorSteeringMessage, bool, error) {
-	query := operatorSteeringSelect + ` message WHERE run_id = ? AND status = 'pending'
+	query := operatorSteeringSelect + ` WHERE message.run_id = ? AND message.status = 'pending'
 		AND NOT EXISTS (SELECT 1 FROM operator_steering_deliveries delivery
 			WHERE delivery.message_id = message.id AND delivery.status = 'prepared')`
 	args := []any{runID}
 	if preferredMessageID != "" {
-		query += ` AND id = ?`
+		query += ` AND message.id = ?`
 		args = append(args, preferredMessageID)
 	}
-	query += ` ORDER BY sequence LIMIT 1`
+	query += ` ORDER BY message.sequence LIMIT 1`
 	message, err := getOperatorSteeringMessageRow(tx.QueryRowContext(ctx, query, args...))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.OperatorSteeringMessage{}, false, nil
@@ -816,7 +824,8 @@ func getOperatorSteeringMessageRow(row operatorSteeringRow) (domain.OperatorStee
 	var committedAt, cancelledAt sql.NullString
 	if err := row.Scan(&message.ID, &message.RunID, &message.SessionID, &message.Sequence,
 		&message.Status, &message.Content, &message.ContentSHA256, &message.RequestedBy,
-		&sessionMessageID, &createdAt, &committedAt, &cancelledAt); err != nil {
+		&sessionMessageID, &createdAt, &committedAt, &cancelledAt,
+		&message.Prepared); err != nil {
 		return domain.OperatorSteeringMessage{}, err
 	}
 	message.SessionMessageID = sessionMessageID.Int64

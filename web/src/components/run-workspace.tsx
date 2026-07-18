@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -11,12 +11,16 @@ import {
   GitBranch,
   ListChecks,
   ListOrdered,
+  LoaderCircle,
   Network,
+  Pause,
+  Play,
   Radio,
   ScanSearch,
   ShieldAlert,
   StickyNote,
   Terminal,
+  ChevronsRight,
   View,
   Wrench,
 } from "lucide-react";
@@ -30,6 +34,9 @@ import type {
   RunDetailView,
   RunExecutionProfileControlView,
   RunExecutionProfileView,
+  RunExecutionControlView,
+  RunLifecycleControlRequestView,
+  RunLifecycleControlView,
   SupervisorToolRoundView,
   WorkItemView,
 } from "../api/types";
@@ -194,6 +201,7 @@ function RunOverview({ client, detail }: { client: CyberAgentClient; detail: Run
           <KeyValue label="Created" value={formatDate(detail.run.created_at)} />
         </dl>
       </section>
+      <RunControlPanel client={client} detail={detail} />
       <ExecutionProfilePanel client={client} detail={detail} />
       <section className="detail-section">
         <h2>执行状态</h2>
@@ -219,6 +227,109 @@ function RunOverview({ client, detail }: { client: CyberAgentClient; detail: Run
       {detail.plan_delivery && <PlanDeliveryPanel state={detail.plan_delivery} />}
       {detail.external_skills && <ExternalSkillsPanel projection={detail.external_skills} />}
     </div>
+  );
+}
+
+export function RunControlPanel({ client, detail }: {
+  client: CyberAgentClient;
+  detail: RunDetailView;
+}) {
+  const queryClient = useQueryClient();
+  const [maxSteps, setMaxSteps] = useState(1);
+  const [lastExecution, setLastExecution] = useState<RunExecutionControlView | null>(null);
+  const operationKeys = useRef(new Map<string, string>());
+  const operationKey = (kind: string) => {
+    const existing = operationKeys.current.get(kind);
+    if (existing) {
+      return existing;
+    }
+    const created = `web-run-${kind}-${globalThis.crypto.randomUUID()}`;
+    operationKeys.current.set(kind, created);
+    return created;
+  };
+  const lifecycle = useMutation({
+    mutationFn: (action: RunLifecycleControlRequestView["action"]) =>
+      client.controlRunLifecycle(detail.run.id, {
+        version: "run_lifecycle_control.v1", action,
+      }, operationKey(`lifecycle-${action}`)),
+    onSuccess: (result: RunLifecycleControlView, action) => {
+      operationKeys.current.delete(`lifecycle-${action}`);
+      queryClient.setQueryData<RunDetailView>(["run", detail.run.id], (current) => current
+        ? { ...current, run: result.run }
+        : current);
+      void queryClient.invalidateQueries({ queryKey: ["run", detail.run.id] });
+      void queryClient.invalidateQueries({ queryKey: ["run", detail.run.id, "events"] });
+    },
+  });
+  const execution = useMutation({
+    mutationFn: () => client.executeRun(detail.run.id, {
+      version: "run_execution_handoff.v1", max_steps: maxSteps,
+    }, operationKey(`execute-${maxSteps}`)),
+    onSuccess: (result) => {
+      operationKeys.current.delete(`execute-${result.max_steps}`);
+      setLastExecution(result);
+      void queryClient.invalidateQueries({ queryKey: ["run", detail.run.id] });
+      void queryClient.invalidateQueries({ queryKey: ["run", detail.run.id, "events"] });
+    },
+  });
+  if (!client.hasRunLifecycle && !client.hasRunExecution) {
+    return null;
+  }
+  const activeLease = Boolean(detail.execution_lease?.active);
+  const queued = detail.operator_steering.pending + detail.operator_steering.prepared;
+  const lifecycleAction: RunLifecycleControlRequestView["action"] | null =
+    detail.run.status === "created" ? "start" :
+      detail.run.status === "running" ? "pause" :
+        detail.run.status === "paused" ? "resume" : null;
+  const lifecycleDisabled = lifecycle.isPending || execution.isPending || activeLease ||
+    lifecycleAction === null;
+  const executionDisabled = execution.isPending || lifecycle.isPending || activeLease ||
+    detail.run.status !== "running" || queued === 0;
+  const LifecycleIcon = lifecycleAction === "pause" ? Pause : Play;
+  const error = lifecycle.error ?? execution.error;
+  return (
+    <section className="detail-section run-control-section">
+      <div className="section-heading">
+        <h2><Play aria-hidden="true" size={15} />Run control</h2>
+        <StatusBadge status={activeLease ? "busy" : detail.run.status} />
+      </div>
+      <div className="run-control-row">
+        {client.hasRunLifecycle && lifecycleAction && (
+          <button className="command-button" disabled={lifecycleDisabled}
+            onClick={() => lifecycle.mutate(lifecycleAction)} type="button">
+            {lifecycle.isPending
+              ? <LoaderCircle aria-hidden="true" className="spin" size={16} />
+              : <LifecycleIcon aria-hidden="true" size={16} />}
+            {lifecycleAction === "start" ? "Start" : lifecycleAction === "pause" ? "Pause" : "Resume"}
+          </button>
+        )}
+        {client.hasRunExecution && (
+          <div className="run-execution-control">
+            <label htmlFor={`run-max-steps-${detail.run.id}`}>Steps</label>
+            <input id={`run-max-steps-${detail.run.id}`} max={8} min={1}
+              onChange={(event) => setMaxSteps(Math.max(1, Math.min(8,
+                Number.parseInt(event.target.value, 10) || 1)))} type="number" value={maxSteps} />
+            <button className="command-button" disabled={executionDisabled}
+              onClick={() => execution.mutate()} type="button">
+              {execution.isPending
+                ? <LoaderCircle aria-hidden="true" className="spin" size={16} />
+                : <ChevronsRight aria-hidden="true" size={16} />}
+              Run queue
+            </button>
+          </div>
+        )}
+      </div>
+      {lastExecution && (
+        <div className="run-control-result" role="status">
+          <StatusBadge status={lastExecution.status} />
+          <span>{lastExecution.stop_reason}</span>
+          <span>{lastExecution.steps_completed}/{lastExecution.selected_count} steps</span>
+        </div>
+      )}
+      {error && <div className="inline-warning" role="alert">
+        {error instanceof Error ? error.message : "Run control failed"}
+      </div>}
+    </section>
   );
 }
 

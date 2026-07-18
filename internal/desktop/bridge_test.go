@@ -88,6 +88,7 @@ func TestDesktopBridgeBootstrapsMemoryOnlyClosedAuthority(t *testing.T) {
 		bootstrap.ReadToken != testDesktopReadToken ||
 		bootstrap.ControlToken != testDesktopControlToken || !bootstrap.ControlEnabled ||
 		!bootstrap.RunCreationEnabled || !bootstrap.SessionMessageEnabled ||
+		!bootstrap.RunLifecycleEnabled || !bootstrap.RunExecutionEnabled ||
 		bootstrap.ReadOnlyDefault || bootstrap.ProcessExecutionEnabled ||
 		bootstrap.ShellExecutionEnabled || bootstrap.DockerExecutionEnabled ||
 		bootstrap.SkillInstallationEnabled || bootstrap.RendererPathInputSupported {
@@ -101,8 +102,70 @@ func TestDesktopBridgeBootstrapsMemoryOnlyClosedAuthority(t *testing.T) {
 		"api_base_url", "api_version", "app_version", "control_enabled", "control_token",
 		"docker_execution_enabled", "process_execution_enabled", "protocol_version", "read_only_default",
 		"read_token", "renderer_path_input_supported", "run_creation_enabled", "shell_execution_enabled",
-		"session_message_enabled", "skill_installation_enabled", "ui_digest",
+		"run_execution_enabled", "run_lifecycle_enabled",
+		"session_message_enabled", "session_steering_control_enabled",
+		"skill_installation_enabled", "ui_digest",
 	})
+}
+
+func TestDesktopBridgeSeparatesRunLifecycleAndExecutionCapabilities(t *testing.T) {
+	for _, current := range []struct {
+		name      string
+		lifecycle bool
+		execution bool
+	}{
+		{name: "lifecycle", lifecycle: true},
+		{name: "execution", execution: true},
+	} {
+		t.Run(current.name, func(t *testing.T) {
+			selector, preview := NewSkillPackagePreviewBoundary()
+			bridge, err := NewDesktopBridge(DesktopBridgeConfig{
+				ContextProvider: func() context.Context { return context.Background() },
+				FilePicker:      &testSkillPackagePicker{}, ReadToken: testDesktopReadToken,
+				ControlToken:        testDesktopControlToken,
+				RunLifecycleEnabled: current.lifecycle, RunExecutionEnabled: current.execution,
+				APIVersion: "api.v1", AppVersion: "test", UIDigest: testDesktopUIDigest,
+				Selector: selector, PreviewBridge: preview,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bootstrap, err := bridge.Bootstrap()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bootstrap.RunLifecycleEnabled != current.lifecycle ||
+				bootstrap.RunExecutionEnabled != current.execution ||
+				bootstrap.ControlEnabled || bootstrap.RunCreationEnabled ||
+				bootstrap.SessionMessageEnabled || bootstrap.SessionSteeringControlEnabled ||
+				bootstrap.ReadOnlyDefault {
+				t.Fatalf("Run operation capability widened authority: %#v", bootstrap)
+			}
+		})
+	}
+}
+
+func TestDesktopBridgeSeparatesSessionSteeringControlFromOtherControls(t *testing.T) {
+	selector, preview := NewSkillPackagePreviewBoundary()
+	bridge, err := NewDesktopBridge(DesktopBridgeConfig{
+		ContextProvider: func() context.Context { return context.Background() },
+		FilePicker:      &testSkillPackagePicker{}, ReadToken: testDesktopReadToken,
+		ControlToken: testDesktopControlToken, SessionSteeringControlEnabled: true,
+		APIVersion: "api.v1", AppVersion: "test", UIDigest: testDesktopUIDigest,
+		Selector: selector, PreviewBridge: preview,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap, err := bridge.Bootstrap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bootstrap.ControlEnabled || bootstrap.RunCreationEnabled ||
+		bootstrap.SessionMessageEnabled || !bootstrap.SessionSteeringControlEnabled ||
+		bootstrap.ReadOnlyDefault || bootstrap.ControlToken == "" {
+		t.Fatalf("Session steering cancellation widened another capability: %#v", bootstrap)
+	}
 }
 
 func TestDesktopBridgeSeparatesSessionMessagesFromOtherControls(t *testing.T) {
@@ -275,6 +338,7 @@ func newTestDesktopBridge(t *testing.T, ctx context.Context, picker SkillPackage
 		ContextProvider: func() context.Context { return ctx }, FilePicker: picker,
 		ReadToken: testDesktopReadToken, ControlToken: testDesktopControlToken,
 		RunControlEnabled: true, RunCreationEnabled: true, SessionMessageEnabled: true,
+		RunLifecycleEnabled: true, RunExecutionEnabled: true,
 		APIVersion: "api.v1", AppVersion: "test", UIDigest: testDesktopUIDigest,
 		Selector: selector, PreviewBridge: preview,
 	})

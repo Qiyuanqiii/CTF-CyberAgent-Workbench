@@ -35,6 +35,9 @@ export function ConnectionGate() {
         runControlEnabled: bootstrap.control_enabled,
         runCreationEnabled: bootstrap.run_creation_enabled,
         sessionMessageEnabled: bootstrap.session_message_enabled,
+        sessionSteeringControlEnabled: bootstrap.session_steering_control_enabled,
+        runLifecycleEnabled: bootstrap.run_lifecycle_enabled,
+        runExecutionEnabled: bootstrap.run_execution_enabled,
       });
     }).catch((caught: unknown) => {
       if (active) {

@@ -30,21 +30,27 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if defaults.profileControl || defaults.runCreation || defaults.sessionMessages || defaults.version {
+	if defaults.profileControl || defaults.runCreation || defaults.sessionMessages ||
+		defaults.sessionSteeringControl || defaults.runLifecycle || defaults.runExecution ||
+		defaults.version {
 		t.Fatalf("unexpected defaults: %#v", defaults)
 	}
 	enabled, err := parseDesktopOptions([]string{"--enable-profile-control"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !enabled.profileControl || enabled.runCreation || enabled.sessionMessages || enabled.version {
+	if !enabled.profileControl || enabled.runCreation || enabled.sessionMessages ||
+		enabled.sessionSteeringControl || enabled.runLifecycle || enabled.runExecution ||
+		enabled.version {
 		t.Fatalf("profile control was not explicit: %#v", enabled)
 	}
 	creation, err := parseDesktopOptions([]string{"--enable-run-creation"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if creation.profileControl || !creation.runCreation || creation.sessionMessages || creation.version {
+	if creation.profileControl || !creation.runCreation || creation.sessionMessages ||
+		creation.sessionSteeringControl || creation.runLifecycle || creation.runExecution ||
+		creation.version {
 		t.Fatalf("Run creation was not independently explicit: %#v", creation)
 	}
 	messages, err := parseDesktopOptions([]string{"--enable-session-messages"})
@@ -52,8 +58,34 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 		t.Fatal(err)
 	}
 	if messages.profileControl || messages.runCreation || !messages.sessionMessages ||
+		messages.sessionSteeringControl || messages.runLifecycle || messages.runExecution ||
 		messages.version {
 		t.Fatalf("Session messages were not independently explicit: %#v", messages)
+	}
+	steering, err := parseDesktopOptions([]string{"--enable-session-steering-control"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if steering.profileControl || steering.runCreation || steering.sessionMessages ||
+		!steering.sessionSteeringControl || steering.runLifecycle || steering.runExecution ||
+		steering.version {
+		t.Fatalf("Session steering cancellation was not independently explicit: %#v", steering)
+	}
+	lifecycle, err := parseDesktopOptions([]string{"--enable-run-lifecycle"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !lifecycle.runLifecycle || lifecycle.runExecution || lifecycle.profileControl ||
+		lifecycle.runCreation || lifecycle.sessionMessages || lifecycle.sessionSteeringControl {
+		t.Fatalf("Run lifecycle was not independently explicit: %#v", lifecycle)
+	}
+	execution, err := parseDesktopOptions([]string{"--enable-run-execution"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !execution.runExecution || execution.runLifecycle || execution.profileControl ||
+		execution.runCreation || execution.sessionMessages || execution.sessionSteeringControl {
+		t.Fatalf("Run execution was not independently explicit: %#v", execution)
 	}
 	if _, err := parseDesktopOptions([]string{"unexpected"}); err == nil {
 		t.Fatal("desktop positional argument was accepted")

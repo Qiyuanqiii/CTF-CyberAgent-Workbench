@@ -42,17 +42,28 @@ func (s *SQLiteStore) GetSupervisorCheckpoint(ctx context.Context, runID string)
 func (s *SQLiteStore) BeginSupervisorTurn(ctx context.Context, lease domain.RunExecutionLease,
 	pendingInput string,
 ) (domain.SupervisorTurn, error) {
-	return s.beginSupervisorTurn(ctx, lease, pendingInput, false)
+	return s.beginSupervisorTurn(ctx, lease, pendingInput, false, "")
 }
 
 func (s *SQLiteStore) BeginSupervisorSteeringTurn(ctx context.Context,
 	lease domain.RunExecutionLease,
 ) (domain.SupervisorTurn, error) {
-	return s.beginSupervisorTurn(ctx, lease, "", true)
+	return s.beginSupervisorTurn(ctx, lease, "", true, "")
+}
+
+func (s *SQLiteStore) BeginSupervisorSteeringTurnForMessage(ctx context.Context,
+	lease domain.RunExecutionLease, messageID string,
+) (domain.SupervisorTurn, error) {
+	messageID = strings.TrimSpace(messageID)
+	if !domain.ValidAgentID(messageID) || strings.ContainsRune(messageID, 0) {
+		return domain.SupervisorTurn{}, apperror.New(apperror.CodeInvalidArgument,
+			"operator steering message id is invalid")
+	}
+	return s.beginSupervisorTurn(ctx, lease, "", true, messageID)
 }
 
 func (s *SQLiteStore) beginSupervisorTurn(ctx context.Context, lease domain.RunExecutionLease,
-	pendingInput string, requireSteering bool,
+	pendingInput string, requireSteering bool, requiredSteeringID string,
 ) (domain.SupervisorTurn, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.SupervisorTurn{}, apperror.Normalize(err)
@@ -132,9 +143,15 @@ func (s *SQLiteStore) beginSupervisorTurn(ctx context.Context, lease domain.RunE
 	if checkpoint.Phase == domain.SupervisorTurnStarted {
 		if requireSteering {
 			var prepared int
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*)
+			query := `SELECT COUNT(*)
 				FROM operator_steering_deliveries WHERE run_id = ? AND attempt_id = ?
-					AND status = 'prepared'`, run.ID, checkpoint.AttemptID).Scan(&prepared); err != nil {
+					AND status = 'prepared'`
+			args := []any{run.ID, checkpoint.AttemptID}
+			if requiredSteeringID != "" {
+				query += ` AND message_id = ?`
+				args = append(args, requiredSteeringID)
+			}
+			if err := tx.QueryRowContext(ctx, query, args...).Scan(&prepared); err != nil {
 				return domain.SupervisorTurn{}, err
 			}
 			if prepared != 1 {
@@ -207,6 +224,13 @@ func (s *SQLiteStore) beginSupervisorTurn(ctx context.Context, lease domain.RunE
 			pendingInput = failedInput
 		}
 	}
+	if requiredSteeringID != "" {
+		if preferredSteeringID != "" && preferredSteeringID != requiredSteeringID {
+			return domain.SupervisorTurn{}, apperror.New(apperror.CodeConflict,
+				"failed operator steering delivery does not match the required message")
+		}
+		preferredSteeringID = requiredSteeringID
+	}
 
 	checkpoint.Phase = domain.SupervisorTurnStarted
 	checkpoint.LeaseID = lease.LeaseID
@@ -226,8 +250,8 @@ func (s *SQLiteStore) beginSupervisorTurn(ctx context.Context, lease domain.RunE
 			return domain.SupervisorTurn{}, err
 		}
 		if preferredSteeringID != "" && !steeringFound {
-			return domain.SupervisorTurn{}, apperror.New(apperror.CodeConflict,
-				"failed operator steering delivery could not be prepared for retry")
+			return domain.SupervisorTurn{}, apperror.New(apperror.CodeFailedPrecondition,
+				"required operator steering message is no longer pending")
 		}
 		if steeringFound {
 			pendingInput = steeringMessage.Content

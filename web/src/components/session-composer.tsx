@@ -1,9 +1,9 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { LoaderCircle, SendHorizontal } from "lucide-react";
+import { CircleX, LoaderCircle, SendHorizontal } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import type { RunView, SessionMessageControlRequestView,
-  SessionMessageControlView } from "../api/types";
+  SessionMessageControlView, OperatorSteeringQueueView } from "../api/types";
 import { StatusBadge } from "./common";
 
 const maximumContentBytes = 16 * 1024;
@@ -11,6 +11,66 @@ const maximumContentBytes = 16 * 1024;
 interface RetryIntent {
   fingerprint: string;
   key: string;
+}
+
+export function SessionSteeringQueue({ client, sessionID, state }: {
+  client: CyberAgentClient;
+  sessionID: string;
+  state: OperatorSteeringQueueView | null;
+}) {
+  const queryClient = useQueryClient();
+  const retryKeys = useRef(new Map<string, string>());
+  const mutation = useMutation({
+    mutationFn: ({ messageID, key }: { messageID: string; key: string }) =>
+      client.cancelSessionSteering(sessionID, messageID, {
+        version: "session_steering_cancellation.v1",
+        reason: "operator cancelled queued Session message",
+      }, key),
+    onSuccess: (result) => {
+      retryKeys.current.delete(result.steering.id);
+      void queryClient.invalidateQueries({ queryKey: ["run", result.run_id] });
+      void queryClient.invalidateQueries({ queryKey: ["session", sessionID] });
+    },
+  });
+
+  if (!client.hasSessionSteeringControl || !state) {
+    return null;
+  }
+  const pending = state.messages.filter((message) =>
+    message.status === "pending" && !message.prepared);
+  if (pending.length === 0) {
+    return null;
+  }
+  const cancel = (messageID: string) => {
+    let key = retryKeys.current.get(messageID);
+    if (!key) {
+      key = `web-session-steering-cancel-${globalThis.crypto.randomUUID()}`;
+      retryKeys.current.set(messageID, key);
+    }
+    mutation.mutate({ messageID, key });
+  };
+  return (
+    <section aria-label="Queued Session messages" className="session-steering-queue">
+      <div className="session-steering-heading">
+        <span>Queued for next safe boundary</span><strong>{pending.length}</strong>
+      </div>
+      {pending.map((message) => (
+        <div className="session-steering-item" key={message.id}>
+          <span>#{message.sequence}</span><StatusBadge status={message.status} />
+          <button aria-label={`Cancel queued message ${message.sequence}`}
+            className="icon-button compact" disabled={mutation.isPending}
+            onClick={() => cancel(message.id)} title="Cancel queued message" type="button">
+            {mutation.isPending && mutation.variables?.messageID === message.id ?
+              <LoaderCircle aria-hidden="true" className="spin" size={15} /> :
+              <CircleX aria-hidden="true" size={15} />}
+          </button>
+        </div>
+      ))}
+      {mutation.isError && <div className="connection-error" role="alert">
+        {errorMessage(mutation.error)}
+      </div>}
+    </section>
+  );
 }
 
 export function SessionComposer({ client, sessionID, run }: {

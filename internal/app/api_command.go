@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"cyberagent-workbench/internal/apperror"
+	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/httpapi"
 	"cyberagent-workbench/internal/webui"
 )
@@ -64,12 +65,20 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 	if err := a.ensureStore(); err != nil {
 		return err
 	}
+	lifecycleControl := application.NewRunLifecycleControlService(a.store)
+	executionControl := application.NewRunExecutionHandoffService(a.store, a.router,
+		a.checker).WithActiveCalls(a.calls)
 	api, err := httpapi.New(a.store, httpapi.Config{
 		AccessToken: accessToken, ControlToken: controlToken,
 		RunControlEnabled: controlToken != "", RunCreationEnabled: controlToken != "",
-		SessionMessageEnabled: controlToken != "",
-		AppVersion:            Version,
-		UIHandler:             uiBundle,
+		SessionMessageEnabled:         controlToken != "",
+		SessionSteeringControlEnabled: controlToken != "",
+		RunLifecycleEnabled:           controlToken != "",
+		RunExecutionEnabled:           controlToken != "",
+		RunLifecycleController:        lifecycleControl,
+		RunExecutionController:        executionControl,
+		AppVersion:                    Version,
+		UIHandler:                     uiBundle,
 	})
 	if err != nil {
 		return err

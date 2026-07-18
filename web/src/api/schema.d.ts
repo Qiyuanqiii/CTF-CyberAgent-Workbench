@@ -308,6 +308,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute a bounded queued Run batch
+         * @description Freezes at most eight currently queued Session steering messages, then executes only those exact message identities through the Go RunSupervisor under one private execution lease. Retries replay the durable result and cannot consume messages appended after selection.
+         */
+        post: operations["executeRunSelection"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/execution-profile": {
         parameters: {
             query?: never;
@@ -362,6 +382,26 @@ export interface paths {
         get: operations["listRunFanoutPlans"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/lifecycle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start, pause, or resume a Run
+         * @description Applies one exact idempotent Run lifecycle transition. Start atomically crosses created, preparing, and running; pause requires a quiescent Supervisor with no active execution lease; resume requires paused state. This operation never calls a model or tool.
+         */
+        post: operations["controlRunLifecycle"];
         delete?: never;
         options?: never;
         head?: never;
@@ -526,6 +566,26 @@ export interface paths {
          * @description Creates or replays one redacted durable operator-steering record for the exact Run-bound Session. It does not append Session history early, start or resume the Run, acquire a lease, call a model or tool, or grant a capability.
          */
         post: operations["submitSessionMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{session_id}/messages/{message_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel queued Session steering
+         * @description Cancels one exact pending operator-steering message for the bound Session. Prepared, committed, and already consumed input is immutable; this operation does not stop a model call or start execution.
+         */
+        post: operations["cancelSessionSteering"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1081,6 +1141,7 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             id: string;
+            prepared: boolean;
             /** Format: int64 */
             sequence: number;
             /** @enum {string} */
@@ -1218,6 +1279,46 @@ export interface components {
             /** @enum {string} */
             version: "run-events.v1";
         };
+        RunExecutionControlRequestView: {
+            /** Format: int32 */
+            max_steps: number;
+            /** @enum {string} */
+            version: "run_execution_handoff.v1";
+        };
+        RunExecutionControlView: {
+            /** Format: int32 */
+            cancelled_count: number;
+            capability_grant: boolean;
+            /** Format: int32 */
+            committed_count: number;
+            /** Format: int64 */
+            completion_event_sequence: number;
+            error_code?: string;
+            execution_started: boolean;
+            /** Format: int32 */
+            max_steps: number;
+            model_called: boolean;
+            operation_id: string;
+            /** Format: int32 */
+            pending_count: number;
+            /** Format: int32 */
+            prepared_count: number;
+            replayed: boolean;
+            run_id: string;
+            /** @enum {string} */
+            run_status: "created" | "preparing" | "running" | "waiting_approval" | "paused" | "completed" | "failed" | "cancelled";
+            /** Format: int32 */
+            selected_count: number;
+            session_id: string;
+            /** @enum {string} */
+            status: "completed" | "failed";
+            /** Format: int32 */
+            steps_completed: number;
+            stop_reason: string;
+            tool_called: boolean;
+            /** @enum {string} */
+            version: "run_execution_handoff.v1";
+        };
         RunExecutionLeaseView: {
             /** Format: date-time */
             acquired_at: string;
@@ -1269,6 +1370,32 @@ export interface components {
             revision: number;
             /** @enum {string} */
             risk_tier: "minimal" | "elevated" | "high";
+        };
+        RunLifecycleControlRequestView: {
+            /** @enum {string} */
+            action: "start" | "pause" | "resume";
+            /** @enum {string} */
+            version: "run_lifecycle_control.v1";
+        };
+        RunLifecycleControlView: {
+            /** @enum {string} */
+            action: "start" | "pause" | "resume";
+            /** @enum {string} */
+            applied_status: "running" | "paused";
+            capability_grant: boolean;
+            /** Format: int64 */
+            event_sequence_end: number;
+            /** Format: int64 */
+            event_sequence_start: number;
+            execution_started: boolean;
+            /** @enum {string} */
+            expected_status: "created" | "running" | "paused";
+            model_called: boolean;
+            replayed: boolean;
+            run: components["schemas"]["RunView"];
+            tool_called: boolean;
+            /** @enum {string} */
+            version: "run_lifecycle_control.v1";
         };
         RunModeView: {
             capability_grant: boolean;
@@ -1333,6 +1460,26 @@ export interface components {
             tool_called: boolean;
             /** @enum {string} */
             version: "session_message_submission.v1";
+        };
+        SessionSteeringCancellationRequestView: {
+            reason: string;
+            /** @enum {string} */
+            version: "session_steering_cancellation.v1";
+        };
+        SessionSteeringCancellationView: {
+            cancellation_id: string;
+            /** @enum {string} */
+            cancellation_kind: "operator";
+            capability_grant: boolean;
+            execution_started: boolean;
+            model_called: boolean;
+            replayed: boolean;
+            run_id: string;
+            session_id: string;
+            steering: components["schemas"]["OperatorSteeringMessageView"];
+            tool_called: boolean;
+            /** @enum {string} */
+            version: "session_steering_cancellation.v1";
         };
         SessionView: {
             /** Format: date-time */
@@ -2171,6 +2318,52 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    executeRunSelection: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunExecutionControlRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RunExecutionControlView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     selectRunExecutionProfile: {
         parameters: {
             query?: never;
@@ -2289,6 +2482,52 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    controlRunLifecycle: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunLifecycleControlRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RunLifecycleControlView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];
         };
@@ -2656,6 +2895,54 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["SessionMessageControlView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    cancelSessionSteering: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Session identity */
+                session_id: string;
+                /** @description Operator steering message identity */
+                message_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionSteeringCancellationRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["SessionSteeringCancellationView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";

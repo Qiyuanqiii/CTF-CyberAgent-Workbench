@@ -499,11 +499,33 @@ func removeSchemaV71ForTestStatements() []string {
 }
 
 func removeSchemaV72ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV73ForTestStatements(), []string{
 		`DROP TRIGGER trg_run_creation_operation_delete_immutable`,
 		`DROP TRIGGER trg_run_creation_operation_update_immutable`,
 		`DROP TRIGGER trg_run_creation_operation_insert`,
 		`DROP TABLE run_creation_operations`,
 		`DELETE FROM schema_migrations WHERE version = 72`,
+	}...)
+}
+
+func removeSchemaV73ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_run_execution_handoff_result_delete_immutable`,
+		`DROP TRIGGER trg_run_execution_handoff_result_update_immutable`,
+		`DROP TRIGGER trg_run_execution_handoff_item_delete_immutable`,
+		`DROP TRIGGER trg_run_execution_handoff_item_update_immutable`,
+		`DROP TRIGGER trg_run_execution_handoff_operation_delete_immutable`,
+		`DROP TRIGGER trg_run_execution_handoff_operation_update_immutable`,
+		`DROP TRIGGER trg_run_execution_handoff_result_insert`,
+		`DROP TRIGGER trg_run_execution_handoff_item_insert`,
+		`DROP TRIGGER trg_run_execution_handoff_operation_insert`,
+		`DROP TRIGGER trg_run_lifecycle_operation_delete_immutable`,
+		`DROP TRIGGER trg_run_lifecycle_operation_update_immutable`,
+		`DROP TRIGGER trg_run_lifecycle_operation_insert`,
+		`DROP TABLE run_execution_handoff_results`,
+		`DROP TABLE run_execution_handoff_items`,
+		`DROP TABLE run_execution_handoff_operations`,
+		`DROP TABLE run_lifecycle_operations`,
+		`DELETE FROM schema_migrations WHERE version = 73`,
 	}
 }

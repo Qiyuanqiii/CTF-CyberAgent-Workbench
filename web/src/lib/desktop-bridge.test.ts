@@ -11,6 +11,9 @@ const bootstrap = {
   control_enabled: false,
   run_creation_enabled: false,
   session_message_enabled: false,
+  session_steering_control_enabled: false,
+  run_lifecycle_enabled: false,
+  run_execution_enabled: false,
   read_only_default: true,
   process_execution_enabled: false,
   shell_execution_enabled: false,
@@ -96,6 +99,18 @@ describe("desktop native bridge", () => {
     installBridge({ Bootstrap: vi.fn().mockResolvedValue(messagesOnly) });
     const module = await import("./desktop-bridge");
     await expect(module.loadDesktopBootstrap()).resolves.toEqual(messagesOnly);
+  });
+
+  it("accepts Session steering cancellation without enabling sibling capabilities", async () => {
+    const steeringOnly = {
+      ...bootstrap,
+      control_token: "control-token-0123456789abcdefghijkl",
+      session_steering_control_enabled: true,
+      read_only_default: false,
+    };
+    installBridge({ Bootstrap: vi.fn().mockResolvedValue(steeringOnly) });
+    const module = await import("./desktop-bridge");
+    await expect(module.loadDesktopBootstrap()).resolves.toEqual(steeringOnly);
   });
 
   it("rejects authority widening and extra local-file fields", async () => {

@@ -2,11 +2,11 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MessagesSquare } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
-import type { MessageView, SessionDetailView } from "../api/types";
+import type { MessageView, RunDetailView, SessionDetailView } from "../api/types";
 import { usePagedResource } from "../hooks/use-paged-resource";
 import { formatDate, formatNumber, shortID } from "../lib/format";
 import { EmptyState, ErrorState, KeyValue, LoadMoreButton, LoadingState, StatusBadge } from "./common";
-import { SessionComposer } from "./session-composer";
+import { SessionComposer, SessionSteeringQueue } from "./session-composer";
 
 export function SessionWorkspace({ client, sessionID }: { client: CyberAgentClient; sessionID: string }) {
   const detailQuery = useQuery({
@@ -17,6 +17,12 @@ export function SessionWorkspace({ client, sessionID }: { client: CyberAgentClie
   const messagesQuery = usePagedResource<MessageView>(client, ["session", sessionID, "messages"],
     `/sessions/${encodeURIComponent(sessionID)}/messages`, { limit: 100, include_compacted: true }, Boolean(sessionID));
   const messages = useMemo(() => messagesQuery.data?.pages.flatMap((page) => page.items) ?? [], [messagesQuery.data]);
+  const boundRunID = detailQuery.data?.run?.id ?? "";
+  const runQuery = useQuery({
+    queryKey: ["run", boundRunID],
+    queryFn: ({ signal }) => client.get<RunDetailView>(`/runs/${encodeURIComponent(boundRunID)}`, {}, signal),
+    enabled: Boolean(boundRunID) && client.hasSessionSteeringControl,
+  });
 
   if (!sessionID) {
     return <div className="workspace-empty"><MessagesSquare aria-hidden="true" size={24} /><h1>选择一个 Session</h1></div>;
@@ -48,6 +54,8 @@ export function SessionWorkspace({ client, sessionID }: { client: CyberAgentClie
       </div>
       <SessionComposer client={client} key={sessionID} run={detail.run ?? null}
         sessionID={sessionID} />
+      <SessionSteeringQueue client={client} sessionID={sessionID}
+        state={runQuery.data?.operator_steering ?? null} />
       <div className="workspace-content session-content">
         <div className="section-heading"><h2>Messages</h2><span>{formatNumber(messages.length)}</span></div>
         {messagesQuery.isLoading && <LoadingState />}

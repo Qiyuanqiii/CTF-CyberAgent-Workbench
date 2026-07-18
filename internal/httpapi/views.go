@@ -140,6 +140,7 @@ type OperatorSteeringMessageView struct {
 	ID          string     `json:"id"`
 	Sequence    int64      `json:"sequence"`
 	Status      string     `json:"status"`
+	Prepared    bool       `json:"prepared"`
 	CreatedAt   time.Time  `json:"created_at"`
 	CommittedAt *time.Time `json:"committed_at,omitempty"`
 	CancelledAt *time.Time `json:"cancelled_at,omitempty"`
@@ -445,6 +446,7 @@ func operatorSteeringQueueView(summary domain.OperatorSteeringQueueSummary,
 func operatorSteeringMessageView(value domain.OperatorSteeringMessage) OperatorSteeringMessageView {
 	return OperatorSteeringMessageView{
 		ID: value.ID, Sequence: value.Sequence, Status: string(value.Status),
+		Prepared:  value.Prepared,
 		CreatedAt: value.CreatedAt, CommittedAt: value.CommittedAt,
 		CancelledAt: value.CancelledAt,
 	}

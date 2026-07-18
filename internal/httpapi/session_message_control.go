@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"cyberagent-workbench/internal/apperror"
@@ -139,20 +138,5 @@ func (a *API) serveSessionMessageControl(writer http.ResponseWriter,
 }
 
 func sessionMessageIdempotencyKey(header http.Header) (string, error) {
-	values := header.Values("Idempotency-Key")
-	if len(values) != 1 {
-		return "", apperror.New(apperror.CodeInvalidArgument,
-			"Session message requires exactly one Idempotency-Key header")
-	}
-	value, err := domain.NormalizeAgentOperationKey(values[0])
-	if err != nil {
-		return "", apperror.Wrap(apperror.CodeInvalidArgument, err.Error(), err)
-	}
-	for _, current := range value {
-		if unicode.IsSpace(current) || unicode.IsControl(current) {
-			return "", apperror.New(apperror.CodeInvalidArgument,
-				"Session message idempotency key cannot contain whitespace or control characters")
-		}
-	}
-	return value, nil
+	return sessionControlIdempotencyKey(header, "Session message")
 }

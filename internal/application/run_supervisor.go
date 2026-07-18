@@ -41,6 +41,8 @@ type SupervisorStore interface {
 	BeginSupervisorTurn(ctx context.Context, lease domain.RunExecutionLease, pendingInput string) (domain.SupervisorTurn, error)
 	BeginSupervisorSteeringTurn(ctx context.Context,
 		lease domain.RunExecutionLease) (domain.SupervisorTurn, error)
+	BeginSupervisorSteeringTurnForMessage(ctx context.Context,
+		lease domain.RunExecutionLease, messageID string) (domain.SupervisorTurn, error)
 	BindSupervisorTurnInput(ctx context.Context, checkpoint domain.SupervisorCheckpoint, input string) (domain.SupervisorCheckpoint, error)
 	NextSupervisorModelAttempt(ctx context.Context, checkpoint domain.SupervisorCheckpoint,
 		protocolRepair int, toolRound int) (int, int, error)
@@ -314,22 +316,33 @@ func (s *RunSupervisor) step(ctx context.Context, runID string, requestedInput s
 func (s *RunSupervisor) stepWithLease(ctx context.Context, lease domain.RunExecutionLease,
 	requestedInput string,
 ) (LifecycleResult, error) {
-	return s.stepWithLeaseMode(ctx, lease, requestedInput, false)
+	return s.stepWithLeaseMode(ctx, lease, requestedInput, false, "")
 }
 
 func (s *RunSupervisor) stepSteeringWithLease(ctx context.Context,
 	lease domain.RunExecutionLease,
 ) (LifecycleResult, error) {
-	return s.stepWithLeaseMode(ctx, lease, "", true)
+	return s.stepWithLeaseMode(ctx, lease, "", true, "")
+}
+
+func (s *RunSupervisor) stepSteeringMessageWithLease(ctx context.Context,
+	lease domain.RunExecutionLease, messageID string,
+) (LifecycleResult, error) {
+	return s.stepWithLeaseMode(ctx, lease, "", true, messageID)
 }
 
 func (s *RunSupervisor) stepWithLeaseMode(ctx context.Context, lease domain.RunExecutionLease,
-	requestedInput string, requireSteering bool,
+	requestedInput string, requireSteering bool, steeringMessageID string,
 ) (LifecycleResult, error) {
 	var turn domain.SupervisorTurn
 	var err error
 	if requireSteering {
-		turn, err = s.store.BeginSupervisorSteeringTurn(ctx, lease)
+		if steeringMessageID == "" {
+			turn, err = s.store.BeginSupervisorSteeringTurn(ctx, lease)
+		} else {
+			turn, err = s.store.BeginSupervisorSteeringTurnForMessage(ctx, lease,
+				steeringMessageID)
+		}
 	} else {
 		turn, err = s.store.BeginSupervisorTurn(ctx, lease, requestedInput)
 	}

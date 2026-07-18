@@ -98,6 +98,28 @@ func RunCreationRequestFingerprint(goal string, workspaceID string, profile stri
 		surface, phase, requestedBy)
 }
 
+func RunLifecycleOperationDigest(runID string, operationKey string) string {
+	return Fingerprint("run_lifecycle_operation.v1", runID, operationKey)
+}
+
+func RunLifecycleRequestFingerprint(runID string, action string, expectedStatus string,
+	requestedBy string,
+) string {
+	return Fingerprint("run_lifecycle_request.v1", runID, action, expectedStatus,
+		requestedBy)
+}
+
+func RunExecutionHandoffOperationDigest(runID string, operationKey string) string {
+	return Fingerprint("run_execution_handoff_operation.v1", runID, operationKey)
+}
+
+func RunExecutionHandoffRequestFingerprint(runID string, requestedBy string,
+	maxSteps int,
+) string {
+	return Fingerprint("run_execution_handoff_request.v1", runID, requestedBy,
+		strconv.Itoa(maxSteps))
+}
+
 func SupervisorToolOperationKey(runID string, turn int, toolName string, payloadJSON string) string {
 	return Fingerprint("supervisor_structured_tool.v1", strings.TrimSpace(runID), strconv.Itoa(turn),
 		strings.TrimSpace(toolName), strings.TrimSpace(payloadJSON))

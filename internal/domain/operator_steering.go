@@ -12,7 +12,8 @@ import (
 )
 
 const (
-	SessionMessageSubmissionProtocolVersion = "session_message_submission.v1"
+	SessionMessageSubmissionProtocolVersion    = "session_message_submission.v1"
+	SessionSteeringCancellationProtocolVersion = "session_steering_cancellation.v1"
 
 	MaxOperatorSteeringContentBytes  = 16 * 1024
 	MaxOperatorSteeringReasonBytes   = 2 * 1024
@@ -131,6 +132,7 @@ type OperatorSteeringMessage struct {
 	SessionID        string
 	Sequence         int64
 	Status           OperatorSteeringStatus
+	Prepared         bool
 	Content          string
 	ContentSHA256    string
 	RequestedBy      string
@@ -157,6 +159,9 @@ func (m OperatorSteeringMessage) Validate() error {
 	}
 	if m.Sequence <= 0 || !m.Status.Valid() || m.CreatedAt.IsZero() {
 		return errors.New("operator steering sequence, status, and creation time are required")
+	}
+	if m.Prepared && m.Status != OperatorSteeringPending {
+		return errors.New("only pending operator steering can have a prepared delivery")
 	}
 	switch m.Status {
 	case OperatorSteeringPending:

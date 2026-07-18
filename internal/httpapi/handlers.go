@@ -52,6 +52,12 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		if a.runCreationEnabled {
 			resources = append(resources, "run-creation-control")
 		}
+		if a.runLifecycleEnabled {
+			resources = append(resources, "run-lifecycle-control")
+		}
+		if a.runExecutionEnabled {
+			resources = append(resources, "run-execution-control")
+		}
 		return IndexView{APIVersion: Version, AppVersion: a.appVersion, Resources: resources}, nil, nil
 	case "/api/v1/health":
 		if err := rejectQuery(request.URL.Query()); err != nil {

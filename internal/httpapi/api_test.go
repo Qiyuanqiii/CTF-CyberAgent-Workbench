@@ -186,7 +186,8 @@ func newAPIFixture(t *testing.T) *apiFixture {
 	api, err := New(st, Config{
 		AccessToken: testAccessToken, ControlToken: testControlToken,
 		RunControlEnabled: true, RunCreationEnabled: true, SessionMessageEnabled: true,
-		AppVersion: "test-version",
+		SessionSteeringControlEnabled: true,
+		AppVersion:                    "test-version",
 	})
 	if err != nil {
 		t.Fatal(err)

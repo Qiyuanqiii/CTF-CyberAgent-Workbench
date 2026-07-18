@@ -18,6 +18,7 @@ import (
 	"cyberagent-workbench/internal/coordinator"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/llm"
+	"cyberagent-workbench/internal/policy"
 )
 
 func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testing.T) {
@@ -69,7 +70,13 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 					item.Post.OperationID == "selectRunExecutionProfile") ||
 				(path == RunCreationControlPath && item.Post.OperationID == "createRun") ||
 				(path == SessionMessageControlPathTemplate &&
-					item.Post.OperationID == "submitSessionMessage")
+					item.Post.OperationID == "submitSessionMessage") ||
+				(path == SessionSteeringCancellationPathTemplate &&
+					item.Post.OperationID == "cancelSessionSteering") ||
+				(path == RunLifecycleControlPathTemplate &&
+					item.Post.OperationID == "controlRunLifecycle") ||
+				(path == RunExecutionControlPathTemplate &&
+					item.Post.OperationID == "executeRunSelection")
 			if !validControl ||
 				item.Post.ReadOnly || item.Post.Responses["202"] == nil || item.Post.RequestBody == nil ||
 				len(item.Post.Security) != 1 || item.Post.Security[0]["ControlBearerAuth"] == nil {
@@ -108,7 +115,10 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 			if method != "get" && !((path == ModelCancellationPathTemplate ||
 				path == SpecialistModelCancellationPathTemplate ||
 				path == RunExecutionProfileControlPathTemplate ||
-				path == RunCreationControlPath || path == SessionMessageControlPathTemplate) &&
+				path == RunCreationControlPath || path == SessionMessageControlPathTemplate ||
+				path == SessionSteeringCancellationPathTemplate ||
+				path == RunLifecycleControlPathTemplate ||
+				path == RunExecutionControlPathTemplate) &&
 				method == "post") {
 				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
 			}
@@ -169,10 +179,51 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, lifecycleRun, err := application.NewRunService(fixture.store).Create(t.Context(),
+		application.CreateRunRequest{Goal: "OpenAPI lifecycle target", Profile: "code",
+			Budget: domain.Budget{MaxTurns: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, executionCreated, err := application.NewRunService(fixture.store).Create(t.Context(),
+		application.CreateRunRequest{Goal: "OpenAPI execution target", Profile: "code",
+			ModelRoute: "mock/mock-code", Budget: domain.Budget{MaxTurns: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	executionRun, err := application.NewRunService(fixture.store).Start(t.Context(),
+		executionCreated.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.store.EnqueueOperatorSteering(t.Context(),
+		domain.EnqueueOperatorSteeringRequest{
+			RunID: executionRun.ID, SessionID: executionRun.SessionID,
+			Content:      "OpenAPI execution input",
+			OperationKey: "openapi-execution-queue-0001", RequestedBy: "openapi_test",
+		}); err != nil {
+		t.Fatal(err)
+	}
+	fixture.api.runLifecycleEnabled = true
+	fixture.api.runExecutionEnabled = true
+	fixture.api.runLifecycleController = application.NewRunLifecycleControlService(fixture.store)
+	fixture.api.runExecutionController = application.NewRunExecutionHandoffService(
+		fixture.store, llm.NewDefaultRouter(), policy.NewDefaultChecker())
+	steering, err := fixture.store.EnqueueOperatorSteering(t.Context(),
+		domain.EnqueueOperatorSteeringRequest{
+			RunID: fixture.run.ID, SessionID: fixture.run.SessionID,
+			Content:      "OpenAPI cancellation target",
+			OperationKey: "openapi-cancellation-target-0001",
+			RequestedBy:  "openapi_test",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
 	replacements := map[string]string{
 		"{run_id}":       fixture.run.ID,
 		"{agent_id}":     child.ID,
 		"{session_id}":   fixture.run.SessionID,
+		"{message_id}":   steering.Message.ID,
 		"{work_item_id}": fixture.workItems[0].ID,
 		"{note_id}":      fixture.notes[0].ID,
 		"{artifact_id}":  fixture.artifactID,
@@ -188,6 +239,10 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 			requestPath = strings.ReplaceAll(requestPath, "{agent_id}", child.ID)
 		} else if spec.Path == RunExecutionProfileControlPathTemplate {
 			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", profileRun.ID)
+		} else if spec.Path == RunLifecycleControlPathTemplate {
+			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", lifecycleRun.ID)
+		} else if spec.Path == RunExecutionControlPathTemplate {
+			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", executionRun.ID)
 		}
 		t.Run(spec.OperationID, func(t *testing.T) {
 			var response *httptest.ResponseRecorder
@@ -203,6 +258,13 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 				} else if spec.Path == SessionMessageControlPathTemplate {
 					body = `{"version":"session_message_submission.v1",` +
 						`"content":"OpenAPI live Session message"}`
+				} else if spec.Path == SessionSteeringCancellationPathTemplate {
+					body = `{"version":"session_steering_cancellation.v1",` +
+						`"reason":"OpenAPI live cancellation"}`
+				} else if spec.Path == RunLifecycleControlPathTemplate {
+					body = `{"version":"run_lifecycle_control.v1","action":"start"}`
+				} else if spec.Path == RunExecutionControlPathTemplate {
+					body = `{"version":"run_execution_handoff.v1","max_steps":1}`
 				} else if spec.Path != RunExecutionProfileControlPathTemplate {
 					attemptID := fixture.checkpoint.AttemptID
 					modelAttempt := 1

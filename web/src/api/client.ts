@@ -5,10 +5,16 @@ import type {
   PageResult,
   RunCreationControlRequestView,
   RunCreationControlView,
+  RunExecutionControlRequestView,
+  RunExecutionControlView,
+  RunLifecycleControlRequestView,
+  RunLifecycleControlView,
   RunEventPollView,
   RunEventStreamView,
   SessionMessageControlRequestView,
   SessionMessageControlView,
+  SessionSteeringCancellationRequestView,
+  SessionSteeringCancellationView,
   SuccessEnvelope,
 } from "./types";
 
@@ -152,8 +158,9 @@ function parseSessionMessageControl(value: unknown,
     value.execution_started !== false || value.model_called !== false ||
     value.tool_called !== false || value.capability_grant !== false ||
     !isRecord(value.steering) || !hasOnlyKeys(value.steering,
-      ["cancelled_at", "committed_at", "created_at", "id", "sequence", "status"]) ||
+      ["cancelled_at", "committed_at", "created_at", "id", "prepared", "sequence", "status"]) ||
     !boundedIdentity(value.steering.id) ||
+    value.steering.prepared !== false ||
     typeof value.steering.sequence !== "number" ||
     !Number.isSafeInteger(value.steering.sequence) || value.steering.sequence <= 0 ||
     typeof value.steering.created_at !== "string" ||
@@ -175,6 +182,104 @@ function parseSessionMessageControl(value: unknown,
       "INVALID_RESPONSE", 502);
   }
   return value as unknown as SessionMessageControlView;
+}
+
+function parseSessionSteeringCancellation(value: unknown,
+  expectedSessionID: string, expectedMessageID: string): SessionSteeringCancellationView {
+  if (!hasExactKeys(value, ["cancellation_id", "cancellation_kind", "capability_grant",
+    "execution_started", "model_called", "replayed", "run_id", "session_id", "steering",
+    "tool_called", "version"]) ||
+    value.version !== "session_steering_cancellation.v1" ||
+    value.session_id !== expectedSessionID || !boundedIdentity(value.run_id) ||
+    !boundedIdentity(value.session_id) || !boundedIdentity(value.cancellation_id) ||
+    value.cancellation_kind !== "operator" || typeof value.replayed !== "boolean" ||
+    value.execution_started !== false || value.model_called !== false ||
+    value.tool_called !== false || value.capability_grant !== false ||
+    !isRecord(value.steering) || !hasOnlyKeys(value.steering,
+      ["cancelled_at", "committed_at", "created_at", "id", "prepared", "sequence", "status"]) ||
+    value.steering.id !== expectedMessageID || value.steering.status !== "cancelled" ||
+    value.steering.prepared !== false ||
+    typeof value.steering.sequence !== "number" ||
+    !Number.isSafeInteger(value.steering.sequence) || value.steering.sequence <= 0 ||
+    typeof value.steering.created_at !== "string" ||
+    !Number.isFinite(Date.parse(value.steering.created_at)) ||
+    typeof value.steering.cancelled_at !== "string" ||
+    !Number.isFinite(Date.parse(value.steering.cancelled_at)) ||
+    value.steering.committed_at !== undefined) {
+    throw new APIRequestError("Session steering cancellation response is invalid",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as SessionSteeringCancellationView;
+}
+
+function parseRunLifecycleControl(value: unknown, expectedRunID: string,
+  request: RunLifecycleControlRequestView): RunLifecycleControlView {
+  if (!hasExactKeys(value, ["action", "applied_status", "capability_grant",
+    "event_sequence_end", "event_sequence_start", "execution_started", "expected_status",
+    "model_called", "replayed", "run", "tool_called", "version"]) ||
+    value.version !== "run_lifecycle_control.v1" || value.action !== request.action ||
+    !isRecord(value.run) || value.run.id !== expectedRunID || !boundedIdentity(value.run.id) ||
+    typeof value.run.status !== "string" || typeof value.replayed !== "boolean" ||
+    value.execution_started !== false || value.model_called !== false ||
+    value.tool_called !== false || value.capability_grant !== false ||
+    !safePositiveInteger(value.event_sequence_start) ||
+    !safePositiveInteger(value.event_sequence_end)) {
+    throw new APIRequestError("Run lifecycle response is invalid", "INVALID_RESPONSE", 502);
+  }
+  const transitions = {
+    start: ["created", "running", 2],
+    pause: ["running", "paused", 1],
+    resume: ["paused", "running", 1],
+  } as const;
+  const transition = transitions[request.action];
+  if (!transition || value.expected_status !== transition[0] ||
+    value.applied_status !== transition[1] ||
+    (!value.replayed && value.run.status !== transition[1]) ||
+    (value.replayed && !isRunStatus(value.run.status)) ||
+    value.event_sequence_end - value.event_sequence_start + 1 !== transition[2]) {
+    throw new APIRequestError("Run lifecycle response violated its transition contract",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as RunLifecycleControlView;
+}
+
+function isRunStatus(value: unknown): boolean {
+  return typeof value === "string" && ["created", "preparing", "running",
+    "waiting_approval", "paused", "completed", "failed", "cancelled"].includes(value);
+}
+
+function parseRunExecutionControl(value: unknown, expectedRunID: string,
+  request: RunExecutionControlRequestView): RunExecutionControlView {
+  if (!isRecord(value) || !hasOnlyKeys(value, ["cancelled_count", "capability_grant",
+    "committed_count", "completion_event_sequence", "error_code", "execution_started",
+    "max_steps", "model_called", "operation_id", "pending_count", "prepared_count",
+    "replayed", "run_id", "run_status", "selected_count", "session_id", "status",
+    "steps_completed", "stop_reason", "tool_called", "version"]) ||
+    value.version !== "run_execution_handoff.v1" || value.run_id !== expectedRunID ||
+    !boundedIdentity(value.run_id) || !boundedIdentity(value.session_id) ||
+    !boundedIdentity(value.operation_id) || value.max_steps !== request.max_steps ||
+    !safeBoundedCount(value.selected_count, request.max_steps) ||
+    !safeBoundedCount(value.steps_completed, value.selected_count) ||
+    !safeBoundedCount(value.pending_count, value.selected_count) ||
+    !safeBoundedCount(value.prepared_count, value.selected_count) ||
+    !safeBoundedCount(value.committed_count, value.selected_count) ||
+    !safeBoundedCount(value.cancelled_count, value.selected_count) ||
+    value.pending_count + value.prepared_count + value.committed_count +
+      value.cancelled_count !== value.selected_count ||
+    !safePositiveInteger(value.completion_event_sequence) ||
+    (value.status !== "completed" && value.status !== "failed") ||
+    typeof value.run_status !== "string" || typeof value.stop_reason !== "string" ||
+    value.stop_reason.length === 0 || value.stop_reason.length > 64 ||
+    typeof value.replayed !== "boolean" || typeof value.execution_started !== "boolean" ||
+    typeof value.model_called !== "boolean" || typeof value.tool_called !== "boolean" ||
+    value.capability_grant !== false || (value.tool_called && !value.model_called) ||
+    value.execution_started !== (value.selected_count > 0) ||
+    (value.status === "completed" && value.error_code !== undefined) ||
+    (value.status === "failed" && (typeof value.error_code !== "string" ||
+      value.error_code.length === 0 || value.error_code.length > 64))) {
+    throw new APIRequestError("Run execution response is invalid", "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as RunExecutionControlView;
 }
 
 function hasNoAllowedTargets(scope: Record<string, unknown>): boolean {
@@ -206,18 +311,31 @@ function boundedIdentity(value: unknown): string {
     : "";
 }
 
+function safePositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function safeBoundedCount(value: unknown, maximum: number): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) &&
+    value >= 0 && value <= maximum;
+}
+
 export class CyberAgentClient {
   readonly baseURL: string;
   readonly hasControl: boolean;
   readonly hasRunCreation: boolean;
   readonly hasSessionMessages: boolean;
+  readonly hasSessionSteeringControl: boolean;
+  readonly hasRunLifecycle: boolean;
+  readonly hasRunExecution: boolean;
 
   constructor(
     private readonly token: string,
     baseURL = import.meta.env.VITE_API_BASE_URL || "/api/v1",
     private readonly controlToken = "",
     capabilities: { runControlEnabled?: boolean; runCreationEnabled?: boolean;
-      sessionMessageEnabled?: boolean } = {},
+      sessionMessageEnabled?: boolean; sessionSteeringControlEnabled?: boolean;
+      runLifecycleEnabled?: boolean; runExecutionEnabled?: boolean } = {},
   ) {
     if (token.trim() === "") {
       throw new Error("A read bearer token is required");
@@ -227,6 +345,10 @@ export class CyberAgentClient {
     this.hasControl = controlPresent && (capabilities.runControlEnabled ?? true);
     this.hasRunCreation = controlPresent && (capabilities.runCreationEnabled ?? true);
     this.hasSessionMessages = controlPresent && (capabilities.sessionMessageEnabled ?? true);
+    this.hasSessionSteeringControl = controlPresent &&
+      (capabilities.sessionSteeringControlEnabled ?? true);
+    this.hasRunLifecycle = controlPresent && (capabilities.runLifecycleEnabled ?? true);
+    this.hasRunExecution = controlPresent && (capabilities.runExecutionEnabled ?? true);
   }
 
   async health(signal?: AbortSignal): Promise<HealthView> {
@@ -286,6 +408,55 @@ export class CyberAgentClient {
       `/sessions/${encodeURIComponent(sessionID)}/messages`, body, idempotencyKey, signal,
     );
     return parseSessionMessageControl(result, sessionID);
+  }
+
+  async cancelSessionSteering(sessionID: string, messageID: string,
+    body: SessionSteeringCancellationRequestView, idempotencyKey: string,
+    signal?: AbortSignal): Promise<SessionSteeringCancellationView> {
+    if (!this.hasSessionSteeringControl) {
+      throw new Error("Session steering cancellation capability is required for this operation");
+    }
+    const normalizedSessionID = boundedIdentity(sessionID);
+    const normalizedMessageID = boundedIdentity(messageID);
+    if (!normalizedSessionID || normalizedSessionID !== sessionID ||
+      !normalizedMessageID || normalizedMessageID !== messageID) {
+      throw new Error("Normalized Session and steering identities are required");
+    }
+    const result = await this.sendControl<unknown>(
+      `/sessions/${encodeURIComponent(sessionID)}/messages/${encodeURIComponent(messageID)}/cancel`,
+      body, idempotencyKey, signal,
+    );
+    return parseSessionSteeringCancellation(result, sessionID, messageID);
+  }
+
+  async controlRunLifecycle(runID: string, body: RunLifecycleControlRequestView,
+    idempotencyKey: string, signal?: AbortSignal): Promise<RunLifecycleControlView> {
+    if (!this.hasRunLifecycle) {
+      throw new Error("Run lifecycle capability is required for this operation");
+    }
+    const normalizedRunID = boundedIdentity(runID);
+    if (!normalizedRunID || normalizedRunID !== runID) {
+      throw new Error("A normalized Run identity is required");
+    }
+    const result = await this.sendControl<unknown>(
+      `/runs/${encodeURIComponent(runID)}/lifecycle`, body, idempotencyKey, signal,
+    );
+    return parseRunLifecycleControl(result, runID, body);
+  }
+
+  async executeRun(runID: string, body: RunExecutionControlRequestView,
+    idempotencyKey: string, signal?: AbortSignal): Promise<RunExecutionControlView> {
+    if (!this.hasRunExecution) {
+      throw new Error("Run execution capability is required for this operation");
+    }
+    const normalizedRunID = boundedIdentity(runID);
+    if (!normalizedRunID || normalizedRunID !== runID) {
+      throw new Error("A normalized Run identity is required");
+    }
+    const result = await this.sendControl<unknown>(
+      `/runs/${encodeURIComponent(runID)}/execute`, body, idempotencyKey, signal,
+    );
+    return parseRunExecutionControl(result, runID, body);
   }
 
   private async sendControl<T>(path: string, body: unknown, idempotencyKey: string,

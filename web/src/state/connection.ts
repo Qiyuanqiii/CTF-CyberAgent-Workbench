@@ -13,9 +13,13 @@ interface ConnectionState {
   runControlEnabled: boolean;
   runCreationEnabled: boolean;
   sessionMessageEnabled: boolean;
+  sessionSteeringControlEnabled: boolean;
+  runLifecycleEnabled: boolean;
+  runExecutionEnabled: boolean;
   connect: (token: string, health: HealthView, controlToken?: string,
     capabilities?: { runControlEnabled?: boolean; runCreationEnabled?: boolean;
-      sessionMessageEnabled?: boolean }) => void;
+      sessionMessageEnabled?: boolean; sessionSteeringControlEnabled?: boolean;
+      runLifecycleEnabled?: boolean; runExecutionEnabled?: boolean }) => void;
   disconnect: () => void;
   selectRun: (runID: string) => void;
   selectSession: (sessionID: string) => void;
@@ -37,16 +41,25 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   runControlEnabled: false,
   runCreationEnabled: false,
   sessionMessageEnabled: false,
+  sessionSteeringControlEnabled: false,
+  runLifecycleEnabled: false,
+  runExecutionEnabled: false,
   connect: (token, health, controlToken = "", capabilities = {}) => {
     const present = controlToken.trim() !== "";
     set({ token, health, controlToken,
       runControlEnabled: present && (capabilities.runControlEnabled ?? true),
       runCreationEnabled: present && (capabilities.runCreationEnabled ?? true),
       sessionMessageEnabled: present && (capabilities.sessionMessageEnabled ?? true),
+      sessionSteeringControlEnabled: present &&
+        (capabilities.sessionSteeringControlEnabled ?? true),
+      runLifecycleEnabled: present && (capabilities.runLifecycleEnabled ?? true),
+      runExecutionEnabled: present && (capabilities.runExecutionEnabled ?? true),
     });
   },
   disconnect: () => set({ token: "", controlToken: "", health: null,
     runControlEnabled: false, runCreationEnabled: false, sessionMessageEnabled: false,
+    sessionSteeringControlEnabled: false,
+    runLifecycleEnabled: false, runExecutionEnabled: false,
     ...initialSelection }),
   selectRun: (selectedRunID) => set({ selectedRunID, resourceKind: "run" }),
   selectSession: (selectedSessionID) => set({ selectedSessionID, resourceKind: "session" }),

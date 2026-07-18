@@ -17,6 +17,8 @@ const (
 	RunPhaseChangedEvent                          = "run.phase_changed"
 	RunExecutionProfileSelectedEvent              = "run.execution_profile_selected"
 	RunStatusChangedEvent                         = "run.status_changed"
+	RunExecutionHandoffRequestedEvent             = "run.execution_handoff_requested"
+	RunExecutionHandoffCompletedEvent             = "run.execution_handoff_completed"
 	RunExecutionLeaseAcquiredEvent                = "run.execution_lease_acquired"
 	RunExecutionLeaseTakenOverEvent               = "run.execution_lease_taken_over"
 	RunExecutionLeaseReleasedEvent                = "run.execution_lease_released"

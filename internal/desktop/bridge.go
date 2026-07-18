@@ -26,22 +26,25 @@ const (
 // binding. Tokens stay in renderer memory and are never written to browser
 // storage, SQLite, logs, command output, or the Windows registry.
 type ConnectionBootstrap struct {
-	ProtocolVersion            string `json:"protocol_version"`
-	APIBaseURL                 string `json:"api_base_url"`
-	APIVersion                 string `json:"api_version"`
-	AppVersion                 string `json:"app_version"`
-	UIDigest                   string `json:"ui_digest"`
-	ReadToken                  string `json:"read_token"`
-	ControlToken               string `json:"control_token"`
-	ControlEnabled             bool   `json:"control_enabled"`
-	RunCreationEnabled         bool   `json:"run_creation_enabled"`
-	SessionMessageEnabled      bool   `json:"session_message_enabled"`
-	ReadOnlyDefault            bool   `json:"read_only_default"`
-	ProcessExecutionEnabled    bool   `json:"process_execution_enabled"`
-	ShellExecutionEnabled      bool   `json:"shell_execution_enabled"`
-	DockerExecutionEnabled     bool   `json:"docker_execution_enabled"`
-	SkillInstallationEnabled   bool   `json:"skill_installation_enabled"`
-	RendererPathInputSupported bool   `json:"renderer_path_input_supported"`
+	ProtocolVersion               string `json:"protocol_version"`
+	APIBaseURL                    string `json:"api_base_url"`
+	APIVersion                    string `json:"api_version"`
+	AppVersion                    string `json:"app_version"`
+	UIDigest                      string `json:"ui_digest"`
+	ReadToken                     string `json:"read_token"`
+	ControlToken                  string `json:"control_token"`
+	ControlEnabled                bool   `json:"control_enabled"`
+	RunCreationEnabled            bool   `json:"run_creation_enabled"`
+	SessionMessageEnabled         bool   `json:"session_message_enabled"`
+	SessionSteeringControlEnabled bool   `json:"session_steering_control_enabled"`
+	RunLifecycleEnabled           bool   `json:"run_lifecycle_enabled"`
+	RunExecutionEnabled           bool   `json:"run_execution_enabled"`
+	ReadOnlyDefault               bool   `json:"read_only_default"`
+	ProcessExecutionEnabled       bool   `json:"process_execution_enabled"`
+	ShellExecutionEnabled         bool   `json:"shell_execution_enabled"`
+	DockerExecutionEnabled        bool   `json:"docker_execution_enabled"`
+	SkillInstallationEnabled      bool   `json:"skill_installation_enabled"`
+	RendererPathInputSupported    bool   `json:"renderer_path_input_supported"`
 }
 
 type SkillPackageDialogStatus string
@@ -67,18 +70,21 @@ type SkillPackageFilePicker interface {
 }
 
 type DesktopBridgeConfig struct {
-	ContextProvider       func() context.Context
-	FilePicker            SkillPackageFilePicker
-	ReadToken             string
-	ControlToken          string
-	RunControlEnabled     bool
-	RunCreationEnabled    bool
-	SessionMessageEnabled bool
-	APIVersion            string
-	AppVersion            string
-	UIDigest              string
-	Selector              NativeSkillPackageSelector
-	PreviewBridge         *SkillPackagePreviewBridge
+	ContextProvider               func() context.Context
+	FilePicker                    SkillPackageFilePicker
+	ReadToken                     string
+	ControlToken                  string
+	RunControlEnabled             bool
+	RunCreationEnabled            bool
+	SessionMessageEnabled         bool
+	SessionSteeringControlEnabled bool
+	RunLifecycleEnabled           bool
+	RunExecutionEnabled           bool
+	APIVersion                    string
+	AppVersion                    string
+	UIDigest                      string
+	Selector                      NativeSkillPackageSelector
+	PreviewBridge                 *SkillPackagePreviewBridge
 }
 
 // DesktopBridge is the complete renderer binding surface for D0-A. Keep this
@@ -103,13 +109,16 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop bridge tokens must be normalized bounded values")
 	}
-	if (config.RunControlEnabled || config.RunCreationEnabled || config.SessionMessageEnabled) &&
+	if (config.RunControlEnabled || config.RunCreationEnabled || config.SessionMessageEnabled ||
+		config.SessionSteeringControlEnabled || config.RunLifecycleEnabled ||
+		config.RunExecutionEnabled) &&
 		config.ControlToken == "" {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop control capabilities require a control token")
 	}
 	if config.ControlToken != "" && !config.RunControlEnabled && !config.RunCreationEnabled &&
-		!config.SessionMessageEnabled {
+		!config.SessionMessageEnabled && !config.SessionSteeringControlEnabled &&
+		!config.RunLifecycleEnabled && !config.RunExecutionEnabled {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop control token requires an enabled control capability")
 	}
@@ -135,11 +144,15 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 			ProtocolVersion: ConnectionBootstrapProtocolVersion,
 			APIBaseURL:      DesktopAPIBasePath, APIVersion: apiVersion, AppVersion: appVersion,
 			UIDigest: config.UIDigest, ReadToken: config.ReadToken, ControlToken: config.ControlToken,
-			ControlEnabled:        config.RunControlEnabled,
-			RunCreationEnabled:    config.RunCreationEnabled,
-			SessionMessageEnabled: config.SessionMessageEnabled,
+			ControlEnabled:                config.RunControlEnabled,
+			RunCreationEnabled:            config.RunCreationEnabled,
+			SessionMessageEnabled:         config.SessionMessageEnabled,
+			SessionSteeringControlEnabled: config.SessionSteeringControlEnabled,
+			RunLifecycleEnabled:           config.RunLifecycleEnabled,
+			RunExecutionEnabled:           config.RunExecutionEnabled,
 			ReadOnlyDefault: !config.RunControlEnabled && !config.RunCreationEnabled &&
-				!config.SessionMessageEnabled,
+				!config.SessionMessageEnabled && !config.SessionSteeringControlEnabled &&
+				!config.RunLifecycleEnabled && !config.RunExecutionEnabled,
 			ProcessExecutionEnabled: false, ShellExecutionEnabled: false, DockerExecutionEnabled: false,
 			SkillInstallationEnabled: false, RendererPathInputSupported: false,
 		},

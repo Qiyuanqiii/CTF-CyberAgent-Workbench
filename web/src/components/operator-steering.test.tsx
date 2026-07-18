@@ -11,8 +11,10 @@ describe("OperatorSteeringPanel", () => {
       cancelled: 0,
       messages: [
         { id: "steer-20260714000000-000000000001", sequence: 3, status: "pending",
+          prepared: false,
           created_at: "2026-07-14T00:00:00Z" },
         { id: "steer-20260714000000-000000000002", sequence: 2, status: "committed",
+          prepared: false,
           created_at: "2026-07-13T23:59:00Z", committed_at: "2026-07-14T00:01:00Z" },
       ],
     };

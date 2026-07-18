@@ -3,8 +3,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import type { CyberAgentClient } from "../api/client";
-import type { RunView, SessionMessageControlView } from "../api/types";
-import { SessionComposer } from "./session-composer";
+import type { OperatorSteeringQueueView, RunView, SessionMessageControlView,
+  SessionSteeringCancellationView } from "../api/types";
+import { SessionComposer, SessionSteeringQueue } from "./session-composer";
 
 const result: SessionMessageControlView = {
   version: "session_message_submission.v1",
@@ -14,6 +15,7 @@ const result: SessionMessageControlView = {
     id: "steer-1",
     sequence: 3,
     status: "pending",
+    prepared: false,
     created_at: "2026-07-18T00:00:00Z",
   },
   replayed: false,
@@ -24,6 +26,17 @@ const result: SessionMessageControlView = {
 };
 
 const runningRun = { id: "run-1", status: "running" } as RunView;
+
+const cancellationResult: SessionSteeringCancellationView = {
+  version: "session_steering_cancellation.v1",
+  run_id: "run-1", session_id: "sess-1", cancellation_id: "cancel-1",
+  cancellation_kind: "operator", replayed: false,
+  steering: {
+    id: "steer-1", sequence: 3, status: "cancelled", prepared: false,
+    created_at: "2026-07-18T00:00:00Z", cancelled_at: "2026-07-18T00:01:00Z",
+  },
+  execution_started: false, model_called: false, tool_called: false, capability_grant: false,
+};
 
 describe("SessionComposer", () => {
   beforeEach(() => {
@@ -94,6 +107,66 @@ describe("SessionComposer", () => {
     await waitFor(() => expect(screen.getByLabelText("Session message")).toBeDisabled());
     expect(screen.getByText("Run unavailable")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
+  });
+});
+
+describe("SessionSteeringQueue", () => {
+  it("cancels only pending metadata and reuses the in-memory retry key", async () => {
+    const cancelSessionSteering = vi.fn()
+      .mockRejectedValueOnce(new Error("response unavailable"))
+      .mockResolvedValueOnce(cancellationResult);
+    const client = {
+      hasSessionSteeringControl: true,
+      cancelSessionSteering,
+    } as unknown as CyberAgentClient;
+    const state = {
+      pending: 1, prepared: 0, committed: 1, cancelled: 0,
+      messages: [
+        { id: "steer-1", sequence: 3, status: "pending", prepared: false,
+          created_at: "2026-07-18T00:00:00Z" },
+        { id: "steer-2", sequence: 2, status: "committed", created_at: "2026-07-18T00:00:00Z",
+          committed_at: "2026-07-18T00:00:30Z", prepared: false },
+      ],
+    } as OperatorSteeringQueueView;
+    const user = userEvent.setup();
+    render(withProvider(<SessionSteeringQueue client={client} sessionID="sess-1" state={state} />));
+
+    expect(screen.queryByRole("button", { name: "Cancel queued message 2" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel queued message 3" }));
+    await screen.findByText("response unavailable");
+    await user.click(screen.getByRole("button", { name: "Cancel queued message 3" }));
+    await waitFor(() => expect(cancelSessionSteering).toHaveBeenCalledTimes(2));
+
+    expect(cancelSessionSteering.mock.calls[0]?.[0]).toBe("sess-1");
+    expect(cancelSessionSteering.mock.calls[0]?.[1]).toBe("steer-1");
+    expect(cancelSessionSteering.mock.calls[0]?.[2]).toEqual({
+      version: "session_steering_cancellation.v1",
+      reason: "operator cancelled queued Session message",
+    });
+    expect(cancelSessionSteering.mock.calls[0]?.[3]).toBe(
+      cancelSessionSteering.mock.calls[1]?.[3]);
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it("stays hidden without its distinct capability", () => {
+    const client = { hasSessionSteeringControl: false } as CyberAgentClient;
+    render(withProvider(<SessionSteeringQueue client={client} sessionID="sess-1" state={{
+      pending: 1, prepared: 0, committed: 0, cancelled: 0,
+      messages: [{ id: "steer-1", sequence: 1, status: "pending", prepared: false,
+        created_at: "2026-07-18T00:00:00Z" }],
+    }} />));
+    expect(screen.queryByLabelText("Queued Session messages")).not.toBeInTheDocument();
+  });
+
+  it("does not offer cancellation for an already prepared message", () => {
+    const client = { hasSessionSteeringControl: true } as CyberAgentClient;
+    render(withProvider(<SessionSteeringQueue client={client} sessionID="sess-1" state={{
+      pending: 0, prepared: 1, committed: 0, cancelled: 0,
+      messages: [{ id: "steer-prepared", sequence: 1, status: "pending", prepared: true,
+        created_at: "2026-07-18T00:00:00Z" }],
+    }} />));
+    expect(screen.queryByLabelText("Queued Session messages")).not.toBeInTheDocument();
   });
 });
 

@@ -3,7 +3,7 @@
   "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
   "info": {
     "title": "CyberAgent Workbench Local API",
-    "description": "Authenticated loopback-only API owned by the Go control plane. Read operations expose durable metadata; separately authorized control capabilities permit exact active-call cancellation, non-authorizing execution-profile selection, idempotent creation of a closed workspace-bound Run, and durable Run-bound Session message submission without starting execution.",
+    "description": "Authenticated loopback-only API owned by the Go control plane. Read operations expose durable metadata; separately authorized control capabilities permit exact active-call cancellation, non-authorizing execution-profile selection, idempotent creation of a closed workspace-bound Run, durable Run-bound Session steering, idempotent Run lifecycle transitions, and bounded execution through the Go Supervisor.",
     "version": "api.v1",
     "license": {
       "name": "Apache License 2.0",
@@ -1527,6 +1527,123 @@
         "x-cyberagent-streaming": true
       }
     },
+    "/api/v1/runs/{run_id}/execute": {
+      "post": {
+        "operationId": "executeRunSelection",
+        "summary": "Execute a bounded queued Run batch",
+        "description": "Freezes at most eight currently queued Session steering messages, then executes only those exact message identities through the Go RunSupervisor under one private execution lease. Retries replay the durable result and cannot consume messages appended after selection.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque retry key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RunExecutionControlView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunExecutionControlRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
     "/api/v1/runs/{run_id}/execution-profile": {
       "post": {
         "operationId": "selectRunExecutionProfile",
@@ -1826,6 +1943,123 @@
           }
         },
         "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/runs/{run_id}/lifecycle": {
+      "post": {
+        "operationId": "controlRunLifecycle",
+        "summary": "Start, pause, or resume a Run",
+        "description": "Applies one exact idempotent Run lifecycle transition. Start atomically crosses created, preparing, and running; pause requires a quiescent Supervisor with no active execution lease; resume requires paused state. This operation never calls a model or tool.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque retry key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RunLifecycleControlView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunLifecycleControlRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
       }
     },
     "/api/v1/runs/{run_id}/notes": {
@@ -2889,6 +3123,135 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SessionMessageControlRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
+    "/api/v1/sessions/{session_id}/messages/{message_id}/cancel": {
+      "post": {
+        "operationId": "cancelSessionSteering",
+        "summary": "Cancel queued Session steering",
+        "description": "Cancels one exact pending operator-steering message for the bound Session. Prepared, committed, and already consumed input is immutable; this operation does not stop a model call or start execution.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "description": "Session identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "description": "Operator steering message identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque retry key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/SessionSteeringCancellationView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionSteeringCancellationRequestView"
               }
             }
           }
@@ -4903,6 +5266,9 @@
             "minLength": 1,
             "type": "string"
           },
+          "prepared": {
+            "type": "boolean"
+          },
           "sequence": {
             "format": "int64",
             "minimum": 1,
@@ -4921,6 +5287,7 @@
           "id",
           "sequence",
           "status",
+          "prepared",
           "created_at"
         ],
         "type": "object"
@@ -5444,6 +5811,165 @@
         ],
         "type": "object"
       },
+      "RunExecutionControlRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "max_steps": {
+            "format": "int32",
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "version": {
+            "enum": [
+              "run_execution_handoff.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "max_steps"
+        ],
+        "type": "object"
+      },
+      "RunExecutionControlView": {
+        "additionalProperties": false,
+        "properties": {
+          "cancelled_count": {
+            "format": "int32",
+            "maximum": 8,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "capability_grant": {
+            "type": "boolean"
+          },
+          "committed_count": {
+            "format": "int32",
+            "maximum": 8,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "completion_event_sequence": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "error_code": {
+            "type": "string"
+          },
+          "execution_started": {
+            "type": "boolean"
+          },
+          "max_steps": {
+            "format": "int32",
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "model_called": {
+            "type": "boolean"
+          },
+          "operation_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "pending_count": {
+            "format": "int32",
+            "maximum": 8,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "prepared_count": {
+            "format": "int32",
+            "maximum": 8,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "run_status": {
+            "enum": [
+              "created",
+              "preparing",
+              "running",
+              "waiting_approval",
+              "paused",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "selected_count": {
+            "format": "int32",
+            "maximum": 8,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "steps_completed": {
+            "format": "int32",
+            "maximum": 8,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "stop_reason": {
+            "type": "string"
+          },
+          "tool_called": {
+            "type": "boolean"
+          },
+          "version": {
+            "enum": [
+              "run_execution_handoff.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "operation_id",
+          "run_id",
+          "session_id",
+          "max_steps",
+          "selected_count",
+          "status",
+          "run_status",
+          "stop_reason",
+          "steps_completed",
+          "pending_count",
+          "prepared_count",
+          "committed_count",
+          "cancelled_count",
+          "completion_event_sequence",
+          "replayed",
+          "execution_started",
+          "model_called",
+          "tool_called",
+          "capability_grant"
+        ],
+        "type": "object"
+      },
       "RunExecutionLeaseView": {
         "additionalProperties": false,
         "properties": {
@@ -5632,6 +6158,107 @@
           "created_at",
           "process_enabled",
           "execution_authorized",
+          "capability_grant"
+        ],
+        "type": "object"
+      },
+      "RunLifecycleControlRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "start",
+              "pause",
+              "resume"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "run_lifecycle_control.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "action"
+        ],
+        "type": "object"
+      },
+      "RunLifecycleControlView": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "start",
+              "pause",
+              "resume"
+            ],
+            "type": "string"
+          },
+          "applied_status": {
+            "enum": [
+              "running",
+              "paused"
+            ],
+            "type": "string"
+          },
+          "capability_grant": {
+            "type": "boolean"
+          },
+          "event_sequence_end": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "event_sequence_start": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "execution_started": {
+            "type": "boolean"
+          },
+          "expected_status": {
+            "enum": [
+              "created",
+              "running",
+              "paused"
+            ],
+            "type": "string"
+          },
+          "model_called": {
+            "type": "boolean"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunView"
+          },
+          "tool_called": {
+            "type": "boolean"
+          },
+          "version": {
+            "enum": [
+              "run_lifecycle_control.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "run",
+          "action",
+          "expected_status",
+          "applied_status",
+          "event_sequence_start",
+          "event_sequence_end",
+          "replayed",
+          "execution_started",
+          "model_called",
+          "tool_called",
           "capability_grant"
         ],
         "type": "object"
@@ -5881,6 +6508,90 @@
           "run_id",
           "session_id",
           "steering",
+          "replayed",
+          "execution_started",
+          "model_called",
+          "tool_called",
+          "capability_grant"
+        ],
+        "type": "object"
+      },
+      "SessionSteeringCancellationRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "session_steering_cancellation.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "SessionSteeringCancellationView": {
+        "additionalProperties": false,
+        "properties": {
+          "cancellation_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "cancellation_kind": {
+            "enum": [
+              "operator"
+            ],
+            "type": "string"
+          },
+          "capability_grant": {
+            "type": "boolean"
+          },
+          "execution_started": {
+            "type": "boolean"
+          },
+          "model_called": {
+            "type": "boolean"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "steering": {
+            "$ref": "#/components/schemas/OperatorSteeringMessageView"
+          },
+          "tool_called": {
+            "type": "boolean"
+          },
+          "version": {
+            "enum": [
+              "session_steering_cancellation.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "run_id",
+          "session_id",
+          "steering",
+          "cancellation_id",
+          "cancellation_kind",
           "replayed",
           "execution_started",
           "model_called",

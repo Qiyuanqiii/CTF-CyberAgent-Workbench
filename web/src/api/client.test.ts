@@ -1,5 +1,5 @@
 import { CyberAgentClient } from "./client";
-import type { RunEventStreamView } from "./types";
+import type { RunEventStreamView, RunLifecycleControlView } from "./types";
 
 const healthEnvelope = {
   version: "api.v1",
@@ -31,13 +31,46 @@ const sessionMessageData = {
   run_id: "run-1",
   session_id: "sess-1",
   steering: {
-    id: "steer-1", sequence: 1, status: "pending", created_at: "2026-07-18T00:00:00Z",
+    id: "steer-1", sequence: 1, status: "pending", prepared: false,
+    created_at: "2026-07-18T00:00:00Z",
   },
   replayed: false,
   execution_started: false,
   model_called: false,
   tool_called: false,
   capability_grant: false,
+};
+
+const sessionSteeringCancellationData = {
+  version: "session_steering_cancellation.v1",
+  run_id: "run-1", session_id: "sess-1",
+  steering: {
+    id: "steer-1", sequence: 1, status: "cancelled", prepared: false,
+    created_at: "2026-07-18T00:00:00Z", cancelled_at: "2026-07-18T00:01:00Z",
+  },
+  cancellation_id: "cancel-1", cancellation_kind: "operator", replayed: false,
+  execution_started: false, model_called: false, tool_called: false, capability_grant: false,
+};
+
+const runLifecycleData = {
+  version: "run_lifecycle_control.v1",
+  run: {
+    id: "run-1", mission_id: "mission-1", session_id: "sess-1", status: "running",
+    config: { model_route: "code", interactive: true }, budget: { max_turns: 4 },
+    created_at: "2026-07-18T00:00:00Z", updated_at: "2026-07-18T00:01:00Z",
+  },
+  action: "start", expected_status: "created", applied_status: "running",
+  event_sequence_start: 5, event_sequence_end: 6, replayed: false,
+  execution_started: false, model_called: false, tool_called: false, capability_grant: false,
+};
+
+const runExecutionData = {
+  version: "run_execution_handoff.v1", operation_id: "run-handoff-1",
+  run_id: "run-1", session_id: "sess-1", max_steps: 2, selected_count: 2,
+  status: "completed", run_status: "running", stop_reason: "selection_drained",
+  steps_completed: 1, pending_count: 0, prepared_count: 0, committed_count: 1,
+  cancelled_count: 1, completion_event_sequence: 12, replayed: false,
+  execution_started: true, model_called: true, tool_called: false, capability_grant: false,
 };
 
 describe("CyberAgentClient", () => {
@@ -319,6 +352,147 @@ describe("CyberAgentClient", () => {
     await expect(client.submitSessionMessage("sess-1", {
       version: "session_message_submission.v1", content: "Review",
     }, "web-session-message-operation-0004")).rejects.toThrow("capability");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("separates pending Session steering cancellation and validates its authority", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-session-cancel",
+      data: sessionSteeringCancellationData,
+    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false, runCreationEnabled: false, sessionMessageEnabled: false,
+      sessionSteeringControlEnabled: true,
+    });
+    expect(client.hasControl).toBe(false);
+    expect(client.hasSessionMessages).toBe(false);
+    expect(client.hasSessionSteeringControl).toBe(true);
+    await expect(client.cancelSessionSteering("sess-1", "steer-1", {
+      version: "session_steering_cancellation.v1", reason: "operator cancelled",
+    }, "web-session-steering-cancel-0001")).resolves.toEqual(sessionSteeringCancellationData);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/sessions/sess-1/messages/steer-1/cancel");
+    expect(init.headers).toMatchObject({
+      Authorization: "Bearer control-secret",
+      "Idempotency-Key": "web-session-steering-cancel-0001",
+    });
+  });
+
+  it("rejects forged or cross-message Session steering cancellation responses", async () => {
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false, runCreationEnabled: false, sessionMessageEnabled: false,
+      sessionSteeringControlEnabled: true,
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-session-cancel-forged",
+      data: { ...sessionSteeringCancellationData, execution_started: true },
+    }), { status: 202, headers: { "Content-Type": "application/json" } })).mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        version: "api.v1", request_id: "req-session-cancel-cross",
+        data: { ...sessionSteeringCancellationData,
+          steering: { ...sessionSteeringCancellationData.steering, id: "steer-other" } },
+      }), { status: 202, headers: { "Content-Type": "application/json" } }),
+    ));
+    const body = { version: "session_steering_cancellation.v1" as const, reason: "cancel" };
+    await expect(client.cancelSessionSteering("sess-1", "steer-1", body,
+      "web-session-steering-cancel-0002")).rejects.toThrow("invalid");
+    await expect(client.cancelSessionSteering("sess-1", "steer-1", body,
+      "web-session-steering-cancel-0003")).rejects.toThrow("invalid");
+  });
+
+  it("does not expose Session steering cancellation without its capability", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      sessionMessageEnabled: true, sessionSteeringControlEnabled: false,
+    });
+    await expect(client.cancelSessionSteering("sess-1", "steer-1", {
+      version: "session_steering_cancellation.v1", reason: "cancel",
+    }, "web-session-steering-cancel-0004")).rejects.toThrow("capability");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("separates Run lifecycle and bounded execution capabilities", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        version: "api.v1", request_id: "req-lifecycle", data: runLifecycleData,
+      }), { status: 202, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        version: "api.v1", request_id: "req-execute", data: runExecutionData,
+      }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false, runCreationEnabled: false, sessionMessageEnabled: false,
+      sessionSteeringControlEnabled: false, runLifecycleEnabled: true,
+      runExecutionEnabled: true,
+    });
+    expect(client.hasControl).toBe(false);
+    expect(client.hasRunLifecycle).toBe(true);
+    expect(client.hasRunExecution).toBe(true);
+    await expect(client.controlRunLifecycle("run-1", {
+      version: "run_lifecycle_control.v1", action: "start",
+    }, "web-run-lifecycle-operation-0001")).resolves.toEqual(runLifecycleData);
+    await expect(client.executeRun("run-1", {
+      version: "run_execution_handoff.v1", max_steps: 2,
+    }, "web-run-execution-operation-0001")).resolves.toEqual(runExecutionData);
+    const [lifecycleURL, lifecycleInit] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [executionURL, executionInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(lifecycleURL).toBe("/api/v1/runs/run-1/lifecycle");
+    expect(executionURL).toBe("/api/v1/runs/run-1/execute");
+    expect(lifecycleInit.headers).toMatchObject({ Authorization: "Bearer control-secret",
+      "Idempotency-Key": "web-run-lifecycle-operation-0001" });
+    expect(executionInit.headers).toMatchObject({ Authorization: "Bearer control-secret",
+      "Idempotency-Key": "web-run-execution-operation-0001" });
+  });
+
+  it("rejects forged Run lifecycle and execution metadata", async () => {
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runLifecycleEnabled: true, runExecutionEnabled: true,
+    });
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        version: "api.v1", request_id: "req-lifecycle-forged",
+        data: { ...runLifecycleData, model_called: true },
+      }), { status: 202, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        version: "api.v1", request_id: "req-execute-forged",
+        data: { ...runExecutionData, committed_count: 2 },
+      }), { status: 202, headers: { "Content-Type": "application/json" } })));
+    await expect(client.controlRunLifecycle("run-1", {
+      version: "run_lifecycle_control.v1", action: "start",
+    }, "web-run-lifecycle-operation-0002")).rejects.toThrow("invalid");
+    await expect(client.executeRun("run-1", {
+      version: "run_execution_handoff.v1", max_steps: 2,
+    }, "web-run-execution-operation-0002")).rejects.toThrow("invalid");
+  });
+
+  it("accepts an exact lifecycle replay after the Run has advanced", async () => {
+    const delayedReplay = {
+      ...runLifecycleData, replayed: true,
+      run: { ...runLifecycleData.run, status: "paused" },
+    } as RunLifecycleControlView;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-lifecycle-delayed", data: delayedReplay,
+    }), { status: 202, headers: { "Content-Type": "application/json" } })));
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runLifecycleEnabled: true,
+    });
+    await expect(client.controlRunLifecycle("run-1", {
+      version: "run_lifecycle_control.v1", action: "start",
+    }, "web-run-lifecycle-delayed-0001")).resolves.toEqual(delayedReplay);
+  });
+
+  it("does not expose Run operations without their distinct capabilities", async () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runLifecycleEnabled: false, runExecutionEnabled: false,
+    });
+    await expect(client.controlRunLifecycle("run-1", {
+      version: "run_lifecycle_control.v1", action: "start",
+    }, "web-run-lifecycle-operation-0003")).rejects.toThrow("capability");
+    await expect(client.executeRun("run-1", {
+      version: "run_execution_handoff.v1", max_steps: 1,
+    }, "web-run-execution-operation-0003")).rejects.toThrow("capability");
     expect(fetch).not.toHaveBeenCalled();
   });
 

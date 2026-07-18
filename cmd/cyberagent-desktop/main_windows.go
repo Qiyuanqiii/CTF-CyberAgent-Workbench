@@ -41,10 +41,13 @@ type webView2RuntimeProbe struct {
 }
 
 type desktopOptions struct {
-	profileControl  bool
-	runCreation     bool
-	sessionMessages bool
-	version         bool
+	profileControl         bool
+	runCreation            bool
+	sessionMessages        bool
+	sessionSteeringControl bool
+	runLifecycle           bool
+	runExecution           bool
+	version                bool
 }
 
 type nativeSkillPackagePicker struct{}
@@ -170,6 +173,12 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 		"enable idempotent workspace-bound Run creation")
 	sessionMessages := fs.Bool("enable-session-messages", false,
 		"enable idempotent Run-bound Session message submission")
+	sessionSteeringControl := fs.Bool("enable-session-steering-control", false,
+		"enable pending-only Run-bound Session steering cancellation")
+	runLifecycle := fs.Bool("enable-run-lifecycle", false,
+		"enable idempotent Run start, pause, and resume control")
+	runExecution := fs.Bool("enable-run-execution", false,
+		"enable bounded queued Run execution through the Go Supervisor")
 	version := fs.Bool("version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
 		return desktopOptions{}, err
@@ -178,7 +187,11 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 		return desktopOptions{}, errors.New("cyberagent-desktop accepts no positional arguments")
 	}
 	return desktopOptions{profileControl: *profileControl, runCreation: *runCreation,
-		sessionMessages: *sessionMessages, version: *version}, nil
+		sessionMessages:        *sessionMessages,
+		sessionSteeringControl: *sessionSteeringControl,
+		runLifecycle:           *runLifecycle,
+		runExecution:           *runExecution,
+		version:                *version}, nil
 }
 
 func runDesktop(config desktopOptions) error {
@@ -198,7 +211,8 @@ func runDesktop(config desktopOptions) error {
 		return err
 	}
 	controlToken := ""
-	if config.profileControl || config.runCreation || config.sessionMessages {
+	if config.profileControl || config.runCreation || config.sessionMessages ||
+		config.sessionSteeringControl || config.runLifecycle || config.runExecution {
 		controlToken, err = httpapi.GenerateAccessToken()
 		if err != nil {
 			return err
@@ -209,8 +223,11 @@ func runDesktop(config desktopOptions) error {
 	controlPlane, err := desktop.OpenControlPlane(desktop.ControlPlaneConfig{
 		DatabasePath: databasePath, ReadToken: readToken, ControlToken: controlToken,
 		RunControlEnabled: config.profileControl, RunCreationEnabled: config.runCreation,
-		SessionMessageEnabled: config.sessionMessages,
-		AppVersion:            app.Version, UIHandler: bundle,
+		SessionMessageEnabled:         config.sessionMessages,
+		SessionSteeringControlEnabled: config.sessionSteeringControl,
+		RunLifecycleEnabled:           config.runLifecycle,
+		RunExecutionEnabled:           config.runExecution,
+		AppVersion:                    app.Version, UIHandler: bundle,
 	})
 	if err != nil {
 		return apperror.Wrap(apperror.CodeFailedPrecondition,
@@ -224,8 +241,11 @@ func runDesktop(config desktopOptions) error {
 		ContextProvider: lifecycle.Context, FilePicker: nativeSkillPackagePicker{},
 		ReadToken: readToken, ControlToken: controlToken, APIVersion: httpapi.Version,
 		RunControlEnabled: config.profileControl, RunCreationEnabled: config.runCreation,
-		SessionMessageEnabled: config.sessionMessages,
-		AppVersion:            app.Version, UIDigest: bundle.Digest(), Selector: selector, PreviewBridge: preview,
+		SessionMessageEnabled:         config.sessionMessages,
+		SessionSteeringControlEnabled: config.sessionSteeringControl,
+		RunLifecycleEnabled:           config.runLifecycle,
+		RunExecutionEnabled:           config.runExecution,
+		AppVersion:                    app.Version, UIDigest: bundle.Digest(), Selector: selector, PreviewBridge: preview,
 	})
 	if err != nil {
 		return err
