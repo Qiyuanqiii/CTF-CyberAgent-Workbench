@@ -906,6 +906,8 @@ D1-W1 新增可复现 linker metadata、只读 `cyberagent doctor portable [--js
 
 累计六切片完整健壮性门通过：最终全仓 ordinary 294.0 秒、race 338.3 秒；普通/secure-Desktop test 与 vet、零告警 staticcheck、零可达漏洞 govulncheck、module verify/tidy diff、22 个文件 88 项 React 测试、strict TypeScript、确定性 OpenAPI/TypeScript、Vite build、npm 零漏洞、隔离且显式清空真实 Provider 环境的 CLI smoke、凭据/本机路径/产物扫描与真实 Windows 双构建均为绿色。OpenAPI 为 47 个 path、106 个 schema、31 个 GET、19 个 control POST；双构建 SHA-256 为 `33fb9ca3064df98191ac50b2a3ef9431e1b5c81abe8c610d4be15db113cdf1ef`，COFF timestamp 为 0。审计修复 release-ready 误报、失败回执成功图标、非规范/跨目录 Explorer 路径权限、OpenAPI 活路由缺 Workspace 夹具、脱敏投影上限、PowerShell 5.1 兼容、输出重解析点和一项既有 Go error 文案；当前无已知未解决高/中风险。未调用真实 Provider、Shell、LocalRunner、Docker、网络攻击、安装器、注册表、自启动或更新。
 
+远端 GitHub Actions run `29658783000` 已通过实现提交 `5f0f397`：Go control plane 5 分 49 秒、TypeScript console 32 秒、Windows Desktop shell 2 分 11 秒。
+
 双指标更新为架构完成度约 98%（V2 约 99%）、完整产品可用度约 74-78%、通用 Coding Agent 约 70%、Cyber 自动化约 20%。下一批建议为 D1-E2 有界 Workspace 搜索、D1-C1 操作者显式把单份非授权 Workspace evidence 附加到既有 Session 队列，以及 D1-U2 可刷新 metadata-only operation receipt history。Windows 10 人工矩阵、签名/安装包、真实进程、Rust analyzer 与 CTF 自动化继续独立后置，边界见 ADR 0042。
 
 ## 八、仓库同步与恢复约定

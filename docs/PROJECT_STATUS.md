@@ -1072,7 +1072,9 @@ TypeScript, Vite build, zero-vulnerability npm audit, isolated mock-only CLI smo
 privacy/artifact scans, and a real reproducible Windows double build. OpenAPI is 47
 paths/106 schemas/31 GET/19 control POST. The binary SHA-256 is
 `33fb9ca3064df98191ac50b2a3ef9431e1b5c81abe8c610d4be15db113cdf1ef`.
-No unresolved high/medium issue is known. Current estimates are architecture about 98%
+GitHub Actions run `29658783000` passed implementation commit `5f0f397`: Go control
+plane 5m49s, TypeScript console 32s, and Windows Desktop shell 2m11s. No unresolved
+high/medium issue is known. Current estimates are architecture about 98%
 (V2 about 99%), complete-product usability about 74-78%, generic Coding Agent workflow
 about 70%, and Cyber autonomous workflow about 20%. ADR 0042 records the decision.
 
