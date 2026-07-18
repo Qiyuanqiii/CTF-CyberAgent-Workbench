@@ -39,6 +39,8 @@ type ConnectionBootstrap struct {
 	SessionSteeringControlEnabled bool   `json:"session_steering_control_enabled"`
 	RunLifecycleEnabled           bool   `json:"run_lifecycle_enabled"`
 	RunExecutionEnabled           bool   `json:"run_execution_enabled"`
+	PlanDeliveryControlEnabled    bool   `json:"plan_delivery_control_enabled"`
+	ApprovalControlEnabled        bool   `json:"approval_control_enabled"`
 	ReadOnlyDefault               bool   `json:"read_only_default"`
 	ProcessExecutionEnabled       bool   `json:"process_execution_enabled"`
 	ShellExecutionEnabled         bool   `json:"shell_execution_enabled"`
@@ -80,6 +82,8 @@ type DesktopBridgeConfig struct {
 	SessionSteeringControlEnabled bool
 	RunLifecycleEnabled           bool
 	RunExecutionEnabled           bool
+	PlanDeliveryControlEnabled    bool
+	ApprovalControlEnabled        bool
 	APIVersion                    string
 	AppVersion                    string
 	UIDigest                      string
@@ -109,16 +113,16 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop bridge tokens must be normalized bounded values")
 	}
-	if (config.RunControlEnabled || config.RunCreationEnabled || config.SessionMessageEnabled ||
+	controlEnabled := config.RunControlEnabled || config.RunCreationEnabled ||
+		config.SessionMessageEnabled ||
 		config.SessionSteeringControlEnabled || config.RunLifecycleEnabled ||
-		config.RunExecutionEnabled) &&
-		config.ControlToken == "" {
+		config.RunExecutionEnabled || config.PlanDeliveryControlEnabled ||
+		config.ApprovalControlEnabled
+	if controlEnabled && config.ControlToken == "" {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop control capabilities require a control token")
 	}
-	if config.ControlToken != "" && !config.RunControlEnabled && !config.RunCreationEnabled &&
-		!config.SessionMessageEnabled && !config.SessionSteeringControlEnabled &&
-		!config.RunLifecycleEnabled && !config.RunExecutionEnabled {
+	if config.ControlToken != "" && !controlEnabled {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop control token requires an enabled control capability")
 	}
@@ -150,10 +154,10 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 			SessionSteeringControlEnabled: config.SessionSteeringControlEnabled,
 			RunLifecycleEnabled:           config.RunLifecycleEnabled,
 			RunExecutionEnabled:           config.RunExecutionEnabled,
-			ReadOnlyDefault: !config.RunControlEnabled && !config.RunCreationEnabled &&
-				!config.SessionMessageEnabled && !config.SessionSteeringControlEnabled &&
-				!config.RunLifecycleEnabled && !config.RunExecutionEnabled,
-			ProcessExecutionEnabled: false, ShellExecutionEnabled: false, DockerExecutionEnabled: false,
+			PlanDeliveryControlEnabled:    config.PlanDeliveryControlEnabled,
+			ApprovalControlEnabled:        config.ApprovalControlEnabled,
+			ReadOnlyDefault:               !controlEnabled,
+			ProcessExecutionEnabled:       false, ShellExecutionEnabled: false, DockerExecutionEnabled: false,
 			SkillInstallationEnabled: false, RendererPathInputSupported: false,
 		},
 	}, nil

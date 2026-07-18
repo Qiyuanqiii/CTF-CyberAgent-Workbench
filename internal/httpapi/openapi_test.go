@@ -19,6 +19,7 @@ import (
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
+	"cyberagent-workbench/internal/toolgateway"
 )
 
 func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testing.T) {
@@ -75,6 +76,12 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 					item.Post.OperationID == "cancelSessionSteering") ||
 				(path == RunLifecycleControlPathTemplate &&
 					item.Post.OperationID == "controlRunLifecycle") ||
+				(path == PlanDirectionControlPathTemplate &&
+					item.Post.OperationID == "selectPlanDirection") ||
+				(path == PlanDeliveryControlPathTemplate &&
+					item.Post.OperationID == "enterPlanDelivery") ||
+				(path == ApprovalDecisionControlPathTemplate &&
+					item.Post.OperationID == "decideRunApproval") ||
 				(path == RunExecutionControlPathTemplate &&
 					item.Post.OperationID == "executeRunSelection")
 			if !validControl ||
@@ -118,6 +125,9 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				path == RunCreationControlPath || path == SessionMessageControlPathTemplate ||
 				path == SessionSteeringCancellationPathTemplate ||
 				path == RunLifecycleControlPathTemplate ||
+				path == PlanDirectionControlPathTemplate ||
+				path == PlanDeliveryControlPathTemplate ||
+				path == ApprovalDecisionControlPathTemplate ||
 				path == RunExecutionControlPathTemplate) &&
 				method == "post") {
 				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
@@ -131,6 +141,11 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 			"OperatorSteeringMessageView", field)
 	}
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "ArtifactView", "content")
+	for _, field := range []string{"command", "content", "path", "request_fingerprint",
+		"decision_reason", "requested_by", "reviewed_by", "grant_id"} {
+		assertOpenAPISchemaOmits(t, document.Components.Schemas,
+			"ApprovalQueueItemView", field)
+	}
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "AgentNodeView", "status_reason")
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "DelegationReviewView", "reason")
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "DelegationApplicationView", "policy_fingerprint")
@@ -204,11 +219,31 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		}); err != nil {
 		t.Fatal(err)
 	}
+	planRun, planProposal := prepareOpenAPIPlanControlTarget(t, fixture)
+	checker := policy.NewDefaultChecker()
+	gateway := toolgateway.New(fixture.store, checker)
+	pendingApproval, err := gateway.Invoke(t.Context(), toolgateway.ToolCall{
+		Name: toolgateway.ShellTool, Arguments: map[string]string{"command": "echo OpenAPI approval"},
+		RunID: fixture.run.ID, SessionID: fixture.run.SessionID,
+		WorkspaceID: fixture.workspace.ID, RequestedBy: "openapi_test",
+	})
+	if err != nil || pendingApproval.Proposal == nil {
+		t.Fatalf("prepare OpenAPI approval=%#v err=%v", pendingApproval, err)
+	}
+	approvalRecord, err := fixture.store.GetApprovalByProposal(t.Context(), pendingApproval.Proposal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	fixture.api.runLifecycleEnabled = true
 	fixture.api.runExecutionEnabled = true
+	fixture.api.planDeliveryControlEnabled = true
+	fixture.api.approvalControlEnabled = true
 	fixture.api.runLifecycleController = application.NewRunLifecycleControlService(fixture.store)
 	fixture.api.runExecutionController = application.NewRunExecutionHandoffService(
 		fixture.store, llm.NewDefaultRouter(), policy.NewDefaultChecker())
+	fixture.api.planDeliveryController = application.NewPlanDeliveryControlService(fixture.store)
+	fixture.api.approvalController = application.NewApprovalControlService(fixture.store,
+		gateway, checker)
 	steering, err := fixture.store.EnqueueOperatorSteering(t.Context(),
 		domain.EnqueueOperatorSteeringRequest{
 			RunID: fixture.run.ID, SessionID: fixture.run.SessionID,
@@ -228,6 +263,7 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		"{note_id}":      fixture.notes[0].ID,
 		"{artifact_id}":  fixture.artifactID,
 		"{report_id}":    "report-openapi-missing-0001",
+		"{approval_id}":  approvalRecord.ID,
 	}
 	for _, spec := range openAPIOperationSpecs() {
 		requestPath := spec.Path
@@ -241,6 +277,9 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", profileRun.ID)
 		} else if spec.Path == RunLifecycleControlPathTemplate {
 			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", lifecycleRun.ID)
+		} else if spec.Path == PlanDirectionControlPathTemplate ||
+			spec.Path == PlanDeliveryControlPathTemplate {
+			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", planRun.ID)
 		} else if spec.Path == RunExecutionControlPathTemplate {
 			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", executionRun.ID)
 		}
@@ -263,6 +302,13 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 						`"reason":"OpenAPI live cancellation"}`
 				} else if spec.Path == RunLifecycleControlPathTemplate {
 					body = `{"version":"run_lifecycle_control.v1","action":"start"}`
+				} else if spec.Path == PlanDirectionControlPathTemplate {
+					body = `{"version":"plan_delivery_control.v1","proposal_id":"` +
+						planProposal.ID + `","direction":1}`
+				} else if spec.Path == PlanDeliveryControlPathTemplate {
+					body = `{"version":"plan_delivery_control.v1"}`
+				} else if spec.Path == ApprovalDecisionControlPathTemplate {
+					body = `{"version":"approval_control.v1","action":"approve_once"}`
 				} else if spec.Path == RunExecutionControlPathTemplate {
 					body = `{"version":"run_execution_handoff.v1","max_steps":1}`
 				} else if spec.Path != RunExecutionProfileControlPathTemplate {
@@ -308,6 +354,49 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		"127.0.0.1:8765", "127.0.0.1:45000", nil)
 	assertAPIError(t, unauthorized, http.StatusUnauthorized, "POLICY_DENIED")
 	assertAPIError(t, fixture.get(t, OpenAPIPath+"?format=yaml"), http.StatusBadRequest, "INVALID_ARGUMENT")
+}
+
+func prepareOpenAPIPlanControlTarget(t *testing.T,
+	fixture *apiFixture,
+) (domain.Run, domain.PlanDeliveryProposal) {
+	t.Helper()
+	ctx := t.Context()
+	runs := application.NewRunService(fixture.store)
+	_, run, err := runs.Create(ctx, application.CreateRunRequest{
+		Goal: "OpenAPI Plan control target", Profile: "review", Phase: "plan",
+		ModelRoute: "http-plan/model",
+		Budget:     domain.Budget{MaxTurns: 4, MaxTokens: 1000, MaxToolCalls: 4},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err = runs.Start(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &httpPlanProvider{responses: []*llm.ChatResponse{
+		{Provider: "openapi-plan", Model: "model",
+			Usage: llm.Usage{InputTokens: 2, OutputTokens: 2, TotalTokens: 4},
+			ToolCalls: []llm.ToolCall{{ID: "openapi-plan-control-call",
+				Name: "plan_delivery_propose", Arguments: json.RawMessage(httpPlanDeliveryPayload)}}},
+		{Text: httpRootWaitResponse(t), Provider: "openapi-plan", Model: "model",
+			Usage: llm.Usage{InputTokens: 2, OutputTokens: 2, TotalTokens: 4}},
+	}}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	if _, err := application.NewRunSupervisor(fixture.store, router,
+		policy.NewDefaultChecker()).Step(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	proposals, err := fixture.store.ListPlanDeliveryProposals(ctx, run.ID, 2)
+	if err != nil || len(proposals) != 1 {
+		t.Fatalf("OpenAPI Plan proposals=%#v err=%v", proposals, err)
+	}
+	run, err = fixture.store.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return run, proposals[0]
 }
 
 func prepareOpenAPISpecialistCancellationTarget(t *testing.T,

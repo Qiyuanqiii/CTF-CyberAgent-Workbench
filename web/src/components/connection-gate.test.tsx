@@ -53,6 +53,8 @@ describe("ConnectionGate", () => {
       session_steering_control_enabled: false,
       run_lifecycle_enabled: false,
       run_execution_enabled: false,
+      plan_delivery_control_enabled: false,
+      approval_control_enabled: false,
       read_only_default: true,
       process_execution_enabled: false,
       shell_execution_enabled: false,

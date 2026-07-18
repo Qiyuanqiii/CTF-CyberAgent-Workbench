@@ -17,6 +17,8 @@ export interface DesktopConnectionBootstrap {
   session_steering_control_enabled: boolean;
   run_lifecycle_enabled: boolean;
   run_execution_enabled: boolean;
+  plan_delivery_control_enabled: boolean;
+  approval_control_enabled: boolean;
   read_only_default: boolean;
   process_execution_enabled: false;
   shell_execution_enabled: false;
@@ -161,9 +163,11 @@ function getBridge(): NativeDesktopBridge | null {
 
 function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
   if (!hasExactKeys(value, [
-    "api_base_url", "api_version", "app_version", "control_enabled", "control_token",
+    "api_base_url", "api_version", "app_version", "approval_control_enabled",
+    "control_enabled", "control_token",
     "docker_execution_enabled", "process_execution_enabled", "protocol_version", "read_only_default",
-    "read_token", "renderer_path_input_supported", "run_creation_enabled", "shell_execution_enabled",
+    "plan_delivery_control_enabled", "read_token", "renderer_path_input_supported",
+    "run_creation_enabled", "shell_execution_enabled",
     "run_execution_enabled", "run_lifecycle_enabled",
     "session_message_enabled", "skill_installation_enabled", "ui_digest",
     "session_steering_control_enabled",
@@ -179,14 +183,18 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
     typeof value.session_steering_control_enabled === "boolean" &&
     typeof value.run_lifecycle_enabled === "boolean" &&
     typeof value.run_execution_enabled === "boolean" &&
+    typeof value.plan_delivery_control_enabled === "boolean" &&
+    typeof value.approval_control_enabled === "boolean" &&
     (value.control_token !== "") === (value.control_enabled || value.run_creation_enabled ||
       value.session_message_enabled || value.session_steering_control_enabled ||
-      value.run_lifecycle_enabled || value.run_execution_enabled) &&
+      value.run_lifecycle_enabled || value.run_execution_enabled ||
+      value.plan_delivery_control_enabled || value.approval_control_enabled) &&
     (value.control_token === "" || validToken(value.control_token)) &&
     value.control_token !== value.read_token &&
     value.read_only_default === !(value.control_enabled || value.run_creation_enabled ||
       value.session_message_enabled || value.session_steering_control_enabled ||
-      value.run_lifecycle_enabled || value.run_execution_enabled) &&
+      value.run_lifecycle_enabled || value.run_execution_enabled ||
+      value.plan_delivery_control_enabled || value.approval_control_enabled) &&
     value.process_execution_enabled === false && value.shell_execution_enabled === false &&
     value.docker_execution_enabled === false && value.skill_installation_enabled === false &&
     value.renderer_path_input_supported === false;

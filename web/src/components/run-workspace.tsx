@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   Boxes,
+  Check,
   ClipboardList,
   Container,
   Database,
@@ -18,6 +19,7 @@ import {
   Radio,
   ScanSearch,
   ShieldAlert,
+  ShieldCheck,
   StickyNote,
   Terminal,
   ChevronsRight,
@@ -44,12 +46,14 @@ import { usePagedResource } from "../hooks/use-paged-resource";
 import { useRunEventStream } from "../hooks/use-run-event-stream";
 import { formatBytes, formatDate, formatNumber, shortID } from "../lib/format";
 import { EmptyState, ErrorState, KeyValue, LoadMoreButton, LoadingState, StatusBadge } from "./common";
+import { ApprovalPanel } from "./approval-panel";
 import { AgentGraphPanel, DelegationsPanel, ExternalSkillsPanel, FanoutPanel, FindingsPanel } from "./run-projections";
 
-type RunTab = "overview" | "agents" | "delegations" | "fanout" | "findings" | "events" | "work" | "notes" | "artifacts" | "tools";
+type RunTab = "overview" | "approvals" | "agents" | "delegations" | "fanout" | "findings" | "events" | "work" | "notes" | "artifacts" | "tools";
 
 const tabs: Array<{ id: RunTab; label: string; icon: typeof Activity }> = [
   { id: "overview", label: "概览", icon: Gauge },
+  { id: "approvals", label: "Approvals", icon: ShieldCheck },
   { id: "agents", label: "Agents", icon: GitBranch },
   { id: "delegations", label: "委派", icon: Network },
   { id: "fanout", label: "Fan-out", icon: ScanSearch },
@@ -134,6 +138,7 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
       </nav>
       <div className="workspace-content">
         {tab === "overview" && <RunOverview client={client} detail={detail} />}
+        {tab === "approvals" && <ApprovalPanel client={client} runID={runID} />}
         {tab === "agents" && <AgentGraphPanel client={client} runID={runID} />}
         {tab === "delegations" && <DelegationsPanel client={client} runID={runID} />}
         {tab === "fanout" && <FanoutPanel client={client} runID={runID} />}
@@ -224,7 +229,8 @@ function RunOverview({ client, detail }: { client: CyberAgentClient; detail: Run
         </dl>
       </section>
       <OperatorSteeringPanel state={steering} />
-      {detail.plan_delivery && <PlanDeliveryPanel state={detail.plan_delivery} />}
+      {detail.plan_delivery && <PlanDeliveryPanel client={client} detail={detail}
+        state={detail.plan_delivery} />}
       {detail.external_skills && <ExternalSkillsPanel projection={detail.external_skills} />}
     </div>
   );
@@ -440,8 +446,65 @@ export function OperatorSteeringPanel({ state }: { state: OperatorSteeringQueueV
   );
 }
 
-export function PlanDeliveryPanel({ state }: { state: PlanDeliveryStateView }) {
+export function PlanDeliveryPanel({ state, client, detail }: {
+  state: PlanDeliveryStateView;
+  client?: CyberAgentClient;
+  detail?: RunDetailView;
+}) {
+  const queryClient = useQueryClient();
+  const operationKeys = useRef(new Map<string, string>());
+  const operationKey = (intent: string) => {
+    const existing = operationKeys.current.get(intent);
+    if (existing) {
+      return existing;
+    }
+    const created = `web-plan-${globalThis.crypto.randomUUID()}`;
+    operationKeys.current.set(intent, created);
+    return created;
+  };
+  const refresh = () => {
+    if (!detail) return;
+    void queryClient.invalidateQueries({ queryKey: ["run", detail.run.id] });
+    void queryClient.invalidateQueries({ queryKey: ["run", detail.run.id, "events"] });
+    void queryClient.invalidateQueries({ queryKey: ["run", detail.run.id, "work"] });
+    void queryClient.invalidateQueries({ queryKey: ["run", detail.run.id, "notes"] });
+  };
+  const directionMutation = useMutation({
+    mutationFn: (direction: number) => {
+      if (!client || !detail || !state.proposal) {
+        throw new Error("Plan direction control is unavailable");
+      }
+      const intent = `${state.proposal.id}:direction:${direction}`;
+      return client.selectPlanDirection(detail.run.id, {
+        version: "plan_delivery_control.v1", proposal_id: state.proposal.id, direction,
+      }, operationKey(intent)).then((result) => ({ result, intent }));
+    },
+    onSuccess: ({ intent }) => {
+      operationKeys.current.delete(intent);
+      refresh();
+    },
+  });
+  const deliveryMutation = useMutation({
+    mutationFn: () => {
+      if (!client || !detail || !state.selection) {
+        throw new Error("Plan delivery control is unavailable");
+      }
+      const intent = `${state.selection.id}:deliver`;
+      return client.enterPlanDelivery(detail.run.id, {
+        version: "plan_delivery_control.v1",
+      }, operationKey(intent)).then((result) => ({ result, intent }));
+    },
+    onSuccess: ({ intent }) => {
+      operationKeys.current.delete(intent);
+      refresh();
+    },
+  });
   const selected = state.selection?.direction_ordinal;
+  const mutable = Boolean(client?.hasPlanDelivery && detail &&
+    (detail.run.status === "created" || detail.run.status === "paused") &&
+    detail.mode.phase === "plan" && !detail.execution_lease?.active);
+  const selecting = directionMutation.isPending || deliveryMutation.isPending;
+  const controlError = directionMutation.error ?? deliveryMutation.error;
   const status = state.operator_choice_needed
     ? "Operator choice required"
     : state.phase_change_needed
@@ -479,10 +542,35 @@ export function PlanDeliveryPanel({ state }: { state: PlanDeliveryStateView }) {
                   <small>{module.dependencies.length > 0 ? `Depends on ${module.dependencies.join(", ")}` : "No dependencies"}</small>
                 </li>
               ))}</ol></div>
+              {mutable && state.operator_choice_needed && state.proposal && (
+                <button className="command-button plan-choice-button" disabled={selecting}
+                  onClick={() => directionMutation.mutate(direction.ordinal)} type="button">
+                  {directionMutation.isPending && directionMutation.variables === direction.ordinal
+                    ? <LoaderCircle aria-hidden="true" className="spin" size={15} />
+                    : <Check aria-hidden="true" size={15} />}Choose direction {direction.ordinal}
+                </button>
+              )}
             </div>
           </details>
         ))}
       </div>
+      {mutable && state.selection && state.phase_change_needed && (
+        <div className="plan-delivery-actions">
+          <button className="command-button" disabled={selecting}
+            onClick={() => deliveryMutation.mutate()} type="button">
+            {deliveryMutation.isPending
+              ? <LoaderCircle aria-hidden="true" className="spin" size={15} />
+              : <ChevronsRight aria-hidden="true" size={15} />}Enter Deliver
+          </button>
+        </div>
+      )}
+      {(directionMutation.isError || deliveryMutation.isError) && (
+        <div className="inline-warning" role="alert">
+          {controlError instanceof Error
+            ? controlError.message
+            : "Plan/Delivery control failed"}
+        </div>
+      )}
       {state.selection && (
         <div className="delivery-checkpoint-list" aria-label="Delivery checkpoint history">
           <h3>Checkpoint history</h3>

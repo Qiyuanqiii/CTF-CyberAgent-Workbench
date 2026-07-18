@@ -496,6 +496,119 @@ describe("CyberAgentClient", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("validates redacted model availability without probing through the client", async () => {
+    const data = {
+      protocol_version: "model_availability.v1",
+      providers: [{ name: "mock", kind: "local", status: "available", models: ["mock-code"],
+        credential_source: "none", network_required: false, configuration_error: false }],
+      routes: [{ name: "code", provider: "mock", model: "mock-code", available: true }],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-models", data,
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(new CyberAgentClient("read-secret").modelAvailability()).resolves.toEqual(data);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("/api/v1/models");
+    expect(init.method).toBe("GET");
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-models-forged",
+      data: { ...data, providers: [{ ...data.providers[0], base_url: "https://private.invalid" }] },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    await expect(new CyberAgentClient("read-secret").modelAvailability()).rejects.toThrow("invalid");
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-models-unbound",
+      data: { ...data, routes: [{ ...data.routes[0], provider: "missing" }] },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    await expect(new CyberAgentClient("read-secret").modelAvailability()).rejects.toThrow("invalid");
+  });
+
+  it("keeps Plan direction and Deliver as independently validated controls", async () => {
+    const direction = {
+      version: "plan_delivery_control.v1", run_id: "run-1", proposal_id: "proposal-1",
+      selection_id: "selection-1", note_id: "note-1", direction: 2, work_item_count: 1,
+      replayed: false, phase_changed: false, execution_started: false, model_called: false,
+      tool_called: false, capability_grant: false,
+    };
+    const delivery = {
+      version: "plan_delivery_control.v1", run_id: "run-1", selection_id: "selection-1",
+      applied_mode: { phase: "deliver", capability_grant: false },
+      current_mode: { phase: "deliver", capability_grant: false }, replayed: false,
+      execution_started: false, model_called: false, tool_called: false, capability_grant: false,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        version: "api.v1", request_id: "req-plan-direction", data: direction,
+      }), { status: 202, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        version: "api.v1", request_id: "req-plan-deliver", data: delivery,
+      }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false, runCreationEnabled: false, sessionMessageEnabled: false,
+      sessionSteeringControlEnabled: false, runLifecycleEnabled: false, runExecutionEnabled: false,
+      planDeliveryControlEnabled: true, approvalControlEnabled: false,
+    });
+    expect(client.hasControl).toBe(false);
+    expect(client.hasPlanDelivery).toBe(true);
+    expect(client.hasApprovalControl).toBe(false);
+    await expect(client.selectPlanDirection("run-1", {
+      version: "plan_delivery_control.v1", proposal_id: "proposal-1", direction: 2,
+    }, "web-plan-direction-operation-0001")).resolves.toEqual(direction);
+    await expect(client.enterPlanDelivery("run-1", {
+      version: "plan_delivery_control.v1",
+    }, "web-plan-deliver-operation-0001")).resolves.toEqual(delivery);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/runs/run-1/plan/direction");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/v1/runs/run-1/plan/deliver");
+  });
+
+  it("validates a metadata-only approval queue and closed approve-once response", async () => {
+    const queue = {
+      protocol_version: "approval_queue.v1", run_id: "run-1", truncated: false,
+      process_execution_enabled: false, session_grant_created: false, capability_grant: false,
+      items: [{ id: "approval-1", proposal_id: "proposal-1", run_id: "run-1",
+        session_id: "session-1", workspace_id: "workspace-1", tool_name: "shell",
+        action_class: "shell", mode: "per_call", status: "pending",
+        allowed_actions: ["approve_once", "deny"], version: 1,
+        created_at: "2026-07-18T00:00:00Z", updated_at: "2026-07-18T00:00:00Z",
+        process_execution_enabled: false, capability_grant: false }],
+    };
+    const decision = {
+      version: "approval_control.v1", run_id: "run-1", approval_id: "approval-1",
+      proposal_id: "proposal-1", tool_name: "shell", action: "approve_once",
+      status: "approved", replayed: false, process_execution_enabled: false,
+      shell_execution_enabled: false, docker_execution_enabled: false,
+      workspace_write_applied: false, session_grant_created: false, capability_grant: false,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        version: "api.v1", request_id: "req-approval-queue", data: queue,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        version: "api.v1", request_id: "req-approval-decision", data: decision,
+      }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false, approvalControlEnabled: true,
+    });
+    await expect(client.approvalQueue("run-1")).resolves.toEqual(queue);
+    await expect(client.decideApproval("run-1", "approval-1", {
+      version: "approval_control.v1", action: "approve_once",
+    }, "web-approval-operation-0001")).resolves.toEqual(decision);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/v1/runs/run-1/approvals");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/v1/runs/run-1/approvals/approval-1/decision");
+    const decisionInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    expect(decisionInit.headers).toMatchObject({ Authorization: "Bearer control-secret" });
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-approval-unbound",
+      data: { ...queue, items: [{ ...queue.items[0], session_id: "" }] },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    await expect(client.approvalQueue("run-1")).rejects.toThrow("invalid");
+  });
+
   it("polls Run events with a stream-compatible opaque cursor and validates the envelope", async () => {
     const frame: RunEventStreamView = {
       version: "run-events.v1",

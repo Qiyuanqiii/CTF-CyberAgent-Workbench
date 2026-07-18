@@ -38,6 +38,8 @@ export function ConnectionGate() {
         sessionSteeringControlEnabled: bootstrap.session_steering_control_enabled,
         runLifecycleEnabled: bootstrap.run_lifecycle_enabled,
         runExecutionEnabled: bootstrap.run_execution_enabled,
+        planDeliveryControlEnabled: bootstrap.plan_delivery_control_enabled,
+        approvalControlEnabled: bootstrap.approval_control_enabled,
       });
     }).catch((caught: unknown) => {
       if (active) {

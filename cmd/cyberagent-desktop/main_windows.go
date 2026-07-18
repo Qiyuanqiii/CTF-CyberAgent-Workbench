@@ -47,6 +47,8 @@ type desktopOptions struct {
 	sessionSteeringControl bool
 	runLifecycle           bool
 	runExecution           bool
+	planDeliveryControl    bool
+	approvalControl        bool
 	version                bool
 }
 
@@ -179,6 +181,10 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 		"enable idempotent Run start, pause, and resume control")
 	runExecution := fs.Bool("enable-run-execution", false,
 		"enable bounded queued Run execution through the Go Supervisor")
+	planDeliveryControl := fs.Bool("enable-plan-delivery", false,
+		"enable operator Plan direction selection and explicit Deliver transition")
+	approvalControl := fs.Bool("enable-approvals", false,
+		"enable bounded approve-once and deny decisions for durable approvals")
 	version := fs.Bool("version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
 		return desktopOptions{}, err
@@ -191,6 +197,8 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 		sessionSteeringControl: *sessionSteeringControl,
 		runLifecycle:           *runLifecycle,
 		runExecution:           *runExecution,
+		planDeliveryControl:    *planDeliveryControl,
+		approvalControl:        *approvalControl,
 		version:                *version}, nil
 }
 
@@ -212,7 +220,8 @@ func runDesktop(config desktopOptions) error {
 	}
 	controlToken := ""
 	if config.profileControl || config.runCreation || config.sessionMessages ||
-		config.sessionSteeringControl || config.runLifecycle || config.runExecution {
+		config.sessionSteeringControl || config.runLifecycle || config.runExecution ||
+		config.planDeliveryControl || config.approvalControl {
 		controlToken, err = httpapi.GenerateAccessToken()
 		if err != nil {
 			return err
@@ -227,6 +236,8 @@ func runDesktop(config desktopOptions) error {
 		SessionSteeringControlEnabled: config.sessionSteeringControl,
 		RunLifecycleEnabled:           config.runLifecycle,
 		RunExecutionEnabled:           config.runExecution,
+		PlanDeliveryControlEnabled:    config.planDeliveryControl,
+		ApprovalControlEnabled:        config.approvalControl,
 		AppVersion:                    app.Version, UIHandler: bundle,
 	})
 	if err != nil {
@@ -245,6 +256,8 @@ func runDesktop(config desktopOptions) error {
 		SessionSteeringControlEnabled: config.sessionSteeringControl,
 		RunLifecycleEnabled:           config.runLifecycle,
 		RunExecutionEnabled:           config.runExecution,
+		PlanDeliveryControlEnabled:    config.planDeliveryControl,
+		ApprovalControlEnabled:        config.approvalControl,
 		AppVersion:                    app.Version, UIDigest: bundle.Digest(), Selector: selector, PreviewBridge: preview,
 	})
 	if err != nil {

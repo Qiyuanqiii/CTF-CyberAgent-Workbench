@@ -1,6 +1,6 @@
 # CyberAgent Workbench Desktop Plan
 
-状态：Desktop D0-A、D0-B、schema-v72 D1-R1、非 schema D1-S1/S2 与 schema-v73 D1-L1/D1-X1 自动化核心已完成。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill 预览、受控 Run 创建、Session 排队/pending-only 取消、幂等 Run 生命周期和最多八条冻结输入的显式 RunSupervisor 交接已通过累计六切片门禁；Windows 10 实机矩阵、Desktop Provider 设置、后台 wake/retry、Plan/审批/Diff/Skill mutation、安装包、正式便携发行、注册表、自启动、更新和高权限执行仍未实现。
+状态：Desktop D0-A、D0-B、schema-v72 D1-R1、非 schema D1-S1/S2、schema-v73 D1-L1/X1 与非 schema D1-M1/P1/A1 自动化核心已完成。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill 预览、受控 Run 创建、Session 排队/pending-only 取消、幂等 Run 生命周期、最多八条冻结输入的显式 RunSupervisor 交接、脱敏模型可用性、Plan 三选一/Deliver 和受限审批决策已经落地；Windows 10 实机矩阵、Desktop Provider 密钥设置/在线诊断、后台 wake/retry、Diff/Skill mutation、安装包、正式便携发行、注册表、自启动、更新和高权限执行仍未实现。
 
 ## 目标
 
@@ -33,9 +33,9 @@
 - `desktop_skill_package_preview.v1` 只返回有界风险元数据，排除路径、文件名、正文、Manifest description/content path/content digest，并固定安装、命令、网络、Provider、工具和能力授权为 false。
 - D0-A 已把该边界接入 Wails 原生对话框和 React 只读预览。渲染层仍不能提交路径、文件字节或安装请求，也不会因预览创建数据库事实或 Run 事件；ADR 0033 与 ADR 0034 分别记录路径隔离和桌面壳边界。
 
-## D0-A 至 D1-X1 当前实现
+## D0-A 至 D1-A1 当前实现
 
-- `cmd/cyberagent-desktop` 只在 Windows `desktop,wv2runtime.error` build tags 下编译，production 构建再增加 `production`；默认 read-only。`--enable-profile-control`、`--enable-run-creation`、`--enable-session-messages`、`--enable-session-steering-control`、`--enable-run-lifecycle` 和 `--enable-run-execution` 分别开放一个窄 Go route；六项 capability 独立，单项启用不能访问其他 route。
+- `cmd/cyberagent-desktop` 只在 Windows `desktop,wv2runtime.error` build tags 下编译，production 构建再增加 `production`；默认 read-only。`--enable-profile-control`、`--enable-run-creation`、`--enable-session-messages`、`--enable-session-steering-control`、`--enable-run-lifecycle`、`--enable-run-execution`、`--enable-plan-delivery` 和 `--enable-approvals` 分别开放窄 Go route；八项 capability 独立，单项启用不能访问其他 route。模型可用性只使用 read token。
 - `web/dist` 以 compile-time embed 进入二进制；Go 在启动前验证 index、内容哈希资源、类型、数量、单项/总大小并复制为不可变内存快照。
 - Wails AssetServer 直接调用现有 `httpapi.API` Handler，不监听 TCP 端口；同一 Go 层继续负责 Bearer、Host、CSP、Policy、SQLite 和 DTO。
 - Renderer 绑定面只有 `Bootstrap`、`SelectSkillPackage`、`PreviewSkillPackage` 三个方法。进程、Shell、Docker、Skill 安装和 renderer path input 权限全部固定为 false。
@@ -44,7 +44,7 @@
 - `desktop.ControlPlane` 与 `desktop.Lifecycle` 固定同库 API 所有权、幂等关闭、崩溃重开、第二实例让位和停止后永久静默；第二实例参数与工作目录不会进入主实例。
 - Desktop 通过 `GET /api/v1/runs/{run_id}/events/poll` 消费与 SSE 相同的真实事件 frame/cursor；React 最多在内存保留 16 个 Run、每个 500 帧，不写浏览器存储。
 - WebView2 `94.0.992.31` 以上只读预检发生在 bundle/数据库之前；失败时不下载、不安装、不打开 URL。进程内适配器只接受精确 `http://wails.localhost`，外部链接、表单和 popup 在 Desktop renderer 中被阻止。
-- secure production-tag 二进制已经在隔离数据目录通过 Windows 11 强制结束/重开与第二实例实机烟测；主工作台、Skill modal 与原生 `.zip` 对话框也已通过视觉复核。D1-R1 至 D1-X1 的 route、能力分离、重放和 React 交互由自动化覆盖，正式发布前仍需随最终二进制复跑完整 Windows 10/11 人工矩阵。
+- secure production-tag 二进制已经在隔离数据目录通过 Windows 11 强制结束/重开与第二实例实机烟测；主工作台、Skill modal 与原生 `.zip` 对话框也已通过视觉复核。D1-R1 至 D1-A1 的 route、能力分离、重放和 React 交互由自动化覆盖，正式发布前仍需随最终二进制复跑完整 Windows 10/11 人工矩阵。
 
 本地构建：
 
@@ -86,6 +86,15 @@ powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
 
 取消只适用于未 prepared 的 pending 项。生命周期只执行严格 start/pause/resume。执行入口冻结最多八条 pending 身份，并通过现有 RunSupervisor、Policy、预算、模型/工具账本和私有 lease 消费；它不是 Desktop-native worker，也不能启动 Shell、Local 或 Docker 进程。
 
+显式启用 Plan/Deliver 与审批决策：
+
+```powershell
+.\build\desktop\cyberagent-desktop.exe --enable-plan-delivery
+.\build\desktop\cyberagent-desktop.exe --enable-approvals
+```
+
+Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 事实，进入 Deliver 必须第二次显式操作。审批队列不返回命令、路径、文件内容、指纹或原因；approve-once 会重检 Policy，且只能得到 dry-run Shell 或 process-disabled ScriptProcess 结果。文件替换不能通过该入口批准，永久拒绝不能覆盖，所有进程/文件写入/Grant 权限仍为 false。
+
 ## 分阶段交付
 
 ### D0：桌面基础验证（自动化核心完成，Windows 10 实机待补）
@@ -109,10 +118,11 @@ powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
 - [x] D1-L1 / schema v73：幂等 operator Run start/pause/resume 已完成，独立复核状态、quiescence、lease、Agent/Supervisor 和 capability。
 - [x] D1-X1 / schema v73：Go-owned bounded execution handoff 已通过既有 Supervisor/预算/Policy/lease/model/tool/event 路径消费冻结队列，不建立 native executor。
 - [x] D1-X1 后累计六片完整健壮性门已通过：ordinary/race 268.2 秒/295.3 秒、vet、staticcheck、govulncheck、依赖/隐私、确定性契约、66 项前端测试、Windows/Vite build、重启与并发功能复核均为绿色。
-- [ ] D1-M1：复用现有 Go Provider Registry/模型路由初始化，向 renderer 只投影脱敏可用性；API key 保留在 Go/环境边界。
-- [ ] D1-P1：增加 Plan 三选一与显式 Plan-to-Deliver control；模型不能代选或自动切换阶段。
-- [ ] D1-A1：增加 durable approval queue 的只读投影和 approve-once/deny；永久拒绝与 process-disabled 结果不可覆盖。
-- [ ] 随后的独立切片增加 Plan 选择/阶段切换、审批、Diff 审查和 Skill 管理；每类 mutation 分别做状态、幂等、权限与重启审计。
+- [x] D1-M1：CLI/API/Desktop 已统一使用 Go Provider Registry/持久化模型路由；renderer 只取得脱敏可用性，API key、Base URL 和环境变量名不进入 DTO，也不触发探测。
+- [x] D1-P1：已增加独立 Plan 三选一与显式 Plan-to-Deliver control；模型不能代选，选择不能自动切换阶段或执行。
+- [x] D1-A1：已增加 durable approval queue 的 metadata-only 投影和 approve-once/deny；永久拒绝、文件写入、Session Grant 与真实进程不可覆盖。
+- [x] D1-M1/P1/A1 三切片普通功能门通过全仓 Go、Desktop tag、73 项前端测试、strict TypeScript、OpenAPI、Vite/Windows production build 和 npm audit；组合审计无已知高/中风险。
+- [ ] 随后的独立切片增加 Provider 在线诊断/路由设置、Diff 审查和 Skill 管理；每类 mutation 分别做状态、幂等、权限与重启审计。
 - [ ] 所有 mutation 使用独立 control token、Origin/Host 校验、幂等 operation key 和 typed errors；CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。
 
@@ -144,4 +154,4 @@ powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
 - 安装、升级和卸载不会静默删除 Workspace、数据库、凭证或用户创建文件。
 - 未签名开发产物不得伪装成正式发布；正式包必须有可核验签名和哈希。
 
-ADR 0034、ADR 0035、ADR 0036、ADR 0037 与 ADR 0038 分别记录 D0-A 可见壳、D0-B 生命周期/事件续传加固、D1-R1 受控 Run 创建、D1-S1 Session message submission，以及 D1-S2/D1-L1/D1-X1 的取消/生命周期/有界交接。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。
+ADR 0034 至 ADR 0039 分别记录可见壳、生命周期/事件续传、受控 Run 创建、Session message submission、Run 控制/有界交接，以及模型/Plan/审批控制。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。

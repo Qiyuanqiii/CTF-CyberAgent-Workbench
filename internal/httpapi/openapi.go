@@ -9,8 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"cyberagent-workbench/internal/application"
+	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/modelregistry"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/skills"
 )
@@ -171,6 +174,7 @@ func GenerateOpenAPI() ([]byte, error) {
 		Security: []map[string][]string{{"BearerAuth": {}}},
 		Tags: []openAPITag{
 			{Name: "System", Description: "API discovery, health, and contract metadata."},
+			{Name: "Models", Description: "Redacted Go-owned Provider and model-route availability."},
 			{Name: "Runs", Description: "Durable Run state and Run-scoped projections."},
 			{Name: "Agents", Description: "Bounded Agent graph and operator-gated delegation projections."},
 			{Name: "Analysis", Description: "Read-only Fan-out plans and execution summaries."},
@@ -210,6 +214,7 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 	noteID := pathIdentityParameter("note_id", "Note identity")
 	artifactID := pathIdentityParameter("artifact_id", "Artifact identity")
 	reportID := pathIdentityParameter("report_id", "Finding Report identity")
+	approvalID := pathIdentityParameter("approval_id", "Approval identity")
 	return []openAPIOperationSpec{
 		{Path: "/api/v1", OperationID: "getAPIIndex", Summary: "Inspect API resources",
 			Description: "Returns API and application versions plus top-level resources.", Tag: "System",
@@ -217,6 +222,10 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 		{Path: "/api/v1/health", OperationID: "getHealth", Summary: "Inspect local API health",
 			Description: "Reads the current SQLite schema version without mutating state.", Tag: "System",
 			DataType: reflect.TypeOf(HealthView{})},
+		{Path: "/api/v1/models", OperationID: "getModelAvailability",
+			Summary: "Inspect redacted model availability", Tag: "Models",
+			Description: "Returns deterministic Provider registration and route metadata without API keys, base URLs, environment variable names, network probes, or model calls.",
+			DataType:    reflect.TypeOf(ModelAvailabilityView{})},
 		{Path: OpenAPIPath, OperationID: "getOpenAPI", Summary: "Read the OpenAPI contract",
 			Description: "Returns the raw deterministic OpenAPI 3.1 JSON document under the same authentication boundary.",
 			Tag:         "System", RawDocument: true},
@@ -353,6 +362,50 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 			RequestType: reflect.TypeOf(RunLifecycleControlRequestView{}),
 			Control:     true, NotFound: true, Parameters: []openAPIParameter{
 				runID,
+				{Name: "Idempotency-Key", In: "header", Description: "Opaque retry key; only a domain-separated digest is persisted",
+					Required: true, Schema: map[string]any{"type": "string",
+						"minLength": domain.MinAgentOperationKeyBytes,
+						"maxLength": domain.MaxAgentOperationKeyBytes, "pattern": `^\S+$`}},
+			}},
+		{Path: PlanDirectionControlPathTemplate, Method: http.MethodPost,
+			OperationID: "selectPlanDirection", Summary: "Select one Plan direction",
+			Tag:         "Control",
+			Description: "Selects exactly one of a persisted proposal's three directions and atomically creates its bounded WorkItems and handoff Note. It does not change phase, start execution, call a model, or grant capability.",
+			DataType:    reflect.TypeOf(PlanDirectionControlView{}),
+			RequestType: reflect.TypeOf(PlanDirectionControlRequestView{}),
+			Control:     true, NotFound: true, Parameters: []openAPIParameter{
+				runID,
+				{Name: "Idempotency-Key", In: "header", Description: "Opaque retry key; only a domain-separated digest is persisted",
+					Required: true, Schema: map[string]any{"type": "string",
+						"minLength": domain.MinAgentOperationKeyBytes,
+						"maxLength": domain.MaxAgentOperationKeyBytes, "pattern": `^\S+$`}},
+			}},
+		{Path: PlanDeliveryControlPathTemplate, Method: http.MethodPost,
+			OperationID: "enterPlanDelivery", Summary: "Enter Deliver after Plan selection",
+			Tag:         "Control",
+			Description: "Explicitly transitions a created or paused Run from Plan to Deliver only after an immutable operator selection exists. It does not resume the Run, start execution, call a model, or grant capability.",
+			DataType:    reflect.TypeOf(PlanDeliveryTransitionControlView{}),
+			RequestType: reflect.TypeOf(PlanDeliveryTransitionControlRequestView{}),
+			Control:     true, NotFound: true, Parameters: []openAPIParameter{
+				runID,
+				{Name: "Idempotency-Key", In: "header", Description: "Opaque retry key; only a domain-separated digest is persisted",
+					Required: true, Schema: map[string]any{"type": "string",
+						"minLength": domain.MinAgentOperationKeyBytes,
+						"maxLength": domain.MaxAgentOperationKeyBytes, "pattern": `^\S+$`}},
+			}},
+		{Path: "/api/v1/runs/{run_id}/approvals", OperationID: "listRunApprovals",
+			Summary: "List pending Run approvals", Tag: "Control",
+			Description: "Returns at most one hundred pending approval metadata records and their bounded operator actions. Commands, file content, fingerprints, decision reasons, paths, capability grants, and execution authority are omitted.",
+			DataType:    reflect.TypeOf(ApprovalQueueView{}), NotFound: true,
+			Parameters: []openAPIParameter{runID}},
+		{Path: ApprovalDecisionControlPathTemplate, Method: http.MethodPost,
+			OperationID: "decideRunApproval", Summary: "Approve once or deny a pending request",
+			Tag:         "Control",
+			Description: "Applies an idempotent operator decision to one exact Run-bound approval. Approve-once is limited to Policy-rechecked dry-run Shell and process-disabled ScriptProcess proposals; file edits can only be denied. It never creates a Session grant, starts a real process, writes a file, starts Docker, or grants capability.",
+			DataType:    reflect.TypeOf(ApprovalDecisionControlView{}),
+			RequestType: reflect.TypeOf(ApprovalDecisionControlRequestView{}),
+			Control:     true, NotFound: true, Parameters: []openAPIParameter{
+				runID, approvalID,
 				{Name: "Idempotency-Key", In: "header", Description: "Opaque retry key; only a domain-separated digest is persisted",
 					Required: true, Schema: map[string]any{"type": "string",
 						"minLength": domain.MinAgentOperationKeyBytes,
@@ -747,6 +800,10 @@ var openAPIFieldEnums = map[string][]string{
 	"IndexView.api_version":                             {Version},
 	"HealthView.status":                                 {"ok"},
 	"HealthView.api_version":                            {Version},
+	"ModelAvailabilityView.protocol_version":            {modelregistry.ProtocolVersion},
+	"ProviderAvailabilityView.kind":                     {modelregistry.ProviderKindLocal, modelregistry.ProviderKindAnthropicCompatible},
+	"ProviderAvailabilityView.status":                   {modelregistry.ProviderAvailable, modelregistry.ProviderNotConfigured, modelregistry.ProviderInvalidConfiguration},
+	"ProviderAvailabilityView.credential_source":        {"none", "environment"},
 	"ScopeView.network_mode":                            {"disabled", "allowlist"},
 	"MissionView.profile":                               {"code", "review", "learn", "script"},
 	"RunView.status":                                    runStatuses(),
@@ -784,6 +841,17 @@ var openAPIFieldEnums = map[string][]string{
 	"RunExecutionControlView.version":                   {domain.RunExecutionHandoffProtocolVersion},
 	"RunExecutionControlView.status":                    {string(domain.RunExecutionHandoffCompleted), string(domain.RunExecutionHandoffFailed)},
 	"RunExecutionControlView.run_status":                runStatuses(),
+	"PlanDirectionControlRequestView.version":           {application.PlanDeliveryControlProtocolVersion},
+	"PlanDirectionControlView.version":                  {application.PlanDeliveryControlProtocolVersion},
+	"PlanDeliveryTransitionControlRequestView.version":  {application.PlanDeliveryControlProtocolVersion},
+	"PlanDeliveryTransitionControlView.version":         {application.PlanDeliveryControlProtocolVersion},
+	"ApprovalQueueView.protocol_version":                {application.ApprovalQueueProtocolVersion},
+	"ApprovalQueueItemView.status":                      {string(approval.StatusPending)},
+	"ApprovalDecisionControlRequestView.version":        {application.ApprovalControlProtocolVersion},
+	"ApprovalDecisionControlRequestView.action":         {string(application.ApprovalControlApproveOnce), string(application.ApprovalControlDeny)},
+	"ApprovalDecisionControlView.version":               {application.ApprovalControlProtocolVersion},
+	"ApprovalDecisionControlView.action":                {string(application.ApprovalControlApproveOnce), string(application.ApprovalControlDeny)},
+	"ApprovalDecisionControlView.status":                {string(approval.StatusApproved), string(approval.StatusDenied)},
 	"SupervisorCheckpointView.phase":                    {"idle", "turn_started", "turn_failed", "waiting", "run_completed", "run_failed"},
 	"SupervisorCheckpointView.repair_phase":             {"pending", "exhausted"},
 	"RunExecutionLeaseView.status":                      {string(domain.RunExecutionLeaseActive), string(domain.RunExecutionLeaseReleased)},
@@ -894,17 +962,24 @@ var openAPIFieldMinimums = map[string]float64{
 	"RunExecutionControlView.committed_count":             0,
 	"RunExecutionControlView.cancelled_count":             0,
 	"RunExecutionControlView.completion_event_sequence":   1,
+	"PlanDirectionControlRequestView.direction":           1,
+	"PlanDirectionControlView.direction":                  1,
+	"PlanDirectionControlView.work_item_count":            1,
+	"ApprovalQueueItemView.version":                       1,
 }
 
 var openAPIFieldMaximums = map[string]float64{
-	"RunExecutionControlRequestView.max_steps": domain.MaxRunExecutionHandoffSteps,
-	"RunExecutionControlView.max_steps":        domain.MaxRunExecutionHandoffSteps,
-	"RunExecutionControlView.selected_count":   domain.MaxRunExecutionHandoffSteps,
-	"RunExecutionControlView.steps_completed":  domain.MaxRunExecutionHandoffSteps,
-	"RunExecutionControlView.pending_count":    domain.MaxRunExecutionHandoffSteps,
-	"RunExecutionControlView.prepared_count":   domain.MaxRunExecutionHandoffSteps,
-	"RunExecutionControlView.committed_count":  domain.MaxRunExecutionHandoffSteps,
-	"RunExecutionControlView.cancelled_count":  domain.MaxRunExecutionHandoffSteps,
+	"RunExecutionControlRequestView.max_steps":  domain.MaxRunExecutionHandoffSteps,
+	"RunExecutionControlView.max_steps":         domain.MaxRunExecutionHandoffSteps,
+	"RunExecutionControlView.selected_count":    domain.MaxRunExecutionHandoffSteps,
+	"RunExecutionControlView.steps_completed":   domain.MaxRunExecutionHandoffSteps,
+	"RunExecutionControlView.pending_count":     domain.MaxRunExecutionHandoffSteps,
+	"RunExecutionControlView.prepared_count":    domain.MaxRunExecutionHandoffSteps,
+	"RunExecutionControlView.committed_count":   domain.MaxRunExecutionHandoffSteps,
+	"RunExecutionControlView.cancelled_count":   domain.MaxRunExecutionHandoffSteps,
+	"PlanDirectionControlRequestView.direction": domain.PlanDeliveryDirectionCount,
+	"PlanDirectionControlView.direction":        domain.PlanDeliveryDirectionCount,
+	"PlanDirectionControlView.work_item_count":  domain.MaxPlanDeliveryModules,
 }
 
 var openAPIFieldMaxLengths = map[string]int{
@@ -913,6 +988,7 @@ var openAPIFieldMaxLengths = map[string]int{
 	"RunCreationControlRequestView.goal":            domain.MaxRunCreationGoalBytes,
 	"SessionMessageControlRequestView.content":      domain.MaxOperatorSteeringContentBytes,
 	"SessionSteeringCancellationRequestView.reason": domain.MaxOperatorSteeringReasonBytes,
+	"ApprovalDecisionControlRequestView.reason":     approval.MaxReasonRunes,
 	"MessageView.source_ref":                        session.MaxContextSourceRefRunes,
 	"MessageView.content_sha256":                    64,
 }

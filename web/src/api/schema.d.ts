@@ -64,6 +64,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect redacted model availability
+         * @description Returns deterministic Provider registration and route metadata without API keys, base URLs, environment variable names, network probes, or model calls.
+         */
+        get: operations["getModelAvailability"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notes/{note_id}": {
         parameters: {
             query?: never;
@@ -202,6 +222,46 @@ export interface paths {
          * @description Persists an audit-first cancellation request bound to one exact Specialist AgentAttempt and model attempt. Only the worker holding that Attempt's private Run lease can observe and apply it.
          */
         post: operations["requestSpecialistModelCancellation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List pending Run approvals
+         * @description Returns at most one hundred pending approval metadata records and their bounded operator actions. Commands, file content, fingerprints, decision reasons, paths, capability grants, and execution authority are omitted.
+         */
+        get: operations["listRunApprovals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/approvals/{approval_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve once or deny a pending request
+         * @description Applies an idempotent operator decision to one exact Run-bound approval. Approve-once is limited to Policy-rechecked dry-run Shell and process-disabled ScriptProcess proposals; file edits can only be denied. It never creates a Session grant, starts a real process, writes a file, starts Docker, or grants capability.
+         */
+        post: operations["decideRunApproval"];
         delete?: never;
         options?: never;
         head?: never;
@@ -422,6 +482,46 @@ export interface paths {
         get: operations["listRunNotes"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/plan/deliver": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Enter Deliver after Plan selection
+         * @description Explicitly transitions a created or paused Run from Plan to Deliver only after an immutable operator selection exists. It does not resume the Run, start execution, call a model, or grant capability.
+         */
+        post: operations["enterPlanDelivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/plan/direction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Select one Plan direction
+         * @description Selects exactly one of a persisted proposal's three directions and atomically creates its bounded WorkItems and handoff Note. It does not change phase, start execution, call a model, or grant capability.
+         */
+        post: operations["selectPlanDirection"];
         delete?: never;
         options?: never;
         head?: never;
@@ -689,6 +789,63 @@ export interface components {
             updated_at: string;
             /** Format: int64 */
             version: number;
+        };
+        ApprovalDecisionControlRequestView: {
+            /** @enum {string} */
+            action: "approve_once" | "deny";
+            reason?: string;
+            /** @enum {string} */
+            version: "approval_control.v1";
+        };
+        ApprovalDecisionControlView: {
+            /** @enum {string} */
+            action: "approve_once" | "deny";
+            approval_id: string;
+            capability_grant: boolean;
+            docker_execution_enabled: boolean;
+            process_execution_enabled: boolean;
+            proposal_id: string;
+            replayed: boolean;
+            run_id: string;
+            session_grant_created: boolean;
+            shell_execution_enabled: boolean;
+            /** @enum {string} */
+            status: "approved" | "denied";
+            tool_name: string;
+            /** @enum {string} */
+            version: "approval_control.v1";
+            workspace_write_applied: boolean;
+        };
+        ApprovalQueueItemView: {
+            action_class: string;
+            allowed_actions: string[];
+            capability_grant: boolean;
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            mode: string;
+            process_execution_enabled: boolean;
+            proposal_id: string;
+            run_id: string;
+            session_id: string;
+            /** @enum {string} */
+            status: "pending";
+            tool_name: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: int64 */
+            version: number;
+            workspace_id: string;
+        };
+        ApprovalQueueView: {
+            capability_grant: boolean;
+            items: components["schemas"]["ApprovalQueueItemView"][];
+            process_execution_enabled: boolean;
+            /** @enum {string} */
+            protocol_version: "approval_queue.v1";
+            run_id: string;
+            session_grant_created: boolean;
+            truncated: boolean;
         };
         ArtifactView: {
             /** Format: date-time */
@@ -1089,6 +1246,12 @@ export interface components {
             updated_at: string;
             workspace_id?: string;
         };
+        ModelAvailabilityView: {
+            /** @enum {string} */
+            protocol_version: "model_availability.v1";
+            providers: components["schemas"]["ProviderAvailabilityView"][];
+            routes: components["schemas"]["ModelRouteAvailabilityView"][];
+        };
         ModelCancellationRequestView: {
             attempt_id: string;
             /** Format: int32 */
@@ -1106,6 +1269,12 @@ export interface components {
             run_id: string;
             /** @enum {string} */
             status: "pending" | "observed" | "resolved";
+        };
+        ModelRouteAvailabilityView: {
+            available: boolean;
+            model: string;
+            name: string;
+            provider: string;
         };
         NoteView: {
             /** Format: date-time */
@@ -1225,6 +1394,60 @@ export interface components {
             /** Format: int32 */
             required_checkpoints: number;
             selection?: components["schemas"]["PlanDeliverySelectionView"];
+        };
+        PlanDeliveryTransitionControlRequestView: {
+            /** @enum {string} */
+            version: "plan_delivery_control.v1";
+        };
+        PlanDeliveryTransitionControlView: {
+            applied_mode: components["schemas"]["RunModeView"];
+            capability_grant: boolean;
+            current_mode: components["schemas"]["RunModeView"];
+            execution_started: boolean;
+            model_called: boolean;
+            replayed: boolean;
+            run_id: string;
+            selection_id: string;
+            tool_called: boolean;
+            /** @enum {string} */
+            version: "plan_delivery_control.v1";
+        };
+        PlanDirectionControlRequestView: {
+            /** Format: int32 */
+            direction: number;
+            proposal_id: string;
+            /** @enum {string} */
+            version: "plan_delivery_control.v1";
+        };
+        PlanDirectionControlView: {
+            capability_grant: boolean;
+            /** Format: int32 */
+            direction: number;
+            execution_started: boolean;
+            model_called: boolean;
+            note_id: string;
+            phase_changed: boolean;
+            proposal_id: string;
+            replayed: boolean;
+            run_id: string;
+            selection_id: string;
+            tool_called: boolean;
+            /** @enum {string} */
+            version: "plan_delivery_control.v1";
+            /** Format: int32 */
+            work_item_count: number;
+        };
+        ProviderAvailabilityView: {
+            configuration_error: boolean;
+            /** @enum {string} */
+            credential_source: "none" | "environment";
+            /** @enum {string} */
+            kind: "local" | "anthropic_compatible";
+            models: string[];
+            name: string;
+            network_required: boolean;
+            /** @enum {string} */
+            status: "available" | "not_configured" | "invalid_configuration";
         };
         RunConfigView: {
             interactive: boolean;
@@ -1805,6 +2028,37 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    getModelAvailability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ModelAvailabilityView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     getNote: {
         parameters: {
             query?: never;
@@ -2096,6 +2350,89 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["SpecialistModelCancellationView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listRunApprovals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ApprovalQueueView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    decideRunApproval: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Run identity */
+                run_id: string;
+                /** @description Approval identity */
+                approval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalDecisionControlRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ApprovalDecisionControlView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";
@@ -2583,6 +2920,98 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    enterPlanDelivery: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanDeliveryTransitionControlRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PlanDeliveryTransitionControlView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    selectPlanDirection: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanDirectionControlRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["PlanDirectionControlView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];
         };

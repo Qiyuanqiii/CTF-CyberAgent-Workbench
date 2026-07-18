@@ -20,10 +20,12 @@ import (
 	"unicode/utf8"
 
 	"cyberagent-workbench/internal/apperror"
+	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/idgen"
+	"cyberagent-workbench/internal/modelregistry"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/toolbudget"
@@ -105,6 +107,8 @@ type Store interface {
 	ListFindingReportSummariesPage(ctx context.Context, runID string,
 		offset int, limit int) ([]domain.FindingReportSummary, error)
 	GetFindingReport(ctx context.Context, id string) (domain.FindingReport, error)
+	GetApproval(ctx context.Context, id string) (approval.Record, error)
+	ListApprovals(ctx context.Context, filter approval.ListFilter) ([]approval.Record, error)
 
 	GetSession(ctx context.Context, id string) (session.Session, error)
 	GetWorkspaceInfo(ctx context.Context, id string) (session.WorkspaceInfo, error)
@@ -131,8 +135,13 @@ type Config struct {
 	SessionSteeringControlEnabled bool
 	RunLifecycleEnabled           bool
 	RunExecutionEnabled           bool
+	PlanDeliveryControlEnabled    bool
+	ApprovalControlEnabled        bool
 	RunLifecycleController        RunLifecycleController
 	RunExecutionController        RunExecutionController
+	PlanDeliveryController        PlanDeliveryController
+	ApprovalController            ApprovalController
+	ModelRegistry                 *modelregistry.Registry
 	AppVersion                    string
 	EventStream                   EventStreamConfig
 	UIHandler                     http.Handler
@@ -148,8 +157,13 @@ type API struct {
 	sessionSteeringControlEnabled bool
 	runLifecycleEnabled           bool
 	runExecutionEnabled           bool
+	planDeliveryControlEnabled    bool
+	approvalControlEnabled        bool
 	runLifecycleController        RunLifecycleController
 	runExecutionController        RunExecutionController
+	planDeliveryController        PlanDeliveryController
+	approvalController            ApprovalController
+	modelRegistry                 *modelregistry.Registry
 	appVersion                    string
 	openAPI                       []byte
 	eventStream                   EventStreamConfig
@@ -181,7 +195,8 @@ func New(store Store, config Config) (*API, error) {
 	}
 	if (config.RunControlEnabled || config.RunCreationEnabled || config.SessionMessageEnabled ||
 		config.SessionSteeringControlEnabled || config.RunLifecycleEnabled ||
-		config.RunExecutionEnabled) &&
+		config.RunExecutionEnabled || config.PlanDeliveryControlEnabled ||
+		config.ApprovalControlEnabled) &&
 		!controlTokenPresent {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"HTTP API control capabilities require a control token")
@@ -194,9 +209,21 @@ func New(store Store, config Config) (*API, error) {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"HTTP API Run execution controller is required when enabled")
 	}
+	if config.PlanDeliveryControlEnabled && config.PlanDeliveryController == nil {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API Plan/Delivery controller is required when enabled")
+	}
+	if config.ApprovalControlEnabled && config.ApprovalController == nil {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API approval controller is required when enabled")
+	}
 	version := strings.TrimSpace(config.AppVersion)
 	if version == "" {
 		version = "unknown"
+	}
+	modelRegistry := config.ModelRegistry
+	if modelRegistry == nil {
+		modelRegistry = modelregistry.New(nil)
 	}
 	document, err := GenerateOpenAPI()
 	if err != nil {
@@ -214,8 +241,13 @@ func New(store Store, config Config) (*API, error) {
 		sessionSteeringControlEnabled: controlTokenPresent && config.SessionSteeringControlEnabled,
 		runLifecycleEnabled:           controlTokenPresent && config.RunLifecycleEnabled,
 		runExecutionEnabled:           controlTokenPresent && config.RunExecutionEnabled,
+		planDeliveryControlEnabled:    controlTokenPresent && config.PlanDeliveryControlEnabled,
+		approvalControlEnabled:        controlTokenPresent && config.ApprovalControlEnabled,
 		runLifecycleController:        config.RunLifecycleController,
 		runExecutionController:        config.RunExecutionController,
+		planDeliveryController:        config.PlanDeliveryController,
+		approvalController:            config.ApprovalController,
+		modelRegistry:                 modelRegistry,
 		openAPI:                       document, eventStream: eventStream,
 		eventStreamSlots: make(chan struct{}, eventStream.MaxConnections),
 		uiHandler:        config.UIHandler}, nil
@@ -344,6 +376,18 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if runID, matched := matchRunLifecycleControlPath(request.URL.Path); matched {
 		a.serveRunLifecycleControl(tracked, request, requestID, runID)
+		return
+	}
+	if runID, matched := matchPlanDirectionControlPath(request.URL.Path); matched {
+		a.servePlanDirectionControl(tracked, request, requestID, runID)
+		return
+	}
+	if runID, matched := matchPlanDeliveryControlPath(request.URL.Path); matched {
+		a.servePlanDeliveryControl(tracked, request, requestID, runID)
+		return
+	}
+	if runID, approvalID, matched := matchApprovalDecisionControlPath(request.URL.Path); matched {
+		a.serveApprovalDecisionControl(tracked, request, requestID, runID, approvalID)
 		return
 	}
 	if runID, matched := matchRunExecutionControlPath(request.URL.Path); matched {

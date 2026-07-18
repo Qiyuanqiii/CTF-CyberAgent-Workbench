@@ -32,6 +32,7 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 	}
 	if defaults.profileControl || defaults.runCreation || defaults.sessionMessages ||
 		defaults.sessionSteeringControl || defaults.runLifecycle || defaults.runExecution ||
+		defaults.planDeliveryControl || defaults.approvalControl ||
 		defaults.version {
 		t.Fatalf("unexpected defaults: %#v", defaults)
 	}
@@ -41,6 +42,7 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 	}
 	if !enabled.profileControl || enabled.runCreation || enabled.sessionMessages ||
 		enabled.sessionSteeringControl || enabled.runLifecycle || enabled.runExecution ||
+		enabled.planDeliveryControl || enabled.approvalControl ||
 		enabled.version {
 		t.Fatalf("profile control was not explicit: %#v", enabled)
 	}
@@ -50,6 +52,7 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 	}
 	if creation.profileControl || !creation.runCreation || creation.sessionMessages ||
 		creation.sessionSteeringControl || creation.runLifecycle || creation.runExecution ||
+		creation.planDeliveryControl || creation.approvalControl ||
 		creation.version {
 		t.Fatalf("Run creation was not independently explicit: %#v", creation)
 	}
@@ -59,6 +62,7 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 	}
 	if messages.profileControl || messages.runCreation || !messages.sessionMessages ||
 		messages.sessionSteeringControl || messages.runLifecycle || messages.runExecution ||
+		messages.planDeliveryControl || messages.approvalControl ||
 		messages.version {
 		t.Fatalf("Session messages were not independently explicit: %#v", messages)
 	}
@@ -68,6 +72,7 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 	}
 	if steering.profileControl || steering.runCreation || steering.sessionMessages ||
 		!steering.sessionSteeringControl || steering.runLifecycle || steering.runExecution ||
+		steering.planDeliveryControl || steering.approvalControl ||
 		steering.version {
 		t.Fatalf("Session steering cancellation was not independently explicit: %#v", steering)
 	}
@@ -76,7 +81,8 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 		t.Fatal(err)
 	}
 	if !lifecycle.runLifecycle || lifecycle.runExecution || lifecycle.profileControl ||
-		lifecycle.runCreation || lifecycle.sessionMessages || lifecycle.sessionSteeringControl {
+		lifecycle.runCreation || lifecycle.sessionMessages || lifecycle.sessionSteeringControl ||
+		lifecycle.planDeliveryControl || lifecycle.approvalControl {
 		t.Fatalf("Run lifecycle was not independently explicit: %#v", lifecycle)
 	}
 	execution, err := parseDesktopOptions([]string{"--enable-run-execution"})
@@ -84,8 +90,27 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 		t.Fatal(err)
 	}
 	if !execution.runExecution || execution.runLifecycle || execution.profileControl ||
-		execution.runCreation || execution.sessionMessages || execution.sessionSteeringControl {
+		execution.runCreation || execution.sessionMessages || execution.sessionSteeringControl ||
+		execution.planDeliveryControl || execution.approvalControl {
 		t.Fatalf("Run execution was not independently explicit: %#v", execution)
+	}
+	plan, err := parseDesktopOptions([]string{"--enable-plan-delivery"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.planDeliveryControl || plan.approvalControl || plan.runExecution ||
+		plan.runLifecycle || plan.profileControl || plan.runCreation || plan.sessionMessages ||
+		plan.sessionSteeringControl {
+		t.Fatalf("Plan/Delivery control was not independently explicit: %#v", plan)
+	}
+	approvals, err := parseDesktopOptions([]string{"--enable-approvals"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !approvals.approvalControl || approvals.planDeliveryControl || approvals.runExecution ||
+		approvals.runLifecycle || approvals.profileControl || approvals.runCreation ||
+		approvals.sessionMessages || approvals.sessionSteeringControl {
+		t.Fatalf("Approval control was not independently explicit: %#v", approvals)
 	}
 	if _, err := parseDesktopOptions([]string{"unexpected"}); err == nil {
 		t.Fatal("desktop positional argument was accepted")

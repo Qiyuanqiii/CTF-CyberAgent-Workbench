@@ -27,6 +27,10 @@
       "description": "API discovery, health, and contract metadata."
     },
     {
+      "name": "Models",
+      "description": "Redacted Go-owned Provider and model-route availability."
+    },
+    {
       "name": "Runs",
       "description": "Durable Run state and Run-scoped projections."
     },
@@ -221,6 +225,67 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/HealthView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/models": {
+      "get": {
+        "operationId": "getModelAvailability",
+        "summary": "Inspect redacted model availability",
+        "description": "Returns deterministic Provider registration and route metadata without API keys, base URLs, environment variable names, network probes, or model calls.",
+        "tags": [
+          "Models"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ModelAvailabilityView"
                     },
                     "request_id": {
                       "maxLength": 256,
@@ -1000,6 +1065,213 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ModelCancellationRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
+    "/api/v1/runs/{run_id}/approvals": {
+      "get": {
+        "operationId": "listRunApprovals",
+        "summary": "List pending Run approvals",
+        "description": "Returns at most one hundred pending approval metadata records and their bounded operator actions. Commands, file content, fingerprints, decision reasons, paths, capability grants, and execution authority are omitted.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalQueueView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/runs/{run_id}/approvals/{approval_id}/decision": {
+      "post": {
+        "operationId": "decideRunApproval",
+        "summary": "Approve once or deny a pending request",
+        "description": "Applies an idempotent operator decision to one exact Run-bound approval. Approve-once is limited to Policy-rechecked dry-run Shell and process-disabled ScriptProcess proposals; file edits can only be denied. It never creates a Session grant, starts a real process, writes a file, starts Docker, or grants capability.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "approval_id",
+            "in": "path",
+            "description": "Approval identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque retry key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ApprovalDecisionControlView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalDecisionControlRequestView"
               }
             }
           }
@@ -2278,6 +2550,240 @@
           }
         },
         "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/runs/{run_id}/plan/deliver": {
+      "post": {
+        "operationId": "enterPlanDelivery",
+        "summary": "Enter Deliver after Plan selection",
+        "description": "Explicitly transitions a created or paused Run from Plan to Deliver only after an immutable operator selection exists. It does not resume the Run, start execution, call a model, or grant capability.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque retry key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PlanDeliveryTransitionControlView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanDeliveryTransitionControlRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
+    "/api/v1/runs/{run_id}/plan/direction": {
+      "post": {
+        "operationId": "selectPlanDirection",
+        "summary": "Select one Plan direction",
+        "description": "Selects exactly one of a persisted proposal's three directions and atomically creates its bounded WorkItems and handoff Note. It does not change phase, start execution, call a model, or grant capability.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque retry key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PlanDirectionControlView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanDirectionControlRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
       }
     },
     "/api/v1/runs/{run_id}/reports": {
@@ -3642,6 +4148,246 @@
           "version",
           "created_at",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "ApprovalDecisionControlRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "approve_once",
+              "deny"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 2048,
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "approval_control.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "action"
+        ],
+        "type": "object"
+      },
+      "ApprovalDecisionControlView": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "approve_once",
+              "deny"
+            ],
+            "type": "string"
+          },
+          "approval_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "capability_grant": {
+            "type": "boolean"
+          },
+          "docker_execution_enabled": {
+            "type": "boolean"
+          },
+          "process_execution_enabled": {
+            "type": "boolean"
+          },
+          "proposal_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_grant_created": {
+            "type": "boolean"
+          },
+          "shell_execution_enabled": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "approved",
+              "denied"
+            ],
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "approval_control.v1"
+            ],
+            "type": "string"
+          },
+          "workspace_write_applied": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "version",
+          "run_id",
+          "approval_id",
+          "proposal_id",
+          "tool_name",
+          "action",
+          "status",
+          "replayed",
+          "process_execution_enabled",
+          "shell_execution_enabled",
+          "docker_execution_enabled",
+          "workspace_write_applied",
+          "session_grant_created",
+          "capability_grant"
+        ],
+        "type": "object"
+      },
+      "ApprovalQueueItemView": {
+        "additionalProperties": false,
+        "properties": {
+          "action_class": {
+            "type": "string"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "capability_grant": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "process_execution_enabled": {
+            "type": "boolean"
+          },
+          "proposal_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending"
+            ],
+            "type": "string"
+          },
+          "tool_name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "version": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "proposal_id",
+          "run_id",
+          "session_id",
+          "workspace_id",
+          "tool_name",
+          "action_class",
+          "mode",
+          "status",
+          "allowed_actions",
+          "version",
+          "created_at",
+          "updated_at",
+          "process_execution_enabled",
+          "capability_grant"
+        ],
+        "type": "object"
+      },
+      "ApprovalQueueView": {
+        "additionalProperties": false,
+        "properties": {
+          "capability_grant": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApprovalQueueItemView"
+            },
+            "type": "array"
+          },
+          "process_execution_enabled": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "approval_queue.v1"
+            ],
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_grant_created": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "items",
+          "truncated",
+          "process_execution_enabled",
+          "session_grant_created",
+          "capability_grant"
         ],
         "type": "object"
       },
@@ -5063,6 +5809,35 @@
         ],
         "type": "object"
       },
+      "ModelAvailabilityView": {
+        "additionalProperties": false,
+        "properties": {
+          "protocol_version": {
+            "enum": [
+              "model_availability.v1"
+            ],
+            "type": "string"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderAvailabilityView"
+            },
+            "type": "array"
+          },
+          "routes": {
+            "items": {
+              "$ref": "#/components/schemas/ModelRouteAvailabilityView"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "providers",
+          "routes"
+        ],
+        "type": "object"
+      },
       "ModelCancellationRequestView": {
         "additionalProperties": false,
         "properties": {
@@ -5134,6 +5909,30 @@
           "status",
           "requested_at",
           "replayed"
+        ],
+        "type": "object"
+      },
+      "ModelRouteAvailabilityView": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "provider",
+          "model",
+          "available"
         ],
         "type": "object"
       },
@@ -5595,6 +6394,233 @@
           "required_checkpoints",
           "ready_checkpoints",
           "checkpoints"
+        ],
+        "type": "object"
+      },
+      "PlanDeliveryTransitionControlRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "enum": [
+              "plan_delivery_control.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "PlanDeliveryTransitionControlView": {
+        "additionalProperties": false,
+        "properties": {
+          "applied_mode": {
+            "$ref": "#/components/schemas/RunModeView"
+          },
+          "capability_grant": {
+            "type": "boolean"
+          },
+          "current_mode": {
+            "$ref": "#/components/schemas/RunModeView"
+          },
+          "execution_started": {
+            "type": "boolean"
+          },
+          "model_called": {
+            "type": "boolean"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "selection_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "tool_called": {
+            "type": "boolean"
+          },
+          "version": {
+            "enum": [
+              "plan_delivery_control.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "run_id",
+          "selection_id",
+          "applied_mode",
+          "current_mode",
+          "replayed",
+          "execution_started",
+          "model_called",
+          "tool_called",
+          "capability_grant"
+        ],
+        "type": "object"
+      },
+      "PlanDirectionControlRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "format": "int32",
+            "maximum": 3,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "proposal_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "plan_delivery_control.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "proposal_id",
+          "direction"
+        ],
+        "type": "object"
+      },
+      "PlanDirectionControlView": {
+        "additionalProperties": false,
+        "properties": {
+          "capability_grant": {
+            "type": "boolean"
+          },
+          "direction": {
+            "format": "int32",
+            "maximum": 3,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "execution_started": {
+            "type": "boolean"
+          },
+          "model_called": {
+            "type": "boolean"
+          },
+          "note_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "phase_changed": {
+            "type": "boolean"
+          },
+          "proposal_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "selection_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "tool_called": {
+            "type": "boolean"
+          },
+          "version": {
+            "enum": [
+              "plan_delivery_control.v1"
+            ],
+            "type": "string"
+          },
+          "work_item_count": {
+            "format": "int32",
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "run_id",
+          "proposal_id",
+          "selection_id",
+          "direction",
+          "work_item_count",
+          "note_id",
+          "replayed",
+          "phase_changed",
+          "execution_started",
+          "model_called",
+          "tool_called",
+          "capability_grant"
+        ],
+        "type": "object"
+      },
+      "ProviderAvailabilityView": {
+        "additionalProperties": false,
+        "properties": {
+          "configuration_error": {
+            "type": "boolean"
+          },
+          "credential_source": {
+            "enum": [
+              "none",
+              "environment"
+            ],
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "local",
+              "anthropic_compatible"
+            ],
+            "type": "string"
+          },
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "network_required": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "available",
+              "not_configured",
+              "invalid_configuration"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "status",
+          "models",
+          "credential_source",
+          "network_required",
+          "configuration_error"
         ],
         "type": "object"
       },

@@ -1,5 +1,8 @@
-import { render, screen } from "@testing-library/react";
-import type { PlanDeliveryStateView } from "../api/types";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { CyberAgentClient } from "../api/client";
+import type { PlanDeliveryStateView, RunDetailView } from "../api/types";
 import { PlanDeliveryPanel } from "./run-workspace";
 
 const directions: NonNullable<PlanDeliveryStateView["proposal"]>["directions"] = [
@@ -33,7 +36,7 @@ describe("PlanDeliveryPanel", () => {
         note_id: "note-1", items: [{ ordinal: 1, module_ordinal: 1, work_item_id: "work-1" }],
         version: 1, created_at: "2026-07-13T00:01:00Z" },
     };
-    const { container } = render(<PlanDeliveryPanel state={state} />);
+    const { container } = renderWithQuery(<PlanDeliveryPanel state={state} />);
     expect(screen.getByText("Deliver phase required")).toBeInTheDocument();
     expect(screen.getByText("Capability grant: no")).toBeInTheDocument();
     expect(screen.getByText("Delivery gates 1 / 1")).toBeInTheDocument();
@@ -44,4 +47,59 @@ describe("PlanDeliveryPanel", () => {
     expect(container.querySelector("details.selected")?.getAttribute("open")).not.toBeNull();
     expect(container.querySelector("button")).toBeNull();
   });
+
+  it("keeps direction selection and Deliver as separate explicit controls", async () => {
+    const user = userEvent.setup();
+    const selectPlanDirection = vi.fn().mockResolvedValue({
+      version: "plan_delivery_control.v1", run_id: "run-plan", proposal_id: "proposal-1",
+      selection_id: "selection-1", note_id: "note-1", direction: 1, work_item_count: 1,
+      replayed: false, phase_changed: false, execution_started: false, model_called: false,
+      tool_called: false, capability_grant: false,
+    });
+    const enterPlanDelivery = vi.fn().mockResolvedValue({});
+    const client = { hasPlanDelivery: true, selectPlanDirection,
+      enterPlanDelivery } as unknown as CyberAgentClient;
+    const detail = {
+      run: { id: "run-plan", status: "paused" },
+      mode: { phase: "plan" },
+    } as unknown as RunDetailView;
+    const choiceState: PlanDeliveryStateView = {
+      operator_choice_needed: true, phase_change_needed: false, capability_grant: false,
+      delivery_gate_enforced: true, required_checkpoints: 0, ready_checkpoints: 0,
+      checkpoints: [],
+      proposal: { id: "proposal-1", protocol_version: "plan_delivery.v1", status: "proposed",
+        mode_revision: 4, directions, version: 1, created_at: "2026-07-13T00:00:00Z" },
+    };
+    const rendered = renderWithQuery(<PlanDeliveryPanel client={client} detail={detail}
+      state={choiceState} />);
+    await user.click(screen.getByRole("button", { name: "Choose direction 1" }));
+    await waitFor(() => expect(selectPlanDirection).toHaveBeenCalledTimes(1));
+    expect(selectPlanDirection.mock.calls[0]?.[0]).toBe("run-plan");
+    expect(selectPlanDirection.mock.calls[0]?.[1]).toEqual({
+      version: "plan_delivery_control.v1", proposal_id: "proposal-1", direction: 1,
+    });
+    expect(screen.queryByRole("button", { name: "Enter Deliver" })).not.toBeInTheDocument();
+
+    rendered.rerender(<QueryClientProvider client={rendered.queryClient}>
+      <PlanDeliveryPanel client={client} detail={detail} state={{ ...choiceState,
+        operator_choice_needed: false, phase_change_needed: true,
+        selection: { id: "selection-1", proposal_id: "proposal-1", direction_ordinal: 1,
+          note_id: "note-1", items: [{ ordinal: 1, module_ordinal: 1, work_item_id: "work-1" }],
+          version: 1, created_at: "2026-07-13T00:01:00Z" },
+      }} />
+    </QueryClientProvider>);
+    await user.click(screen.getByRole("button", { name: "Enter Deliver" }));
+    await waitFor(() => expect(enterPlanDelivery).toHaveBeenCalledTimes(1));
+    expect(enterPlanDelivery.mock.calls[0]?.[0]).toBe("run-plan");
+    expect(enterPlanDelivery.mock.calls[0]?.[1]).toEqual({
+      version: "plan_delivery_control.v1",
+    });
+  });
 });
+
+function renderWithQuery(node: React.ReactNode) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false },
+    mutations: { retry: false } } });
+  return { ...render(<QueryClientProvider client={queryClient}>{node}</QueryClientProvider>),
+    queryClient };
+}

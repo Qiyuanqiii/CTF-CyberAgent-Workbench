@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
@@ -22,6 +23,57 @@ type HealthView struct {
 	APIVersion    string `json:"api_version"`
 	AppVersion    string `json:"app_version"`
 	SchemaVersion int    `json:"schema_version"`
+}
+
+type ProviderAvailabilityView struct {
+	Name               string   `json:"name"`
+	Kind               string   `json:"kind"`
+	Status             string   `json:"status"`
+	Models             []string `json:"models"`
+	CredentialSource   string   `json:"credential_source"`
+	NetworkRequired    bool     `json:"network_required"`
+	ConfigurationError bool     `json:"configuration_error"`
+}
+
+type ModelRouteAvailabilityView struct {
+	Name      string `json:"name"`
+	Provider  string `json:"provider"`
+	Model     string `json:"model"`
+	Available bool   `json:"available"`
+}
+
+type ModelAvailabilityView struct {
+	ProtocolVersion string                       `json:"protocol_version"`
+	Providers       []ProviderAvailabilityView   `json:"providers"`
+	Routes          []ModelRouteAvailabilityView `json:"routes"`
+}
+
+type ApprovalQueueItemView struct {
+	ID                      string                              `json:"id"`
+	ProposalID              string                              `json:"proposal_id"`
+	RunID                   string                              `json:"run_id"`
+	SessionID               string                              `json:"session_id"`
+	WorkspaceID             string                              `json:"workspace_id"`
+	ToolName                string                              `json:"tool_name"`
+	ActionClass             string                              `json:"action_class"`
+	Mode                    string                              `json:"mode"`
+	Status                  string                              `json:"status"`
+	AllowedActions          []application.ApprovalControlAction `json:"allowed_actions"`
+	Version                 int64                               `json:"version"`
+	CreatedAt               time.Time                           `json:"created_at"`
+	UpdatedAt               time.Time                           `json:"updated_at"`
+	ProcessExecutionEnabled bool                                `json:"process_execution_enabled"`
+	CapabilityGrant         bool                                `json:"capability_grant"`
+}
+
+type ApprovalQueueView struct {
+	ProtocolVersion         string                  `json:"protocol_version"`
+	RunID                   string                  `json:"run_id"`
+	Items                   []ApprovalQueueItemView `json:"items"`
+	Truncated               bool                    `json:"truncated"`
+	ProcessExecutionEnabled bool                    `json:"process_execution_enabled"`
+	SessionGrantCreated     bool                    `json:"session_grant_created"`
+	CapabilityGrant         bool                    `json:"capability_grant"`
 }
 
 type WorkspaceView struct {

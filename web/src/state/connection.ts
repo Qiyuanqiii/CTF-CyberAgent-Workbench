@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { ClientCapabilities } from "../api/client";
 import type { HealthView } from "../api/types";
 
 type ResourceKind = "run" | "session";
@@ -16,10 +17,10 @@ interface ConnectionState {
   sessionSteeringControlEnabled: boolean;
   runLifecycleEnabled: boolean;
   runExecutionEnabled: boolean;
+  planDeliveryControlEnabled: boolean;
+  approvalControlEnabled: boolean;
   connect: (token: string, health: HealthView, controlToken?: string,
-    capabilities?: { runControlEnabled?: boolean; runCreationEnabled?: boolean;
-      sessionMessageEnabled?: boolean; sessionSteeringControlEnabled?: boolean;
-      runLifecycleEnabled?: boolean; runExecutionEnabled?: boolean }) => void;
+    capabilities?: ClientCapabilities) => void;
   disconnect: () => void;
   selectRun: (runID: string) => void;
   selectSession: (sessionID: string) => void;
@@ -44,6 +45,8 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   sessionSteeringControlEnabled: false,
   runLifecycleEnabled: false,
   runExecutionEnabled: false,
+  planDeliveryControlEnabled: false,
+  approvalControlEnabled: false,
   connect: (token, health, controlToken = "", capabilities = {}) => {
     const present = controlToken.trim() !== "";
     set({ token, health, controlToken,
@@ -54,12 +57,16 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
         (capabilities.sessionSteeringControlEnabled ?? true),
       runLifecycleEnabled: present && (capabilities.runLifecycleEnabled ?? true),
       runExecutionEnabled: present && (capabilities.runExecutionEnabled ?? true),
+      planDeliveryControlEnabled: present &&
+        (capabilities.planDeliveryControlEnabled ?? true),
+      approvalControlEnabled: present && (capabilities.approvalControlEnabled ?? true),
     });
   },
   disconnect: () => set({ token: "", controlToken: "", health: null,
     runControlEnabled: false, runCreationEnabled: false, sessionMessageEnabled: false,
     sessionSteeringControlEnabled: false,
     runLifecycleEnabled: false, runExecutionEnabled: false,
+    planDeliveryControlEnabled: false, approvalControlEnabled: false,
     ...initialSelection }),
   selectRun: (selectedRunID) => set({ selectedRunID, resourceKind: "run" }),
   selectSession: (selectedSessionID) => set({ selectedSessionID, resourceKind: "session" }),

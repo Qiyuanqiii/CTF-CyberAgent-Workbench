@@ -89,6 +89,7 @@ func TestDesktopBridgeBootstrapsMemoryOnlyClosedAuthority(t *testing.T) {
 		bootstrap.ControlToken != testDesktopControlToken || !bootstrap.ControlEnabled ||
 		!bootstrap.RunCreationEnabled || !bootstrap.SessionMessageEnabled ||
 		!bootstrap.RunLifecycleEnabled || !bootstrap.RunExecutionEnabled ||
+		bootstrap.PlanDeliveryControlEnabled || bootstrap.ApprovalControlEnabled ||
 		bootstrap.ReadOnlyDefault || bootstrap.ProcessExecutionEnabled ||
 		bootstrap.ShellExecutionEnabled || bootstrap.DockerExecutionEnabled ||
 		bootstrap.SkillInstallationEnabled || bootstrap.RendererPathInputSupported {
@@ -99,13 +100,53 @@ func TestDesktopBridgeBootstrapsMemoryOnlyClosedAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertExactJSONKeys(t, string(raw), []string{
-		"api_base_url", "api_version", "app_version", "control_enabled", "control_token",
+		"api_base_url", "api_version", "app_version", "approval_control_enabled",
+		"control_enabled", "control_token",
 		"docker_execution_enabled", "process_execution_enabled", "protocol_version", "read_only_default",
-		"read_token", "renderer_path_input_supported", "run_creation_enabled", "shell_execution_enabled",
+		"plan_delivery_control_enabled", "read_token", "renderer_path_input_supported",
+		"run_creation_enabled", "shell_execution_enabled",
 		"run_execution_enabled", "run_lifecycle_enabled",
 		"session_message_enabled", "session_steering_control_enabled",
 		"skill_installation_enabled", "ui_digest",
 	})
+}
+
+func TestDesktopBridgeSeparatesPlanAndApprovalControls(t *testing.T) {
+	for _, current := range []struct {
+		name     string
+		plan     bool
+		approval bool
+	}{
+		{name: "plan", plan: true},
+		{name: "approval", approval: true},
+	} {
+		t.Run(current.name, func(t *testing.T) {
+			selector, preview := NewSkillPackagePreviewBoundary()
+			bridge, err := NewDesktopBridge(DesktopBridgeConfig{
+				ContextProvider: func() context.Context { return context.Background() },
+				FilePicker:      &testSkillPackagePicker{}, ReadToken: testDesktopReadToken,
+				ControlToken:               testDesktopControlToken,
+				PlanDeliveryControlEnabled: current.plan,
+				ApprovalControlEnabled:     current.approval,
+				APIVersion:                 "api.v1", AppVersion: "test", UIDigest: testDesktopUIDigest,
+				Selector: selector, PreviewBridge: preview,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bootstrap, err := bridge.Bootstrap()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bootstrap.PlanDeliveryControlEnabled != current.plan ||
+				bootstrap.ApprovalControlEnabled != current.approval ||
+				bootstrap.ControlEnabled || bootstrap.RunCreationEnabled ||
+				bootstrap.SessionMessageEnabled || bootstrap.RunLifecycleEnabled ||
+				bootstrap.RunExecutionEnabled || bootstrap.ReadOnlyDefault {
+				t.Fatalf("Plan or approval capability widened authority: %#v", bootstrap)
+			}
+		})
+	}
 }
 
 func TestDesktopBridgeSeparatesRunLifecycleAndExecutionCapabilities(t *testing.T) {
@@ -317,6 +358,7 @@ func TestNewDesktopBridgeRejectsInvalidMetadataAndDependencies(t *testing.T) {
 		{name: "short token", change: func(c *DesktopBridgeConfig) { c.ReadToken = "short" }},
 		{name: "same control token", change: func(c *DesktopBridgeConfig) { c.ControlToken = c.ReadToken }},
 		{name: "capability without token", change: func(c *DesktopBridgeConfig) { c.RunCreationEnabled = true }},
+		{name: "approval without token", change: func(c *DesktopBridgeConfig) { c.ApprovalControlEnabled = true }},
 		{name: "bad digest", change: func(c *DesktopBridgeConfig) { c.UIDigest = strings.Repeat("g", 64) }},
 		{name: "missing version", change: func(c *DesktopBridgeConfig) { c.APIVersion = "" }},
 	}

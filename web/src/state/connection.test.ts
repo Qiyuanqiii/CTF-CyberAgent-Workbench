@@ -26,6 +26,8 @@ describe("connection store", () => {
     expect(useConnectionStore.getState().sessionSteeringControlEnabled).toBe(true);
     expect(useConnectionStore.getState().runLifecycleEnabled).toBe(true);
     expect(useConnectionStore.getState().runExecutionEnabled).toBe(true);
+    expect(useConnectionStore.getState().planDeliveryControlEnabled).toBe(true);
+    expect(useConnectionStore.getState().approvalControlEnabled).toBe(true);
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
 
@@ -38,6 +40,8 @@ describe("connection store", () => {
     expect(useConnectionStore.getState().sessionSteeringControlEnabled).toBe(false);
     expect(useConnectionStore.getState().runLifecycleEnabled).toBe(false);
     expect(useConnectionStore.getState().runExecutionEnabled).toBe(false);
+    expect(useConnectionStore.getState().planDeliveryControlEnabled).toBe(false);
+    expect(useConnectionStore.getState().approvalControlEnabled).toBe(false);
     expect(useConnectionStore.getState().selectedRunID).toBe("");
   });
 });

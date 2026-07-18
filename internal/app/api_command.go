@@ -68,6 +68,9 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 	lifecycleControl := application.NewRunLifecycleControlService(a.store)
 	executionControl := application.NewRunExecutionHandoffService(a.store, a.router,
 		a.checker).WithActiveCalls(a.calls)
+	planDeliveryControl := application.NewPlanDeliveryControlService(a.store)
+	approvalControl := application.NewApprovalControlService(a.store,
+		a.newToolGateway(), a.checker)
 	api, err := httpapi.New(a.store, httpapi.Config{
 		AccessToken: accessToken, ControlToken: controlToken,
 		RunControlEnabled: controlToken != "", RunCreationEnabled: controlToken != "",
@@ -75,8 +78,13 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 		SessionSteeringControlEnabled: controlToken != "",
 		RunLifecycleEnabled:           controlToken != "",
 		RunExecutionEnabled:           controlToken != "",
+		PlanDeliveryControlEnabled:    controlToken != "",
+		ApprovalControlEnabled:        controlToken != "",
 		RunLifecycleController:        lifecycleControl,
 		RunExecutionController:        executionControl,
+		PlanDeliveryController:        planDeliveryControl,
+		ApprovalController:            approvalControl,
+		ModelRegistry:                 a.models,
 		AppVersion:                    Version,
 		UIHandler:                     uiBundle,
 	})

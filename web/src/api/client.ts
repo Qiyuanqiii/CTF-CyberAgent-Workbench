@@ -1,8 +1,16 @@
 import { consumeSSE } from "./sse";
 import type {
+  ApprovalDecisionControlRequestView,
+  ApprovalDecisionControlView,
+  ApprovalQueueView,
   ErrorEnvelope,
   HealthView,
+  ModelAvailabilityView,
   PageResult,
+  PlanDeliveryTransitionControlRequestView,
+  PlanDeliveryTransitionControlView,
+  PlanDirectionControlRequestView,
+  PlanDirectionControlView,
   RunCreationControlRequestView,
   RunCreationControlView,
   RunExecutionControlRequestView,
@@ -19,6 +27,17 @@ import type {
 } from "./types";
 
 export type QueryValue = boolean | number | string | undefined;
+
+export interface ClientCapabilities {
+  runControlEnabled?: boolean;
+  runCreationEnabled?: boolean;
+  sessionMessageEnabled?: boolean;
+  sessionSteeringControlEnabled?: boolean;
+  runLifecycleEnabled?: boolean;
+  runExecutionEnabled?: boolean;
+  planDeliveryControlEnabled?: boolean;
+  approvalControlEnabled?: boolean;
+}
 
 export class APIRequestError extends Error {
   constructor(
@@ -282,6 +301,140 @@ function parseRunExecutionControl(value: unknown, expectedRunID: string,
   return value as unknown as RunExecutionControlView;
 }
 
+function parseModelAvailability(value: unknown): ModelAvailabilityView {
+  if (!hasExactKeys(value, ["protocol_version", "providers", "routes"]) ||
+    value.protocol_version !== "model_availability.v1" || !Array.isArray(value.providers) ||
+    !Array.isArray(value.routes) || value.providers.length > 64 || value.routes.length > 64) {
+    throw new APIRequestError("Model availability response is invalid", "INVALID_RESPONSE", 502);
+  }
+  const providerNames = new Set<string>();
+  const availableProviderNames = new Set<string>();
+  for (const provider of value.providers) {
+    if (!hasExactKeys(provider, ["configuration_error", "credential_source", "kind", "models",
+      "name", "network_required", "status"]) || !boundedText(provider.name, 128) ||
+      (provider.kind !== "local" && provider.kind !== "anthropic_compatible") ||
+      (provider.status !== "available" && provider.status !== "not_configured" &&
+        provider.status !== "invalid_configuration") ||
+      (provider.credential_source !== "none" && provider.credential_source !== "environment") ||
+      typeof provider.network_required !== "boolean" ||
+      typeof provider.configuration_error !== "boolean" || !Array.isArray(provider.models) ||
+      provider.models.length > 64 || !provider.models.every((model) => boundedText(model, 256)) ||
+      providerNames.has(provider.name)) {
+      throw new APIRequestError("Model Provider availability is invalid", "INVALID_RESPONSE", 502);
+    }
+    providerNames.add(provider.name);
+    if (provider.status === "available") {
+      availableProviderNames.add(provider.name);
+    }
+  }
+  const routeNames = new Set<string>();
+  for (const route of value.routes) {
+    if (!hasExactKeys(route, ["available", "model", "name", "provider"]) ||
+      !boundedText(route.name, 128) || !boundedText(route.provider, 128) ||
+      !boundedText(route.model, 256) || typeof route.available !== "boolean" ||
+      (route.available && !availableProviderNames.has(route.provider)) ||
+      routeNames.has(route.name)) {
+      throw new APIRequestError("Model route availability is invalid", "INVALID_RESPONSE", 502);
+    }
+    routeNames.add(route.name);
+  }
+  return value as unknown as ModelAvailabilityView;
+}
+
+function parsePlanDirectionControl(value: unknown, expectedRunID: string,
+  request: PlanDirectionControlRequestView): PlanDirectionControlView {
+  if (!hasExactKeys(value, ["capability_grant", "direction", "execution_started", "model_called",
+    "note_id", "phase_changed", "proposal_id", "replayed", "run_id", "selection_id",
+    "tool_called", "version", "work_item_count"]) ||
+    value.version !== "plan_delivery_control.v1" || value.run_id !== expectedRunID ||
+    value.proposal_id !== request.proposal_id || value.direction !== request.direction ||
+    !boundedIdentity(value.run_id) || !boundedIdentity(value.proposal_id) ||
+    !boundedIdentity(value.selection_id) || !boundedIdentity(value.note_id) ||
+    !safeBoundedCount(value.work_item_count, 32) || value.work_item_count < 1 ||
+    typeof value.replayed !== "boolean" || value.phase_changed !== false ||
+    value.execution_started !== false || value.model_called !== false ||
+    value.tool_called !== false || value.capability_grant !== false) {
+    throw new APIRequestError("Plan direction response violated its closed authority contract",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as PlanDirectionControlView;
+}
+
+function parsePlanDeliveryTransition(value: unknown,
+  expectedRunID: string): PlanDeliveryTransitionControlView {
+  if (!hasExactKeys(value, ["applied_mode", "capability_grant", "current_mode",
+    "execution_started", "model_called", "replayed", "run_id", "selection_id", "tool_called",
+    "version"]) || value.version !== "plan_delivery_control.v1" ||
+    value.run_id !== expectedRunID || !boundedIdentity(value.run_id) ||
+    !boundedIdentity(value.selection_id) || !isRecord(value.applied_mode) ||
+    !isRecord(value.current_mode) || value.applied_mode.phase !== "deliver" ||
+    value.current_mode.phase !== "deliver" || value.applied_mode.capability_grant !== false ||
+    value.current_mode.capability_grant !== false || typeof value.replayed !== "boolean" ||
+    value.execution_started !== false || value.model_called !== false ||
+    value.tool_called !== false || value.capability_grant !== false) {
+    throw new APIRequestError("Plan delivery response violated its closed authority contract",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as PlanDeliveryTransitionControlView;
+}
+
+function parseApprovalQueue(value: unknown, expectedRunID: string): ApprovalQueueView {
+  if (!hasExactKeys(value, ["capability_grant", "items", "process_execution_enabled",
+    "protocol_version", "run_id", "session_grant_created", "truncated"]) ||
+    value.protocol_version !== "approval_queue.v1" || value.run_id !== expectedRunID ||
+    !boundedIdentity(value.run_id) || !Array.isArray(value.items) || value.items.length > 100 ||
+    typeof value.truncated !== "boolean" || value.process_execution_enabled !== false ||
+    value.session_grant_created !== false || value.capability_grant !== false) {
+    throw new APIRequestError("Approval queue response is invalid", "INVALID_RESPONSE", 502);
+  }
+  const identities = new Set<string>();
+  for (const item of value.items) {
+    const itemID = isRecord(item) ? boundedIdentity(item.id) : "";
+    if (!hasExactKeys(item, ["action_class", "allowed_actions", "capability_grant", "created_at",
+      "id", "mode", "process_execution_enabled", "proposal_id", "run_id", "session_id",
+      "status", "tool_name", "updated_at", "version", "workspace_id"]) ||
+      item.run_id !== expectedRunID || item.status !== "pending" || !itemID ||
+      !boundedIdentity(item.proposal_id) || !boundedIdentity(item.run_id) ||
+      !boundedIdentity(item.session_id) || !boundedIdentity(item.workspace_id) ||
+      !boundedText(item.tool_name, 128) || !boundedText(item.action_class, 128) ||
+      !boundedText(item.mode, 64) || !Array.isArray(item.allowed_actions) ||
+      item.allowed_actions.length > 2 ||
+      !item.allowed_actions.every((action) => action === "approve_once" || action === "deny") ||
+      new Set(item.allowed_actions).size !== item.allowed_actions.length ||
+      !safePositiveInteger(item.version) || !validDate(item.created_at) ||
+      !validDate(item.updated_at) || item.process_execution_enabled !== false ||
+      item.capability_grant !== false || identities.has(itemID)) {
+      throw new APIRequestError("Approval queue item is invalid", "INVALID_RESPONSE", 502);
+    }
+    if (item.tool_name === "replace_file" && item.allowed_actions.includes("approve_once")) {
+      throw new APIRequestError("File approval exposed write authority", "INVALID_RESPONSE", 502);
+    }
+    identities.add(itemID);
+  }
+  return value as unknown as ApprovalQueueView;
+}
+
+function parseApprovalDecision(value: unknown, expectedRunID: string, expectedApprovalID: string,
+  request: ApprovalDecisionControlRequestView): ApprovalDecisionControlView {
+  const expectedStatus = request.action === "approve_once" ? "approved" : "denied";
+  if (!hasExactKeys(value, ["action", "approval_id", "capability_grant",
+    "docker_execution_enabled", "process_execution_enabled", "proposal_id", "replayed", "run_id",
+    "session_grant_created", "shell_execution_enabled", "status", "tool_name", "version",
+    "workspace_write_applied"]) || value.version !== "approval_control.v1" ||
+    value.run_id !== expectedRunID || value.approval_id !== expectedApprovalID ||
+    value.action !== request.action || value.status !== expectedStatus ||
+    !boundedIdentity(value.run_id) || !boundedIdentity(value.approval_id) ||
+    !boundedIdentity(value.proposal_id) || !boundedText(value.tool_name, 128) ||
+    typeof value.replayed !== "boolean" || value.process_execution_enabled !== false ||
+    value.shell_execution_enabled !== false || value.docker_execution_enabled !== false ||
+    value.workspace_write_applied !== false || value.session_grant_created !== false ||
+    value.capability_grant !== false) {
+    throw new APIRequestError("Approval decision violated its closed authority contract",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as ApprovalDecisionControlView;
+}
+
 function hasNoAllowedTargets(scope: Record<string, unknown>): boolean {
   return scope.allowed_targets === undefined ||
     (Array.isArray(scope.allowed_targets) && scope.allowed_targets.length === 0);
@@ -311,6 +464,15 @@ function boundedIdentity(value: unknown): string {
     : "";
 }
 
+function boundedText(value: unknown, maximum: number): value is string {
+  return typeof value === "string" && value.trim() === value && value.length > 0 &&
+    value.length <= maximum;
+}
+
+function validDate(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
 function safePositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
@@ -328,14 +490,14 @@ export class CyberAgentClient {
   readonly hasSessionSteeringControl: boolean;
   readonly hasRunLifecycle: boolean;
   readonly hasRunExecution: boolean;
+  readonly hasPlanDelivery: boolean;
+  readonly hasApprovalControl: boolean;
 
   constructor(
     private readonly token: string,
     baseURL = import.meta.env.VITE_API_BASE_URL || "/api/v1",
     private readonly controlToken = "",
-    capabilities: { runControlEnabled?: boolean; runCreationEnabled?: boolean;
-      sessionMessageEnabled?: boolean; sessionSteeringControlEnabled?: boolean;
-      runLifecycleEnabled?: boolean; runExecutionEnabled?: boolean } = {},
+    capabilities: ClientCapabilities = {},
   ) {
     if (token.trim() === "") {
       throw new Error("A read bearer token is required");
@@ -349,10 +511,17 @@ export class CyberAgentClient {
       (capabilities.sessionSteeringControlEnabled ?? true);
     this.hasRunLifecycle = controlPresent && (capabilities.runLifecycleEnabled ?? true);
     this.hasRunExecution = controlPresent && (capabilities.runExecutionEnabled ?? true);
+    this.hasPlanDelivery = controlPresent && (capabilities.planDeliveryControlEnabled ?? true);
+    this.hasApprovalControl = controlPresent && (capabilities.approvalControlEnabled ?? true);
   }
 
   async health(signal?: AbortSignal): Promise<HealthView> {
     return this.get<HealthView>("/health", {}, signal);
+  }
+
+  async modelAvailability(signal?: AbortSignal): Promise<ModelAvailabilityView> {
+    const value = await this.get<unknown>("/models", {}, signal);
+    return parseModelAvailability(value);
   }
 
   async get<T>(path: string, query: Record<string, QueryValue> = {}, signal?: AbortSignal): Promise<T> {
@@ -457,6 +626,62 @@ export class CyberAgentClient {
       `/runs/${encodeURIComponent(runID)}/execute`, body, idempotencyKey, signal,
     );
     return parseRunExecutionControl(result, runID, body);
+  }
+
+  async selectPlanDirection(runID: string, body: PlanDirectionControlRequestView,
+    idempotencyKey: string, signal?: AbortSignal): Promise<PlanDirectionControlView> {
+    if (!this.hasPlanDelivery) {
+      throw new Error("Plan/Delivery control capability is required for this operation");
+    }
+    if (!boundedIdentity(runID) || runID.trim() !== runID || body.direction < 1 ||
+      body.direction > 3 || !boundedIdentity(body.proposal_id)) {
+      throw new Error("A normalized Run, proposal, and direction are required");
+    }
+    const result = await this.sendControl<unknown>(
+      `/runs/${encodeURIComponent(runID)}/plan/direction`, body, idempotencyKey, signal,
+    );
+    return parsePlanDirectionControl(result, runID, body);
+  }
+
+  async enterPlanDelivery(runID: string, body: PlanDeliveryTransitionControlRequestView,
+    idempotencyKey: string, signal?: AbortSignal): Promise<PlanDeliveryTransitionControlView> {
+    if (!this.hasPlanDelivery) {
+      throw new Error("Plan/Delivery control capability is required for this operation");
+    }
+    if (!boundedIdentity(runID) || runID.trim() !== runID) {
+      throw new Error("A normalized Run identity is required");
+    }
+    const result = await this.sendControl<unknown>(
+      `/runs/${encodeURIComponent(runID)}/plan/deliver`, body, idempotencyKey, signal,
+    );
+    return parsePlanDeliveryTransition(result, runID);
+  }
+
+  async approvalQueue(runID: string, signal?: AbortSignal): Promise<ApprovalQueueView> {
+    if (!boundedIdentity(runID) || runID.trim() !== runID) {
+      throw new Error("A normalized Run identity is required");
+    }
+    const value = await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/approvals`, {}, signal,
+    );
+    return parseApprovalQueue(value, runID);
+  }
+
+  async decideApproval(runID: string, approvalID: string,
+    body: ApprovalDecisionControlRequestView, idempotencyKey: string,
+    signal?: AbortSignal): Promise<ApprovalDecisionControlView> {
+    if (!this.hasApprovalControl) {
+      throw new Error("Approval control capability is required for this operation");
+    }
+    if (!boundedIdentity(runID) || runID.trim() !== runID ||
+      !boundedIdentity(approvalID) || approvalID.trim() !== approvalID) {
+      throw new Error("Normalized Run and approval identities are required");
+    }
+    const result = await this.sendControl<unknown>(
+      `/runs/${encodeURIComponent(runID)}/approvals/${encodeURIComponent(approvalID)}/decision`,
+      body, idempotencyKey, signal,
+    );
+    return parseApprovalDecision(result, runID, approvalID, body);
   }
 
   private async sendControl<T>(path: string, body: unknown, idempotencyKey: string,

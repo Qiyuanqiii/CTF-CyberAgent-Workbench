@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { LogOut, PackageSearch, Plus, RefreshCw, ShieldCheck } from "lucide-react";
+import { Cpu, LogOut, PackageSearch, Plus, RefreshCw, ShieldCheck } from "lucide-react";
 import { CyberAgentClient } from "./api/client";
 import { ConnectionGate } from "./components/connection-gate";
 import { DesktopSkillPreviewDialog } from "./components/desktop-skill-preview";
+import { ModelAvailabilityDialog } from "./components/model-availability-dialog";
 import { RunCreationDialog } from "./components/run-creation-dialog";
 import { ResourceSidebar } from "./components/resource-sidebar";
 import { RunWorkspace } from "./components/run-workspace";
@@ -21,6 +22,9 @@ export default function App() {
     (state) => state.sessionSteeringControlEnabled);
   const runLifecycleEnabled = useConnectionStore((state) => state.runLifecycleEnabled);
   const runExecutionEnabled = useConnectionStore((state) => state.runExecutionEnabled);
+  const planDeliveryControlEnabled = useConnectionStore(
+    (state) => state.planDeliveryControlEnabled);
+  const approvalControlEnabled = useConnectionStore((state) => state.approvalControlEnabled);
   if (!token) {
     return <ConnectionGate />;
   }
@@ -28,12 +32,14 @@ export default function App() {
     runControlEnabled={runControlEnabled} runCreationEnabled={runCreationEnabled}
     sessionMessageEnabled={sessionMessageEnabled}
     sessionSteeringControlEnabled={sessionSteeringControlEnabled}
-    runLifecycleEnabled={runLifecycleEnabled} runExecutionEnabled={runExecutionEnabled} />;
+    runLifecycleEnabled={runLifecycleEnabled} runExecutionEnabled={runExecutionEnabled}
+    planDeliveryControlEnabled={planDeliveryControlEnabled}
+    approvalControlEnabled={approvalControlEnabled} />;
 }
 
 function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreationEnabled,
   sessionMessageEnabled, sessionSteeringControlEnabled, runLifecycleEnabled,
-  runExecutionEnabled }: {
+  runExecutionEnabled, planDeliveryControlEnabled, approvalControlEnabled }: {
   token: string;
   controlToken: string;
   runControlEnabled: boolean;
@@ -42,16 +48,21 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
   sessionSteeringControlEnabled: boolean;
   runLifecycleEnabled: boolean;
   runExecutionEnabled: boolean;
+  planDeliveryControlEnabled: boolean;
+  approvalControlEnabled: boolean;
 }) {
   const [skillPreviewOpen, setSkillPreviewOpen] = useState(false);
   const [runCreationOpen, setRunCreationOpen] = useState(false);
+  const [modelsOpen, setModelsOpen] = useState(false);
   const desktop = desktopBridgeAvailable();
   const client = useMemo(() => new CyberAgentClient(token, undefined, controlToken, {
     runControlEnabled, runCreationEnabled, sessionMessageEnabled,
     sessionSteeringControlEnabled,
     runLifecycleEnabled, runExecutionEnabled,
+    planDeliveryControlEnabled, approvalControlEnabled,
   }), [token, controlToken, runControlEnabled, runCreationEnabled, sessionMessageEnabled,
-    sessionSteeringControlEnabled, runLifecycleEnabled, runExecutionEnabled]);
+    sessionSteeringControlEnabled, runLifecycleEnabled, runExecutionEnabled,
+    planDeliveryControlEnabled, approvalControlEnabled]);
   const queryClient = useQueryClient();
   const health = useConnectionStore((state) => state.health);
   const setHealth = useConnectionStore((state) => state.setHealth);
@@ -75,6 +86,7 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
   const leave = () => {
     setSkillPreviewOpen(false);
     setRunCreationOpen(false);
+    setModelsOpen(false);
     queryClient.clear();
     disconnect();
   };
@@ -95,6 +107,10 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
               <button aria-label="Create Run" className="icon-button" onClick={() => setRunCreationOpen(true)} title="Create Run" type="button">
                 <Plus aria-hidden="true" size={17} />
               </button>}
+            <button aria-label="Model availability" className="icon-button"
+              onClick={() => setModelsOpen(true)} title="Models" type="button">
+              <Cpu aria-hidden="true" size={16} />
+            </button>
             {desktop &&
               <button aria-label="预览 Skill 包" className="icon-button" onClick={() => setSkillPreviewOpen(true)} title="预览 Skill 包" type="button">
                 <PackageSearch aria-hidden="true" size={16} />
@@ -113,6 +129,8 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
         </div>
       </div>
       <DesktopSkillPreviewDialog open={skillPreviewOpen} onClose={() => setSkillPreviewOpen(false)} />
+      <ModelAvailabilityDialog client={client} open={modelsOpen}
+        onClose={() => setModelsOpen(false)} />
       <RunCreationDialog client={client} open={runCreationOpen}
         onClose={() => setRunCreationOpen(false)} />
     </>

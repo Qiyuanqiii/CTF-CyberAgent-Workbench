@@ -12,6 +12,8 @@ import (
 	"unicode/utf8"
 
 	"cyberagent-workbench/internal/apperror"
+	"cyberagent-workbench/internal/application"
+	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/redact"
@@ -44,7 +46,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
-			"external-skills", "workspaces", "event-stream", "event-poll", "openapi"}
+			"external-skills", "workspaces", "models", "event-stream", "event-poll", "openapi"}
 		if a.controlEnabled {
 			resources = append(resources, "model-cancellation-control",
 				"specialist-model-cancellation-control", "execution-profile-control")
@@ -57,6 +59,12 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 		if a.runExecutionEnabled {
 			resources = append(resources, "run-execution-control")
+		}
+		if a.planDeliveryControlEnabled {
+			resources = append(resources, "plan-delivery-control")
+		}
+		if a.approvalControlEnabled {
+			resources = append(resources, "approval-control")
 		}
 		return IndexView{APIVersion: Version, AppVersion: a.appVersion, Resources: resources}, nil, nil
 	case "/api/v1/health":
@@ -75,6 +83,10 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 	}
 	switch segments[0] {
+	case "models":
+		if len(segments) == 1 {
+			return a.modelAvailability(request)
+		}
 	case "runs":
 		return a.routeRuns(request, segments)
 	case "workspaces":
@@ -97,6 +109,32 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 	}
 	return nil, nil, apperror.New(apperror.CodeNotFound, "HTTP API endpoint was not found")
+}
+
+func (a *API) modelAvailability(request *http.Request) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	snapshot := a.modelRegistry.Snapshot()
+	providers := make([]ProviderAvailabilityView, len(snapshot.Providers))
+	for index, provider := range snapshot.Providers {
+		providers[index] = ProviderAvailabilityView{
+			Name: provider.Name, Kind: provider.Kind, Status: provider.Status,
+			Models:             append([]string(nil), provider.Models...),
+			CredentialSource:   provider.CredentialSource,
+			NetworkRequired:    provider.NetworkRequired,
+			ConfigurationError: provider.ConfigurationError,
+		}
+	}
+	routes := make([]ModelRouteAvailabilityView, len(snapshot.Routes))
+	for index, route := range snapshot.Routes {
+		routes[index] = ModelRouteAvailabilityView{
+			Name: route.Name, Provider: route.Provider, Model: route.Model,
+			Available: route.Available,
+		}
+	}
+	return ModelAvailabilityView{ProtocolVersion: snapshot.ProtocolVersion,
+		Providers: providers, Routes: routes}, nil, nil
 }
 
 func (a *API) workspaces(request *http.Request) (any, *Page, error) {
@@ -150,6 +188,8 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 			return a.runArtifacts(request, segments[1])
 		case "tool-rounds":
 			return a.runToolRounds(request, segments[1])
+		case "approvals":
+			return a.runApprovals(request, segments[1])
 		}
 	case 4:
 		if segments[2] == "reports" {
@@ -157,6 +197,44 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 		}
 	}
 	return nil, nil, apperror.New(apperror.CodeNotFound, "Run HTTP API endpoint was not found")
+}
+
+func (a *API) runApprovals(request *http.Request, runID string) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	run, err := a.store.GetRun(request.Context(), runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	records, err := a.store.ListApprovals(request.Context(), approval.ListFilter{
+		RunID: run.ID, Status: approval.StatusPending,
+		Limit: application.MaxApprovalQueueItems + 1,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	truncated := len(records) > application.MaxApprovalQueueItems
+	if truncated {
+		records = records[:application.MaxApprovalQueueItems]
+	}
+	items := make([]ApprovalQueueItemView, len(records))
+	for index, record := range records {
+		if record.RunID != run.ID || record.Status != approval.StatusPending {
+			return nil, nil, apperror.New(apperror.CodeInternal,
+				"approval queue contains a mismatched record")
+		}
+		items[index] = ApprovalQueueItemView{
+			ID: record.ID, ProposalID: record.ProposalID, RunID: record.RunID,
+			SessionID: record.SessionID, WorkspaceID: record.WorkspaceID,
+			ToolName: record.ToolName, ActionClass: record.ActionClass,
+			Mode: record.Mode, Status: string(record.Status),
+			AllowedActions: application.ApprovalDecisionActions(record, run.Terminal()),
+			Version:        record.Version, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
+		}
+	}
+	return ApprovalQueueView{ProtocolVersion: application.ApprovalQueueProtocolVersion,
+		RunID: run.ID, Items: items, Truncated: truncated}, nil, nil
 }
 
 func (a *API) routeSessions(request *http.Request, segments []string) (any, *Page, error) {

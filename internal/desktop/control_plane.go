@@ -1,6 +1,7 @@
 package desktop
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -9,9 +10,10 @@ import (
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/httpapi"
-	"cyberagent-workbench/internal/llm"
+	"cyberagent-workbench/internal/modelregistry"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/store"
+	"cyberagent-workbench/internal/toolgateway"
 )
 
 // ControlPlane owns the Desktop process' SQLite connection and in-process API.
@@ -34,6 +36,8 @@ type ControlPlaneConfig struct {
 	SessionSteeringControlEnabled bool
 	RunLifecycleEnabled           bool
 	RunExecutionEnabled           bool
+	PlanDeliveryControlEnabled    bool
+	ApprovalControlEnabled        bool
 	AppVersion                    string
 	UIHandler                     http.Handler
 }
@@ -47,10 +51,19 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 	if err != nil {
 		return nil, err
 	}
+	models := modelregistry.NewFromEnvironment()
+	if err := models.LoadRouteSettings(context.Background(), stateStore); err != nil {
+		_ = stateStore.Close()
+		return nil, err
+	}
+	checker := policy.NewDefaultChecker()
 	lifecycleControl := application.NewRunLifecycleControlService(stateStore)
 	executionControl := application.NewRunExecutionHandoffService(stateStore,
-		llm.NewDefaultRouter(), policy.NewDefaultChecker()).WithActiveCalls(
+		models.Router(), checker).WithActiveCalls(
 		application.NewActiveCallRegistry())
+	planDeliveryControl := application.NewPlanDeliveryControlService(stateStore)
+	approvalControl := application.NewApprovalControlService(stateStore,
+		toolgateway.New(stateStore, checker), checker)
 	api, err := httpapi.New(stateStore, httpapi.Config{
 		AccessToken: config.ReadToken, ControlToken: config.ControlToken,
 		RunControlEnabled:             config.RunControlEnabled,
@@ -59,8 +72,13 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 		SessionSteeringControlEnabled: config.SessionSteeringControlEnabled,
 		RunLifecycleEnabled:           config.RunLifecycleEnabled,
 		RunExecutionEnabled:           config.RunExecutionEnabled,
+		PlanDeliveryControlEnabled:    config.PlanDeliveryControlEnabled,
+		ApprovalControlEnabled:        config.ApprovalControlEnabled,
 		RunLifecycleController:        lifecycleControl,
 		RunExecutionController:        executionControl,
+		PlanDeliveryController:        planDeliveryControl,
+		ApprovalController:            approvalControl,
+		ModelRegistry:                 models,
 		AppVersion:                    config.AppVersion, UIHandler: config.UIHandler,
 	})
 	if err != nil {

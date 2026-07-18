@@ -107,7 +107,7 @@ Schema v40 loads the complete selected set for root Supervisor turns. Before eve
 
 Schema v47 derives `specialist_skill_context.v1` for each active child Attempt. Go reloads the child after Attempt start, binds the current immutable Run mode and parent selection, requires delegated `model.chat`, and selects at most one already-pinned guide. Code uses the guide matching its Profile. Cyber receives no broad Code/Review/Learn guide and receives `script` only for the Script Profile. `plan-delivery` is root-only. The default child budget is 1,024 conservative tokens with a 2,048 hard maximum. Preparation is idempotent across concurrent Store callers and commits atomically with the first Specialist model start; a selected Run cannot start that call without preparation. Child assignment text, model output, HTTP, Tool Gateway, and external directories cannot select Skills. The body remains in the current Go Provider request only, while SQLite and events store aggregate metadata and fingerprints.
 
-## Windows Desktop D0-A Through D1-X1
+## Windows Desktop D0-A Through D1-A1
 
 Build the unsigned development/portable-test shell from the repository root:
 
@@ -147,9 +147,16 @@ To expose pending cancellation, Run lifecycle, or explicit bounded execution:
 .\build\desktop\cyberagent-desktop.exe --enable-run-execution
 ```
 
-Any flag creates one distinct in-memory control token, while capability bits keep routes independent. Profile selection does not enable a backend. Run creation makes only a default-budget, network-disabled `preview/noop` graph. Session submission queues one redacted item; cancellation applies only before preparation. Lifecycle performs strict start/pause/resume. Execution freezes at most eight pending identities and invokes only the existing Go RunSupervisor, Policy, budgets, model/tool ledgers, checkpoints, and private execution lease. There is no background wake/retry worker, terminal, LocalRunner, Docker start, Shell, Skill installation, upload, registry integration, startup entry, updater, or installer.
+To expose Plan/Deliver control or constrained approval decisions:
 
-The New Run dialog selects a Workspace, Profile, Code/Cyber surface, and Plan/Deliver phase. The Session composer, pending Cancel action, Start/Pause/Resume, and Run Queue control retain intent-bound retry keys only in memory. Changing message, lifecycle action, or `maxSteps` rotates the key. Go performs authoritative validation and transactions. A single-capability launch does not unlock sibling controls.
+```powershell
+.\build\desktop\cyberagent-desktop.exe --enable-plan-delivery
+.\build\desktop\cyberagent-desktop.exe --enable-approvals
+```
+
+Any flag creates one distinct in-memory control token, while capability bits keep routes independent. Profile selection does not enable a backend. Run creation makes only a default-budget, network-disabled `preview/noop` graph. Session submission queues one redacted item; cancellation applies only before preparation. Lifecycle performs strict start/pause/resume. Execution freezes at most eight pending identities and invokes only the existing Go RunSupervisor, Policy, budgets, model/tool ledgers, checkpoints, and private execution lease. Plan selection and Deliver are separate explicit operations. Approve-once rechecks Policy and remains dry-run/process-disabled; file replacement cannot be approved there. There is no background wake/retry worker, terminal, LocalRunner, Docker start, real Shell process, Skill installation, upload, registry integration, startup entry, updater, or installer.
+
+The New Run dialog selects a Workspace, Profile, Code/Cyber surface, and Plan/Deliver phase. The top-bar Models dialog reads only redacted Provider/route status. The Session composer, pending Cancel action, Start/Pause/Resume, Run Queue, Plan/Deliver, and Approval controls retain intent-bound retry keys only in memory. Changing message, lifecycle action, `maxSteps`, Plan direction, or approval intent rotates the key. Go performs authoritative validation and transactions. A single-capability launch does not unlock sibling controls.
 
 The top-bar package button opens the native `.zip` picker. The operating-system path stays inside Go and is immediately validated. React receives only an opaque one-time handle followed by bounded metadata and the fixed conclusion `installation_authorized=false`; cancellation creates no state. Set `CYBERAGENT_HOME` before launch only when intentionally using an isolated data directory for testing. The renderer cannot read or change that path.
 

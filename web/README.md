@@ -2,13 +2,13 @@
 
 ## 中文
 
-schema v42 的 Run 概览会只读显示三个 Plan 方向、已选方向、切片数量与是否仍需显式切换到 Deliver。浏览器没有方向选择、阶段切换或执行入口，`capability_grant` 始终为 `false`。
+schema v42 的 Run 概览显示三个 Plan 方向、已选方向、切片数量与是否仍需显式切换到 Deliver。D1-P1 在独立 capability 下增加“方向三选一”和“进入 Deliver”两个显式操作；选择不改阶段，Deliver 不启动/恢复执行，`capability_grant` 始终为 `false`。
 
 schema v45-v46 的 Run 概览显示操作者引导队列的 pending/prepared/committed/cancelled 计数和有界元数据。D1-S1/S2 通过两个独立 capability 增加现有 Run-bound Session 的 enqueue/replay 和 pending-only 取消；`prepared=true` 时 UI 不提供取消。schema v73 再增加独立的 Run start/pause/resume 和最多八条冻结输入的显式 RunSupervisor 交接。浏览器不接收消息/模型正文、工具参数、operation 或 lease 身份，也不能编辑、重排或后台唤醒队列。
 
 schema v71 的 External Skills 面板只读显示 Run 固定选择的 surface/profile、版本、信任类别、token 上界、声明工具数量以及 root/Specialist 准备/提交计数。它不接收 Skill 正文、路径、字节数、hash/digest/fingerprint、安装/选择 ID、operation key 或操作者/agent 身份，也没有安装、选择、授权或执行按钮。
 
-这是 CyberAgent Workbench 的本地 read-mostly 运维界面。React/Vite 只消费 Go 生成的 OpenAPI 3.1 DTO 和 `api.v1`，不会重新实现 Policy、审批、工作区权限、Shell、Docker、模型路由或 SQLite 逻辑。当前窄 mutation 包括非授权档位、受控 Run 创建、Session 排队/pending 取消，以及 schema-v73 Run 生命周期和有界 Supervisor 交接。
+这是 CyberAgent Workbench 的本地 read-mostly 运维界面。React/Vite 只消费 Go 生成的 OpenAPI 3.1 DTO 和 `api.v1`，不会重新实现 Policy、审批、工作区权限、Shell、Docker、模型路由或 SQLite 逻辑。当前窄 mutation 包括非授权档位、受控 Run 创建、Session 排队/pending 取消、schema-v73 Run 生命周期/有界 Supervisor 交接，以及 D1-P1/A1 Plan/Deliver 和受限审批。
 
 当前界面提供：
 
@@ -24,12 +24,13 @@ schema v71 的 External Skills 面板只读显示 Run 固定选择的 surface/pr
 - Session 列表、绑定 Run 和包含压缩状态的消息历史；
 - capability 开启且 Run 为 running/paused 时的 Session composer；成功只显示排队 sequence/status；
 - 未 prepared 的 pending 消息取消、Run Start/Pause/Resume 和 `maxSteps=1..8` 的 Run Queue 控件；
+- 只读脱敏 Provider/模型路由对话框、显式 Plan 选择/Deliver 控件和 metadata-only Approvals 页；
 - `preview|docker|local` 执行档位、固定门禁与 false authority 状态；
 - 只驻留页面内存的 read bearer token 和可选 distinct control token。
 
 浏览器不持久化 token，也不把 token 放入 URL、body 或静态资源请求。可选 control token 只驻留页面内存；Go 决定 Workspace/Run/Session 绑定、默认预算、backend、scope、审批、风险、门禁和全部权限位。不确定失败后的 operation key 只在同一未改变意图下复用；消息、lifecycle action 或 `maxSteps` 改变都会轮换 key。Artifact/Skill/Session 正文、模型输出、工具参数、私有叙述、lease/fencing token、宿主/容器进程启动和其他执行类写操作仍不向 Web 开放。
 
-同一 bundle 也被 Desktop D0-A 至 D1-X1 编译进 Wails v2.13.0 Windows 壳。React 通过三个方法的严格 native bridge 自动取得内存连接材料并调用进程内 Go API，不监听端口、不使用 Local Storage。Desktop 通过同一高水位 cursor 轮询事件；Skill picker 不向 React 暴露路径或 bytes。New Run、Session enqueue/cancel、Run lifecycle 和 bounded execution 控件只在 Go bootstrap 返回各自独立 capability 时出现，业务 mutation 始终走 Go HTTP Handler。
+同一 bundle 也被 Desktop 编译进 Wails v2.13.0 Windows 壳。React 通过三个方法的严格 native bridge 自动取得内存连接材料并调用进程内 Go API，不监听端口、不使用 Local Storage。Desktop 通过同一高水位 cursor 轮询事件；Skill picker 不向 React 暴露路径或 bytes。New Run、Session enqueue/cancel、Run lifecycle、bounded execution、Plan/Deliver 和 Approval 控件只在 Go bootstrap 返回各自独立 capability 时出现，业务 mutation 始终走 Go HTTP Handler。
 
 ### 生产式本地运行
 
@@ -66,13 +67,13 @@ npm run dev
 
 ## English
 
-This is the local read-mostly operations UI for CyberAgent Workbench. React/Vite consumes the Go-generated OpenAPI 3.1 DTOs and `api.v1`; it does not reimplement policy, approvals, workspace authorization, Shell, Docker, model routing, or SQLite behavior. Its narrow mutations are non-authorizing profiles, controlled Run creation, Session enqueue/pending cancellation, and schema-v73 Run lifecycle/bounded Supervisor handoff.
+This is the local read-mostly operations UI for CyberAgent Workbench. React/Vite consumes the Go-generated OpenAPI 3.1 DTOs and `api.v1`; it does not reimplement policy, approvals, workspace authorization, Shell, Docker, model routing, or SQLite behavior. Its narrow mutations are non-authorizing profiles, controlled Run creation, Session enqueue/pending cancellation, schema-v73 Run lifecycle/bounded Supervisor handoff, and D1-P1/A1 Plan/Deliver plus constrained approval decisions.
 
-The current UI includes controlled Run creation, Run/Session browsing, read-only Plan/Delivery, steering counts and ordered metadata, Session enqueue/pending cancellation, Start/Pause/Resume, an at-most-eight-step Run Queue action, Agent/delegation/Fan-out/Finding views, resumable events, Work/Notes/Artifact/ToolRound metadata, budgets/leases, execution profiles, and external-Skill provenance. Plan, approvals, Diff apply, and External Skills remain read-only. Bearers and intent-bound retry keys stay in page memory and never enter a URL or browser storage. TypeScript submits no backend, scope, gate, approval, private lease, tool argument, or authority field; model/message bodies and private identities are omitted from browser DTOs.
+The current UI includes controlled Run creation, Run/Session browsing, redacted model availability, explicit Plan/Delivery, a metadata-only approval queue, steering counts and ordered metadata, Session enqueue/pending cancellation, Start/Pause/Resume, an at-most-eight-step Run Queue action, Agent/delegation/Fan-out/Finding views, resumable events, Work/Notes/Artifact/ToolRound metadata, budgets/leases, execution profiles, and external-Skill provenance. Diff apply and External-Skill installation remain unavailable. Bearers and intent-bound retry keys stay in page memory and never enter a URL or browser storage. TypeScript submits no backend, scope, gate, private lease, tool argument, or authority field; model/message bodies and private identities are omitted from browser DTOs.
 
 For the production-style local path, run `npm run build`, then start `cyberagent api serve --ui-dir web/dist`. Go validates and snapshots the bundle at startup, serves it from the same loopback origin as `api.v1`, applies a strict CSP, disables HTML caching, and gives only hashed assets immutable caching. Static requests are anonymous but reject authorization headers, queries, bodies, and methods other than GET/HEAD. For frontend development, Vite can still proxy same-origin `/api` requests to a loopback Go service and rejects non-loopback targets.
 
-Desktop D0-A through D1-X1 compiles the same bundle into a Wails v2.13.0 Windows shell. React obtains ephemeral connection material through a strict three-method native bridge and calls the Go API in process without a listening port or browser storage. Desktop consumes `run-event-poll.v1` with the same Run-bound high-water cursor as SSE, while WebView2 and renderer-origin/navigation gates fail closed. The native `.zip` picker exposes neither path nor bytes. Run creation, Session enqueue/cancel, lifecycle, and bounded execution controls appear only under independent Go bootstrap capabilities and use HTTP control routes rather than native mutation methods.
+Desktop compiles the same bundle into a Wails v2.13.0 Windows shell. React obtains ephemeral connection material through a strict three-method native bridge and calls the Go API in process without a listening port or browser storage. Desktop consumes `run-event-poll.v1` with the same Run-bound high-water cursor as SSE, while WebView2 and renderer-origin/navigation gates fail closed. The native `.zip` picker exposes neither path nor bytes. Run creation, Session enqueue/cancel, lifecycle, bounded execution, Plan/Deliver, and Approval controls appear only under independent Go bootstrap capabilities and use HTTP control routes rather than native mutation methods.
 
 Open `http://127.0.0.1:8765` for the Go-hosted build or `http://127.0.0.1:5173` for Vite development, then enter the same read token shown or configured for the Go process. Enter the distinct control token only for a narrow mutation. Bounded execution may call the configured model and approved structured tools through Go, but no Web control can start a Shell, Local, Docker, or other host/container process.
 

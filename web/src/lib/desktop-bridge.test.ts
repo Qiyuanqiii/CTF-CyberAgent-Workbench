@@ -14,6 +14,8 @@ const bootstrap = {
   session_steering_control_enabled: false,
   run_lifecycle_enabled: false,
   run_execution_enabled: false,
+  plan_delivery_control_enabled: false,
+  approval_control_enabled: false,
   read_only_default: true,
   process_execution_enabled: false,
   shell_execution_enabled: false,
@@ -111,6 +113,29 @@ describe("desktop native bridge", () => {
     installBridge({ Bootstrap: vi.fn().mockResolvedValue(steeringOnly) });
     const module = await import("./desktop-bridge");
     await expect(module.loadDesktopBootstrap()).resolves.toEqual(steeringOnly);
+  });
+
+  it("accepts Plan and approval controls as independent capabilities", async () => {
+    const planOnly = {
+      ...bootstrap,
+      control_token: "control-token-0123456789abcdefghijkl",
+      plan_delivery_control_enabled: true,
+      read_only_default: false,
+    };
+    installBridge({ Bootstrap: vi.fn().mockResolvedValue(planOnly) });
+    let module = await import("./desktop-bridge");
+    await expect(module.loadDesktopBootstrap()).resolves.toEqual(planOnly);
+
+    vi.resetModules();
+    const approvalOnly = {
+      ...bootstrap,
+      control_token: "control-token-0123456789abcdefghijkl",
+      approval_control_enabled: true,
+      read_only_default: false,
+    };
+    installBridge({ Bootstrap: vi.fn().mockResolvedValue(approvalOnly) });
+    module = await import("./desktop-bridge");
+    await expect(module.loadDesktopBootstrap()).resolves.toEqual(approvalOnly);
   });
 
   it("rejects authority widening and extra local-file fields", async () => {

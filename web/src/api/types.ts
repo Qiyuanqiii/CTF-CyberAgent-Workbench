@@ -1,6 +1,10 @@
 import type { components } from "./schema";
 
 export type APIErrorView = components["schemas"]["APIError"];
+export type ApprovalDecisionControlRequestView = components["schemas"]["ApprovalDecisionControlRequestView"];
+export type ApprovalDecisionControlView = components["schemas"]["ApprovalDecisionControlView"];
+export type ApprovalQueueItemView = components["schemas"]["ApprovalQueueItemView"];
+export type ApprovalQueueView = components["schemas"]["ApprovalQueueView"];
 export type AgentGraphView = components["schemas"]["AgentGraphView"];
 export type ArtifactView = components["schemas"]["ArtifactView"];
 export type DelegationView = components["schemas"]["DelegationView"];
@@ -12,10 +16,15 @@ export type FindingReportSummaryView = components["schemas"]["FindingReportSumma
 export type FindingReportView = components["schemas"]["FindingReportView"];
 export type HealthView = components["schemas"]["HealthView"];
 export type MessageView = components["schemas"]["MessageView"];
+export type ModelAvailabilityView = components["schemas"]["ModelAvailabilityView"];
 export type NoteView = components["schemas"]["NoteView"];
 export type OperatorSteeringQueueView = components["schemas"]["OperatorSteeringQueueView"];
 export type Page = components["schemas"]["Page"];
 export type PlanDeliveryStateView = components["schemas"]["PlanDeliveryStateView"];
+export type PlanDeliveryTransitionControlRequestView = components["schemas"]["PlanDeliveryTransitionControlRequestView"];
+export type PlanDeliveryTransitionControlView = components["schemas"]["PlanDeliveryTransitionControlView"];
+export type PlanDirectionControlRequestView = components["schemas"]["PlanDirectionControlRequestView"];
+export type PlanDirectionControlView = components["schemas"]["PlanDirectionControlView"];
 export type RunDetailView = components["schemas"]["RunDetailView"];
 export type RunEventPollView = components["schemas"]["RunEventPollView"];
 export type RunEventStreamView = components["schemas"]["RunEventStreamView"];

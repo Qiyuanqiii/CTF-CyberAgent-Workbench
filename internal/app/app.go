@@ -19,6 +19,7 @@ import (
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/llm"
+	"cyberagent-workbench/internal/modelregistry"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/redact"
 	"cyberagent-workbench/internal/sandbox"
@@ -30,22 +31,7 @@ import (
 
 const Version = "v0.1.0"
 
-const (
-	defaultMimoBaseURL     = "https://token-plan-cn.xiaomimimo.com/anthropic"
-	defaultMimoModel       = "mimo-v2.5-pro"
-	defaultDeepSeekBaseURL = "https://api.deepseek.com/anthropic"
-	defaultDeepSeekModel   = "deepseek-v4-flash"
-	defaultAnthropicURL    = "https://api.anthropic.com"
-)
-
-type envAnthropicProviderConfig struct {
-	name           string
-	apiKeyEnv      string
-	baseURLEnv     string
-	modelEnv       string
-	defaultBaseURL string
-	defaultModel   string
-}
+const defaultDeepSeekModel = modelregistry.DefaultDeepSeekModel
 
 type App struct {
 	home                 string
@@ -53,6 +39,7 @@ type App struct {
 	errOut               io.Writer
 	store                *store.SQLiteStore
 	router               *llm.Router
+	models               *modelregistry.Registry
 	checker              policy.Checker
 	kernel               *agent.Kernel
 	calls                *application.ActiveCallRegistry
@@ -80,18 +67,19 @@ func executeContextWithConfig(ctx context.Context, args []string, out io.Writer,
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	models := modelregistry.NewFromEnvironment()
 	app := &App{
 		home:    DefaultHome(),
 		out:     out,
 		errOut:  errOut,
-		router:  llm.NewDefaultRouter(),
+		router:  models.Router(),
+		models:  models,
 		checker: policy.NewDefaultChecker(),
 		calls:   application.NewActiveCallRegistry(),
 	}
 	if configure != nil {
 		configure(app)
 	}
-	app.registerEnvProviders()
 	defer app.Close()
 
 	if err := app.dispatch(ctx, args); err != nil {
@@ -115,47 +103,6 @@ func (a *App) newToolGateway() *toolgateway.Gateway {
 			rec, err := a.store.GetWorkspaceByID(ctx, workspaceID)
 			return rec.RootPath, err
 		})
-}
-
-func (a *App) registerEnvProviders() {
-	configs := []envAnthropicProviderConfig{
-		{
-			name: "mimo", apiKeyEnv: "MIMO_API_KEY", baseURLEnv: "MIMO_BASE_URL", modelEnv: "MIMO_MODEL",
-			defaultBaseURL: defaultMimoBaseURL, defaultModel: defaultMimoModel,
-		},
-		{
-			name: "deepseek", apiKeyEnv: "DEEPSEEK_API_KEY", baseURLEnv: "DEEPSEEK_BASE_URL", modelEnv: "DEEPSEEK_MODEL",
-			defaultBaseURL: defaultDeepSeekBaseURL, defaultModel: defaultDeepSeekModel,
-		},
-		{
-			name: "anthropic", apiKeyEnv: "CYBERAGENT_ANTHROPIC_API_KEY", baseURLEnv: "CYBERAGENT_ANTHROPIC_BASE_URL",
-			modelEnv: "CYBERAGENT_ANTHROPIC_MODEL", defaultBaseURL: defaultAnthropicURL,
-		},
-	}
-	for _, config := range configs {
-		a.registerEnvAnthropicProvider(config)
-	}
-}
-
-func (a *App) registerEnvAnthropicProvider(config envAnthropicProviderConfig) {
-	apiKey := strings.TrimSpace(os.Getenv(config.apiKeyEnv))
-	if apiKey == "" {
-		return
-	}
-	baseURL := strings.TrimSpace(os.Getenv(config.baseURLEnv))
-	if baseURL == "" {
-		baseURL = config.defaultBaseURL
-	}
-	model := strings.TrimSpace(os.Getenv(config.modelEnv))
-	if model == "" {
-		model = config.defaultModel
-	}
-	provider, err := llm.NewAnthropicCompatibleProvider(llm.AnthropicCompatibleConfig{
-		Name: config.name, BaseURL: baseURL, APIKey: apiKey, DefaultModel: model,
-	})
-	if err == nil {
-		a.router.RegisterProvider(provider)
-	}
 }
 
 func DefaultHome() string {
@@ -276,22 +223,13 @@ func (a *App) ensureStore() error {
 		return err
 	}
 	a.store = st
-	a.loadRouteSettings(context.Background())
+	if err := a.models.LoadRouteSettings(context.Background(), a.store); err != nil {
+		a.store = nil
+		_ = st.Close()
+		return err
+	}
 	a.kernel = agent.NewKernel(st, a.router, a.checker)
 	return nil
-}
-
-func (a *App) loadRouteSettings(ctx context.Context) {
-	for _, route := range []string{"ctf", "script", "learn", "code", "review"} {
-		value, ok, err := a.store.GetProviderSetting(ctx, "route."+route)
-		if err != nil || !ok {
-			continue
-		}
-		ref, err := llm.ParseModelRef(value)
-		if err == nil {
-			a.router.SetRoute(route, ref)
-		}
-	}
 }
 
 func (a *App) workspaceManager() (*workspace.Manager, error) {
