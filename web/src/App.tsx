@@ -31,6 +31,7 @@ export default function App() {
   const runWakeControlEnabled = useConnectionStore((state) => state.runWakeControlEnabled);
   const runWakeExecutionEnabled = useConnectionStore((state) => state.runWakeExecutionEnabled);
   const skillInstallationEnabled = useConnectionStore((state) => state.skillInstallationEnabled);
+  const evidenceAttachmentEnabled = useConnectionStore((state) => state.evidenceAttachmentEnabled);
   if (!token) {
     return <ConnectionGate />;
   }
@@ -44,14 +45,15 @@ export default function App() {
     fileEditReviewEnabled={fileEditReviewEnabled} fileEditApplyEnabled={fileEditApplyEnabled}
     runWakeControlEnabled={runWakeControlEnabled}
     runWakeExecutionEnabled={runWakeExecutionEnabled}
-    skillInstallationEnabled={skillInstallationEnabled} />;
+    skillInstallationEnabled={skillInstallationEnabled}
+    evidenceAttachmentEnabled={evidenceAttachmentEnabled} />;
 }
 
 function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreationEnabled,
   sessionMessageEnabled, sessionSteeringControlEnabled, runLifecycleEnabled,
   runExecutionEnabled, planDeliveryControlEnabled, approvalControlEnabled,
   modelControlEnabled, fileEditReviewEnabled, fileEditApplyEnabled, runWakeControlEnabled,
-  runWakeExecutionEnabled, skillInstallationEnabled }: {
+  runWakeExecutionEnabled, skillInstallationEnabled, evidenceAttachmentEnabled }: {
   token: string;
   controlToken: string;
   runControlEnabled: boolean;
@@ -68,6 +70,7 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
   runWakeControlEnabled: boolean;
   runWakeExecutionEnabled: boolean;
   skillInstallationEnabled: boolean;
+  evidenceAttachmentEnabled: boolean;
 }) {
   const [skillPreviewOpen, setSkillPreviewOpen] = useState(false);
   const [runCreationOpen, setRunCreationOpen] = useState(false);
@@ -79,12 +82,12 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
     runLifecycleEnabled, runExecutionEnabled,
     planDeliveryControlEnabled, approvalControlEnabled, modelControlEnabled,
     fileEditReviewEnabled, fileEditApplyEnabled, runWakeControlEnabled,
-    runWakeExecutionEnabled, skillInstallationEnabled,
+    runWakeExecutionEnabled, skillInstallationEnabled, evidenceAttachmentEnabled,
   }), [token, controlToken, runControlEnabled, runCreationEnabled, sessionMessageEnabled,
     sessionSteeringControlEnabled, runLifecycleEnabled, runExecutionEnabled,
     planDeliveryControlEnabled, approvalControlEnabled, modelControlEnabled,
     fileEditReviewEnabled, fileEditApplyEnabled, runWakeControlEnabled,
-    runWakeExecutionEnabled, skillInstallationEnabled]);
+    runWakeExecutionEnabled, skillInstallationEnabled, evidenceAttachmentEnabled]);
   const queryClient = useQueryClient();
   const health = useConnectionStore((state) => state.health);
   const setHealth = useConnectionStore((state) => state.setHealth);

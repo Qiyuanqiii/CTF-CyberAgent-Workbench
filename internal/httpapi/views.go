@@ -109,6 +109,20 @@ type OperationReceiptView struct {
 	CleanupState    operationreceipt.CleanupState   `json:"cleanup_state"`
 }
 
+type OperationReceiptHistoryItemView struct {
+	ID          string               `json:"id"`
+	Scope       string               `json:"scope"`
+	RunID       string               `json:"run_id,omitempty"`
+	CompletedAt time.Time            `json:"completed_at"`
+	Receipt     OperationReceiptView `json:"receipt"`
+}
+
+type OperationReceiptHistoryView struct {
+	ProtocolVersion string                            `json:"protocol_version"`
+	Items           []OperationReceiptHistoryItemView `json:"items"`
+	Truncated       bool                              `json:"truncated"`
+}
+
 type FileEditApplyView struct {
 	ProtocolVersion string               `json:"protocol_version"`
 	RunID           string               `json:"run_id"`
@@ -235,6 +249,26 @@ type WorkspaceExplorerView struct {
 	RedactionCount  int                             `json:"redaction_count"`
 	RootPathExposed bool                            `json:"root_path_exposed"`
 	Provenance      WorkspaceExplorerProvenanceView `json:"provenance"`
+}
+
+type WorkspaceSearchResultView struct {
+	Path             string                          `json:"path"`
+	MatchKind        string                          `json:"match_kind"`
+	Line             int                             `json:"line"`
+	Snippet          string                          `json:"snippet"`
+	ContentTruncated bool                            `json:"content_truncated"`
+	Provenance       WorkspaceExplorerProvenanceView `json:"provenance"`
+}
+
+type WorkspaceSearchView struct {
+	ProtocolVersion string                      `json:"protocol_version"`
+	WorkspaceID     string                      `json:"workspace_id"`
+	Results         []WorkspaceSearchResultView `json:"results"`
+	ScannedEntries  int                         `json:"scanned_entries"`
+	ScannedFiles    int                         `json:"scanned_files"`
+	ScannedBytes    int64                       `json:"scanned_bytes"`
+	Truncated       bool                        `json:"truncated"`
+	RootPathExposed bool                        `json:"root_path_exposed"`
 }
 
 type ScopeView struct {

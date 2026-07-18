@@ -48,8 +48,8 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
-			"external-skills", "workspaces", "workspace-explorer", "models",
-			"event-stream", "event-poll", "openapi"}
+			"external-skills", "workspaces", "workspace-explorer", "workspace-search", "models",
+			"operation-receipts", "event-stream", "event-poll", "openapi"}
 		if a.controlEnabled {
 			resources = append(resources, "model-cancellation-control",
 				"specialist-model-cancellation-control", "execution-profile-control")
@@ -87,12 +87,17 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		if a.skillInstallationEnabled {
 			resources = append(resources, "skill-installation-control")
 		}
+		if a.evidenceAttachmentEnabled {
+			resources = append(resources, "evidence-attachment-control")
+		}
 		return IndexView{APIVersion: Version, AppVersion: a.appVersion, Resources: resources}, nil, nil
 	case "/api/v1/health":
 		if err := rejectQuery(request.URL.Query()); err != nil {
 			return nil, nil, err
 		}
 		return a.health(request)
+	case "/api/v1/operation-receipts":
+		return a.operationReceiptHistory(request)
 	}
 	if !strings.HasPrefix(requestPath, "/api/v1/") {
 		return nil, nil, apperror.New(apperror.CodeNotFound, "HTTP API endpoint was not found")
@@ -117,6 +122,9 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		if len(segments) == 3 && segments[2] == "explore" {
 			return a.workspaceExplorer(request, segments[1])
 		}
+		if len(segments) == 3 && segments[2] == "search" {
+			return a.workspaceSearch(request, segments[1])
+		}
 	case "sessions":
 		return a.routeSessions(request, segments)
 	case "work-items":
@@ -133,6 +141,91 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 	}
 	return nil, nil, apperror.New(apperror.CodeNotFound, "HTTP API endpoint was not found")
+}
+
+func (a *API) operationReceiptHistory(request *http.Request) (any, *Page, error) {
+	values := request.URL.Query()
+	if err := validateSingleQueryValues(values, "run_id", "limit"); err != nil {
+		return nil, nil, err
+	}
+	runID := ""
+	if items, ok := values["run_id"]; ok {
+		if len(items) != 1 || items[0] == "" || items[0] != strings.TrimSpace(items[0]) {
+			return nil, nil, apperror.New(apperror.CodeInvalidArgument,
+				"operation receipt history run_id must appear exactly once")
+		}
+		runID = items[0]
+	}
+	limit := 0
+	if items, ok := values["limit"]; ok {
+		if len(items) != 1 || items[0] == "" || items[0] != strings.TrimSpace(items[0]) {
+			return nil, nil, apperror.New(apperror.CodeInvalidArgument,
+				"operation receipt history limit must appear exactly once")
+		}
+		parsed, err := strconv.Atoi(items[0])
+		if err != nil {
+			return nil, nil, apperror.New(apperror.CodeInvalidArgument,
+				"operation receipt history limit must be an integer")
+		}
+		limit = parsed
+	}
+	history, err := application.NewOperationReceiptHistoryService(a.store).List(
+		request.Context(), application.ListOperationReceiptHistoryRequest{
+			RunID: runID, Limit: limit,
+		})
+	if err != nil {
+		return nil, nil, err
+	}
+	items := make([]OperationReceiptHistoryItemView, len(history.Items))
+	for index, item := range history.Items {
+		items[index] = OperationReceiptHistoryItemView{ID: item.ID, Scope: item.Scope,
+			RunID: item.RunID, CompletedAt: item.CompletedAt,
+			Receipt: operationReceiptView(item.Receipt)}
+	}
+	return OperationReceiptHistoryView{ProtocolVersion: history.ProtocolVersion,
+		Items: items, Truncated: history.Truncated}, nil, nil
+}
+
+func (a *API) workspaceSearch(request *http.Request,
+	workspaceID string,
+) (any, *Page, error) {
+	if err := validateSingleQueryValues(request.URL.Query(), "query"); err != nil {
+		return nil, nil, err
+	}
+	values, ok := request.URL.Query()["query"]
+	if !ok || len(values) != 1 {
+		return nil, nil, apperror.New(apperror.CodeInvalidArgument,
+			"query parameter \"query\" is required exactly once")
+	}
+	registered, err := a.store.GetWorkspaceInfo(request.Context(), workspaceID)
+	if err != nil {
+		return nil, nil, apperror.Normalize(err)
+	}
+	if registered.ID != workspaceID {
+		return nil, nil, apperror.New(apperror.CodeInternal,
+			"workspace lookup returned a mismatched identity")
+	}
+	snapshot, err := workspace.Search(registered.RootPath, registered.ID, values[0])
+	if err != nil {
+		return nil, nil, err
+	}
+	results := make([]WorkspaceSearchResultView, len(snapshot.Results))
+	for index, result := range snapshot.Results {
+		results[index] = WorkspaceSearchResultView{Path: result.Path,
+			MatchKind: result.MatchKind, Line: result.Line, Snippet: result.Snippet,
+			ContentTruncated: result.ContentTruncated,
+			Provenance: WorkspaceExplorerProvenanceView{
+				Version: result.Provenance.Version, SourceKind: result.Provenance.SourceKind,
+				SourceRef:             result.Provenance.SourceRef,
+				ContentSHA256:         result.Provenance.ContentSHA256,
+				InstructionAuthorized: result.Provenance.InstructionAuthorized,
+			}}
+	}
+	return WorkspaceSearchView{ProtocolVersion: snapshot.ProtocolVersion,
+		WorkspaceID: snapshot.WorkspaceID, Results: results,
+		ScannedEntries: snapshot.ScannedEntries, ScannedFiles: snapshot.ScannedFiles,
+		ScannedBytes: snapshot.ScannedBytes, Truncated: snapshot.Truncated,
+		RootPathExposed: snapshot.RootPathExposed}, nil, nil
 }
 
 func (a *API) workspaceExplorer(request *http.Request,

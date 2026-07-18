@@ -250,6 +250,17 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 		{Path: OpenAPIPath, OperationID: "getOpenAPI", Summary: "Read the OpenAPI contract",
 			Description: "Returns the raw deterministic OpenAPI 3.1 JSON document under the same authentication boundary.",
 			Tag:         "System", RawDocument: true},
+		{Path: "/api/v1/operation-receipts", OperationID: "listOperationReceipts",
+			Summary: "List durable operation receipts", Tag: "Operations",
+			Description: "Returns a refreshable bounded history derived from terminal FileEdit apply, foreground Run wake, and inert Skill installation facts. It omits operation keys, paths, content digests, requester identities, lease identities, and package archive metadata.",
+			DataType:    reflect.TypeOf(OperationReceiptHistoryView{}),
+			Parameters: []openAPIParameter{
+				identityQueryParameter("run_id", "Optional exact Run filter"),
+				{Name: "limit", In: "query", Description: "Maximum terminal receipts",
+					Schema: map[string]any{"type": "integer", "minimum": 1,
+						"maximum": operationreceipt.MaxHistoryItems,
+						"default": application.DefaultOperationReceiptHistoryLimit}},
+			}},
 		{Path: "/api/v1/runs", OperationID: "listRuns", Summary: "List Runs", Tag: "Runs",
 			Description: "Returns a bounded cursor page of durable Runs.", DataType: reflect.TypeOf(RunView{}),
 			Collection: true, Paginated: true, Parameters: append(paginationParameters(),
@@ -279,6 +290,26 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 				{Name: "path", In: "query", Description: "Canonical Workspace-relative path returned by a previous explorer response; defaults to the root",
 					Schema: map[string]any{"type": "string", "maxLength": workspace.MaxExplorerPathRunes,
 						"default": "."}}}},
+		{Path: "/api/v1/workspaces/{workspace_id}/search",
+			OperationID: "searchWorkspace", Summary: "Search bounded Workspace evidence",
+			Tag:         "Workspaces",
+			Description: "Performs one deterministic bounded scan over redacted UTF-8 Explorer projections. It follows no links, starts no indexer, returns canonical relative references and snippets only, and marks every result as non-authorizing evidence.",
+			DataType:    reflect.TypeOf(WorkspaceSearchView{}), NotFound: true,
+			Parameters: []openAPIParameter{workspaceID,
+				{Name: "query", In: "query", Description: "Normalized case-insensitive filename or redacted text query",
+					Required: true, Schema: map[string]any{"type": "string", "minLength": 1,
+						"maxLength": workspace.MaxSearchQueryRunes}}}},
+		{Path: EvidenceAttachmentPathTemplate, Method: http.MethodPost,
+			OperationID: "attachRunEvidence", Summary: "Attach non-authorizing Workspace evidence",
+			Tag:         "Control",
+			Description: "Revalidates one exact redacted Workspace file projection and atomically appends it to the bound Session as tool-role evidence. Document text never becomes operator instruction and the operation starts no model, tool, process, or network call.",
+			DataType:    reflect.TypeOf(EvidenceAttachmentView{}),
+			RequestType: reflect.TypeOf(EvidenceAttachmentRequestView{}), Control: true,
+			NotFound: true, Parameters: []openAPIParameter{runID,
+				{Name: "Idempotency-Key", In: "header", Description: "Opaque retry key; only a domain-separated digest is persisted",
+					Required: true, Schema: map[string]any{"type": "string",
+						"minLength": domain.MinAgentOperationKeyBytes,
+						"maxLength": domain.MaxAgentOperationKeyBytes, "pattern": `^\S+$`}}}},
 		{Path: "/api/v1/runs/{run_id}", OperationID: "getRun", Summary: "Inspect a Run", Tag: "Runs",
 			Description: "Returns Run, Mission, checkpoint, tool usage, token-free execution-lease metadata, and read-only Plan/Delivery and external-Skill metadata projections when present.",
 			DataType:    reflect.TypeOf(RunDetailView{}), NotFound: true, Parameters: []openAPIParameter{runID}},
@@ -904,6 +935,12 @@ func applyOpenAPIFieldMetadata(typeName string, fieldName string, schema map[str
 	if typeName == "WorkspaceExplorerView" && fieldName == "entries" {
 		schema["maxItems"] = workspace.MaxExplorerEntries
 	}
+	if typeName == "WorkspaceSearchView" && fieldName == "results" {
+		schema["maxItems"] = workspace.MaxSearchResults
+	}
+	if typeName == "OperationReceiptHistoryView" && fieldName == "items" {
+		schema["maxItems"] = operationreceipt.MaxHistoryItems
+	}
 }
 
 var openAPIFieldEnums = map[string][]string{
@@ -946,11 +983,19 @@ var openAPIFieldEnums = map[string][]string{
 	"OperationReceiptView.retry_strategy":               {string(operationreceipt.RetrySameOperationKey), string(operationreceipt.RetrySameWakeGeneration)},
 	"OperationReceiptView.recovery_action":              {string(operationreceipt.RecoveryNone), string(operationreceipt.RecoveryRetryAfterGrace)},
 	"OperationReceiptView.cleanup_state":                {string(operationreceipt.CleanupNotApplicable), string(operationreceipt.CleanupComplete), string(operationreceipt.CleanupPendingReview)},
+	"OperationReceiptHistoryView.protocol_version":      {operationreceipt.HistoryProtocolVersion},
+	"OperationReceiptHistoryItemView.scope":             {"run", "skill_registry"},
 	"WorkspaceExplorerView.protocol_version":            {workspace.ExplorerProtocolVersion},
 	"WorkspaceExplorerView.kind":                        {"directory", "file"},
 	"WorkspaceExplorerEntryView.kind":                   {"directory", "file", "blocked"},
 	"WorkspaceExplorerProvenanceView.version":           {session.ContextProvenanceVersion},
 	"WorkspaceExplorerProvenanceView.source_kind":       {session.SourceWorkspaceFile, session.SourceWorkspaceList},
+	"WorkspaceSearchView.protocol_version":              {workspace.SearchProtocolVersion},
+	"WorkspaceSearchResultView.match_kind":              {"filename", "content", "filename_and_content"},
+	"EvidenceAttachmentRequestView.version":             {session.EvidenceAttachmentProtocolVersion},
+	"EvidenceAttachmentRequestView.source_kind":         {session.SourceWorkspaceFile},
+	"EvidenceAttachmentView.protocol_version":           {session.EvidenceAttachmentProtocolVersion},
+	"EvidenceAttachmentView.source_kind":                {session.SourceWorkspaceFile},
 	"ProviderAvailabilityView.kind":                     {modelregistry.ProviderKindLocal, modelregistry.ProviderKindAnthropicCompatible},
 	"ProviderAvailabilityView.status":                   {modelregistry.ProviderAvailable, modelregistry.ProviderNotConfigured, modelregistry.ProviderInvalidConfiguration},
 	"ProviderAvailabilityView.credential_source":        {"none", "environment"},
@@ -1129,6 +1174,11 @@ var openAPIFieldMinimums = map[string]float64{
 	"WorkspaceExplorerView.total_bytes":                   0,
 	"WorkspaceExplorerView.returned_bytes":                0,
 	"WorkspaceExplorerView.redaction_count":               0,
+	"WorkspaceSearchResultView.line":                      0,
+	"WorkspaceSearchView.scanned_entries":                 0,
+	"WorkspaceSearchView.scanned_files":                   0,
+	"WorkspaceSearchView.scanned_bytes":                   0,
+	"EvidenceAttachmentView.session_message_id":           1,
 }
 
 var openAPIFieldMaximums = map[string]float64{
@@ -1150,6 +1200,9 @@ var openAPIFieldMaximums = map[string]float64{
 	"RunWakeScheduleRequestView.max_elapsed_seconds":   domain.MaxRunWakeElapsedSeconds,
 	"RunWakeExecutionRequestView.max_steps":            domain.MaxRunExecutionHandoffSteps,
 	"WorkspaceExplorerView.returned_bytes":             workspace.MaxExplorerProjectedBytes,
+	"WorkspaceSearchView.scanned_entries":              workspace.MaxSearchEntries,
+	"WorkspaceSearchView.scanned_files":                workspace.MaxSearchFiles,
+	"WorkspaceSearchView.scanned_bytes":                workspace.MaxSearchReadBytes,
 }
 
 var openAPIFieldMaxLengths = map[string]int{
@@ -1167,6 +1220,12 @@ var openAPIFieldMaxLengths = map[string]int{
 	"WorkspaceExplorerProvenanceView.content_sha256": 64,
 	"WorkspaceExplorerEntryView.name":                255,
 	"WorkspaceExplorerEntryView.path":                workspace.MaxExplorerPathRunes,
+	"WorkspaceSearchResultView.path":                 workspace.MaxExplorerPathRunes,
+	"WorkspaceSearchResultView.snippet":              workspace.MaxSearchSnippetBytes,
+	"EvidenceAttachmentRequestView.source_ref":       workspace.MaxExplorerPathRunes,
+	"EvidenceAttachmentRequestView.content_sha256":   64,
+	"EvidenceAttachmentView.source_ref":              workspace.MaxExplorerPathRunes,
+	"EvidenceAttachmentView.content_sha256":          64,
 }
 
 func runStatuses() []string {

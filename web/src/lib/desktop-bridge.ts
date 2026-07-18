@@ -42,6 +42,7 @@ export interface DesktopConnectionBootstrap {
   shell_execution_enabled: false;
   docker_execution_enabled: false;
   skill_installation_enabled: boolean;
+  evidence_attachment_enabled: boolean;
   renderer_path_input_supported: false;
 }
 
@@ -236,6 +237,7 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
   if (!hasExactKeys(value, [
     "api_base_url", "api_version", "app_version", "approval_control_enabled",
     "control_enabled", "control_token", "docker_execution_enabled", "file_edit_apply_enabled",
+    "evidence_attachment_enabled",
     "file_edit_review_enabled", "model_control_enabled", "process_execution_enabled",
     "protocol_version", "read_only_default",
     "plan_delivery_control_enabled", "read_token", "renderer_path_input_supported",
@@ -264,13 +266,15 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
     typeof value.file_edit_apply_enabled === "boolean" &&
     typeof value.run_wake_execution_enabled === "boolean" &&
     typeof value.skill_installation_enabled === "boolean" &&
+    typeof value.evidence_attachment_enabled === "boolean" &&
     (value.control_token !== "") === (value.control_enabled || value.run_creation_enabled ||
       value.session_message_enabled || value.session_steering_control_enabled ||
       value.run_lifecycle_enabled || value.run_execution_enabled ||
 	  value.plan_delivery_control_enabled || value.approval_control_enabled ||
 	  value.model_control_enabled || value.file_edit_review_enabled ||
 	  value.run_wake_control_enabled || value.file_edit_apply_enabled ||
-      value.run_wake_execution_enabled || value.skill_installation_enabled) &&
+      value.run_wake_execution_enabled || value.skill_installation_enabled ||
+      value.evidence_attachment_enabled) &&
     (value.control_token === "" || validToken(value.control_token)) &&
     value.control_token !== value.read_token &&
     value.read_only_default === !(value.control_enabled || value.run_creation_enabled ||
@@ -279,7 +283,8 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
 	  value.plan_delivery_control_enabled || value.approval_control_enabled ||
 	  value.model_control_enabled || value.file_edit_review_enabled ||
 	  value.run_wake_control_enabled || value.file_edit_apply_enabled ||
-      value.run_wake_execution_enabled || value.skill_installation_enabled) &&
+      value.run_wake_execution_enabled || value.skill_installation_enabled ||
+      value.evidence_attachment_enabled) &&
     value.process_execution_enabled === false && value.shell_execution_enabled === false &&
     value.docker_execution_enabled === false &&
     value.renderer_path_input_supported === false;

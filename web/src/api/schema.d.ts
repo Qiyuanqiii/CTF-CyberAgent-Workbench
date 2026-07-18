@@ -164,6 +164,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/operation-receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List durable operation receipts
+         * @description Returns a refreshable bounded history derived from terminal FileEdit apply, foreground Run wake, and inert Skill installation facts. It omits operation keys, paths, content digests, requester identities, lease identities, and package archive metadata.
+         */
+        get: operations["listOperationReceipts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs": {
         parameters: {
             query?: never;
@@ -402,6 +422,26 @@ export interface paths {
         get: operations["streamRunEvents"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/evidence-attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach non-authorizing Workspace evidence
+         * @description Revalidates one exact redacted Workspace file projection and atomically appends it to the bound Session as tool-role evidence. Document text never becomes operator instruction and the operation starts no model, tool, process, or network call.
+         */
+        post: operations["attachRunEvidence"];
         delete?: never;
         options?: never;
         head?: never;
@@ -956,6 +996,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search bounded Workspace evidence
+         * @description Performs one deterministic bounded scan over redacted UTF-8 Explorer projections. It follows no links, starts no indexer, returns canonical relative references and snippets only, and marks every result as non-authorizing evidence.
+         */
+        get: operations["searchWorkspace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1215,6 +1275,34 @@ export interface components {
             subject_id?: string;
             type: string;
             version: string;
+        };
+        EvidenceAttachmentRequestView: {
+            content_sha256: string;
+            /** @enum {string} */
+            source_kind: "workspace_file";
+            source_ref: string;
+            /** @enum {string} */
+            version: "session_evidence_attachment.v1";
+        };
+        EvidenceAttachmentView: {
+            attachment_id: string;
+            capability_grant: boolean;
+            content_sha256: string;
+            execution_started: boolean;
+            instruction_authorized: boolean;
+            model_called: boolean;
+            /** @enum {string} */
+            protocol_version: "session_evidence_attachment.v1";
+            replayed: boolean;
+            run_id: string;
+            session_id: string;
+            /** Format: int64 */
+            session_message_id: number;
+            /** @enum {string} */
+            source_kind: "workspace_file";
+            source_ref: string;
+            tool_called: boolean;
+            workspace_id: string;
         };
         ExternalSkillDeliveryView: {
             /** Format: int32 */
@@ -1590,6 +1678,21 @@ export interface components {
             version: number;
             /** @enum {string} */
             visibility: "run" | "root" | "owner";
+        };
+        OperationReceiptHistoryItemView: {
+            /** Format: date-time */
+            completed_at: string;
+            id: string;
+            receipt: components["schemas"]["OperationReceiptView"];
+            run_id?: string;
+            /** @enum {string} */
+            scope: "run" | "skill_registry";
+        };
+        OperationReceiptHistoryView: {
+            items: components["schemas"]["OperationReceiptHistoryItemView"][];
+            /** @enum {string} */
+            protocol_version: "operation_receipt_history.v1";
+            truncated: boolean;
         };
         OperationReceiptView: {
             /** @enum {string} */
@@ -2302,6 +2405,30 @@ export interface components {
             truncated: boolean;
             workspace_id: string;
         };
+        WorkspaceSearchResultView: {
+            content_truncated: boolean;
+            /** Format: int32 */
+            line: number;
+            /** @enum {string} */
+            match_kind: "filename" | "content" | "filename_and_content";
+            path: string;
+            provenance: components["schemas"]["WorkspaceExplorerProvenanceView"];
+            snippet: string;
+        };
+        WorkspaceSearchView: {
+            /** @enum {string} */
+            protocol_version: "workspace_search.v1";
+            results: components["schemas"]["WorkspaceSearchResultView"][];
+            root_path_exposed: boolean;
+            /** Format: int64 */
+            scanned_bytes: number;
+            /** Format: int32 */
+            scanned_entries: number;
+            /** Format: int32 */
+            scanned_files: number;
+            truncated: boolean;
+            workspace_id: string;
+        };
         WorkspaceView: {
             /** Format: date-time */
             created_at: string;
@@ -2678,6 +2805,42 @@ export interface operations {
                 content: {
                     "application/vnd.oai.openapi+json": {
                         [key: string]: unknown;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listOperationReceipts: {
+        parameters: {
+            query?: {
+                /** @description Optional exact Run filter */
+                run_id?: string;
+                /** @description Maximum terminal receipts */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperationReceiptHistoryView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
                     };
                 };
             };
@@ -3218,6 +3381,52 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    attachRunEvidence: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EvidenceAttachmentRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["EvidenceAttachmentView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];
         };
@@ -4430,6 +4639,44 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["WorkspaceExplorerView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    searchWorkspace: {
+        parameters: {
+            query: {
+                /** @description Normalized case-insensitive filename or redacted text query */
+                query: string;
+            };
+            header?: never;
+            path: {
+                /** @description Workspace identity */
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["WorkspaceSearchView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";

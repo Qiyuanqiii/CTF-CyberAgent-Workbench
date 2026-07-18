@@ -55,6 +55,7 @@ type desktopOptions struct {
 	fileEditApply          bool
 	runWakeExecution       bool
 	skillInstallation      bool
+	evidenceAttachment     bool
 	version                bool
 }
 
@@ -203,6 +204,8 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 		"enable explicitly launched foreground wake execution")
 	skillInstallation := fs.Bool("enable-skill-installation", false,
 		"enable confirmed inert Skill package installation")
+	evidenceAttachment := fs.Bool("enable-evidence-attachments", false,
+		"enable idempotent non-authorizing Workspace evidence attachment")
 	version := fs.Bool("version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
 		return desktopOptions{}, err
@@ -223,6 +226,7 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 		fileEditApply:          *fileEditApply,
 		runWakeExecution:       *runWakeExecution,
 		skillInstallation:      *skillInstallation,
+		evidenceAttachment:     *evidenceAttachment,
 		version:                *version}, nil
 }
 
@@ -247,7 +251,7 @@ func runDesktop(config desktopOptions) error {
 		config.sessionSteeringControl || config.runLifecycle || config.runExecution ||
 		config.planDeliveryControl || config.approvalControl || config.modelControl ||
 		config.fileEditReview || config.runWakeControl || config.fileEditApply ||
-		config.runWakeExecution || config.skillInstallation {
+		config.runWakeExecution || config.skillInstallation || config.evidenceAttachment {
 		controlToken, err = httpapi.GenerateAccessToken()
 		if err != nil {
 			return err
@@ -272,6 +276,7 @@ func runDesktop(config desktopOptions) error {
 		FileEditApplyEnabled:          config.fileEditApply,
 		RunWakeExecutionEnabled:       config.runWakeExecution,
 		SkillInstallationEnabled:      config.skillInstallation,
+		EvidenceAttachmentEnabled:     config.evidenceAttachment,
 		AppVersion:                    app.Version, UIHandler: bundle,
 	})
 	if err != nil {
@@ -298,6 +303,7 @@ func runDesktop(config desktopOptions) error {
 		FileEditApplyEnabled:          config.fileEditApply,
 		RunWakeExecutionEnabled:       config.runWakeExecution,
 		SkillInstallationEnabled:      config.skillInstallation,
+		EvidenceAttachmentEnabled:     config.evidenceAttachment,
 		AppVersion:                    app.Version, UIDigest: bundle.Digest(), Selector: selector,
 		PreviewBridge: preview, SkillInstaller: controlPlane.SkillInstaller(),
 	})

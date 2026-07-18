@@ -51,6 +51,7 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitCapabilities(t *testin
 		{flag: "--enable-file-edit-apply", want: desktopOptions{fileEditApply: true}},
 		{flag: "--enable-run-wake-execution", want: desktopOptions{runWakeExecution: true}},
 		{flag: "--enable-skill-installation", want: desktopOptions{skillInstallation: true}},
+		{flag: "--enable-evidence-attachments", want: desktopOptions{evidenceAttachment: true}},
 	} {
 		parsed, err := parseDesktopOptions([]string{current.flag})
 		if err != nil {

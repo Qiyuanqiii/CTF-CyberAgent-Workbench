@@ -1,6 +1,6 @@
 # CyberAgent Workbench 进度书
 
-更新时间：2026-07-18
+更新时间：2026-07-19
 
 ## 一、当前阶段
 
@@ -9,10 +9,10 @@
 从 schema v49 起采用“双指标”，不再使用容易混淆的单一“整体产品愿景”百分比：
 
 - 架构完成度：约 98%；其中 V2 Run-centric 控制平面约 99%。该指标衡量 Go 主控、持久化状态机和模块边界的覆盖程度。
-- 产品可用度：完整 Code + Cyber 产品约 70-74%；其中通用 Coding Agent 工作流约 66%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
+- 产品可用度：完整 Code + Cyber 产品约 78-82%；其中通用 Coding Agent 工作流约 74%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
 - 上述数值是依据已测试任务切片给出的工程估算，不是性能基准，也不代表仍被安全关闭的功能已经可用。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程 root 活动模型取消。P3 主体已落地 WorkItem/Note/Context，P4 已完成 schema v19-v38 的单 root Coordinator、最多两个核心 child 和独立 1/2/4/6 只读 Fan-out，P5 已落地统一 Tool Gateway、审批/Grant、预算、ScriptProcess、Artifact 和结构化工具。P9 已推进到 schema v76 / D1-B1：除 Run/Session/Plan/审批/有界执行外，现有 CLI/API/Desktop 还支持显式无正文 Provider 诊断、持久化模型路由、Diff 独立审阅/apply、可取消 wake/retry 意图与一次前台消费，以及确认后写入惰性 Registry 的 Skill 安装。真实 Local/Docker/Shell 进程、后台 wake worker、安装脚本/钩子和远程 Skill 分发继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程 root 活动模型取消。P3 主体已落地 WorkItem/Note/Context，P4 已完成 schema v19-v38 的单 root Coordinator、最多两个核心 child 和独立 1/2/4/6 只读 Fan-out，P5 已落地统一 Tool Gateway、审批/Grant、预算、ScriptProcess、Artifact 和结构化工具。P9 已推进到 schema v77 / D1-U2：除 Run/Session/Plan/审批/有界执行外，现有 CLI/API/Desktop 还支持显式无正文 Provider 诊断、持久化模型路由、Diff 独立审阅/apply、可取消 wake/retry 意图与一次前台消费、惰性 Skill 安装、有界 Workspace explore/search、非授权 evidence 附加和可刷新终态回执历史。真实 Local/Docker/Shell 进程、后台 wake worker、安装脚本/钩子和远程 Skill 分发继续关闭。
 
 P8 已推进到 schema v37 及其只读 CI 投影：v35 把完成的 Fan-out execution 投影为通用 `draft` Finding、不可变 `model_assertion` Evidence 和可重建的 Markdown/JSON Report；v36 增加同 Run 冻结 Artifact Evidence、一次性 operator `validated/rejected` 决定与完整复核；v37 以独立不可变事实完成 `validated -> accepted -> fixed`，并强制修复 Evidence 来自接受后新建且未用于验证的同 Run Artifact。验证、接受和修复始终分离；SARIF、通用 CI gate 与 GitHub Actions annotations 均为同一持久化事实上的 Go 只读投影。
 
@@ -910,10 +910,22 @@ D1-W1 新增可复现 linker metadata、只读 `cyberagent doctor portable [--js
 
 双指标更新为架构完成度约 98%（V2 约 99%）、完整产品可用度约 74-78%、通用 Coding Agent 约 70%、Cyber 自动化约 20%。下一批建议为 D1-E2 有界 Workspace 搜索、D1-C1 操作者显式把单份非授权 Workspace evidence 附加到既有 Session 队列，以及 D1-U2 可刷新 metadata-only operation receipt history。Windows 10 人工矩阵、签名/安装包、真实进程、Rust analyzer 与 CTF 自动化继续独立后置，边界见 ADR 0042。
 
+schema v77 / D1-E2、D1-C1、D1-U2 三切片批次已完成，任务 ID 为 `P9-Workspace-Search-Evidence-Attachment-Receipt-History-v77`。D1-E2 新增一次性 `workspace_search.v1`：Go 只搜索既有 Explorer 脱敏投影，查询最多 128 个 Unicode code point，一次最多扫描 128 个目录、1000 个条目、64 个普通文件并返回 50 个结果；不建立 indexer/watcher，不跟随链接，不搜索原始字节，不返回宿主 root。结果只含 canonical relative reference、512-byte 纯文本 snippet 和 `instruction_authorized=false` provenance。
+
+D1-C1 新增独立且默认关闭的 `session_evidence_attachment.v1`。HTTP/Desktop 只提交精确 Run、Go 返回的相对引用、投影 SHA-256、协议版本和内存幂等 key。Application 重新加载并绑定 Run/Mission/active Session/registered Workspace，再重新投影文件；Store 在一个事务中写 tool-role Session message、`session.evidence_attached` 事件与不可变 attachment。schema v77 trigger 再次要求 source/hash/message/event 全匹配以及 `instruction_authorized=false`。即使 README 含有“自动助手应跳过 .env”之类的诱导文本，进入上下文后仍是 untrusted user evidence，不能变成操作者指令、审批、Scope 或 capability。
+
+D1-U2 新增 `operation_receipt_history.v1` 与 React Receipts 页。Go 从 FileEdit apply、前台 wake consume 和惰性 Skill install 终态事实生成 newest-first、最多 100 条记录，可精确按 Run 过滤；公开 ID 使用 domain-separated opaque hash，不返回 operation key/digest、路径/正文摘要、请求者、包 archive 元数据或 private lease。FileEdit staging 只调用只读 `InspectStaging`，任何路径/年龄/类型/大小/身份/hash 不确定都保守返回 `pending_review`，刷新历史绝不删除文件。
+
+本批普通整合门全绿：最终 uncached 全仓 Go 297.9 秒；Windows Desktop tag、`go vet`、module verify/tidy diff、23 个文件 92 项 React 测试、strict TypeScript、Vite production build、确定性 OpenAPI/TypeScript、隔离 mock-only CLI smoke 和 npm 零漏洞全部通过。OpenAPI 为 50 个 path、53 个 operation、112 个 schema。真实 Windows 连续双构建可复现，未签名 GUI SHA-256 为 `d187601e9e9d8cb0d4ee644e3c9aa1c7617905580b001ef7955dbc35b8c47af3`；自动兼容检查通过，但无安装器/注册表且人工矩阵未完成，所以 `release_ready=false`。
+
+组合审计修复两个具体边界：Unicode case mapping 可能改变字节长度，因此搜索改为逐原始行匹配，绝不用 lower-case 偏移切原文；搜索真实读预算补上每文件最多 `utf8.UTFMax` 的 Explorer 前瞻。canonical Workspace evidence reference 同时由 Go 与 schema v77 CHECK 约束。未发现未解决高/中风险；本批未调用真实 Provider、模型、工具、Shell、LocalRunner、Docker、网络、API key、安装器、注册表、自启动或更新。该批是新组六切片的前三片，因此不提前声称 full race/staticcheck/govulncheck 门。
+
+双指标更新为架构完成度约 98%（V2 约 99%）、完整产品可用度约 78-82%、通用 Coding Agent 约 74%、Cyber 自动化约 20%。下一批建议为 D1-O1 Go-owned 有界操作者行动中心、D1-C2 metadata-only 已附加 evidence 清单与 D1-K1 只调用既有已启用能力的键盘命令面板；累计六片后执行 ordinary/race/vet/staticcheck/govulncheck/依赖/隐私完整健壮性门。Windows 10 人工矩阵、签名/安装包、Provider secret UI、真实进程、Rust analyzer 与 CTF 自动化继续独立后置，边界见 ADR 0043。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0042-receipts-explorer-portable-build.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0043-workspace-search-evidence-attachment-receipt-history.md`。

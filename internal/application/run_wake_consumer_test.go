@@ -9,6 +9,7 @@ import (
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/llm"
+	"cyberagent-workbench/internal/operationreceipt"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/store"
 )
@@ -72,6 +73,12 @@ func TestForegroundRunWakeConsumerExecutesOnceAndSettlesCompleted(t *testing.T) 
 		result.Consumption.Status != domain.RunWakeConsumptionCompleted ||
 		result.Handoff.Result == nil || provider.calls != 1 {
 		t.Fatalf("consume result=%#v calls=%d err=%v", result, provider.calls, err)
+	}
+	records, err := state.ListTerminalOperationRecords(ctx, run.ID, 2)
+	if err != nil || len(records) != 1 ||
+		records[0].Kind != operationreceipt.KindRunWakeConsume ||
+		records[0].Outcome != "completed" {
+		t.Fatalf("Run wake terminal receipt source=%#v err=%v", records, err)
 	}
 	if err := state.Close(); err != nil {
 		t.Fatal(err)

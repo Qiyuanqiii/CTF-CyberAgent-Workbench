@@ -65,6 +65,7 @@ describe("ConnectionGate", () => {
       shell_execution_enabled: false,
       docker_execution_enabled: false,
       skill_installation_enabled: false,
+      evidence_attachment_enabled: false,
       renderer_path_input_supported: false,
     });
     window.go = { desktop: { DesktopBridge: {

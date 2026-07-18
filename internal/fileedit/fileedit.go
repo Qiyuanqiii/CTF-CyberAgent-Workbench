@@ -386,6 +386,55 @@ func CleanupStaleStaging(workspaceRoot string, path string, proposedHash string,
 	return result, nil
 }
 
+// InspectStaging reports whether cleanup may still be required without
+// deleting or modifying any directory entry.
+func InspectStaging(workspaceRoot string, path string, proposedHash string,
+	now time.Time,
+) (StagingCleanupResult, error) {
+	if !validDigest(proposedHash) || now.IsZero() {
+		return StagingCleanupResult{}, errors.New("staging inspection digest and time are required")
+	}
+	target, err := tools.NewWorkspaceFS(workspaceRoot).ResolveForWrite(path)
+	if err != nil {
+		return StagingCleanupResult{}, err
+	}
+	directory, err := os.Open(filepath.Dir(target))
+	if err != nil {
+		return StagingCleanupResult{}, err
+	}
+	defer directory.Close()
+	entries, err := directory.ReadDir(stagingCleanupScanLimit + 1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return StagingCleanupResult{}, err
+	}
+	result := StagingCleanupResult{Pending: len(entries) > stagingCleanupScanLimit}
+	if len(entries) > stagingCleanupScanLimit {
+		entries = entries[:stagingCleanupScanLimit]
+	}
+	cutoff := now.UTC().Add(-StagingCleanupGrace)
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), stagingFilePrefix) {
+			continue
+		}
+		candidate := filepath.Join(filepath.Dir(target), entry.Name())
+		info, infoErr := os.Lstat(candidate)
+		if infoErr != nil || !info.Mode().IsRegular() || info.Size() < 0 ||
+			info.Size() > MaxContentBytes || !info.ModTime().Before(cutoff) {
+			result.Pending = true
+			continue
+		}
+		matches, matchErr := stagingFileMatches(candidate, info, proposedHash)
+		if matchErr != nil {
+			result.Pending = true
+			continue
+		}
+		if matches {
+			result.Pending = true
+		}
+	}
+	return result, nil
+}
+
 func stagingFileMatches(path string, expected os.FileInfo, proposedHash string) (bool, error) {
 	file, err := os.Open(path)
 	if err != nil {

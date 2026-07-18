@@ -105,7 +105,9 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				(path == RunWakeExecutionPathTemplate &&
 					item.Post.OperationID == "consumeRunWake") ||
 				(path == SkillPackageInstallPath &&
-					item.Post.OperationID == "installSkillPackage")
+					item.Post.OperationID == "installSkillPackage") ||
+				(path == EvidenceAttachmentPathTemplate &&
+					item.Post.OperationID == "attachRunEvidence")
 			if !validControl ||
 				item.Post.ReadOnly || item.Post.Responses["202"] == nil || item.Post.RequestBody == nil ||
 				len(item.Post.Security) != 1 || item.Post.Security[0]["ControlBearerAuth"] == nil {
@@ -158,7 +160,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				path == RunWakeIntentPathTemplate ||
 				path == RunWakeCancellationPathTemplate ||
 				path == RunWakeExecutionPathTemplate ||
-				path == SkillPackageInstallPath) &&
+				path == SkillPackageInstallPath ||
+				path == EvidenceAttachmentPathTemplate) &&
 				method == "post") {
 				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
 			}
@@ -336,6 +339,7 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 	fixture.api.fileEditApplyEnabled = true
 	fixture.api.runWakeExecutionEnabled = true
 	fixture.api.skillInstallationEnabled = true
+	fixture.api.evidenceAttachmentEnabled = true
 	fixture.api.runLifecycleController = application.NewRunLifecycleControlService(fixture.store)
 	executionController := application.NewRunExecutionHandoffService(
 		fixture.store, llm.NewDefaultRouter(), policy.NewDefaultChecker())
@@ -362,6 +366,12 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	evidenceContent := "OpenAPI evidence\n"
+	if err := os.WriteFile(filepath.Join(fixture.workspace.RootPath, "README.md"),
+		[]byte(evidenceContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	evidenceDigest := sha256.Sum256([]byte(evidenceContent))
 	replacements := map[string]string{
 		"{run_id}":       fixture.run.ID,
 		"{workspace_id}": fixture.workspace.ID,
@@ -398,6 +408,9 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", wakeRun.ID)
 		} else if spec.Path == RunWakeExecutionPathTemplate {
 			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", wakeExecutionRun.ID)
+		}
+		if spec.OperationID == "searchWorkspace" {
+			requestPath += "?query=README"
 		}
 		t.Run(spec.OperationID, func(t *testing.T) {
 			var response *httptest.ResponseRecorder
@@ -447,6 +460,10 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 					body = `{"version":"skill_package_installation.v1","archive_base64":"` +
 						base64.StdEncoding.EncodeToString(skillArchive) +
 						`","surface":"code","confirm_untrusted":true}`
+				} else if spec.Path == EvidenceAttachmentPathTemplate {
+					body = `{"version":"session_evidence_attachment.v1",` +
+						`"source_kind":"workspace_file","source_ref":"README.md",` +
+						`"content_sha256":"` + hex.EncodeToString(evidenceDigest[:]) + `"}`
 				} else if spec.Path != RunExecutionProfileControlPathTemplate {
 					attemptID := fixture.checkpoint.AttemptID
 					modelAttempt := 1

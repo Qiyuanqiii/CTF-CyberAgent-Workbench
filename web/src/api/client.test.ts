@@ -816,6 +816,63 @@ describe("CyberAgentClient", () => {
       .rejects.toThrow("Go-issued relative path");
   });
 
+  it("validates Workspace search, evidence attachment, and metadata-only receipt history", async () => {
+    const provenance = { version: "context_provenance.v1", source_kind: "workspace_file",
+      source_ref: "README.md", content_sha256: "d".repeat(64),
+      instruction_authorized: false };
+    const search = { protocol_version: "workspace_search.v1", workspace_id: "workspace-1",
+      results: [{ path: "README.md", match_kind: "content", line: 2,
+        snippet: "Notes for automated assistants", content_truncated: false, provenance }],
+      scanned_entries: 1, scanned_files: 1, scanned_bytes: 80,
+      truncated: false, root_path_exposed: false };
+    const attachment = { protocol_version: "session_evidence_attachment.v1",
+      attachment_id: "evidence-1", run_id: "run-1", session_id: "session-1",
+      workspace_id: "workspace-1", source_kind: "workspace_file", source_ref: "README.md",
+      content_sha256: provenance.content_sha256, session_message_id: 8,
+      instruction_authorized: false, replayed: false, execution_started: false,
+      model_called: false, tool_called: false, capability_grant: false };
+    const receipt = operationReceipt("file_edit_apply", "applied",
+      "same_operation_key", "complete");
+    const history = { protocol_version: "operation_receipt_history.v1", truncated: false,
+      items: [{ id: "receipt-opaque", scope: "run", run_id: "run-1",
+        completed_at: "2026-07-19T10:00:00Z", receipt }] };
+    const envelope = (requestID: string, data: unknown, status = 200) =>
+      new Response(JSON.stringify({ version: "api.v1", request_id: requestID, data }),
+        { status, headers: { "Content-Type": "application/json" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(envelope("req-search", search))
+      .mockResolvedValueOnce(envelope("req-evidence", attachment, 202))
+      .mockResolvedValueOnce(envelope("req-history", history))
+      .mockResolvedValueOnce(envelope("req-history-forged", {
+        ...history, items: [{ ...history.items[0], receipt: {
+          ...receipt, kind: "shell_execute", outcome: "completed",
+        } }],
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false, evidenceAttachmentEnabled: true,
+    });
+
+    await expect(client.workspaceSearch("workspace-1", "automated assistants"))
+      .resolves.toEqual(search);
+    await expect(client.attachEvidence("run-1", {
+      version: "session_evidence_attachment.v1", source_kind: "workspace_file",
+      source_ref: "README.md", content_sha256: provenance.content_sha256,
+    }, "web-evidence-operation-0001")).resolves.toEqual(attachment);
+    await expect(client.operationReceiptHistory("run-1")).resolves.toEqual(history);
+    const [searchURL] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [attachURL, attachInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const [historyURL] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(searchURL).toContain("/workspaces/workspace-1/search?query=automated+assistants");
+    expect(attachURL).toBe("/api/v1/runs/run-1/evidence-attachments");
+    expect(attachInit.headers).toMatchObject({ Authorization: "Bearer control-secret",
+      "Idempotency-Key": "web-evidence-operation-0001" });
+    expect(String(attachInit.body)).not.toContain("control-secret");
+    expect(historyURL).toContain("/operation-receipts?run_id=run-1&limit=100");
+    await expect(client.operationReceiptHistory("run-1"))
+      .rejects.toThrow("unsupported terminal result");
+  });
+
   it("polls Run events with a stream-compatible opaque cursor and validates the envelope", async () => {
     const frame: RunEventStreamView = {
       version: "run-events.v1",

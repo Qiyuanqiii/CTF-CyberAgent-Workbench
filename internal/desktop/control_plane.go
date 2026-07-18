@@ -48,6 +48,7 @@ type ControlPlaneConfig struct {
 	FileEditApplyEnabled          bool
 	RunWakeExecutionEnabled       bool
 	SkillInstallationEnabled      bool
+	EvidenceAttachmentEnabled     bool
 	AppVersion                    string
 	UIHandler                     http.Handler
 }
@@ -115,6 +116,7 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 		FileEditApplyEnabled:          config.FileEditApplyEnabled,
 		RunWakeExecutionEnabled:       config.RunWakeExecutionEnabled,
 		SkillInstallationEnabled:      config.SkillInstallationEnabled,
+		EvidenceAttachmentEnabled:     config.EvidenceAttachmentEnabled,
 		RunLifecycleController:        lifecycleControl,
 		RunExecutionController:        executionControl,
 		PlanDeliveryController:        planDeliveryControl,

@@ -27,6 +27,7 @@ import (
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/modelregistry"
+	"cyberagent-workbench/internal/operationreceipt"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/toolbudget"
@@ -120,6 +121,12 @@ type Store interface {
 	ListSessionsPage(ctx context.Context, offset int, limit int) ([]session.Session, error)
 	ListSessionMessagesPage(ctx context.Context, sessionID string, includeCompacted bool,
 		offset int, limit int) ([]session.Message, error)
+	ListTerminalOperationRecords(context.Context, string, int) (
+		[]operationreceipt.TerminalRecord, error)
+	GetEvidenceAttachment(context.Context, string) (session.EvidenceAttachment,
+		session.Message, bool, error)
+	AttachEvidence(context.Context, session.EvidenceAttachment, session.Message) (
+		session.EvidenceAttachment, session.Message, bool, error)
 
 	GetWorkItem(ctx context.Context, id string) (domain.WorkItem, error)
 	ListWorkItems(ctx context.Context, filter domain.WorkItemFilter) ([]domain.WorkItem, error)
@@ -147,6 +154,7 @@ type Config struct {
 	FileEditApplyEnabled          bool
 	RunWakeExecutionEnabled       bool
 	SkillInstallationEnabled      bool
+	EvidenceAttachmentEnabled     bool
 	RunLifecycleController        RunLifecycleController
 	RunExecutionController        RunExecutionController
 	PlanDeliveryController        PlanDeliveryController
@@ -181,6 +189,7 @@ type API struct {
 	fileEditApplyEnabled          bool
 	runWakeExecutionEnabled       bool
 	skillInstallationEnabled      bool
+	evidenceAttachmentEnabled     bool
 	runLifecycleController        RunLifecycleController
 	runExecutionController        RunExecutionController
 	planDeliveryController        PlanDeliveryController
@@ -227,7 +236,7 @@ func New(store Store, config Config) (*API, error) {
 		config.ApprovalControlEnabled || config.ModelControlEnabled ||
 		config.FileEditReviewEnabled || config.RunWakeControlEnabled ||
 		config.FileEditApplyEnabled || config.RunWakeExecutionEnabled ||
-		config.SkillInstallationEnabled) &&
+		config.SkillInstallationEnabled || config.EvidenceAttachmentEnabled) &&
 		!controlTokenPresent {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"HTTP API control capabilities require a control token")
@@ -304,6 +313,7 @@ func New(store Store, config Config) (*API, error) {
 		fileEditApplyEnabled:          controlTokenPresent && config.FileEditApplyEnabled,
 		runWakeExecutionEnabled:       controlTokenPresent && config.RunWakeExecutionEnabled,
 		skillInstallationEnabled:      controlTokenPresent && config.SkillInstallationEnabled,
+		evidenceAttachmentEnabled:     controlTokenPresent && config.EvidenceAttachmentEnabled,
 		runLifecycleController:        config.RunLifecycleController,
 		runExecutionController:        config.RunExecutionController,
 		planDeliveryController:        config.PlanDeliveryController,
@@ -480,6 +490,10 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if request.URL.Path == SkillPackageInstallPath {
 		a.serveSkillPackageInstallControl(tracked, request, requestID)
+		return
+	}
+	if runID, matched := matchEvidenceAttachmentPath(request.URL.Path); matched {
+		a.serveEvidenceAttachmentControl(tracked, request, requestID, runID)
 		return
 	}
 	if runID, matched := matchRunExecutionControlPath(request.URL.Path); matched {

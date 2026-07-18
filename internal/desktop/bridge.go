@@ -55,6 +55,7 @@ type ConnectionBootstrap struct {
 	ShellExecutionEnabled         bool   `json:"shell_execution_enabled"`
 	DockerExecutionEnabled        bool   `json:"docker_execution_enabled"`
 	SkillInstallationEnabled      bool   `json:"skill_installation_enabled"`
+	EvidenceAttachmentEnabled     bool   `json:"evidence_attachment_enabled"`
 	RendererPathInputSupported    bool   `json:"renderer_path_input_supported"`
 }
 
@@ -131,6 +132,7 @@ type DesktopBridgeConfig struct {
 	FileEditApplyEnabled          bool
 	RunWakeExecutionEnabled       bool
 	SkillInstallationEnabled      bool
+	EvidenceAttachmentEnabled     bool
 	APIVersion                    string
 	AppVersion                    string
 	UIDigest                      string
@@ -169,7 +171,8 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 		config.ApprovalControlEnabled || config.ModelControlEnabled ||
 		config.FileEditReviewEnabled || config.RunWakeControlEnabled
 	controlEnabled = controlEnabled || config.FileEditApplyEnabled ||
-		config.RunWakeExecutionEnabled || config.SkillInstallationEnabled
+		config.RunWakeExecutionEnabled || config.SkillInstallationEnabled ||
+		config.EvidenceAttachmentEnabled
 	if controlEnabled && config.ControlToken == "" {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop control capabilities require a control token")
@@ -221,6 +224,7 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 			ReadOnlyDefault:               !controlEnabled,
 			ProcessExecutionEnabled:       false, ShellExecutionEnabled: false, DockerExecutionEnabled: false,
 			SkillInstallationEnabled:   config.SkillInstallationEnabled,
+			EvidenceAttachmentEnabled:  config.EvidenceAttachmentEnabled,
 			RendererPathInputSupported: false,
 		},
 	}, nil

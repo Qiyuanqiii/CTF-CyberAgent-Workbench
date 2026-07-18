@@ -155,6 +155,17 @@ func FileEditApplyRequestFingerprint(runID string, editID string,
 	return Fingerprint("file_edit_apply_request.v1", runID, editID, appliedBy)
 }
 
+func EvidenceAttachmentOperationDigest(runID string, operationKey string) string {
+	return Fingerprint("session_evidence_attachment_operation.v1", runID, operationKey)
+}
+
+func EvidenceAttachmentRequestFingerprint(runID string, workspaceID string,
+	sourceKind string, sourceRef string, contentSHA256 string, attachedBy string,
+) string {
+	return Fingerprint("session_evidence_attachment_request.v1", runID, workspaceID,
+		sourceKind, sourceRef, contentSHA256, attachedBy)
+}
+
 func SupervisorToolOperationKey(runID string, turn int, toolName string, payloadJSON string) string {
 	return Fingerprint("supervisor_structured_tool.v1", strings.TrimSpace(runID), strconv.Itoa(turn),
 		strings.TrimSpace(toolName), strings.TrimSpace(payloadJSON))

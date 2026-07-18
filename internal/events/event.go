@@ -33,6 +33,7 @@ const (
 	RunExecutionLeaseReleasedEvent                = "run.execution_lease_released"
 	SessionAttachedEvent                          = "session.attached"
 	SessionMessageEvent                           = "session.message_created"
+	SessionEvidenceAttachedEvent                  = "session.evidence_attached"
 	PolicyDecisionEvent                           = "policy.decision"
 	ToolProposedEvent                             = "tool.proposed"
 	ToolApprovedEvent                             = "tool.approved"

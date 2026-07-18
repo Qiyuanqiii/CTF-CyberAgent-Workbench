@@ -299,6 +299,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 74, Name: "durable Run wake retry intents and ownership", Statements: runWakeOwnershipStatements},
 		{Version: 75, Name: "foreground Run wake execution consumption", Statements: runWakeConsumptionStatements},
 		{Version: 76, Name: "independently authorized FileEdit apply operations", Statements: fileEditApplyStatements},
+		{Version: 77, Name: "non-authorizing Session evidence attachments", Statements: sessionEvidenceAttachmentStatements},
 	})
 }
 

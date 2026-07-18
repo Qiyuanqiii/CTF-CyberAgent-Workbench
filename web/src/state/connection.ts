@@ -25,6 +25,7 @@ interface ConnectionState {
   runWakeControlEnabled: boolean;
   runWakeExecutionEnabled: boolean;
   skillInstallationEnabled: boolean;
+  evidenceAttachmentEnabled: boolean;
   connect: (token: string, health: HealthView, controlToken?: string,
     capabilities?: ClientCapabilities) => void;
   disconnect: () => void;
@@ -59,6 +60,7 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   runWakeControlEnabled: false,
   runWakeExecutionEnabled: false,
   skillInstallationEnabled: false,
+  evidenceAttachmentEnabled: false,
   connect: (token, health, controlToken = "", capabilities = {}) => {
     const present = controlToken.trim() !== "";
     set({ token, health, controlToken,
@@ -78,6 +80,7 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
 	  runWakeControlEnabled: present && (capabilities.runWakeControlEnabled ?? true),
 	  runWakeExecutionEnabled: present && (capabilities.runWakeExecutionEnabled ?? true),
 	  skillInstallationEnabled: present && (capabilities.skillInstallationEnabled ?? true),
+	  evidenceAttachmentEnabled: present && (capabilities.evidenceAttachmentEnabled ?? true),
     });
   },
   disconnect: () => set({ token: "", controlToken: "", health: null,
@@ -87,6 +90,7 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
 	planDeliveryControlEnabled: false, approvalControlEnabled: false,
 	modelControlEnabled: false, fileEditReviewEnabled: false, fileEditApplyEnabled: false,
 	runWakeControlEnabled: false, runWakeExecutionEnabled: false, skillInstallationEnabled: false,
+	evidenceAttachmentEnabled: false,
     ...initialSelection }),
   selectRun: (selectedRunID) => set({ selectedRunID, resourceKind: "run" }),
   selectSession: (selectedSessionID) => set({ selectedSessionID, resourceKind: "session" }),

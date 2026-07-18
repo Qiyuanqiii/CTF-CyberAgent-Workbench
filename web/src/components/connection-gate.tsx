@@ -46,6 +46,7 @@ export function ConnectionGate() {
 		runWakeControlEnabled: bootstrap.run_wake_control_enabled,
 		runWakeExecutionEnabled: bootstrap.run_wake_execution_enabled,
 		skillInstallationEnabled: bootstrap.skill_installation_enabled,
+		evidenceAttachmentEnabled: bootstrap.evidence_attachment_enabled,
       });
     }).catch((caught: unknown) => {
       if (active) {

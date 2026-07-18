@@ -4,6 +4,8 @@ import "fmt"
 
 const ProtocolVersion = "operation_receipt.v1"
 
+const HistoryProtocolVersion = "operation_receipt_history.v1"
+
 type Kind string
 
 const (
@@ -83,6 +85,12 @@ func FileEditApply(outcome string, replayed bool, cleanupPending bool) Receipt {
 	return receipt
 }
 
+func RunWakeConsume(outcome string, replayed bool) Receipt {
+	receipt := Settled(KindRunWakeConsume, replayed, false)
+	receipt.Outcome = outcome
+	return receipt
+}
+
 func (r Receipt) Validate() error {
 	if r.ProtocolVersion != ProtocolVersion || !r.Durable || !r.RetrySafe {
 		return fmt.Errorf("operation receipt protocol or durable retry state is invalid")
@@ -94,10 +102,16 @@ func (r Receipt) Validate() error {
 	if r.Kind == KindFileEditApply && r.Outcome != "applied" && r.Outcome != "failed" {
 		return fmt.Errorf("FileEdit operation receipt outcome is invalid")
 	}
+	if r.Kind == KindRunWakeConsume && r.Outcome != "completed" && r.Outcome != "failed" {
+		return fmt.Errorf("Run wake operation receipt outcome is invalid")
+	}
 	want := Settled(r.Kind, r.Replayed, r.CleanupState == CleanupPendingReview)
 	if r.Kind == KindFileEditApply {
 		want = FileEditApply(r.Outcome, r.Replayed,
 			r.CleanupState == CleanupPendingReview)
+	}
+	if r.Kind == KindRunWakeConsume {
+		want = RunWakeConsume(r.Outcome, r.Replayed)
 	}
 	if r != want {
 		return fmt.Errorf("operation receipt fields are inconsistent")

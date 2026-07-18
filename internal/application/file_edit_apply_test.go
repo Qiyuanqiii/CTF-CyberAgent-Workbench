@@ -10,6 +10,7 @@ import (
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/fileedit"
+	"cyberagent-workbench/internal/operationreceipt"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/store"
 	"cyberagent-workbench/internal/tools"
@@ -79,6 +80,12 @@ func TestFileEditApplyRequiresReviewWritesOnceAndReplaysAcrossRestart(t *testing
 	if err != nil || result.Result.Status != fileedit.ApplyCompleted ||
 		result.Edit.Status != fileedit.StatusApplied || !result.FileWritten {
 		t.Fatalf("apply result=%#v err=%v", result, err)
+	}
+	records, err := state.ListTerminalOperationRecords(ctx, run.ID, 2)
+	if err != nil || len(records) != 1 ||
+		records[0].Kind != operationreceipt.KindFileEditApply ||
+		records[0].Outcome != "applied" || records[0].Path != "README.md" {
+		t.Fatalf("FileEdit terminal receipt source=%#v err=%v", records, err)
 	}
 	written, err := os.ReadFile(filepath.Join(workspaceRoot, "README.md"))
 	if err != nil || string(written) != "reviewed\n" {

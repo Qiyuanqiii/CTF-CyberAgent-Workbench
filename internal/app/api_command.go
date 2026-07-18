@@ -103,6 +103,7 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 		FileEditApplyEnabled:          controlToken != "",
 		RunWakeExecutionEnabled:       controlToken != "",
 		SkillInstallationEnabled:      controlToken != "",
+		EvidenceAttachmentEnabled:     controlToken != "",
 		RunLifecycleController:        lifecycleControl,
 		RunExecutionController:        executionControl,
 		PlanDeliveryController:        planDeliveryControl,

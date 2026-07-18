@@ -12,6 +12,7 @@ import {
   FolderOpen,
   Gauge,
   GitBranch,
+  History,
   ListChecks,
   ListOrdered,
   LoaderCircle,
@@ -50,17 +51,19 @@ import { formatBytes, formatDate, formatNumber, shortID } from "../lib/format";
 import { EmptyState, ErrorState, KeyValue, LoadMoreButton, LoadingState, StatusBadge } from "./common";
 import { ApprovalPanel } from "./approval-panel";
 import { FileEditPanel } from "./file-edit-panel";
+import { OperationReceiptHistory } from "./operation-receipt-history";
 import { RunWakePanel } from "./run-wake-panel";
 import { WorkspaceExplorer } from "./workspace-explorer";
 import { AgentGraphPanel, DelegationsPanel, ExternalSkillsPanel, FanoutPanel, FindingsPanel } from "./run-projections";
 
-type RunTab = "overview" | "approvals" | "diffs" | "files" | "agents" | "delegations" | "fanout" | "findings" | "events" | "work" | "notes" | "artifacts" | "tools";
+type RunTab = "overview" | "approvals" | "diffs" | "files" | "receipts" | "agents" | "delegations" | "fanout" | "findings" | "events" | "work" | "notes" | "artifacts" | "tools";
 
 const tabs: Array<{ id: RunTab; label: string; icon: typeof Activity }> = [
   { id: "overview", label: "概览", icon: Gauge },
   { id: "approvals", label: "Approvals", icon: ShieldCheck },
   { id: "diffs", label: "Diffs", icon: FileDiff },
   { id: "files", label: "Files", icon: FolderOpen },
+  { id: "receipts", label: "Receipts", icon: History },
   { id: "agents", label: "Agents", icon: GitBranch },
   { id: "delegations", label: "委派", icon: Network },
   { id: "fanout", label: "Fan-out", icon: ScanSearch },
@@ -149,7 +152,8 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
         {tab === "diffs" && <FileEditPanel client={client} runID={runID} />}
         {tab === "files" && <WorkspaceExplorer client={client}
           key={detail.mission.workspace_id ?? "unbound"}
-          workspaceID={detail.mission.workspace_id ?? ""} />}
+          runID={runID} workspaceID={detail.mission.workspace_id ?? ""} />}
+        {tab === "receipts" && <OperationReceiptHistory client={client} runID={runID} />}
         {tab === "agents" && <AgentGraphPanel client={client} runID={runID} />}
         {tab === "delegations" && <DelegationsPanel client={client} runID={runID} />}
         {tab === "fanout" && <FanoutPanel client={client} runID={runID} />}

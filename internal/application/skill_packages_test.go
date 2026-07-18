@@ -17,6 +17,7 @@ import (
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/idgen"
+	"cyberagent-workbench/internal/operationreceipt"
 	"cyberagent-workbench/internal/runmutation"
 	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/store"
@@ -60,6 +61,12 @@ func TestSkillPackageRegistryImportListGetAndRemoveAreInert(t *testing.T) {
 		imported.Package.Result.RunSelectionAuthorized ||
 		imported.Package.Result.ToolCapabilityGrant {
 		t.Fatalf("import result widened authority: %#v", imported)
+	}
+	records, err := st.ListTerminalOperationRecords(ctx, "", 2)
+	if err != nil || len(records) != 1 ||
+		records[0].Kind != operationreceipt.KindSkillPackageInstall ||
+		records[0].Outcome != "installed" || records[0].RunID != "" {
+		t.Fatalf("Skill installation terminal receipt source=%#v err=%v", records, err)
 	}
 	if _, err := os.Stat(sentinel); !os.IsNotExist(err) {
 		t.Fatalf("Skill body executed during import: %v", err)

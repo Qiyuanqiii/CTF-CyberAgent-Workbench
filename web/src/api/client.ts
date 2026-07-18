@@ -4,6 +4,8 @@ import type {
   ApprovalDecisionControlView,
   ApprovalQueueView,
   ErrorEnvelope,
+  EvidenceAttachmentRequestView,
+  EvidenceAttachmentView,
   FileEditApplyRequestView,
   FileEditApplyView,
   FileEditQueueView,
@@ -13,6 +15,7 @@ import type {
   ModelAvailabilityView,
   ModelRouteControlRequestView,
   OperationReceiptView,
+  OperationReceiptHistoryView,
   PageResult,
   PlanDeliveryTransitionControlRequestView,
   PlanDeliveryTransitionControlView,
@@ -42,6 +45,7 @@ import type {
   SessionSteeringCancellationView,
   SuccessEnvelope,
   WorkspaceExplorerView,
+  WorkspaceSearchView,
 } from "./types";
 
 export type QueryValue = boolean | number | string | undefined;
@@ -61,6 +65,7 @@ export interface ClientCapabilities {
   runWakeControlEnabled?: boolean;
   runWakeExecutionEnabled?: boolean;
   skillInstallationEnabled?: boolean;
+  evidenceAttachmentEnabled?: boolean;
 }
 
 export class APIRequestError extends Error {
@@ -722,6 +727,107 @@ function parseWorkspaceExplorer(value: unknown, workspaceID: string,
   return { ...value, entries } as unknown as WorkspaceExplorerView;
 }
 
+function parseWorkspaceSearch(value: unknown, workspaceID: string): WorkspaceSearchView {
+  if (!hasExactKeys(value, ["protocol_version", "results", "root_path_exposed",
+    "scanned_bytes", "scanned_entries", "scanned_files", "truncated", "workspace_id"]) ||
+    value.protocol_version !== "workspace_search.v1" || value.workspace_id !== workspaceID ||
+    !Array.isArray(value.results) || value.results.length > 50 ||
+    !safeBoundedCount(value.scanned_entries, 1000) ||
+    !safeBoundedCount(value.scanned_files, 64) ||
+    !safeBoundedCount(value.scanned_bytes, 64 * (64 * 1024 + 4)) ||
+    typeof value.truncated !== "boolean" || value.root_path_exposed !== false) {
+    throw new APIRequestError("Workspace search response violated its bounded evidence contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const results = value.results.map((item) => {
+    if (!hasExactKeys(item, ["content_truncated", "line", "match_kind", "path",
+      "provenance", "snippet"]) || !validWorkspaceRelativePath(item.path) ||
+      !["filename", "content", "filename_and_content"].includes(String(item.match_kind)) ||
+      !safeBoundedCount(item.line, Number.MAX_SAFE_INTEGER) ||
+      typeof item.snippet !== "string" || new TextEncoder().encode(item.snippet).length > 512 ||
+      typeof item.content_truncated !== "boolean" || !hasExactKeys(item.provenance,
+        ["content_sha256", "instruction_authorized", "source_kind", "source_ref", "version"]) ||
+      item.provenance.version !== "context_provenance.v1" ||
+      item.provenance.source_kind !== "workspace_file" ||
+      item.provenance.source_ref !== item.path || !isSHA256(item.provenance.content_sha256) ||
+      item.provenance.instruction_authorized !== false ||
+      (item.match_kind === "filename" ? item.line !== 0 || item.snippet !== "" : item.line < 1)) {
+      throw new APIRequestError("Workspace search result widened renderer or instruction authority",
+        "INVALID_RESPONSE", 502);
+    }
+    return item;
+  });
+  return { ...value, results } as unknown as WorkspaceSearchView;
+}
+
+function parseEvidenceAttachment(value: unknown, runID: string,
+  request: EvidenceAttachmentRequestView): EvidenceAttachmentView {
+  if (!hasExactKeys(value, ["attachment_id", "capability_grant", "content_sha256",
+    "execution_started", "instruction_authorized", "model_called", "protocol_version",
+    "replayed", "run_id", "session_id", "session_message_id", "source_kind", "source_ref",
+    "tool_called", "workspace_id"]) ||
+    value.protocol_version !== "session_evidence_attachment.v1" || value.run_id !== runID ||
+    value.source_kind !== "workspace_file" || value.source_kind !== request.source_kind ||
+    value.source_ref !== request.source_ref || value.content_sha256 !== request.content_sha256 ||
+    !boundedIdentity(value.attachment_id) || !boundedIdentity(value.session_id) ||
+    !boundedIdentity(value.workspace_id) || !safePositiveInteger(value.session_message_id) ||
+    value.instruction_authorized !== false || typeof value.replayed !== "boolean" ||
+    value.execution_started !== false || value.model_called !== false ||
+    value.tool_called !== false || value.capability_grant !== false) {
+    throw new APIRequestError("Evidence attachment response widened document authority",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as EvidenceAttachmentView;
+}
+
+function parseOperationReceiptHistory(value: unknown,
+  expectedRunID: string): OperationReceiptHistoryView {
+  if (!hasExactKeys(value, ["items", "protocol_version", "truncated"]) ||
+    value.protocol_version !== "operation_receipt_history.v1" || !Array.isArray(value.items) ||
+    value.items.length > 100 || typeof value.truncated !== "boolean") {
+    throw new APIRequestError("Operation receipt history response is invalid",
+      "INVALID_RESPONSE", 502);
+  }
+  const identities = new Set<string>();
+  const items = value.items.map((item) => {
+    if (!isRecord(item) || !hasOnlyKeys(item, ["completed_at", "id", "receipt", "run_id", "scope"]) ||
+      !boundedIdentity(item.id) || identities.has(String(item.id)) || !validDate(item.completed_at) ||
+      (item.scope !== "run" && item.scope !== "skill_registry") ||
+      (item.scope === "run" && (!boundedIdentity(item.run_id) ||
+        (expectedRunID !== "" && item.run_id !== expectedRunID))) ||
+      (item.scope === "skill_registry" && item.run_id !== undefined)) {
+      throw new APIRequestError("Operation receipt history item exposed invalid scope metadata",
+        "INVALID_RESPONSE", 502);
+    }
+    const receiptValue = item.receipt;
+    if (!isRecord(receiptValue) || typeof receiptValue.kind !== "string" ||
+      typeof receiptValue.outcome !== "string") {
+      throw new APIRequestError("Operation receipt history item omitted its durable receipt",
+        "INVALID_RESPONSE", 502);
+    }
+    const validTerminalOutcome =
+      (receiptValue.kind === "file_edit_apply" &&
+        (receiptValue.outcome === "applied" || receiptValue.outcome === "failed")) ||
+      (receiptValue.kind === "run_wake_consume" &&
+        (receiptValue.outcome === "completed" || receiptValue.outcome === "failed")) ||
+      (receiptValue.kind === "skill_package_install" && receiptValue.outcome === "installed");
+    if (!validTerminalOutcome) {
+      throw new APIRequestError("Operation receipt history contains an unsupported terminal result",
+        "INVALID_RESPONSE", 502);
+    }
+    const receipt = parseOperationReceipt(receiptValue,
+      receiptValue.kind as OperationReceiptView["kind"],
+      receiptValue.outcome as OperationReceiptView["outcome"], false);
+    if ((item.scope === "skill_registry") !== (receipt.kind === "skill_package_install")) {
+      throw new APIRequestError("Operation receipt history scope and kind diverged",
+        "INVALID_RESPONSE", 502);
+    }
+    identities.add(String(item.id));
+    return { ...item, receipt };
+  });
+  return { ...value, items } as unknown as OperationReceiptHistoryView;
+}
+
 function validWorkspaceRelativePath(value: unknown): value is string {
   if (typeof value !== "string" || value.length === 0 || Array.from(value).length > 512 ||
     value.trim() !== value || value.startsWith("/") || value.includes("\\") ||
@@ -805,6 +911,7 @@ export class CyberAgentClient {
   readonly hasRunWakeControl: boolean;
   readonly hasRunWakeExecution: boolean;
   readonly hasSkillInstallation: boolean;
+  readonly hasEvidenceAttachment: boolean;
 
   constructor(
     private readonly token: string,
@@ -832,6 +939,8 @@ export class CyberAgentClient {
     this.hasRunWakeControl = controlPresent && (capabilities.runWakeControlEnabled ?? true);
     this.hasRunWakeExecution = controlPresent && (capabilities.runWakeExecutionEnabled ?? true);
     this.hasSkillInstallation = controlPresent && (capabilities.skillInstallationEnabled ?? true);
+    this.hasEvidenceAttachment = controlPresent &&
+      (capabilities.evidenceAttachmentEnabled ?? true);
   }
 
   async health(signal?: AbortSignal): Promise<HealthView> {
@@ -851,6 +960,40 @@ export class CyberAgentClient {
     return parseWorkspaceExplorer(await this.get<unknown>(
       `/workspaces/${encodeURIComponent(workspaceID)}/explore`, { path }, signal,
     ), workspaceID, path);
+  }
+
+  async workspaceSearch(workspaceID: string, query: string,
+    signal?: AbortSignal): Promise<WorkspaceSearchView> {
+    if (!boundedIdentity(workspaceID) || !boundedText(query, 128) ||
+      /[\u0000-\u001f\u007f]/u.test(query)) {
+      throw new Error("A normalized Workspace identity and bounded query are required");
+    }
+    return parseWorkspaceSearch(await this.get<unknown>(
+      `/workspaces/${encodeURIComponent(workspaceID)}/search`, { query }, signal,
+    ), workspaceID);
+  }
+
+  async operationReceiptHistory(runID = "",
+    signal?: AbortSignal): Promise<OperationReceiptHistoryView> {
+    if (runID !== "" && (!boundedIdentity(runID) || runID.trim() !== runID)) {
+      throw new Error("A normalized Run identity is required");
+    }
+    return parseOperationReceiptHistory(await this.get<unknown>(
+      "/operation-receipts", { run_id: runID || undefined, limit: 100 }, signal,
+    ), runID);
+  }
+
+  async attachEvidence(runID: string, body: EvidenceAttachmentRequestView,
+    idempotencyKey: string, signal?: AbortSignal): Promise<EvidenceAttachmentView> {
+    if (!this.hasEvidenceAttachment || !boundedIdentity(runID) ||
+      body.version !== "session_evidence_attachment.v1" ||
+      body.source_kind !== "workspace_file" || !validWorkspaceRelativePath(body.source_ref) ||
+      !isSHA256(body.content_sha256)) {
+      throw new Error("Evidence attachment capability and exact Workspace provenance are required");
+    }
+    return parseEvidenceAttachment(await this.sendControl<unknown>(
+      `/runs/${encodeURIComponent(runID)}/evidence-attachments`, body, idempotencyKey, signal,
+    ), runID, body);
   }
 
   async selectModelRoute(route: string, body: ModelRouteControlRequestView,
