@@ -4,6 +4,18 @@ export const desktopSkillSelectionProtocol = "desktop_file_selection.v1";
 export const desktopSkillPreviewProtocol = "desktop_skill_package_preview.v1";
 export const desktopSkillInstallProtocol = "desktop_skill_package_install.v1";
 
+export interface DesktopOperationReceipt {
+  protocol_version: "operation_receipt.v1";
+  kind: "skill_package_install";
+  outcome: "installed";
+  durable: true;
+  replayed: boolean;
+  retry_safe: true;
+  retry_strategy: "same_operation_key";
+  recovery_action: "none";
+  cleanup_state: "not_applicable";
+}
+
 export interface DesktopConnectionBootstrap {
   protocol_version: typeof desktopConnectionProtocol;
   api_base_url: "/api/v1";
@@ -99,6 +111,7 @@ export interface DesktopSkillInstallResult {
   tool_capability_grant: false;
   run_selection_authorized: false;
   context_injection_authorized: false;
+  receipt: DesktopOperationReceipt;
 }
 
 interface NativeDesktopBridge {
@@ -326,7 +339,7 @@ function validInstallResult(value: unknown, preview: DesktopSkillPreview,
   surface: "code" | "cyber"): value is DesktopSkillInstallResult {
   return hasExactKeys(value, ["archive_sha256", "context_injection_authorized",
     "import_command_execution", "import_network_access", "import_provider_calls", "name",
-    "package_fingerprint", "protocol_version", "recovered_pending", "replayed",
+    "package_fingerprint", "protocol_version", "receipt", "recovered_pending", "replayed",
     "run_selection_authorized", "surface", "tool_capability_grant", "trust_class", "version"]) &&
     value.protocol_version === desktopSkillInstallProtocol && value.name === preview.name &&
     value.version === preview.version && value.surface === surface &&
@@ -336,7 +349,17 @@ function validInstallResult(value: unknown, preview: DesktopSkillPreview,
     typeof value.replayed === "boolean" && typeof value.recovered_pending === "boolean" &&
     value.import_command_execution === false && value.import_network_access === false &&
     value.import_provider_calls === false && value.tool_capability_grant === false &&
-    value.run_selection_authorized === false && value.context_injection_authorized === false;
+    value.run_selection_authorized === false && value.context_injection_authorized === false &&
+    validInstallReceipt(value.receipt, value.replayed);
+}
+
+function validInstallReceipt(value: unknown, replayed: boolean): value is DesktopOperationReceipt {
+  return hasExactKeys(value, ["cleanup_state", "durable", "kind", "outcome", "protocol_version",
+    "recovery_action", "replayed", "retry_safe", "retry_strategy"]) &&
+    value.protocol_version === "operation_receipt.v1" && value.kind === "skill_package_install" &&
+    value.outcome === "installed" && value.durable === true && value.replayed === replayed &&
+    value.retry_safe === true && value.retry_strategy === "same_operation_key" &&
+    value.recovery_action === "none" && value.cleanup_state === "not_applicable";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

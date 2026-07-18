@@ -52,6 +52,10 @@ describe("FileEditPanel", () => {
       protocol_version: "file_edit_apply.v1", run_id: "run-1", status: "applied",
       edit: { ...edit, status: "applied", apply_enabled: false },
       replayed: false, file_written: true, policy_rechecked: true,
+      receipt: { protocol_version: "operation_receipt.v1", kind: "file_edit_apply",
+        outcome: "applied", durable: true, replayed: false, retry_safe: true,
+        retry_strategy: "same_operation_key", recovery_action: "none",
+        cleanup_state: "complete" },
     });
     const client = {
       hasFileEditReview: true, hasFileEditApply: true,
@@ -68,6 +72,7 @@ describe("FileEditPanel", () => {
       "run-1", "edit-approved", { version: "file_edit_apply.v1" },
     ]);
     expect(applyFileEdit.mock.calls[0]?.[3]).toMatch(/^web-file-apply-/);
+    expect(await screen.findByText("file edit apply / durable")).toBeInTheDocument();
   });
 });
 

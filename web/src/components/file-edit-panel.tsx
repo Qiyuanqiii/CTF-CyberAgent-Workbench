@@ -1,13 +1,15 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, FileCheck2, FileDiff, LoaderCircle, X } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
-import type { FileEditReviewRequestView } from "../api/types";
+import type { FileEditReviewRequestView, OperationReceiptView } from "../api/types";
 import { formatDate, shortID } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
+import { OperationReceipt } from "./operation-receipt";
 
 export function FileEditPanel({ client, runID }: { client: CyberAgentClient; runID: string }) {
   const queryClient = useQueryClient();
+  const [receipts, setReceipts] = useState<Record<string, OperationReceiptView>>({});
   const applyKeys = useRef(new Map<string, string>());
   const query = useQuery({
     queryKey: ["run", runID, "file-edits"],
@@ -34,6 +36,7 @@ export function FileEditPanel({ client, runID }: { client: CyberAgentClient; run
     },
     onSuccess: (result) => {
       applyKeys.current.delete(result.edit.id);
+      setReceipts((current) => ({ ...current, [result.edit.id]: result.receipt }));
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "file-edits"] });
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "events"] });
     },
@@ -60,6 +63,7 @@ export function FileEditPanel({ client, runID }: { client: CyberAgentClient; run
           </summary>
           <div className="file-edit-body">
             <pre>{edit.diff}</pre>
+            {receipts[edit.id] && <OperationReceipt receipt={receipts[edit.id]} />}
             <footer>
               <time dateTime={edit.updated_at}>{formatDate(edit.updated_at)}</time>
               <span>Apply authority: {edit.apply_enabled ? "ready" : "disabled"}</span>

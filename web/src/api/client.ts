@@ -12,6 +12,7 @@ import type {
   HealthView,
   ModelAvailabilityView,
   ModelRouteControlRequestView,
+  OperationReceiptView,
   PageResult,
   PlanDeliveryTransitionControlRequestView,
   PlanDeliveryTransitionControlView,
@@ -40,6 +41,7 @@ import type {
   SessionSteeringCancellationRequestView,
   SessionSteeringCancellationView,
   SuccessEnvelope,
+  WorkspaceExplorerView,
 } from "./types";
 
 export type QueryValue = boolean | number | string | undefined;
@@ -539,7 +541,7 @@ function parseFileEditReview(value: unknown, runID: string, editID: string,
 
 function parseFileEditApply(value: unknown, runID: string, editID: string): FileEditApplyView {
   if (!hasExactKeys(value, ["edit", "file_written", "policy_rechecked", "protocol_version",
-    "replayed", "run_id", "status"]) || value.protocol_version !== "file_edit_apply.v1" ||
+    "receipt", "replayed", "run_id", "status"]) || value.protocol_version !== "file_edit_apply.v1" ||
     value.run_id !== runID || (value.status !== "applied" && value.status !== "failed") ||
     typeof value.replayed !== "boolean" || typeof value.file_written !== "boolean" ||
     value.policy_rechecked !== true) {
@@ -553,7 +555,9 @@ function parseFileEditApply(value: unknown, runID: string, editID: string): File
     throw new APIRequestError("File edit apply result does not match the requested edit",
       "INVALID_RESPONSE", 502);
   }
-  return { ...value, edit } as unknown as FileEditApplyView;
+  const receipt = parseOperationReceipt(value.receipt, "file_edit_apply", value.status,
+    value.replayed);
+  return { ...value, edit, receipt } as unknown as FileEditApplyView;
 }
 
 function parseRunWakeIntent(value: unknown, runID: string): NonNullable<RunWakeStateView["intent"]> {
@@ -605,7 +609,7 @@ function parseRunWakeControl(value: unknown, runID: string,
 
 function parseRunWakeExecution(value: unknown, runID: string): RunWakeExecutionView {
   if (!isRecord(value) || !hasOnlyKeys(value, ["background_loop_enabled", "consumption_status",
-    "execution_started", "intent", "model_called", "protocol_version", "replayed", "run_id",
+    "execution_started", "intent", "model_called", "protocol_version", "receipt", "replayed", "run_id",
     "stop_reason", "tool_called"]) || value.protocol_version !== "run_wake_consumer.v1" ||
     value.run_id !== runID || value.consumption_status !== "completed" ||
     value.execution_started !== true || typeof value.model_called !== "boolean" ||
@@ -620,14 +624,16 @@ function parseRunWakeExecution(value: unknown, runID: string): RunWakeExecutionV
     throw new APIRequestError("Foreground Run wake did not settle its exact intent",
       "INVALID_RESPONSE", 502);
   }
-  return { ...value, intent } as unknown as RunWakeExecutionView;
+  const receipt = parseOperationReceipt(value.receipt, "run_wake_consume", "completed",
+    value.replayed);
+  return { ...value, intent, receipt } as unknown as RunWakeExecutionView;
 }
 
 function parseSkillPackageInstall(value: unknown,
   request: SkillPackageInstallRequestView): SkillPackageInstallView {
   if (!hasExactKeys(value, ["archive_sha256", "context_injection_authorized",
     "import_command_execution", "import_network_access", "import_provider_calls", "name",
-    "package_fingerprint", "protocol_version", "recovered_pending", "replayed",
+    "package_fingerprint", "protocol_version", "receipt", "recovered_pending", "replayed",
     "run_selection_authorized", "surface", "tool_capability_grant", "trust_class", "version"]) ||
     value.protocol_version !== "skill_package_installation.v1" ||
     value.surface !== request.surface || value.trust_class !== "operator_installed_untrusted" ||
@@ -640,7 +646,96 @@ function parseSkillPackageInstall(value: unknown,
     throw new APIRequestError("Skill package installation widened inert Registry authority",
       "INVALID_RESPONSE", 502);
   }
-  return value as unknown as SkillPackageInstallView;
+  const receipt = parseOperationReceipt(value.receipt, "skill_package_install", "installed",
+    value.replayed);
+  return { ...value, receipt } as unknown as SkillPackageInstallView;
+}
+
+function parseOperationReceipt(value: unknown, kind: OperationReceiptView["kind"],
+  outcome: OperationReceiptView["outcome"], replayed: boolean): OperationReceiptView {
+  if (!hasExactKeys(value, ["cleanup_state", "durable", "kind", "outcome", "protocol_version",
+    "recovery_action", "replayed", "retry_safe", "retry_strategy"]) ||
+    value.protocol_version !== "operation_receipt.v1" || value.kind !== kind ||
+    value.outcome !== outcome || value.durable !== true || value.replayed !== replayed ||
+    value.retry_safe !== true) {
+    throw new APIRequestError("Operation receipt violated its durable recovery contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const apply = kind === "file_edit_apply";
+  if ((apply && value.retry_strategy !== "same_operation_key") ||
+    (kind === "run_wake_consume" && value.retry_strategy !== "same_wake_generation") ||
+    (kind === "skill_package_install" && value.retry_strategy !== "same_operation_key") ||
+    (apply && !["complete", "pending_review"].includes(String(value.cleanup_state))) ||
+    (!apply && value.cleanup_state !== "not_applicable") ||
+    (value.cleanup_state === "pending_review" &&
+      value.recovery_action !== "retry_after_cleanup_grace") ||
+    (value.cleanup_state !== "pending_review" && value.recovery_action !== "none")) {
+    throw new APIRequestError("Operation receipt widened recovery authority",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as OperationReceiptView;
+}
+
+function parseWorkspaceExplorer(value: unknown, workspaceID: string,
+  expectedPath: string): WorkspaceExplorerView {
+  if (!hasExactKeys(value, ["content", "entries", "kind", "path", "protocol_version",
+    "provenance", "redaction_count", "returned_bytes", "root_path_exposed", "total_bytes",
+    "truncated", "workspace_id"]) || value.protocol_version !== "workspace_explorer.v1" ||
+    value.workspace_id !== workspaceID || value.path !== expectedPath ||
+    (value.kind !== "directory" && value.kind !== "file") || !Array.isArray(value.entries) ||
+    value.entries.length > 200 || typeof value.content !== "string" ||
+    value.content.length > 131_072 || !safeBoundedCount(value.total_bytes, Number.MAX_SAFE_INTEGER) ||
+    !safeBoundedCount(value.returned_bytes, 131_072) ||
+    !safeBoundedCount(value.redaction_count, 65_536) || typeof value.truncated !== "boolean" ||
+    value.root_path_exposed !== false || !isRecord(value.provenance) ||
+    !hasExactKeys(value.provenance, ["content_sha256", "instruction_authorized", "source_kind",
+      "source_ref", "version"]) || value.provenance.version !== "context_provenance.v1" ||
+    value.provenance.source_ref !== expectedPath || !isSHA256(value.provenance.content_sha256) ||
+    value.provenance.instruction_authorized !== false ||
+    (value.kind === "directory" && (value.content !== "" || value.total_bytes !== 0 ||
+      value.returned_bytes !== 0 || value.provenance.source_kind !== "workspace_listing")) ||
+    (value.kind === "file" && (value.entries.length !== 0 ||
+      value.provenance.source_kind !== "workspace_file" ||
+      new TextEncoder().encode(value.content).length !== value.returned_bytes))) {
+    throw new APIRequestError("Workspace explorer response violated its bounded evidence contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const entries = value.entries.map((entry) => {
+    if (!hasExactKeys(entry, ["kind", "name", "path", "readable", "size_bytes"])) {
+      throw new APIRequestError("Workspace explorer entry widened renderer path authority",
+        "INVALID_RESPONSE", 502);
+    }
+    const expectedEntryPath = expectedPath === "." ? String(entry.name) :
+      `${expectedPath}/${String(entry.name)}`;
+    if (!validWorkspaceEntryName(entry.name) || !validWorkspaceRelativePath(entry.path) ||
+      entry.path !== expectedEntryPath ||
+      !["directory", "file", "blocked"].includes(String(entry.kind)) ||
+      !safeBoundedCount(entry.size_bytes, Number.MAX_SAFE_INTEGER) ||
+      typeof entry.readable !== "boolean" ||
+      (entry.kind === "blocked" ? entry.readable !== false : entry.readable !== true) ||
+      String(entry.name).startsWith(".cyberagent-edit-")) {
+      throw new APIRequestError("Workspace explorer entry widened renderer path authority",
+        "INVALID_RESPONSE", 502);
+    }
+    return entry;
+  });
+  return { ...value, entries } as unknown as WorkspaceExplorerView;
+}
+
+function validWorkspaceRelativePath(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0 || Array.from(value).length > 512 ||
+    value.trim() !== value || value.startsWith("/") || value.includes("\\") ||
+    value.includes(":") || /[\u0000-\u001f\u007f]/u.test(value)) {
+    return false;
+  }
+  if (value === ".") return true;
+  return value.split("/").every((part) => part !== "" && part !== "." && part !== "..");
+}
+
+function validWorkspaceEntryName(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && Array.from(value).length <= 255 &&
+    value.trim() === value && !value.includes("/") && !value.includes("\\") &&
+    !value.includes(":") && !/[\u0000-\u001f\u007f]/u.test(value);
 }
 
 function hasNoAllowedTargets(scope: Record<string, unknown>): boolean {
@@ -746,6 +841,16 @@ export class CyberAgentClient {
   async modelAvailability(signal?: AbortSignal): Promise<ModelAvailabilityView> {
     const value = await this.get<unknown>("/models", {}, signal);
     return parseModelAvailability(value);
+  }
+
+  async workspaceExplore(workspaceID: string, path = ".",
+    signal?: AbortSignal): Promise<WorkspaceExplorerView> {
+    if (!boundedIdentity(workspaceID) || !validWorkspaceRelativePath(path)) {
+      throw new Error("A normalized Workspace identity and Go-issued relative path are required");
+    }
+    return parseWorkspaceExplorer(await this.get<unknown>(
+      `/workspaces/${encodeURIComponent(workspaceID)}/explore`, { path }, signal,
+    ), workspaceID, path);
   }
 
   async selectModelRoute(route: string, body: ModelRouteControlRequestView,

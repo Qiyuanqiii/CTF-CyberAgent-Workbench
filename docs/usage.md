@@ -1,5 +1,20 @@
 # Usage
 
+## Portable Build Diagnostics
+
+```powershell
+cyberagent doctor portable
+cyberagent doctor portable --json
+powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1 -VerifyReproducible
+```
+
+`doctor portable` is read-only: it does not open SQLite or read Provider credentials.
+An ordinary `go run` build should report unpinned revision/source date/trimpath warnings.
+The release script supplies reproducible metadata, builds twice when requested, and
+runs the PE/hash/module/non-installing checklist. Automated checks do not replace the
+manual Windows 10/WebView2/display/launch/recovery matrix, so release readiness remains
+false until that matrix is signed.
+
 ## Missions and Runs
 
 ```powershell
@@ -591,6 +606,14 @@ cyberagent workspace read demo README.md
 
 `workspace tree` and `workspace read` only accept paths relative to the selected workspace. Attempts to read outside the workspace, such as `../outside.txt`, are rejected. Text returned by `workspace read` is passed through secret redaction before printing.
 
+The Web/Desktop Run **Files** tab uses the separate read-only
+`workspace_explorer.v1` route. Go resolves the registered Workspace root and returns
+only canonical relative child paths. It follows no links, exposes no root path, scans
+at most 400 entries, returns at most 200, reads at most 64 KiB of UTF-8, and caps the
+redacted projection at 128 KiB. File text is plain evidence with
+`instruction_authorized=false`; notes addressed to an automated assistant do not gain
+system, user, tool, or Policy authority by appearing in a repository file.
+
 ## Script Mode
 
 ```powershell
@@ -739,6 +762,13 @@ File edits replace the complete text content of one file. Existing files and new
 Proposals are stored without modifying the workspace. `review-approve` and `review-deny` exact-bind the Run, Mission, Session, Workspace, proposal, and durable approval. `review-approve` records approval intent only and prints `file_written: false`; it never changes the workspace. The Desktop/Web Diff surface uses this review-only path and receives bounded redacted diff metadata without original/proposed file bodies.
 
 Schema v76 `edit apply` is the separately authorized Run-bound write path. It reloads the exact Run/Mission/Session/Workspace/Edit/Approval, rechecks current Policy, resolves the target inside the stored Workspace, compares the current SHA-256 with the proposal's original hash, writes once, verifies the proposed digest, and persists an idempotent result. A replay reports `file_written: false` and does not write again. HTTP/React submit neither path nor file body. Run-bound edits cannot use the older `edit approve` command; that compatibility command remains only for proposals that are not bound to a Run. Proposed secrets are replaced with redaction markers before persistence and before any approved write. For exact multiline or whitespace-sensitive content, prefer `--content-file`; session `/write` trims the outer message whitespace.
+
+D1-U1 adds a content-free `operation_receipt.v1` to HTTP/Desktop apply, foreground wake
+consume, and inert Skill install results. It tells the operator whether the durable
+result was replayed and which exact retry strategy is allowed. For FileEdit only,
+`pending_review` means an uncertain internal staging candidate was retained; retry the
+same operation key after the grace period rather than creating a second intent. The
+receipt never includes the key, digest, path, body, or private lease.
 
 ## Tool Proposals
 

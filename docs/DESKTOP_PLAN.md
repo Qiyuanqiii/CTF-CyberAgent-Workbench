@@ -1,6 +1,6 @@
 # CyberAgent Workbench Desktop Plan
 
-状态：Desktop D0-A、D0-B 与 D1-R1 至 schema-v76 D1-B1 自动化核心已完成。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill 预览/惰性安装、受控 Run/Session/Plan/审批、显式无正文 Provider 诊断、持久化模型路由、Diff 独立审阅/apply，以及有界 wake/retry 意图/显式前台消费已经落地；Windows 10 实机矩阵、Desktop Provider 密钥设置、后台 wake worker、安装包、正式便携发行、注册表、自启动、更新和高权限执行仍未实现。
+状态：Desktop D0-A、D0-B 与 D1-R1 至 schema-v76 D1-W1 自动化核心已完成。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill 预览/惰性安装、受控 Run/Session/Plan/审批、显式无正文 Provider 诊断、持久化模型路由、Diff 独立审阅/apply、有界 wake/retry 意图/显式前台消费、统一操作回执、只读 Workspace Files 页和可复现便携构建诊断已经落地；Windows 10 实机矩阵、Desktop Provider 密钥设置、后台 wake worker、安装包、签名正式发行、注册表、自启动、更新和高权限执行仍未实现。
 
 ## 目标
 
@@ -33,7 +33,7 @@
 - `desktop_skill_package_preview.v1` 只返回有界风险元数据，排除路径、文件名、正文、Manifest description/content path/content digest，并固定安装、命令、网络、Provider、工具和能力授权为 false。
 - D0-A 已把该边界接入 Wails 原生对话框和 React 只读预览；D1-B1 再允许渲染层提交一次性确认句柄，由 Go 重新消费同一已验证包并写入惰性 Registry。渲染层仍不能提交路径或文件字节，安装不会执行包内容、选择 Run 或授予能力；ADR 0033、ADR 0034 与 ADR 0041 记录这些边界。
 
-## D0-A 至 D1-B1 当前实现
+## D0-A 至 D1-W1 当前实现
 
 - `cmd/cyberagent-desktop` 只在 Windows `desktop,wv2runtime.error` build tags 下编译，production 构建再增加 `production`；默认 read-only。`--enable-profile-control`、`--enable-run-creation`、`--enable-session-messages`、`--enable-session-steering-control`、`--enable-run-lifecycle`、`--enable-run-execution`、`--enable-plan-delivery`、`--enable-approvals`、`--enable-model-control`、`--enable-file-edit-review`、`--enable-run-wake`、`--enable-file-edit-apply`、`--enable-run-wake-execution` 和 `--enable-skill-installation` 分别开放窄 Go route；十四项 capability 独立，单项启用不能访问其他 route。模型可用性只使用 read token。
 - `web/dist` 以 compile-time embed 进入二进制；Go 在启动前验证 index、内容哈希资源、类型、数量、单项/总大小并复制为不可变内存快照。
@@ -43,6 +43,8 @@
 - 单实例、窗口恢复、禁用 WebView 文件拖放/默认右键菜单、renderer code integrity、路径隔离错误和 bounded startup dialog 已接入。
 - `desktop.ControlPlane` 与 `desktop.Lifecycle` 固定同库 API 所有权、幂等关闭、崩溃重开、第二实例让位和停止后永久静默；第二实例参数与工作目录不会进入主实例。
 - Desktop 通过 `GET /api/v1/runs/{run_id}/events/poll` 消费与 SSE 相同的真实事件 frame/cursor；React 最多在内存保留 16 个 Run、每个 500 帧，不写浏览器存储。
+- Run Files 页通过 read bearer 调用 Go-owned `workspace_explorer.v1`；renderer 只使用 Go 返回的 canonical 相对子路径，不能提交 host root，内容经过有界 UTF-8/secret redaction 并标记为 non-authorizing evidence。
+- FileEdit apply、foreground wake consume 与 inert Skill install 使用同一 `operation_receipt.v1`；React 交叉校验父响应，回执不含 operation key/digest、路径/正文或 private lease。
 - WebView2 `94.0.992.31` 以上只读预检发生在 bundle/数据库之前；失败时不下载、不安装、不打开 URL。进程内适配器只接受精确 `http://wails.localhost`，外部链接、表单和 popup 在 Desktop renderer 中被阻止。
 - secure production-tag 二进制已经在隔离数据目录通过 Windows 11 强制结束/重开与第二实例实机烟测；主工作台、Skill modal 与原生 `.zip` 对话框也已通过视觉复核。D1-R1 至 D1-A1 的 route、能力分离、重放和 React 交互由自动化覆盖，正式发布前仍需随最终二进制复跑完整 Windows 10/11 人工矩阵。
 
@@ -50,9 +52,12 @@
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
+# 发布候选诊断会连续构建两次并比较 SHA-256。
+powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1 -VerifyReproducible
+go run ./cmd/cyberagent doctor portable --json
 ```
 
-输出位于 `build/desktop/cyberagent-desktop.exe`，默认不开放 control token。该文件是未签名开发/便携测试产物，不是正式发行包。机器需要 Windows 10/11 和 WebView2 Evergreen Runtime `94.0.992.31` 或更新版本；缺失时应用只给出本机指导，不会隐式安装。测试其他数据目录时，可在启动前设置 `CYBERAGENT_HOME`；桌面渲染层无法读取或更改这个路径。
+输出位于 `build/desktop/cyberagent-desktop.exe`，默认不开放 control token。构建目录必须留在仓库且不能穿过 child reparse point；双构建会输出忽略的 release/compatibility JSON。该文件是未签名开发/便携测试产物，不是正式发行包。机器需要 Windows 10/11 和 WebView2 Evergreen Runtime `94.0.992.31` 或更新版本；缺失时应用只给出本机指导，不会隐式安装。测试其他数据目录时，可在启动前设置 `CYBERAGENT_HOME`；桌面渲染层无法读取或更改这个路径。自动检查通过后 `release_ready` 仍为 false，直到 Windows 10/WebView2 人工矩阵完成。
 
 显式启用受控 Run 创建：
 
@@ -117,7 +122,7 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D0-B 增加精确 renderer origin、规范 `RequestURI`、外部 navigation/form/popup 阻断、secure build-tag 门禁、Windows CI 和 Windows 11 实机恢复记录；仍不增加业务 mutation。
 - [ ] 在正式便携或签名发行前补齐 Windows 10 x64 实机启动、第二实例、强制结束/重开和 WebView2 缺失路径矩阵。
 
-### D1：日常工作台（产品可用度约 70-74%）
+### D1：日常工作台（产品可用度约 74-78%）
 
 - [x] D1-R1 / schema v72：Go API 受控创建 Mission/Run/Session，严格注册 Workspace、Scope、默认预算、幂等 operation、事务事件和关闭 execution profile；React 可选择 Workspace/Profile/Surface/Phase 并在成功后刷新、选中新 Run。
 - [x] D1-R1 capability 与 `--enable-profile-control` 独立；creation-only token 不能访问旧控制 route，Wails native bridge 不增加方法。
@@ -140,7 +145,11 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D1-D2 / schema v76：已批准 Diff 的独立 apply 已完成新鲜 Policy、Workspace path、当前/目标 hash 与幂等写入复核；renderer 不提交路径或正文。
 - [x] D1-B1：一次性句柄 Desktop 安装与 canonical-base64 HTTP 安装已复用惰性 Registry；不执行包内容、脚本/钩子、网络、Provider 或工具，也不选择到 Run。
 - [x] D1-Q2/D1-D2/D1-B1 三切片普通功能门通过：最终 Go 333.1 秒、聚焦 race、Windows Desktop tag、85 项前端测试、strict TypeScript、确定性契约、Windows/Vite build、vet/module/npm/CLI smoke 与仓库卫生均为绿色；完整静态/漏洞门在下一批累计六片后执行。
-- [ ] 下一批分别增加统一 operation receipt/recovery 呈现、有界只读 Workspace explorer 和便携构建诊断；完成后累计六片并运行完整健壮性门。
+- [x] D1-U1：统一 `operation_receipt.v1` 与 FileEdit 暂存恢复；回执无正文/路径/private identity，失败与 pending cleanup 不再显示为成功。
+- [x] D1-E1：Go-owned bounded Workspace explorer 与 Files 页；canonical relative path、link/redirect 拒绝、400/200 entry、64/128 KiB input/projection、root/staging 隐私和 evidence-only provenance 均已固定。
+- [x] D1-W1：portable doctor、reproducible linker metadata、连续双构建 SHA-256、PE/零 COFF timestamp/trimpath/module/non-installing checklist 与 PowerShell 5.1 兼容已完成；人工 Windows 10 矩阵仍待补。
+- [x] D1-U1/E1/W1 后累计六片完整健壮性门已通过：ordinary/race 294.0/338.3 秒、普通/secure-Desktop test/vet、staticcheck、govulncheck、module/依赖/隐私、88 项 React、确定性契约、Vite 与真实 Windows 双构建均为绿色；双构建 SHA-256 为 `33fb9ca3064df98191ac50b2a3ef9431e1b5c81abe8c610d4be15db113cdf1ef`，无已知未解决高/中风险。
+- [ ] 下一批增加 D1-E2 bounded Workspace search、D1-C1 operator-confirmed non-authorizing evidence attachment 与 D1-U2 refreshable receipt history；继续不增加 renderer host path、后台 indexer 或执行权限。
 - [ ] 所有状态 mutation 使用独立 control capability、Origin/Host 校验、稳定 operation key 和 typed errors；显式 Provider 诊断每次只允许一次有界无正文请求。CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。
 
@@ -172,4 +181,4 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - 安装、升级和卸载不会静默删除 Workspace、数据库、凭证或用户创建文件。
 - 未签名开发产物不得伪装成正式发布；正式包必须有可核验签名和哈希。
 
-ADR 0034 至 ADR 0041 分别记录可见壳、生命周期/事件续传、受控 Run 创建、Session message submission、Run 控制/有界交接、模型/Plan/审批、Provider/Diff/wake intent，以及前台 wake、独立 apply 与惰性 Skill 安装。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。
+ADR 0034 至 ADR 0042 分别记录可见壳、生命周期/事件续传、受控 Run 创建、Session message submission、Run 控制/有界交接、模型/Plan/审批、Provider/Diff/wake intent、前台 wake/独立 apply/惰性 Skill 安装，以及统一回执/Workspace evidence/便携构建诊断。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。

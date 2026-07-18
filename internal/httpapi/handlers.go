@@ -18,6 +18,7 @@ import (
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/redact"
+	"cyberagent-workbench/internal/workspace"
 )
 
 type successEnvelope struct {
@@ -47,7 +48,8 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
-			"external-skills", "workspaces", "models", "event-stream", "event-poll", "openapi"}
+			"external-skills", "workspaces", "workspace-explorer", "models",
+			"event-stream", "event-poll", "openapi"}
 		if a.controlEnabled {
 			resources = append(resources, "model-cancellation-control",
 				"specialist-model-cancellation-control", "execution-profile-control")
@@ -112,6 +114,9 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		if len(segments) == 1 {
 			return a.workspaces(request)
 		}
+		if len(segments) == 3 && segments[2] == "explore" {
+			return a.workspaceExplorer(request, segments[1])
+		}
 	case "sessions":
 		return a.routeSessions(request, segments)
 	case "work-items":
@@ -128,6 +133,55 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 	}
 	return nil, nil, apperror.New(apperror.CodeNotFound, "HTTP API endpoint was not found")
+}
+
+func (a *API) workspaceExplorer(request *http.Request,
+	workspaceID string,
+) (any, *Page, error) {
+	if err := validateSingleQueryValues(request.URL.Query(), "path"); err != nil {
+		return nil, nil, err
+	}
+	requestedPath, present := "", false
+	if items, ok := request.URL.Query()["path"]; ok {
+		present = true
+		if len(items) == 1 && items[0] == strings.TrimSpace(items[0]) {
+			requestedPath = items[0]
+		}
+	}
+	if present && requestedPath == "" {
+		return nil, nil, apperror.New(apperror.CodeInvalidArgument,
+			"query parameter \"path\" must appear exactly once and cannot be empty")
+	}
+	registered, err := a.store.GetWorkspaceInfo(request.Context(), workspaceID)
+	if err != nil {
+		return nil, nil, apperror.Normalize(err)
+	}
+	if registered.ID != workspaceID {
+		return nil, nil, apperror.New(apperror.CodeInternal,
+			"workspace lookup returned a mismatched identity")
+	}
+	snapshot, err := workspace.Explore(registered.RootPath, registered.ID, requestedPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	entries := make([]WorkspaceExplorerEntryView, len(snapshot.Entries))
+	for index, entry := range snapshot.Entries {
+		entries[index] = WorkspaceExplorerEntryView{Name: entry.Name, Path: entry.Path,
+			Kind: entry.Kind, SizeBytes: entry.SizeBytes, Readable: entry.Readable}
+	}
+	return WorkspaceExplorerView{
+		ProtocolVersion: snapshot.ProtocolVersion, WorkspaceID: snapshot.WorkspaceID,
+		Path: snapshot.Path, Kind: snapshot.Kind, Entries: entries,
+		Content: snapshot.Content, TotalBytes: snapshot.TotalBytes,
+		ReturnedBytes: snapshot.ReturnedBytes, Truncated: snapshot.Truncated,
+		RedactionCount: snapshot.RedactionCount, RootPathExposed: snapshot.RootPathExposed,
+		Provenance: WorkspaceExplorerProvenanceView{
+			Version: snapshot.Provenance.Version, SourceKind: snapshot.Provenance.SourceKind,
+			SourceRef:             snapshot.Provenance.SourceRef,
+			ContentSHA256:         snapshot.Provenance.ContentSHA256,
+			InstructionAuthorized: snapshot.Provenance.InstructionAuthorized,
+		},
+	}, nil, nil
 }
 
 func (a *API) modelAvailability(request *http.Request) (any, *Page, error) {

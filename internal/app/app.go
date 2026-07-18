@@ -16,6 +16,7 @@ import (
 	"cyberagent-workbench/internal/agent"
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
+	"cyberagent-workbench/internal/buildinfo"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/llm"
@@ -29,7 +30,7 @@ import (
 	"cyberagent-workbench/internal/workspace"
 )
 
-const Version = "v0.1.0"
+var Version = buildinfo.Version
 
 const defaultDeepSeekModel = modelregistry.DefaultDeepSeekModel
 
@@ -134,6 +135,8 @@ func (a *App) dispatch(ctx context.Context, args []string) error {
 	case "version":
 		fmt.Fprintf(a.out, "CyberAgent Workbench cyberagent %s\n", Version)
 		return nil
+	case "doctor":
+		return a.doctorCommand(ctx, args[1:])
 	case "workspace":
 		return a.workspaceCommand(ctx, args[1:])
 	case "script":
@@ -186,6 +189,7 @@ func (a *App) printHelp() {
 	fmt.Fprintln(a.out)
 	fmt.Fprintln(a.out, "Usage:")
 	fmt.Fprintln(a.out, "  cyberagent version")
+	fmt.Fprintln(a.out, "  cyberagent doctor portable [--json]")
 	fmt.Fprintln(a.out, "  cyberagent workspace init|list|show|tree|read")
 	fmt.Fprintln(a.out, "  cyberagent script new|run")
 	fmt.Fprintln(a.out, "  cyberagent ctf init|analyze|writeup")

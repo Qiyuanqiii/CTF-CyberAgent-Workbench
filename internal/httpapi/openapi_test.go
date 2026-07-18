@@ -364,6 +364,7 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 	}
 	replacements := map[string]string{
 		"{run_id}":       fixture.run.ID,
+		"{workspace_id}": fixture.workspace.ID,
 		"{agent_id}":     child.ID,
 		"{session_id}":   fixture.run.SessionID,
 		"{message_id}":   steering.Message.ID,

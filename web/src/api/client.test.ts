@@ -724,7 +724,8 @@ describe("CyberAgentClient", () => {
       updated_at: "2026-07-18T00:00:01Z", apply_enabled: false };
     const applyResult = { protocol_version: "file_edit_apply.v1", run_id: "run-1",
       edit: appliedEdit, status: "applied", replayed: false, file_written: true,
-      policy_rechecked: true };
+      policy_rechecked: true, receipt: operationReceipt("file_edit_apply", "applied",
+        "same_operation_key", "complete") };
     const completedIntent = { id: "wake-1", protocol_version: "run_wake_intent.v1",
       run_id: "run-1", session_id: "session-1", status: "completed", max_attempts: 3,
       attempt_count: 1, initial_delay_seconds: 0, base_backoff_seconds: 5,
@@ -735,14 +736,17 @@ describe("CyberAgentClient", () => {
     const wakeResult = { protocol_version: "run_wake_consumer.v1", run_id: "run-1",
       intent: completedIntent, consumption_status: "completed", stop_reason: "waiting",
       replayed: false, execution_started: true, model_called: true, tool_called: false,
-      background_loop_enabled: false };
+      background_loop_enabled: false, receipt: operationReceipt("run_wake_consume", "completed",
+        "same_wake_generation", "not_applicable") };
     const skillResult = { protocol_version: "skill_package_installation.v1",
       name: "review-helper", version: "1.0.0", surface: "code",
       trust_class: "operator_installed_untrusted", archive_sha256: "b".repeat(64),
       package_fingerprint: "c".repeat(64), replayed: false, recovered_pending: false,
       import_command_execution: false, import_network_access: false,
       import_provider_calls: false, tool_capability_grant: false,
-      run_selection_authorized: false, context_injection_authorized: false };
+      run_selection_authorized: false, context_injection_authorized: false,
+      receipt: operationReceipt("skill_package_install", "installed",
+        "same_operation_key", "not_applicable") };
     const envelope = (requestID: string, data: unknown) => new Response(JSON.stringify({
       version: "api.v1", request_id: requestID, data,
     }), { status: 202, headers: { "Content-Type": "application/json" } });
@@ -752,6 +756,9 @@ describe("CyberAgentClient", () => {
       .mockResolvedValueOnce(envelope("req-skill", skillResult))
       .mockResolvedValueOnce(envelope("req-skill-forged", {
         ...skillResult, import_command_execution: true,
+      }))
+      .mockResolvedValueOnce(envelope("req-apply-mismatch", {
+        ...applyResult, status: "failed", edit: { ...appliedEdit, status: "failed" },
       }));
     vi.stubGlobal("fetch", fetchMock);
     const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
@@ -774,6 +781,39 @@ describe("CyberAgentClient", () => {
       .not.toHaveProperty("Idempotency-Key");
     await expect(client.installSkillPackage(skillRequest,
       "web-skill-install-operation-0002")).rejects.toThrow("inert Registry authority");
+    await expect(client.applyFileEdit("run-1", "edit-1", {
+      version: "file_edit_apply.v1",
+    }, "web-file-apply-operation-0002")).rejects.toThrow("durable recovery contract");
+  });
+
+  it("validates bounded Workspace evidence without accepting local root authority", async () => {
+    const snapshot = { protocol_version: "workspace_explorer.v1", workspace_id: "workspace-1",
+      path: "src", kind: "directory", entries: [{ name: "main.go", path: "src/main.go",
+        kind: "file", size_bytes: 120, readable: true }], content: "", total_bytes: 0,
+      returned_bytes: 0, truncated: false, redaction_count: 0, root_path_exposed: false,
+      provenance: { version: "context_provenance.v1", source_kind: "workspace_listing",
+        source_ref: "src", content_sha256: "a".repeat(64), instruction_authorized: false } };
+    const envelope = (data: unknown) => new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-explorer", data,
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(envelope(snapshot))
+      .mockResolvedValueOnce(envelope({ ...snapshot, root_path: "C:\\private" }))
+      .mockResolvedValueOnce(envelope({ ...snapshot, entries: [
+        { ...snapshot.entries[0], path: "other/main.go" },
+      ] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret");
+    await expect(client.workspaceExplore("workspace-1", "src")).resolves.toEqual(snapshot);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("path=src");
+    await expect(client.workspaceExplore("workspace-1", "src"))
+      .rejects.toThrow("bounded evidence contract");
+    await expect(client.workspaceExplore("workspace-1", "src"))
+      .rejects.toThrow("renderer path authority");
+    await expect(client.workspaceExplore("workspace-1", "../private"))
+      .rejects.toThrow("Go-issued relative path");
+    await expect(client.workspaceExplore("workspace-1", "C:private"))
+      .rejects.toThrow("Go-issued relative path");
   });
 
   it("polls Run events with a stream-compatible opaque cursor and validates the envelope", async () => {
@@ -921,3 +961,12 @@ describe("CyberAgentClient", () => {
     })).rejects.toThrow("id does not match");
   });
 });
+
+function operationReceipt(kind: "file_edit_apply" | "run_wake_consume" | "skill_package_install",
+  outcome: "applied" | "completed" | "installed",
+  retryStrategy: "same_operation_key" | "same_wake_generation",
+  cleanupState: "complete" | "not_applicable") {
+  return { protocol_version: "operation_receipt.v1", kind, outcome, durable: true,
+    replayed: false, retry_safe: true, retry_strategy: retryStrategy,
+    recovery_action: "none", cleanup_state: cleanupState };
+}

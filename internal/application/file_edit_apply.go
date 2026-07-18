@@ -48,11 +48,12 @@ type ApplyFileEditRequest struct {
 }
 
 type ApplyFileEditResult struct {
-	Operation   fileedit.ApplyOperation
-	Result      fileedit.ApplyResult
-	Edit        fileedit.Edit
-	Replayed    bool
-	FileWritten bool
+	Operation      fileedit.ApplyOperation
+	Result         fileedit.ApplyResult
+	Edit           fileedit.Edit
+	StagingCleanup fileedit.StagingCleanupResult
+	Replayed       bool
+	FileWritten    bool
 }
 
 func NewFileEditApplyService(store FileEditApplyStore,
@@ -96,8 +97,9 @@ func (s *FileEditApplyService) Apply(ctx context.Context,
 			return ApplyFileEditResult{}, apperror.Normalize(lookupErr)
 		}
 		if storedResult != nil {
+			cleanup := s.cleanupStaging(ctx, operation)
 			return ApplyFileEditResult{Operation: operation, Result: *storedResult,
-				Edit: edit, Replayed: true}, nil
+				Edit: edit, StagingCleanup: cleanup, Replayed: true}, nil
 		}
 	} else {
 		binding, bindingErr := s.loadBinding(ctx, normalized.RunID, normalized.EditID,
@@ -134,8 +136,12 @@ func (s *FileEditApplyService) Apply(ctx context.Context,
 		}
 		if storedResult != nil {
 			edit, lookupErr := s.store.GetFileEdit(ctx, operation.EditID)
+			cleanup := fileedit.StagingCleanupResult{}
+			if lookupErr == nil {
+				cleanup = s.cleanupStaging(ctx, operation)
+			}
 			return ApplyFileEditResult{Operation: operation, Result: *storedResult,
-				Edit: edit, Replayed: true}, apperror.Normalize(lookupErr)
+				Edit: edit, StagingCleanup: cleanup, Replayed: true}, apperror.Normalize(lookupErr)
 		}
 	}
 
@@ -204,12 +210,29 @@ func (s *FileEditApplyService) Apply(ctx context.Context,
 		}
 		return ApplyFileEditResult{}, apperror.Normalize(completionErr)
 	}
+	cleanup := s.cleanupStaging(ctx, operation)
 	value := ApplyFileEditResult{Operation: operation, Result: result, Edit: applied,
-		Replayed: preparedReplay || completionReplay, FileWritten: fileWritten}
+		StagingCleanup: cleanup, Replayed: preparedReplay || completionReplay,
+		FileWritten: fileWritten}
 	if applyErr != nil {
 		return value, apperror.Normalize(applyErr)
 	}
 	return value, nil
+}
+
+func (s *FileEditApplyService) cleanupStaging(ctx context.Context,
+	operation fileedit.ApplyOperation,
+) fileedit.StagingCleanupResult {
+	binding, err := s.loadOperationBinding(ctx, operation)
+	if err != nil {
+		return fileedit.StagingCleanupResult{Pending: true}
+	}
+	result, err := fileedit.CleanupStaleStaging(binding.workspace.RootPath,
+		operation.Path, operation.ProposedHash, s.now().UTC())
+	if err != nil {
+		return fileedit.StagingCleanupResult{Pending: true}
+	}
+	return result
 }
 
 type fileEditApplyBinding struct {

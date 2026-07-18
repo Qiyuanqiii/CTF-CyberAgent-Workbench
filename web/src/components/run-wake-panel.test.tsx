@@ -47,6 +47,10 @@ describe("RunWakePanel", () => {
       intent: completedState.intent, consumption_status: "completed",
       replayed: false, execution_started: true, model_called: true, tool_called: false,
       background_loop_enabled: false, stop_reason: "waiting",
+      receipt: { protocol_version: "operation_receipt.v1", kind: "run_wake_consume",
+        outcome: "completed", durable: true, replayed: false, retry_safe: true,
+        retry_strategy: "same_wake_generation", recovery_action: "none",
+        cleanup_state: "not_applicable" },
     });
     const client = {
       hasRunWakeControl: false, hasRunWakeExecution: true,
@@ -59,7 +63,8 @@ describe("RunWakePanel", () => {
     await waitFor(() => expect(consumeRunWake).toHaveBeenCalledWith("run-1", {
       version: "run_wake_consumer.v1", max_steps: 1,
     }));
-    expect(await screen.findByText("completed")).toBeInTheDocument();
+    expect((await screen.findAllByText("completed")).length).toBeGreaterThan(0);
+    expect(screen.getByText("run wake consume / durable")).toBeInTheDocument();
   });
 });
 

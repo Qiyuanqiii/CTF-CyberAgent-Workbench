@@ -18,6 +18,7 @@ export type HealthView = components["schemas"]["HealthView"];
 export type MessageView = components["schemas"]["MessageView"];
 export type ModelAvailabilityView = components["schemas"]["ModelAvailabilityView"];
 export type ModelRouteControlRequestView = components["schemas"]["ModelRouteControlRequestView"];
+export type OperationReceiptView = components["schemas"]["OperationReceiptView"];
 export type ProviderDiagnosticRequestView = components["schemas"]["ProviderDiagnosticRequestView"];
 export type ProviderDiagnosticView = components["schemas"]["ProviderDiagnosticView"];
 export type FileEditPreviewView = components["schemas"]["FileEditPreviewView"];
@@ -64,6 +65,7 @@ export type SessionView = components["schemas"]["SessionView"];
 export type SupervisorToolRoundView = components["schemas"]["SupervisorToolRoundView"];
 export type WorkItemView = components["schemas"]["WorkItemView"];
 export type WorkspaceView = components["schemas"]["WorkspaceView"];
+export type WorkspaceExplorerView = components["schemas"]["WorkspaceExplorerView"];
 
 export interface SuccessEnvelope<T> {
   version: "api.v1";

@@ -154,6 +154,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/skills/packages/inst
 | `GET` | `/api/v1/health` | Health and SQLite schema version |
 | `GET` | `/api/v1/openapi.json` | Raw deterministic OpenAPI 3.1 JSON document |
 | `GET` | `/api/v1/workspaces` | Bounded Workspace ID/name/creation metadata; no host root path |
+| `GET` | `/api/v1/workspaces/{workspace_id}/explore` | One bounded directory level or redacted UTF-8 file evidence; canonical relative path only, no host root |
 | `GET` | `/api/v1/models` | Redacted Provider/model-route availability; no key, Base URL, environment name, probe, or model call |
 | `POST` | `/api/v1/models/diagnostics` | One explicitly confirmed, content-free, tool-disabled Provider diagnostic |
 | `POST` | `/api/v1/models/routes/{profile}` | Persist one validated Provider/model route before updating the in-memory Router |
@@ -239,6 +240,21 @@ identity and six false authority facts. Import may write the content-addressed R
 but executes no package content, hook, command, Provider, tool, or network request and
 does not select the package for a Run.
 
+D1-U1 adds `operation_receipt.v1` to successful HTTP FileEdit apply, foreground wake
+consume, and Skill install responses. The receipt contains a closed operation kind,
+outcome, replay flag, retry strategy, recovery action, and cleanup state only. It omits
+raw operation keys/digests, path/content, requester, model output, and lease identity.
+For FileEdit, uncertain retained staging is reported without changing the durable apply
+outcome.
+
+D1-E1 `workspace_explorer.v1` uses the read bearer and registered Workspace identity.
+The optional `path` is a canonical slash-separated relative path. Go rejects traversal,
+absolute/volume paths, links, redirects, controls, normalization aliases, and ambiguous
+names. It scans at most 400 directory entries, returns at most 200, reads at most 64 KiB
+of valid UTF-8, and caps the redacted projection at 128 KiB. The response excludes the
+host root/internal staging and carries `context_provenance.v1` with
+`instruction_authorized=false`.
+
 ## OpenAPI Contract
 
 Go DTO 是响应结构的唯一来源。以下命令不启动数据库、不读取 token，并可复现仓库内受测试的 [openapi.json](openapi.json)：
@@ -250,9 +266,9 @@ cyberagent api openapi
 cyberagent api openapi --output docs/openapi.json
 ```
 
-运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 46 个 path、102 个 schema：30 个只读 GET 使用全局 read capability，十九个控制 POST 显式覆盖为 `ControlBearerAuth`。测试逐条命中公开 handler，并确认普通 DTO 不包含 Workspace root、Artifact/Skill/Session/文件正文、模型输出、工具参数、私有 lifecycle、operation/fencing/lease owner、API key、Provider Base URL 或环境变量名；Skill 安装请求是唯一有界 archive 传输并明确排除 path/content/command/hook 字段。
+运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 47 个 path、106 个 schema：31 个只读 GET 使用全局 read capability，十九个控制 POST 显式覆盖为 `ControlBearerAuth`。测试逐条命中公开 handler，并确认普通 DTO 不包含 Workspace root、Artifact/Skill/Session 正文、模型输出、工具参数、私有 lifecycle、operation/fencing/lease owner、API key、Provider Base URL 或环境变量名。Explorer 也绝不返回 Workspace root；它是唯一有界、脱敏且明确非授权的 Workspace 文本投影。Skill 安装请求是唯一有界 archive 传输，并明确排除 path/content/command/hook 字段。
 
-The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract contains 46 paths and 102 schemas: 30 read-only GET operations use the global read capability, while nineteen control POST operations override security with `ControlBearerAuth`. Tests exercise every handler and verify that ordinary DTOs omit Workspace roots, Artifact/Skill/Session/file bodies, model output, tool arguments, private lifecycle, operation/fencing/lease-owner identities, API keys, Provider base URLs, and environment-variable names. The Skill-install request is the sole bounded archive transport and explicitly omits path, content, command, and hook fields.
+The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract contains 47 paths and 106 schemas: 31 read-only GET operations use the global read capability, while nineteen control POST operations override security with `ControlBearerAuth`. Tests exercise every handler and verify that ordinary DTOs omit Workspace roots, Artifact/Skill/Session bodies, model output, tool arguments, private lifecycle, operation/fencing/lease-owner identities, API keys, Provider base URLs, and environment-variable names. Explorer never returns a Workspace root either; it is the sole bounded, redacted, explicitly non-authorizing Workspace-text projection. The Skill-install request remains the sole bounded archive transport and explicitly omits path, content, command, and hook fields.
 
 ## 主动取消 / Active-Call Cancellation
 

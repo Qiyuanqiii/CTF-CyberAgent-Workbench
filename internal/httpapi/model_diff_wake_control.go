@@ -9,6 +9,7 @@ import (
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/modelregistry"
+	"cyberagent-workbench/internal/operationreceipt"
 )
 
 type ModelControlController interface {
@@ -293,6 +294,9 @@ func (a *API) serveFileEditApplyControl(writer http.ResponseWriter,
 		Edit: fileEditView(result.Edit, false), Status: string(result.Result.Status),
 		Replayed: result.Replayed, FileWritten: result.FileWritten,
 		PolicyRechecked: true,
+		Receipt: operationReceiptView(operationreceipt.FileEditApply(
+			string(result.Result.Status), result.Replayed,
+			result.StagingCleanup.Pending)),
 	}, nil, http.StatusAccepted)
 }
 
@@ -400,7 +404,18 @@ func (a *API) serveRunWakeExecutionControl(writer http.ResponseWriter,
 			result.Handoff.Operation.ID != "",
 		ModelCalled: modelCalled, ToolCalled: toolCalled,
 		BackgroundLoopEnabled: false,
+		Receipt: operationReceiptView(operationreceipt.Settled(
+			operationreceipt.KindRunWakeConsume, result.Replayed, false)),
 	}, nil, http.StatusAccepted)
+}
+
+func operationReceiptView(value operationreceipt.Receipt) OperationReceiptView {
+	return OperationReceiptView{
+		ProtocolVersion: value.ProtocolVersion, Kind: value.Kind, Outcome: value.Outcome,
+		Durable: value.Durable, Replayed: value.Replayed, RetrySafe: value.RetrySafe,
+		RetryStrategy: value.RetryStrategy, RecoveryAction: value.RecoveryAction,
+		CleanupState: value.CleanupState,
+	}
 }
 
 func readStrictControlBody(request *http.Request, label string) ([]byte, error) {

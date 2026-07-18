@@ -17,8 +17,10 @@ import (
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/modelregistry"
+	"cyberagent-workbench/internal/operationreceipt"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/skills"
+	"cyberagent-workbench/internal/workspace"
 )
 
 const (
@@ -219,6 +221,7 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 	reportID := pathIdentityParameter("report_id", "Finding Report identity")
 	approvalID := pathIdentityParameter("approval_id", "Approval identity")
 	editID := pathIdentityParameter("edit_id", "File edit identity")
+	workspaceID := pathIdentityParameter("workspace_id", "Workspace identity")
 	routeName := pathIdentityParameter("route", "Model route name")
 	return []openAPIOperationSpec{
 		{Path: "/api/v1", OperationID: "getAPIIndex", Summary: "Inspect API resources",
@@ -267,6 +270,15 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 			Tag: "Workspaces", Description: "Returns registered Workspace ids and names without local root paths.",
 			DataType: reflect.TypeOf(WorkspaceView{}), Collection: true, Paginated: true,
 			Parameters: paginationParameters()},
+		{Path: "/api/v1/workspaces/{workspace_id}/explore",
+			OperationID: "exploreWorkspace", Summary: "Inspect a bounded Workspace entry",
+			Tag:         "Workspaces",
+			Description: "Lists one directory level or returns a bounded redacted UTF-8 file preview. Go resolves the registered Workspace root, rejects traversal and symbolic links, omits internal staging files, and marks all content as non-authorizing evidence. Local root paths are never returned.",
+			DataType:    reflect.TypeOf(WorkspaceExplorerView{}), NotFound: true,
+			Parameters: []openAPIParameter{workspaceID,
+				{Name: "path", In: "query", Description: "Canonical Workspace-relative path returned by a previous explorer response; defaults to the root",
+					Schema: map[string]any{"type": "string", "maxLength": workspace.MaxExplorerPathRunes,
+						"default": "."}}}},
 		{Path: "/api/v1/runs/{run_id}", OperationID: "getRun", Summary: "Inspect a Run", Tag: "Runs",
 			Description: "Returns Run, Mission, checkpoint, tool usage, token-free execution-lease metadata, and read-only Plan/Delivery and external-Skill metadata projections when present.",
 			DataType:    reflect.TypeOf(RunDetailView{}), NotFound: true, Parameters: []openAPIParameter{runID}},
@@ -886,6 +898,12 @@ func applyOpenAPIFieldMetadata(typeName string, fieldName string, schema map[str
 	if typeName == "ArtifactView" && fieldName == "sha256" {
 		schema["pattern"] = "^[a-f0-9]{64}$"
 	}
+	if fieldName == "content_sha256" {
+		schema["pattern"] = "^[a-f0-9]{64}$"
+	}
+	if typeName == "WorkspaceExplorerView" && fieldName == "entries" {
+		schema["maxItems"] = workspace.MaxExplorerEntries
+	}
 }
 
 var openAPIFieldEnums = map[string][]string{
@@ -922,6 +940,17 @@ var openAPIFieldEnums = map[string][]string{
 	"SkillPackageInstallView.protocol_version":          {skills.PackageInstallationProtocolVersion},
 	"SkillPackageInstallView.surface":                   {string(domain.ExecutionSurfaceCode), string(domain.ExecutionSurfaceCyber)},
 	"SkillPackageInstallView.trust_class":               {string(skills.PackageTrustOperatorInstalledUntrusted)},
+	"OperationReceiptView.protocol_version":             {operationreceipt.ProtocolVersion},
+	"OperationReceiptView.kind":                         {string(operationreceipt.KindFileEditApply), string(operationreceipt.KindRunWakeConsume), string(operationreceipt.KindSkillPackageInstall)},
+	"OperationReceiptView.outcome":                      {"applied", "failed", "completed", "installed"},
+	"OperationReceiptView.retry_strategy":               {string(operationreceipt.RetrySameOperationKey), string(operationreceipt.RetrySameWakeGeneration)},
+	"OperationReceiptView.recovery_action":              {string(operationreceipt.RecoveryNone), string(operationreceipt.RecoveryRetryAfterGrace)},
+	"OperationReceiptView.cleanup_state":                {string(operationreceipt.CleanupNotApplicable), string(operationreceipt.CleanupComplete), string(operationreceipt.CleanupPendingReview)},
+	"WorkspaceExplorerView.protocol_version":            {workspace.ExplorerProtocolVersion},
+	"WorkspaceExplorerView.kind":                        {"directory", "file"},
+	"WorkspaceExplorerEntryView.kind":                   {"directory", "file", "blocked"},
+	"WorkspaceExplorerProvenanceView.version":           {session.ContextProvenanceVersion},
+	"WorkspaceExplorerProvenanceView.source_kind":       {session.SourceWorkspaceFile, session.SourceWorkspaceList},
 	"ProviderAvailabilityView.kind":                     {modelregistry.ProviderKindLocal, modelregistry.ProviderKindAnthropicCompatible},
 	"ProviderAvailabilityView.status":                   {modelregistry.ProviderAvailable, modelregistry.ProviderNotConfigured, modelregistry.ProviderInvalidConfiguration},
 	"ProviderAvailabilityView.credential_source":        {"none", "environment"},
@@ -1096,6 +1125,10 @@ var openAPIFieldMinimums = map[string]float64{
 	"RunWakeIntentView.max_attempts":                      1,
 	"RunWakeIntentView.attempt_count":                     0,
 	"RunWakeExecutionRequestView.max_steps":               1,
+	"WorkspaceExplorerEntryView.size_bytes":               0,
+	"WorkspaceExplorerView.total_bytes":                   0,
+	"WorkspaceExplorerView.returned_bytes":                0,
+	"WorkspaceExplorerView.redaction_count":               0,
 }
 
 var openAPIFieldMaximums = map[string]float64{
@@ -1116,18 +1149,24 @@ var openAPIFieldMaximums = map[string]float64{
 	"RunWakeScheduleRequestView.max_backoff_seconds":   domain.MaxRunWakeBackoffSeconds,
 	"RunWakeScheduleRequestView.max_elapsed_seconds":   domain.MaxRunWakeElapsedSeconds,
 	"RunWakeExecutionRequestView.max_steps":            domain.MaxRunExecutionHandoffSteps,
+	"WorkspaceExplorerView.returned_bytes":             workspace.MaxExplorerProjectedBytes,
 }
 
 var openAPIFieldMaxLengths = map[string]int{
-	"ModelCancellationRequestView.reason":           domain.MaxModelCancellationReasonRunes,
-	"RunExecutionProfileControlRequestView.reason":  domain.MaxRunExecutionProfileReasonRunes,
-	"RunCreationControlRequestView.goal":            domain.MaxRunCreationGoalBytes,
-	"SessionMessageControlRequestView.content":      domain.MaxOperatorSteeringContentBytes,
-	"SessionSteeringCancellationRequestView.reason": domain.MaxOperatorSteeringReasonBytes,
-	"ApprovalDecisionControlRequestView.reason":     approval.MaxReasonRunes,
-	"MessageView.source_ref":                        session.MaxContextSourceRefRunes,
-	"MessageView.content_sha256":                    64,
-	"SkillPackageInstallRequestView.archive_base64": base64.StdEncoding.EncodedLen(skills.MaxPackageArchiveBytes),
+	"ModelCancellationRequestView.reason":            domain.MaxModelCancellationReasonRunes,
+	"RunExecutionProfileControlRequestView.reason":   domain.MaxRunExecutionProfileReasonRunes,
+	"RunCreationControlRequestView.goal":             domain.MaxRunCreationGoalBytes,
+	"SessionMessageControlRequestView.content":       domain.MaxOperatorSteeringContentBytes,
+	"SessionSteeringCancellationRequestView.reason":  domain.MaxOperatorSteeringReasonBytes,
+	"ApprovalDecisionControlRequestView.reason":      approval.MaxReasonRunes,
+	"MessageView.source_ref":                         session.MaxContextSourceRefRunes,
+	"MessageView.content_sha256":                     64,
+	"SkillPackageInstallRequestView.archive_base64":  base64.StdEncoding.EncodedLen(skills.MaxPackageArchiveBytes),
+	"WorkspaceExplorerView.path":                     workspace.MaxExplorerPathRunes,
+	"WorkspaceExplorerProvenanceView.source_ref":     workspace.MaxExplorerPathRunes,
+	"WorkspaceExplorerProvenanceView.content_sha256": 64,
+	"WorkspaceExplorerEntryView.name":                255,
+	"WorkspaceExplorerEntryView.path":                workspace.MaxExplorerPathRunes,
 }
 
 func runStatuses() []string {

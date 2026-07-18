@@ -43,6 +43,10 @@ describe("DesktopSkillPreviewDialog", () => {
       import_command_execution: false, import_network_access: false,
       import_provider_calls: false, tool_capability_grant: false,
       run_selection_authorized: false, context_injection_authorized: false,
+      receipt: { protocol_version: "operation_receipt.v1", kind: "skill_package_install",
+        outcome: "installed", durable: true, replayed: false, retry_safe: true,
+        retry_strategy: "same_operation_key", recovery_action: "none",
+        cleanup_state: "not_applicable" },
     });
     const user = userEvent.setup();
     render(<DesktopSkillPreviewDialog installationEnabled open onClose={vi.fn()} />);

@@ -215,7 +215,7 @@ func (a *App) editApprove(ctx context.Context, manager fileEditManager, args []s
 		if run, found, lookupErr := a.store.GetRunBySession(ctx, edit.SessionID); lookupErr != nil {
 			return lookupErr
 		} else if found {
-			return fmt.Errorf("Run-bound file edit %s cannot use legacy approve; use `cyberagent edit review-approve %s %s`, then `cyberagent edit apply %s %s --operation-key <key>`",
+			return fmt.Errorf("run-bound file edit %s cannot use legacy approve; use `cyberagent edit review-approve %s %s`, then `cyberagent edit apply %s %s --operation-key <key>`",
 				edit.ID, run.ID, edit.ID, run.ID, edit.ID)
 		}
 	}

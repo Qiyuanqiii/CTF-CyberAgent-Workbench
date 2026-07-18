@@ -5054,6 +5054,94 @@
         },
         "x-cyberagent-read-only": true
       }
+    },
+    "/api/v1/workspaces/{workspace_id}/explore": {
+      "get": {
+        "operationId": "exploreWorkspace",
+        "summary": "Inspect a bounded Workspace entry",
+        "description": "Lists one directory level or returns a bounded redacted UTF-8 file preview. Go resolves the registered Workspace root, rejects traversal and symbolic links, omits internal staging files, and marks all content as non-authorizing evidence. Local root paths are never returned.",
+        "tags": [
+          "Workspaces"
+        ],
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "Workspace identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Canonical Workspace-relative path returned by a previous explorer response; defaults to the root",
+            "schema": {
+              "default": ".",
+              "maxLength": 512,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WorkspaceExplorerView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
     }
   },
   "components": {
@@ -6435,6 +6523,9 @@
             ],
             "type": "string"
           },
+          "receipt": {
+            "$ref": "#/components/schemas/OperationReceiptView"
+          },
           "replayed": {
             "type": "boolean"
           },
@@ -6458,7 +6549,8 @@
           "status",
           "replayed",
           "file_written",
-          "policy_rechecked"
+          "policy_rechecked",
+          "receipt"
         ],
         "type": "object"
       },
@@ -7050,6 +7142,7 @@
           },
           "content_sha256": {
             "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$",
             "type": "string"
           },
           "created_at": {
@@ -7427,6 +7520,77 @@
           "version",
           "created_at",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "OperationReceiptView": {
+        "additionalProperties": false,
+        "properties": {
+          "cleanup_state": {
+            "enum": [
+              "not_applicable",
+              "complete",
+              "pending_review"
+            ],
+            "type": "string"
+          },
+          "durable": {
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "file_edit_apply",
+              "run_wake_consume",
+              "skill_package_install"
+            ],
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "applied",
+              "failed",
+              "completed",
+              "installed"
+            ],
+            "type": "string"
+          },
+          "protocol_version": {
+            "enum": [
+              "operation_receipt.v1"
+            ],
+            "type": "string"
+          },
+          "recovery_action": {
+            "enum": [
+              "none",
+              "retry_after_cleanup_grace"
+            ],
+            "type": "string"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "retry_safe": {
+            "type": "boolean"
+          },
+          "retry_strategy": {
+            "enum": [
+              "same_operation_key",
+              "same_wake_generation"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "kind",
+          "outcome",
+          "durable",
+          "replayed",
+          "retry_safe",
+          "retry_strategy",
+          "recovery_action",
+          "cleanup_state"
         ],
         "type": "object"
       },
@@ -9019,6 +9183,9 @@
             ],
             "type": "string"
           },
+          "receipt": {
+            "$ref": "#/components/schemas/OperationReceiptView"
+          },
           "replayed": {
             "type": "boolean"
           },
@@ -9043,7 +9210,8 @@
           "execution_started",
           "model_called",
           "tool_called",
-          "background_loop_enabled"
+          "background_loop_enabled",
+          "receipt"
         ],
         "type": "object"
       },
@@ -9537,6 +9705,9 @@
             ],
             "type": "string"
           },
+          "receipt": {
+            "$ref": "#/components/schemas/OperationReceiptView"
+          },
           "recovered_pending": {
             "type": "boolean"
           },
@@ -9581,7 +9752,8 @@
           "import_provider_calls",
           "tool_capability_grant",
           "run_selection_authorized",
-          "context_injection_authorized"
+          "context_injection_authorized",
+          "receipt"
         ],
         "type": "object"
       },
@@ -9948,6 +10120,158 @@
           "version",
           "created_at",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "WorkspaceExplorerEntryView": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "directory",
+              "file",
+              "blocked"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "readable": {
+            "type": "boolean"
+          },
+          "size_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "path",
+          "kind",
+          "size_bytes",
+          "readable"
+        ],
+        "type": "object"
+      },
+      "WorkspaceExplorerProvenanceView": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "instruction_authorized": {
+            "type": "boolean"
+          },
+          "source_kind": {
+            "enum": [
+              "workspace_file",
+              "workspace_listing"
+            ],
+            "type": "string"
+          },
+          "source_ref": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "context_provenance.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "source_kind",
+          "source_ref",
+          "content_sha256",
+          "instruction_authorized"
+        ],
+        "type": "object"
+      },
+      "WorkspaceExplorerView": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceExplorerEntryView"
+            },
+            "maxItems": 200,
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "directory",
+              "file"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "protocol_version": {
+            "enum": [
+              "workspace_explorer.v1"
+            ],
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/WorkspaceExplorerProvenanceView"
+          },
+          "redaction_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "returned_bytes": {
+            "format": "int32",
+            "maximum": 131072,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "root_path_exposed": {
+            "type": "boolean"
+          },
+          "total_bytes": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "workspace_id",
+          "path",
+          "kind",
+          "entries",
+          "content",
+          "total_bytes",
+          "returned_bytes",
+          "truncated",
+          "redaction_count",
+          "root_path_exposed",
+          "provenance"
         ],
         "type": "object"
       },

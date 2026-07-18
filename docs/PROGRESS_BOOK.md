@@ -898,10 +898,20 @@ GitHub Actions run `29655417908` 已为实现提交 `79f07fb` 全绿：TypeScrip
 
 下一批建议依次完成 D1-U1 mutation receipt/recovery 统一呈现、D1-E1 Go-owned 有界只读 Workspace explorer、D1-W1 可复现便携构建诊断与 Windows 兼容清单；届时累计六片，执行全仓 ordinary/race/vet/staticcheck/govulncheck/依赖/隐私完整健壮性门。后台服务、真实宿主/容器进程、签名分发、Rust analyzer 和 CTF 自动化继续后置。
 
+非 schema D1-U1/D1-E1/D1-W1 三切片批次已完成，任务 ID 为 `P9-Receipts-Workspace-Explorer-Portable-Diagnostics-D1UEW1`，SQLite schema 保持 v76。D1-U1 新增严格 `operation_receipt.v1`，统一 FileEdit apply、前台 wake consume 和惰性 Skill install 的 outcome、replay、闭集 retry/recovery 与 cleanup 状态；不返回 operation key/digest、路径/正文、请求者、模型内容或私有 lease。FileEdit 终态/重放只会清理同一目标目录内、保留前缀、超过 15 分钟、普通文件且完整字节匹配批准 proposal SHA-256 的暂存文件；无法确认时保持 durable 结果并返回 `pending_review`。React 将回执与父响应交叉验证，失败 apply 使用告警而非成功呈现。
+
+D1-E1 新增 read-bearer `workspace_explorer.v1` 与 Run Files 页。Go 只接受注册 Workspace 下规范 `/` 相对路径，拒绝遍历、绝对/卷路径、软链接/重定向、控制字符、首尾空白、需要规范化的别名和跨平台歧义名称；目录最多扫描 400、返回 200，文件最多读取 64 KiB 有效 UTF-8，脱敏投影最多 128 KiB。内部暂存和可疑名称不进入列表，root path 不进入 DTO。每份目录/文件投影以 `context_provenance.v1` 固定 `instruction_authorized=false`，TypeScript 还会核对条目必须等于当前父目录与条目名组合，并只以纯文本 `<pre>` 显示。
+
+D1-W1 新增可复现 linker metadata、只读 `cyberagent doctor portable [--json]`、`build-desktop.ps1 -VerifyReproducible` 与 `check-windows-compat.ps1`。构建输出必须位于仓库内且不能穿过 child reparse point；连续两次构建必须 SHA-256 相同，并检查 PE 签名/架构/可执行标志、零 COFF timestamp、metadata/hash、`-trimpath`、Go module 及无 installer/registry/startup/update 边界。首次真实执行暴露 Windows PowerShell 5.1 不支持 `Path.GetRelativePath`，已改用经过前缀验证的兼容实现。自动检查全绿仍不等于正式发布，Windows 10/WebView2/display/launch/recovery 人工矩阵使 `release_ready=false`。
+
+累计六切片完整健壮性门通过：最终全仓 ordinary 294.0 秒、race 338.3 秒；普通/secure-Desktop test 与 vet、零告警 staticcheck、零可达漏洞 govulncheck、module verify/tidy diff、22 个文件 88 项 React 测试、strict TypeScript、确定性 OpenAPI/TypeScript、Vite build、npm 零漏洞、隔离且显式清空真实 Provider 环境的 CLI smoke、凭据/本机路径/产物扫描与真实 Windows 双构建均为绿色。OpenAPI 为 47 个 path、106 个 schema、31 个 GET、19 个 control POST；双构建 SHA-256 为 `33fb9ca3064df98191ac50b2a3ef9431e1b5c81abe8c610d4be15db113cdf1ef`，COFF timestamp 为 0。审计修复 release-ready 误报、失败回执成功图标、非规范/跨目录 Explorer 路径权限、OpenAPI 活路由缺 Workspace 夹具、脱敏投影上限、PowerShell 5.1 兼容、输出重解析点和一项既有 Go error 文案；当前无已知未解决高/中风险。未调用真实 Provider、Shell、LocalRunner、Docker、网络攻击、安装器、注册表、自启动或更新。
+
+双指标更新为架构完成度约 98%（V2 约 99%）、完整产品可用度约 74-78%、通用 Coding Agent 约 70%、Cyber 自动化约 20%。下一批建议为 D1-E2 有界 Workspace 搜索、D1-C1 操作者显式把单份非授权 Workspace evidence 附加到既有 Session 队列，以及 D1-U2 可刷新 metadata-only operation receipt history。Windows 10 人工矩阵、签名/安装包、真实进程、Rust analyzer 与 CTF 自动化继续独立后置，边界见 ADR 0042。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0041-explicit-wake-file-apply-and-inert-skill-install.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0042-receipts-explorer-portable-build.md`。

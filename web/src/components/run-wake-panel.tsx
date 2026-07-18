@@ -1,10 +1,11 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BellOff, BellRing, LoaderCircle, Play } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
-import type { RunDetailView, RunWakeStateView } from "../api/types";
+import type { OperationReceiptView, RunDetailView, RunWakeStateView } from "../api/types";
 import { formatDate, formatNumber, shortID } from "../lib/format";
 import { ErrorState, KeyValue, LoadingState, StatusBadge } from "./common";
+import { OperationReceipt } from "./operation-receipt";
 
 export function RunWakePanel({ client, detail }: {
   client: CyberAgentClient;
@@ -12,6 +13,7 @@ export function RunWakePanel({ client, detail }: {
 }) {
   const runID = detail.run.id;
   const queryClient = useQueryClient();
+  const [receipt, setReceipt] = useState<OperationReceiptView | null>(null);
   const operationKeys = useRef(new Map<string, string>());
   const keyFor = (action: string) => {
     const existing = operationKeys.current.get(action);
@@ -56,6 +58,7 @@ export function RunWakePanel({ client, detail }: {
       version: "run_wake_consumer.v1", max_steps: 1,
     }),
     onSuccess: (result) => {
+      setReceipt(result.receipt);
       queryClient.setQueryData<RunWakeStateView>(["run", runID, "wake-intent"], {
         protocol_version: "run_wake_intent.v1", run_id: runID, found: true,
         intent: result.intent,
@@ -115,6 +118,7 @@ export function RunWakePanel({ client, detail }: {
             : <Play aria-hidden="true" size={15} />}Consume
         </button>}
     </div>
+    {receipt && <OperationReceipt receipt={receipt} />}
     {error && <div className="inline-warning" role="alert">
       {error instanceof Error ? error.message : "Run wake control failed"}
     </div>}

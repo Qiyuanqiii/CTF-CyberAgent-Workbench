@@ -8,6 +8,7 @@ import {
   type DesktopSkillPreview,
 } from "../lib/desktop-bridge";
 import { formatBytes, formatNumber } from "../lib/format";
+import { OperationReceipt } from "./operation-receipt";
 
 export function DesktopSkillPreviewDialog({ open, onClose, installationEnabled = false }: {
   open: boolean;
@@ -119,6 +120,7 @@ export function DesktopSkillPreviewDialog({ open, onClose, installationEnabled =
             <PackageCheck aria-hidden="true" size={17} />
             <span>{installed.name} {installed.version} 已登记到 {installed.surface}</span>
           </div>}
+          {installed && <OperationReceipt receipt={installed.receipt} />}
           {error && <div className="connection-error" role="alert">{error}</div>}
         </div>
 

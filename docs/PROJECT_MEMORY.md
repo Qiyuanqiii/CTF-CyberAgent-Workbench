@@ -1,6 +1,6 @@
 # CyberAgent Workbench Project Memory
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 ## Resume First
 
@@ -54,20 +54,21 @@ Read in this order after a long context break:
 44. `docs/adr/0039-model-plan-and-approval-controls.md`
 45. `docs/adr/0040-provider-diff-wake-controls.md`
 46. `docs/adr/0041-explicit-wake-file-apply-and-inert-skill-install.md`
-47. `docs/DESKTOP_PLAN.md`
-48. `docs/SKILL_PACKAGE_PLAN.md`
+47. `docs/adr/0042-receipts-explorer-portable-build.md`
+48. `docs/DESKTOP_PLAN.md`
+49. `docs/SKILL_PACKAGE_PLAN.md`
 
 ## Current Baseline
 
 - Architecture completion: about 98%; the V2 run-centric control plane is about 99% complete.
-- Product usability: about 70-74% for the complete Code + Cyber product.
-- Generic coding-agent workflow usability: about 66%.
+- Product usability: about 74-78% for the complete Code + Cyber product.
+- Generic coding-agent workflow usability: about 70%.
 - Cyber autonomous-workflow usability: about 20%.
 - These are engineering estimates based on tested roadmap slices, not performance benchmarks. Do not reuse the retired single-axis "overall product vision" percentage.
 - Database schema: v76.
 - `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v76` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
 - Main languages: Go control plane, TypeScript React/Vite local console; Rust has not started.
-- Desktop status: D0-A/D0-B and D1-R1 through D1-B1 pin Wails v2.13.0 and build a Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics and persisted routes, body-free Diff review, independently authorized apply, durable wake intent plus explicit foreground consumption, and confirmed inert Skill installation. Control flags are independent; capability-only launches cannot reach sibling routes. Windows 10 release coverage remains pending. It has no installer, formal portable release, registry/startup/update behavior, background wake worker, terminal, real Shell/Local/Docker process execution, or Desktop provider-secret settings. See ADR 0033 through ADR 0041 and `docs/DESKTOP_PLAN.md`.
+- Desktop status: D0-A/D0-B and D1-R1 through D1-W1 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics and persisted routes, body-free Diff review, independently authorized apply, durable wake intent plus explicit foreground consumption, confirmed inert Skill installation, unified operation receipts, and a Go-owned bounded Workspace Files view. Control flags are independent; capability-only launches cannot reach sibling routes. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, background wake worker, terminal, real Shell/Local/Docker process execution, or Desktop provider-secret settings. See ADR 0033 through ADR 0042 and `docs/DESKTOP_PLAN.md`.
 - Custom Skill status: the five embedded `skill.v1` guides and explicitly selected external packages are Run-loadable through separate protocols. Schema v69 adds persistent content-addressed import/history; schema v70 adds a second explicitly confirmed exact Run selection and redacted user-role root/Specialist context; schema v71 adds bounded read-only provenance across HTTP/TUI/Web. D1-A adds a pathless, one-time-handle preview boundary; D1-B1 adds explicit HTTP/Desktop registration through the same inert Registry. External packages remain untrusted and grant no declared tools. Installation executes no content and still does not select a package for a Run. See ADR 0024, ADR 0031 through ADR 0033, ADR 0041, and `docs/SKILL_PACKAGE_PLAN.md`.
 - Protected-delete status: explicit recursive, absolute/traversing/wildcard, environment-derived, command-substituted, current-home, PowerShell/`cmd`, and common interpreter deletion intents are permanently denied before approval across Shell, ScriptProcess, and Sandbox Policy. This is defense in depth; Local/container process execution remains disabled and a future executor still requires OS/container isolation. See ADR 0025.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
@@ -83,12 +84,25 @@ Non-schema D1-M2/D1-D1 and schema-v74 D1-Q1 add explicit content-free Provider d
 
 Schema-v75 D1-Q2, schema-v76 D1-D2, and non-schema D1-B1 add one explicit foreground wake consumer, a separately authorized current-hash/Policy-checked FileEdit apply, and confirmed HTTP/Desktop import into the inert Skill Registry. All three are independent and default off. They add no hidden worker, renderer path/body input, install-time execution, or general host/container process authority. ADR 0041 records the boundary.
 
+Non-schema D1-U1/E1/W1 adds `operation_receipt.v1` for apply/wake/install,
+hash-and-age constrained FileEdit staging recovery, and read-bearer
+`workspace_explorer.v1` with canonical Go path resolution, bounded redacted UTF-8, and
+non-authorizing provenance. React can navigate only Go-issued exact child paths and
+renders file bodies as plain text. `cyberagent doctor portable` plus the Windows build
+scripts provide deterministic release metadata, PE/COFF/module checks, and consecutive
+binary hash verification. The tested double-build SHA-256 is
+`33fb9ca3064df98191ac50b2a3ef9431e1b5c81abe8c610d4be15db113cdf1ef`.
+Automated checks pass, while the manual Windows 10/WebView2 matrix correctly keeps
+`release_ready=false`. ADR 0042 records the boundary.
+
 ## Security Invariants
 
 - Go owns Policy, scope, budgets, state transitions, Docker/process control, API-key access, and file permissions.
 - `model_availability.v1` is a deterministic no-probe projection. API keys, Base URLs, environment-variable names, clients, and raw errors never enter it; secret-like or malformed model/route identifiers fail closed or are redacted.
 - `provider_diagnostic.v1` is explicit and content-free. Each invocation may make one bounded model request, but model text, secrets, endpoints, environment-variable names, clients, and raw errors never enter the result. Route persistence succeeds before the in-memory Router changes.
 - File-edit review exact-binds Run/Mission/Session/Workspace/proposal/approval and returns metadata plus bounded redacted Diff only. `approve_intent` never writes a file. Schema v76 apply is a separate capability that rechecks Policy, Workspace resolution, original/current hash, target hash, and idempotent result; browsers submit neither path nor body.
+- `operation_receipt.v1` is a content-free projection of an already durable apply/wake/install result. Go owns the outcome/replay/retry/cleanup tuple; TypeScript cross-checks it against the enclosing response and cannot invent recovery authority. Staging cleanup is restricted by exact directory, reserved prefix, age, ordinary-file identity, size, and approved content hash.
+- `workspace_explorer.v1` treats repository content as evidence rather than authority. Go alone resolves the registered root and canonical relative path, refuses links/redirects/traversal/ambiguous names, redacts and bounds UTF-8, and emits `instruction_authorized=false`. The DTO never includes the root; React cannot submit an arbitrary host path or execute Markdown/HTML from file content.
 - Schema v74 wake intent is not a scheduler. Schema v75 can consume one due intent only after an explicit foreground action and only through the existing bounded RunSupervisor handoff. Public state omits private lease/owner identity, and no background loop exists.
 - Plan direction selection and Deliver transition are separate operator operations. Neither can start/resume execution, call a model/tool, acquire a lease, or grant capability.
 - Desktop/Web approval can only deny or approve-once under a fresh Policy check. Shell is dry-run, ScriptProcess is process-disabled, replace-file is deny-only, permanent denial is non-overridable, and no Session Grant, file write, or real process can result.
@@ -495,14 +509,52 @@ TypeScript console completed in 28s, the Windows Desktop shell in 2m5s, and the 
 control plane in 3m57s. Remote checks included API drift, frontend tests/build/audit,
 Desktop build/boundaries, module verification, the full Go suite, vet, and govulncheck.
 
+## Completed Receipts, Workspace Explorer, And Portable Diagnostics (D1-U1/E1/W1)
+
+D1-U1 adds one strict `operation_receipt.v1` projection to FileEdit apply, foreground
+wake consumption, and inert Skill installation. It contains no operation key/digest,
+path/body, model content, requester, or private lease. Go owns the closed outcome,
+replay, retry, recovery, and cleanup tuple. FileEdit replays attempt conservative
+cleanup only for an old ordinary reserved staging file in the exact target directory
+whose full bytes match the approved proposal SHA-256; uncertainty is reported without
+changing the durable apply result.
+
+D1-E1 adds read-only `workspace_explorer.v1` and the Run Files tab. Go resolves the
+registered root, accepts only canonical slash-separated relative paths, follows no
+link or redirected component, scans at most 400 entries, returns at most 200, reads at
+most 64 KiB of UTF-8, and caps redacted output at 128 KiB. The root and internal staging
+names stay out of the DTO. Each result has non-authorizing `context_provenance.v1`;
+React accepts only the exact child path derived from the current parent and name and
+renders content as plain text.
+
+D1-W1 adds `cyberagent doctor portable`, reproducible linker metadata, a repository-
+contained/no-child-reparse-point build output boundary, consecutive SHA-256 builds,
+and PE architecture/executable/zero-COFF-timestamp/hash/trimpath/module/non-installing
+checks. Automated success and release approval are separate; the manual Windows 10,
+WebView2, display, launch, and recovery matrix keeps `release_ready=false`.
+
+The cumulative six-slice gate is green. Full ordinary/race suites passed in
+294.0s/338.3s; ordinary and secure-Desktop test/vet, zero-warning staticcheck,
+zero-finding govulncheck, module verification/tidy, 88 React tests across 22 files,
+strict TypeScript, deterministic OpenAPI/TypeScript, Vite build, zero-vulnerability
+npm audit, isolated mock-only CLI smoke, privacy/artifact scans, and the real Windows
+double build passed. OpenAPI is 47 paths/106 schemas/31 GET/19 control POST. The double
+build SHA-256 is
+`33fb9ca3064df98191ac50b2a3ef9431e1b5c81abe8c610d4be15db113cdf1ef`.
+No unresolved high/medium issue is known. No real Provider, LocalRunner, Shell, Docker,
+network attack, installer, registry mutation, startup task, or updater was used.
+Current estimates are architecture about 98% (V2 about 99%), complete-product usability
+about 74-78%, generic Coding Agent workflow about 70%, and Cyber autonomous workflow
+about 20%.
+
 ## Next Slice
 
 The recommended next three-slice batch is:
 
-1. D1-U1: consolidate apply/wake/install operation receipts and recovery guidance in the Go API and React console without exposing private identities or inventing client-side state.
-2. D1-E1: add a bounded, read-only Workspace explorer through Go-owned path resolution and provenance so coding users can inspect files without granting renderer filesystem authority.
-3. D1-W1: add reproducible portable-build diagnostics, release metadata, and an automated Windows compatibility checklist before the still-manual Windows 10 matrix.
-4. This batch reaches six slices and therefore must run the full race/vet/staticcheck/govulncheck/dependency/privacy robustness gate. Docker start, Local OS sandboxing, signatures, Rust analyzers, network/secret grants, and CTF solving remain later separately gated work.
+1. D1-E2: add bounded Go-owned Workspace filename/text search that returns only canonical evidence references and redacted snippets; no indexer daemon or renderer filesystem authority.
+2. D1-C1: let an operator explicitly attach one selected Workspace evidence item to the existing Session queue under `context_provenance.v1`; file text remains user-role evidence with `instruction_authorized=false` and cannot self-authorize tools.
+3. D1-U2: add a refreshable, metadata-only operation receipt history/recovery view derived from durable Go state so receipts survive UI reload without exposing operation keys, paths, or private lease identity.
+4. After these three slices run the ordinary integrated gate. The manual Windows 10 matrix, signed/package distribution, real Sandbox/host processes, Rust analyzers, and CTF solving remain separate work requiring their own gates and, where noted, operator hardware/signing input.
 
 ## Local Machine Note
 

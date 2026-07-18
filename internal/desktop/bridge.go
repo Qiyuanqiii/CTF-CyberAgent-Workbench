@@ -13,6 +13,7 @@ import (
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/operationreceipt"
 )
 
 const (
@@ -93,21 +94,22 @@ type SkillPackageInstallRequest struct {
 }
 
 type SkillPackageInstallResult struct {
-	ProtocolVersion            string `json:"protocol_version"`
-	Name                       string `json:"name"`
-	Version                    string `json:"version"`
-	Surface                    string `json:"surface"`
-	TrustClass                 string `json:"trust_class"`
-	ArchiveSHA256              string `json:"archive_sha256"`
-	PackageFingerprint         string `json:"package_fingerprint"`
-	Replayed                   bool   `json:"replayed"`
-	RecoveredPending           bool   `json:"recovered_pending"`
-	ImportCommandExecution     bool   `json:"import_command_execution"`
-	ImportNetworkAccess        bool   `json:"import_network_access"`
-	ImportProviderCalls        bool   `json:"import_provider_calls"`
-	ToolCapabilityGrant        bool   `json:"tool_capability_grant"`
-	RunSelectionAuthorized     bool   `json:"run_selection_authorized"`
-	ContextInjectionAuthorized bool   `json:"context_injection_authorized"`
+	ProtocolVersion            string                   `json:"protocol_version"`
+	Name                       string                   `json:"name"`
+	Version                    string                   `json:"version"`
+	Surface                    string                   `json:"surface"`
+	TrustClass                 string                   `json:"trust_class"`
+	ArchiveSHA256              string                   `json:"archive_sha256"`
+	PackageFingerprint         string                   `json:"package_fingerprint"`
+	Replayed                   bool                     `json:"replayed"`
+	RecoveredPending           bool                     `json:"recovered_pending"`
+	ImportCommandExecution     bool                     `json:"import_command_execution"`
+	ImportNetworkAccess        bool                     `json:"import_network_access"`
+	ImportProviderCalls        bool                     `json:"import_provider_calls"`
+	ToolCapabilityGrant        bool                     `json:"tool_capability_grant"`
+	RunSelectionAuthorized     bool                     `json:"run_selection_authorized"`
+	ContextInjectionAuthorized bool                     `json:"context_injection_authorized"`
+	Receipt                    operationreceipt.Receipt `json:"receipt"`
 }
 
 type DesktopBridgeConfig struct {
@@ -349,6 +351,8 @@ func (b *DesktopBridge) InstallSkillPackage(
 		ToolCapabilityGrant:        installation.ToolCapabilityGrant,
 		RunSelectionAuthorized:     installation.RunSelectionAuthorized,
 		ContextInjectionAuthorized: installation.ContextInjectionAuthorized,
+		Receipt: operationreceipt.Settled(operationreceipt.KindSkillPackageInstall,
+			result.Replayed, false),
 	}, nil
 }
 

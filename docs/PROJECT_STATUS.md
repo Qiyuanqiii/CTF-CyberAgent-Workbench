@@ -1,12 +1,12 @@
 # Project Status
 
-Last updated: 2026-07-18
+Last updated: 2026-07-19
 
 ## Resume Context
 
-Current database schema is v76. Schema v69 adds an explicitly confirmed, content-addressed, inert user Skill Registry. Schema v70 adds a second explicitly confirmed exact external-Skill selection for a created Run plus redacted, provenance-preserving root/Specialist context. Schema v71 projects only bounded provenance and delivery metadata through HTTP/OpenAPI, TUI, and React. Schema v72 adds digest-idempotent, registered-Workspace, default-budget, network-disabled Mission/Run/Session creation for HTTP/Desktop. Non-schema D1-S1/S2 adds independent Session enqueue and exact pending-only cancellation over the v45-v46 steering queue. Schema v73 adds digest-idempotent Run start/pause/resume and an at-most-eight-item frozen execution handoff through the existing RunSupervisor. Schema v74 adds durable bounded wake/retry intent; schema v75 adds only an explicitly launched one-item foreground consumer through that existing handoff; schema v76 adds separately authorized, current-hash and Policy-checked FileEdit apply. Non-schema D1-B1 adds confirmed HTTP/Desktop import into the inert Registry. None grants a background worker, general Shell, LocalRunner, Docker, network, approval, child scheduling, install hook, or automatic Skill selection. Selected package text remains user-role untrusted guidance.
+Current database schema is v76. Schema v69 adds an explicitly confirmed, content-addressed, inert user Skill Registry. Schema v70 adds a second explicitly confirmed exact external-Skill selection for a created Run plus redacted, provenance-preserving root/Specialist context. Schema v71 projects only bounded provenance and delivery metadata through HTTP/OpenAPI, TUI, and React. Schema v72 adds digest-idempotent, registered-Workspace, default-budget, network-disabled Mission/Run/Session creation for HTTP/Desktop. Non-schema D1-S1/S2 adds independent Session enqueue and exact pending-only cancellation over the v45-v46 steering queue. Schema v73 adds digest-idempotent Run start/pause/resume and an at-most-eight-item frozen execution handoff through the existing RunSupervisor. Schema v74 adds durable bounded wake/retry intent; schema v75 adds only an explicitly launched one-item foreground consumer through that existing handoff; schema v76 adds separately authorized, current-hash and Policy-checked FileEdit apply. Non-schema D1-B1 adds confirmed HTTP/Desktop import into the inert Registry. Non-schema D1-U1/E1/W1 adds closed durable operation receipts, Go-owned bounded Workspace evidence exploration, and reproducible portable-build diagnostics without a migration. None grants a background worker, general Shell, LocalRunner, Docker, network, approval, child scheduling, install hook, renderer filesystem authority, or automatic Skill selection. Selected package and Workspace text remain user-role untrusted evidence/guidance.
 
-Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No path starts a Runner, container, Shell, or host process. ADR 0024 through ADR 0041 record the Skill, Sandbox, Desktop, Run-control, foreground-wake, FileEdit-apply, and inert-install boundaries.
+Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No path starts a Runner, container, Shell, or host process. ADR 0024 through ADR 0042 record the Skill, Sandbox, Desktop, Run-control, foreground-wake, FileEdit-apply, inert-install, receipt, Explorer, and portable-build boundaries.
 
 CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The CLI-first implementation has resumable Runs, a durable root Agent Coordinator, bounded review-gated Specialist delegation, a separate read-only 1/2/4/6 Fan-out pool, persisted sessions and model calls, context compaction, WorkItems/Notes/Artifacts, a unified Tool Gateway, embedded and inert user Skills, Finding/Evidence/Report lifecycles with SARIF/CI output, loopback HTTP/SSE/OpenAPI, a Run-first TUI, a generated React/Vite console, and a Windows Wails desktop shell with independently gated Run/Session/lifecycle/Plan/approval, Diff review/apply, foreground wake, and inert Skill installation. Core delegation remains capped at two children and only the original application operator can schedule it; models, ordinary tools, HTTP, and the Desktop native bridge cannot autonomously spawn or schedule children.
 
@@ -1034,15 +1034,63 @@ vet, module verification/tidy, npm audit, isolated CLI smoke, and repository hyg
 green. The audit fixed prepared-wake reclaim/cancel, durable failed-call facts, stale
 FileEdit recovery authority, duplicate per-Edit operations, and direct-truncation writes.
 No high/medium issue remains known. Forced termination may leave one redacted staging
-file before atomic replacement; D1-U1 owns this recorded low-risk recovery path. Current estimates are
+file before atomic replacement; the following D1-U1 slice now owns this recovery path. Historical estimates at that checkpoint were
 architecture about 98% (V2 about 99%), complete-product usability about 70-74%, generic
 Coding Agent workflow about 66%, and Cyber autonomous workflow about 20%.
 
+## Durable Receipts, Workspace Evidence, And Portable Diagnostics
+
+Non-schema D1-U1 adds `operation_receipt.v1` to FileEdit apply, foreground wake
+consumption, and inert Skill installation. The Go-owned receipt exposes only a closed
+outcome/replay/retry/recovery/cleanup tuple. It omits operation keys and digests,
+paths/bodies, requester identity, model text, and private leases. FileEdit terminal
+replay may remove only an old ordinary reserved staging file in the exact target
+directory whose complete bytes match the approved proposal digest. Cleanup uncertainty
+is reported but cannot rewrite the durable mutation result.
+
+D1-E1 adds authenticated read-only `workspace_explorer.v1`. Go resolves the registered
+Workspace root and accepts only canonical slash-separated relative paths. Traversal,
+absolute/volume paths, links, redirects, controls, surrounding whitespace, normalized
+aliases, internal staging, and ambiguous names fail closed or are omitted. Directory
+scan/return bounds are 400/200; file input is 64 KiB valid UTF-8 and redacted output is
+capped at 128 KiB. The DTO never includes the host root and marks every projection as
+`context_provenance.v1` with `instruction_authorized=false`. React's Files tab accepts
+only the exact current-parent/name child path and renders file text without Markdown.
+
+D1-W1 adds reproducible linker metadata, `cyberagent doctor portable`, double-build
+SHA-256 verification, and a PowerShell 5.1-compatible Windows checklist for PE
+signature/machine/executable flags, zero COFF timestamp, metadata/hash binding,
+`-trimpath`, Go module identity, and the no-installer/no-registry/no-startup/no-update
+boundary. Build output must remain under the repository without traversing a child
+reparse point. Automated checks do not sign off the manual Windows 10/WebView2/display/
+launch/recovery matrix, so `release_ready=false` remains mandatory.
+
+The cumulative six-slice gate passed: ordinary/race 294.0s/338.3s, ordinary and
+secure-Desktop test/vet, zero-warning staticcheck, zero-finding govulncheck, module
+verify/tidy, deterministic OpenAPI/TypeScript, 88 React tests across 22 files, strict
+TypeScript, Vite build, zero-vulnerability npm audit, isolated mock-only CLI smoke,
+privacy/artifact scans, and a real reproducible Windows double build. OpenAPI is 47
+paths/106 schemas/31 GET/19 control POST. The binary SHA-256 is
+`33fb9ca3064df98191ac50b2a3ef9431e1b5c81abe8c610d4be15db113cdf1ef`.
+No unresolved high/medium issue is known. Current estimates are architecture about 98%
+(V2 about 99%), complete-product usability about 74-78%, generic Coding Agent workflow
+about 70%, and Cyber autonomous workflow about 20%. ADR 0042 records the decision.
+
 ## Recommended Next Batch
 
-Complete three separately bounded product slices: D1-U1 consolidates operation receipts and recovery guidance for apply/wake/install without moving truth into React; D1-E1 adds a bounded read-only Workspace explorer through Go-owned path resolution and provenance; D1-W1 adds reproducible portable-build diagnostics, release metadata, and an automated Windows compatibility checklist before the manual Windows 10 matrix. None should introduce unrestricted host process, renderer filesystem authority, background service, or cross-capability authority.
+Complete three separately bounded coding-workbench slices: D1-E2 adds bounded Go-owned
+Workspace filename/text search with canonical evidence references and redacted snippets;
+D1-C1 lets an operator explicitly attach one selected evidence item to the existing
+Session queue under non-authorizing provenance; D1-U2 adds a refreshable metadata-only
+receipt/recovery history derived from durable Go state. None may add an indexer daemon,
+renderer host path, document instruction authority, hidden model call, or cross-capability
+mutation.
 
-After those three slices, the two-batch total reaches six slices, so run the full ordinary/race/static-analysis/vulnerability/dependency/privacy robustness gate. Skill installation continues to require strict Host/Origin, content type/length, canonical encoding, cancellation, no renderer path input, and no script/hook execution.
+After those three slices run the ordinary integrated gate. The manual Windows 10 matrix,
+signed ZIP/MSIX distribution, Local OS sandboxing, Docker process lifecycle, Rust
+analyzers, network/secret grants, and CTF solving remain separately gated work. Skill
+installation continues to require strict Host/Origin, content type/length, canonical
+encoding, cancellation, no renderer path input, and no script/hook execution.
 
 Keep the Local profile disabled until a real OS sandbox makes protected host roots unavailable or read-only; never map it to unrestricted `os/exec`. Runtime verification and the Docker start/wait/TERM/KILL/orphan lifecycle still require a later independent release gate. Broader HTTP/Desktop mutations, Rust analyzers, network/secret support, end-user process execution, and CTF solving remain deferred.
 

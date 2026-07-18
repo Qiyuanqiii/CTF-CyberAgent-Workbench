@@ -22,8 +22,16 @@ const (
 	MaxContentBytes = 256 * 1024
 	// MaxDiffBytes bounds a persisted unified diff generated from two bounded
 	// file versions, including per-line prefixes and headers.
-	MaxDiffBytes = 4*MaxContentBytes + 16*1024
+	MaxDiffBytes            = 4*MaxContentBytes + 16*1024
+	stagingFilePrefix       = ".cyberagent-edit-"
+	stagingCleanupScanLimit = 256
+	StagingCleanupGrace     = 15 * time.Minute
 )
+
+type StagingCleanupResult struct {
+	Removed int
+	Pending bool
+}
 
 const (
 	StatusProposed = "proposed"
@@ -278,7 +286,7 @@ func (m *Manager) Approve(ctx context.Context, id string, workspaceRoot string) 
 }
 
 func stageAtomicReplacement(target string, content string, mode os.FileMode) (string, error) {
-	file, err := os.CreateTemp(filepath.Dir(target), ".cyberagent-edit-*")
+	file, err := os.CreateTemp(filepath.Dir(target), stagingFilePrefix+"*")
 	if err != nil {
 		return "", err
 	}
@@ -304,6 +312,102 @@ func stageAtomicReplacement(target string, content string, mode os.FileMode) (st
 	}
 	complete = true
 	return path, nil
+}
+
+// CleanupStaleStaging removes only old regular internal staging files whose
+// exact bytes match this approved proposal. Fresh files are left alone so a
+// concurrent retry cannot lose an in-progress atomic replacement.
+func CleanupStaleStaging(workspaceRoot string, path string, proposedHash string,
+	now time.Time,
+) (StagingCleanupResult, error) {
+	if !validDigest(proposedHash) || now.IsZero() {
+		return StagingCleanupResult{}, errors.New("staging cleanup digest and time are required")
+	}
+	target, err := tools.NewWorkspaceFS(workspaceRoot).ResolveForWrite(path)
+	if err != nil {
+		return StagingCleanupResult{}, err
+	}
+	directory, err := os.Open(filepath.Dir(target))
+	if err != nil {
+		return StagingCleanupResult{}, err
+	}
+	defer directory.Close()
+	entries, err := directory.ReadDir(stagingCleanupScanLimit + 1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return StagingCleanupResult{}, err
+	}
+	result := StagingCleanupResult{Pending: len(entries) > stagingCleanupScanLimit}
+	if len(entries) > stagingCleanupScanLimit {
+		entries = entries[:stagingCleanupScanLimit]
+	}
+	cutoff := now.UTC().Add(-StagingCleanupGrace)
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), stagingFilePrefix) {
+			continue
+		}
+		candidate := filepath.Join(filepath.Dir(target), entry.Name())
+		info, infoErr := os.Lstat(candidate)
+		if infoErr != nil {
+			if !os.IsNotExist(infoErr) {
+				result.Pending = true
+			}
+			continue
+		}
+		if !info.Mode().IsRegular() || info.Size() < 0 || info.Size() > MaxContentBytes ||
+			!info.ModTime().Before(cutoff) {
+			result.Pending = true
+			continue
+		}
+		matches, matchErr := stagingFileMatches(candidate, info, proposedHash)
+		if matchErr != nil {
+			result.Pending = true
+			continue
+		}
+		if !matches {
+			continue
+		}
+		latest, latestErr := os.Lstat(candidate)
+		if latestErr != nil {
+			if !os.IsNotExist(latestErr) {
+				result.Pending = true
+			}
+			continue
+		}
+		if !os.SameFile(info, latest) || !latest.Mode().IsRegular() {
+			result.Pending = true
+			continue
+		}
+		if removeErr := os.Remove(candidate); removeErr != nil {
+			result.Pending = true
+			continue
+		}
+		result.Removed++
+	}
+	return result, nil
+}
+
+func stagingFileMatches(path string, expected os.FileInfo, proposedHash string) (bool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil {
+		return false, err
+	}
+	if !os.SameFile(expected, opened) || !opened.Mode().IsRegular() {
+		return false, nil
+	}
+	data, err := io.ReadAll(io.LimitReader(file, MaxContentBytes+1))
+	if err != nil {
+		return false, err
+	}
+	if len(data) > MaxContentBytes {
+		return false, nil
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]) == proposedHash, nil
 }
 
 func syncParentDirectory(path string) {

@@ -8,6 +8,7 @@ import (
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
+	"cyberagent-workbench/internal/operationreceipt"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/toolbudget"
 )
@@ -96,14 +97,27 @@ type FileEditReviewView struct {
 	FileWritten     bool                `json:"file_written"`
 }
 
+type OperationReceiptView struct {
+	ProtocolVersion string                          `json:"protocol_version"`
+	Kind            operationreceipt.Kind           `json:"kind"`
+	Outcome         string                          `json:"outcome"`
+	Durable         bool                            `json:"durable"`
+	Replayed        bool                            `json:"replayed"`
+	RetrySafe       bool                            `json:"retry_safe"`
+	RetryStrategy   operationreceipt.RetryStrategy  `json:"retry_strategy"`
+	RecoveryAction  operationreceipt.RecoveryAction `json:"recovery_action"`
+	CleanupState    operationreceipt.CleanupState   `json:"cleanup_state"`
+}
+
 type FileEditApplyView struct {
-	ProtocolVersion string              `json:"protocol_version"`
-	RunID           string              `json:"run_id"`
-	Edit            FileEditPreviewView `json:"edit"`
-	Status          string              `json:"status"`
-	Replayed        bool                `json:"replayed"`
-	FileWritten     bool                `json:"file_written"`
-	PolicyRechecked bool                `json:"policy_rechecked"`
+	ProtocolVersion string               `json:"protocol_version"`
+	RunID           string               `json:"run_id"`
+	Edit            FileEditPreviewView  `json:"edit"`
+	Status          string               `json:"status"`
+	Replayed        bool                 `json:"replayed"`
+	FileWritten     bool                 `json:"file_written"`
+	PolicyRechecked bool                 `json:"policy_rechecked"`
+	Receipt         OperationReceiptView `json:"receipt"`
 }
 
 type RunWakeIntentView struct {
@@ -145,16 +159,17 @@ type RunWakeControlView struct {
 }
 
 type RunWakeExecutionView struct {
-	ProtocolVersion       string            `json:"protocol_version"`
-	RunID                 string            `json:"run_id"`
-	Intent                RunWakeIntentView `json:"intent"`
-	ConsumptionStatus     string            `json:"consumption_status"`
-	StopReason            string            `json:"stop_reason,omitempty"`
-	Replayed              bool              `json:"replayed"`
-	ExecutionStarted      bool              `json:"execution_started"`
-	ModelCalled           bool              `json:"model_called"`
-	ToolCalled            bool              `json:"tool_called"`
-	BackgroundLoopEnabled bool              `json:"background_loop_enabled"`
+	ProtocolVersion       string               `json:"protocol_version"`
+	RunID                 string               `json:"run_id"`
+	Intent                RunWakeIntentView    `json:"intent"`
+	ConsumptionStatus     string               `json:"consumption_status"`
+	StopReason            string               `json:"stop_reason,omitempty"`
+	Replayed              bool                 `json:"replayed"`
+	ExecutionStarted      bool                 `json:"execution_started"`
+	ModelCalled           bool                 `json:"model_called"`
+	ToolCalled            bool                 `json:"tool_called"`
+	BackgroundLoopEnabled bool                 `json:"background_loop_enabled"`
+	Receipt               OperationReceiptView `json:"receipt"`
 }
 
 type ApprovalQueueItemView struct {
@@ -189,6 +204,37 @@ type WorkspaceView struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type WorkspaceExplorerEntryView struct {
+	Name      string `json:"name"`
+	Path      string `json:"path"`
+	Kind      string `json:"kind"`
+	SizeBytes int64  `json:"size_bytes"`
+	Readable  bool   `json:"readable"`
+}
+
+type WorkspaceExplorerProvenanceView struct {
+	Version               string `json:"version"`
+	SourceKind            string `json:"source_kind"`
+	SourceRef             string `json:"source_ref"`
+	ContentSHA256         string `json:"content_sha256"`
+	InstructionAuthorized bool   `json:"instruction_authorized"`
+}
+
+type WorkspaceExplorerView struct {
+	ProtocolVersion string                          `json:"protocol_version"`
+	WorkspaceID     string                          `json:"workspace_id"`
+	Path            string                          `json:"path"`
+	Kind            string                          `json:"kind"`
+	Entries         []WorkspaceExplorerEntryView    `json:"entries"`
+	Content         string                          `json:"content"`
+	TotalBytes      int64                           `json:"total_bytes"`
+	ReturnedBytes   int                             `json:"returned_bytes"`
+	Truncated       bool                            `json:"truncated"`
+	RedactionCount  int                             `json:"redaction_count"`
+	RootPathExposed bool                            `json:"root_path_exposed"`
+	Provenance      WorkspaceExplorerProvenanceView `json:"provenance"`
 }
 
 type ScopeView struct {
