@@ -40,4 +40,22 @@ describe("consumeSSE", () => {
     await expect(consumeSSE(streamChunks(["data: 123456\n\n"]), () => undefined, 8))
       .rejects.toThrow("configured client limit");
   });
+
+  it("cancels the response body when frame validation fails", async () => {
+    let cancelled = false;
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode("event: run.event\ndata: invalid\n\n"));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+
+    await expect(consumeSSE(stream, () => {
+      throw new Error("invalid frame");
+    })).rejects.toThrow("invalid frame");
+    expect(cancelled).toBe(true);
+  });
 });

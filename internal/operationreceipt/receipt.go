@@ -100,10 +100,10 @@ func (r Receipt) Validate() error {
 		return fmt.Errorf("operation receipt kind is invalid")
 	}
 	if r.Kind == KindFileEditApply && r.Outcome != "applied" && r.Outcome != "failed" {
-		return fmt.Errorf("FileEdit operation receipt outcome is invalid")
+		return fmt.Errorf("file edit operation receipt outcome is invalid")
 	}
 	if r.Kind == KindRunWakeConsume && r.Outcome != "completed" && r.Outcome != "failed" {
-		return fmt.Errorf("Run wake operation receipt outcome is invalid")
+		return fmt.Errorf("run wake operation receipt outcome is invalid")
 	}
 	want := Settled(r.Kind, r.Replayed, r.CleanupState == CleanupPendingReview)
 	if r.Kind == KindFileEditApply {

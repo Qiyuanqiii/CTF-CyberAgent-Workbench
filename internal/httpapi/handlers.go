@@ -49,7 +49,8 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
 			"external-skills", "workspaces", "workspace-explorer", "workspace-search", "models",
-			"operation-receipts", "event-stream", "event-poll", "openapi"}
+			"operation-receipts", "operator-actions", "evidence-inventory",
+			"event-stream", "event-poll", "openapi"}
 		if a.controlEnabled {
 			resources = append(resources, "model-cancellation-control",
 				"specialist-model-cancellation-control", "execution-profile-control")
@@ -360,6 +361,10 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 			return a.runFileEdits(request, segments[1])
 		case "wake-intent":
 			return a.runWakeIntent(request, segments[1])
+		case "operator-actions":
+			return a.runOperatorActions(request, segments[1])
+		case "evidence-attachments":
+			return a.runEvidenceInventory(request, segments[1])
 		}
 	case 4:
 		if segments[2] == "reports" {

@@ -6,6 +6,7 @@ import type {
   ErrorEnvelope,
   EvidenceAttachmentRequestView,
   EvidenceAttachmentView,
+  EvidenceInventoryView,
   FileEditApplyRequestView,
   FileEditApplyView,
   FileEditQueueView,
@@ -16,6 +17,7 @@ import type {
   ModelRouteControlRequestView,
   OperationReceiptView,
   OperationReceiptHistoryView,
+  OperatorActionCenterView,
   PageResult,
   PlanDeliveryTransitionControlRequestView,
   PlanDeliveryTransitionControlView,
@@ -121,7 +123,7 @@ function parseStreamFrame(value: unknown, expectedRunID: string, expectedRequest
     typeof frame.cursor !== "string" || frame.cursor === "" || frame.cursor.length > 512 ||
     typeof frame.sequence !== "number" || !Number.isSafeInteger(frame.sequence) || frame.sequence <= 0 ||
     typeof frame.event !== "object" || frame.event === null ||
-    frame.event.version !== "event.v1" || frame.event.run_id !== expectedRunID ||
+    frame.event.version !== "v1" || frame.event.run_id !== expectedRunID ||
     frame.event.sequence !== frame.sequence || typeof frame.event.event_id !== "string" ||
     frame.event.event_id === "" || typeof frame.event.mission_id !== "string" ||
     typeof frame.event.type !== "string" || frame.event.type === "" ||
@@ -780,6 +782,72 @@ function parseEvidenceAttachment(value: unknown, runID: string,
   return value as unknown as EvidenceAttachmentView;
 }
 
+function parseEvidenceInventory(value: unknown, runID: string): EvidenceInventoryView {
+  if (!hasExactKeys(value, ["items", "protocol_version", "run_id", "truncated"]) ||
+    value.protocol_version !== "session_evidence_inventory.v1" || value.run_id !== runID ||
+    !Array.isArray(value.items) || value.items.length > 100 ||
+    typeof value.truncated !== "boolean") {
+    throw new APIRequestError("Evidence inventory response violated its metadata-only contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const identities = new Set<string>();
+  const items = value.items.map((item) => {
+    if (!hasExactKeys(item, ["attached_at", "attachment_id", "content_sha256",
+      "instruction_authorized", "run_id", "session_id", "source_kind", "source_ref",
+      "workspace_id"]) || !boundedIdentity(item.attachment_id) ||
+      identities.has(String(item.attachment_id)) || item.run_id !== runID ||
+      !boundedIdentity(item.session_id) || !boundedIdentity(item.workspace_id) ||
+      item.source_kind !== "workspace_file" || !validWorkspaceRelativePath(item.source_ref) ||
+      !isSHA256(item.content_sha256) || item.instruction_authorized !== false ||
+      !validDate(item.attached_at)) {
+      throw new APIRequestError("Evidence inventory item widened document or renderer authority",
+        "INVALID_RESPONSE", 502);
+    }
+    identities.add(String(item.attachment_id));
+    return item;
+  });
+  return { ...value, items } as unknown as EvidenceInventoryView;
+}
+
+function parseOperatorActionCenter(value: unknown, runID: string): OperatorActionCenterView {
+  if (!hasExactKeys(value, ["generated_at", "items", "protocol_version", "run_id",
+    "truncated"]) || value.protocol_version !== "operator_action_center.v1" ||
+    value.run_id !== runID || !validDate(value.generated_at) || !Array.isArray(value.items) ||
+    value.items.length > 100 || typeof value.truncated !== "boolean") {
+    throw new APIRequestError("Operator action center response is invalid", "INVALID_RESPONSE", 502);
+  }
+  const mapping = {
+    steering_pending: ["pending", "queue"],
+    approval_pending: ["pending", "approvals"],
+    file_edit_review: ["proposed", "diffs"],
+    file_edit_apply: ["approved", "diffs"],
+    wake_due: ["queued", "wake"],
+  } as const;
+  const identities = new Set<string>();
+  const generatedAt = Date.parse(value.generated_at);
+  const items = value.items.map((item) => {
+    if (!isRecord(item) || !hasOnlyKeys(item, ["available_at", "destination", "due_at", "id",
+      "kind", "state"]) || !boundedIdentity(item.id) || !String(item.id).startsWith("action-") ||
+      identities.has(String(item.id)) || !validDate(item.available_at) ||
+      !Object.prototype.hasOwnProperty.call(mapping, String(item.kind))) {
+      throw new APIRequestError("Operator action item exposed invalid metadata",
+        "INVALID_RESPONSE", 502);
+    }
+    const expected = mapping[item.kind as keyof typeof mapping];
+    const dueAt = item.due_at;
+    if (item.state !== expected[0] || item.destination !== expected[1] ||
+      (item.kind === "wake_due"
+        ? !validDate(dueAt) || Date.parse(dueAt) > generatedAt
+        : dueAt !== undefined)) {
+      throw new APIRequestError("Operator action item widened its closed navigation contract",
+        "INVALID_RESPONSE", 502);
+    }
+    identities.add(String(item.id));
+    return item;
+  });
+  return { ...value, items } as unknown as OperatorActionCenterView;
+}
+
 function parseOperationReceiptHistory(value: unknown,
   expectedRunID: string): OperationReceiptHistoryView {
   if (!hasExactKeys(value, ["items", "protocol_version", "truncated"]) ||
@@ -980,6 +1048,26 @@ export class CyberAgentClient {
     }
     return parseOperationReceiptHistory(await this.get<unknown>(
       "/operation-receipts", { run_id: runID || undefined, limit: 100 }, signal,
+    ), runID);
+  }
+
+  async operatorActionCenter(runID: string,
+    signal?: AbortSignal): Promise<OperatorActionCenterView> {
+    if (!boundedIdentity(runID) || runID.trim() !== runID) {
+      throw new Error("A normalized Run identity is required");
+    }
+    return parseOperatorActionCenter(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/operator-actions`, {}, signal,
+    ), runID);
+  }
+
+  async evidenceInventory(runID: string,
+    signal?: AbortSignal): Promise<EvidenceInventoryView> {
+    if (!boundedIdentity(runID) || runID.trim() !== runID) {
+      throw new Error("A normalized Run identity is required");
+    }
+    return parseEvidenceInventory(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/evidence-attachments`, {}, signal,
     ), runID);
   }
 

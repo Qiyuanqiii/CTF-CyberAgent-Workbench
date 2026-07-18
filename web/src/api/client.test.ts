@@ -873,6 +873,39 @@ describe("CyberAgentClient", () => {
       .rejects.toThrow("unsupported terminal result");
   });
 
+  it("validates bounded operator actions and metadata-only evidence inventory", async () => {
+    const inventory = { protocol_version: "session_evidence_inventory.v1", run_id: "run-1",
+      truncated: false, items: [{ attachment_id: "evidence-1", run_id: "run-1",
+        session_id: "session-1", workspace_id: "workspace-1", source_kind: "workspace_file",
+        source_ref: "README.md", content_sha256: "c".repeat(64),
+        instruction_authorized: false, attached_at: "2026-07-19T10:00:00Z" }] };
+    const actions = { protocol_version: "operator_action_center.v1", run_id: "run-1",
+      generated_at: "2026-07-19T12:00:00Z", truncated: false,
+      items: [{ id: "action-opaque", kind: "wake_due", state: "queued",
+        destination: "wake", available_at: "2026-07-19T11:00:00Z",
+        due_at: "2026-07-19T11:00:00Z" }] };
+    const envelope = (requestID: string, data: unknown) => new Response(JSON.stringify({
+      version: "api.v1", request_id: requestID, data,
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(envelope("req-inventory", inventory))
+      .mockResolvedValueOnce(envelope("req-actions", actions))
+      .mockResolvedValueOnce(envelope("req-forged-actions", {
+        ...actions, items: [{ ...actions.items[0], due_at: "2026-07-20T11:00:00Z" }],
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret");
+
+    await expect(client.evidenceInventory("run-1")).resolves.toEqual(inventory);
+    await expect(client.operatorActionCenter("run-1")).resolves.toEqual(actions);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "/api/v1/runs/run-1/evidence-attachments");
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      "/api/v1/runs/run-1/operator-actions");
+    await expect(client.operatorActionCenter("run-1"))
+      .rejects.toThrow("closed navigation contract");
+  });
+
   it("polls Run events with a stream-compatible opaque cursor and validates the envelope", async () => {
     const frame: RunEventStreamView = {
       version: "run-events.v1",
@@ -882,7 +915,7 @@ describe("CyberAgentClient", () => {
       sequence: 2,
       event: {
         event_id: "event-2",
-        version: "event.v1",
+        version: "v1",
         run_id: "run-1",
         mission_id: "mission-1",
         sequence: 2,
@@ -932,7 +965,7 @@ describe("CyberAgentClient", () => {
           cursor: "actual-final",
           sequence: 1,
           event: {
-            event_id: "event-1", version: "event.v1", run_id: "run-1", mission_id: "mission-1",
+            event_id: "event-1", version: "v1", run_id: "run-1", mission_id: "mission-1",
             sequence: 1, type: "run.created", source: "test", payload: {},
             created_at: "2026-07-18T00:00:00Z",
           },
@@ -953,7 +986,7 @@ describe("CyberAgentClient", () => {
       sequence: 2,
       event: {
         event_id: "event-2",
-        version: "event.v1",
+        version: "v1",
         run_id: "run-1",
         mission_id: "mission-1",
         sequence: 2,
@@ -997,7 +1030,7 @@ describe("CyberAgentClient", () => {
       sequence: 1,
       event: {
         event_id: "event-1",
-        version: "event.v1",
+        version: "v1",
         run_id: "run-1",
         mission_id: "mission-1",
         sequence: 1,

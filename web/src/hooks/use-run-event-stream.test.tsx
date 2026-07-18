@@ -97,7 +97,7 @@ function frame(sequence: number, cursor: string): RunEventStreamView {
 
 function event(sequence: number): EventView {
   return {
-    version: "event.v1",
+    version: "v1",
     event_id: `event-${sequence}`,
     mission_id: "mission-desktop",
     run_id: "run-desktop",

@@ -79,6 +79,13 @@ export async function consumeSSE(
     if (buffer !== "") {
       processLine(buffer);
     }
+  } catch (error) {
+    try {
+      await reader.cancel(error);
+    } catch {
+      // Preserve the parser or transport error that caused cancellation.
+    }
+    throw error;
   } finally {
     reader.releaseLock();
   }

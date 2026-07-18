@@ -435,7 +435,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List attached non-authorizing evidence
+         * @description Returns a bounded metadata-only inventory of immutable Workspace evidence attachments. It omits document and Session message content, operation keys, request fingerprints, requester identities, event sequence, and capability metadata.
+         */
+        get: operations["listRunEvidence"];
         put?: never;
         /**
          * Attach non-authorizing Workspace evidence
@@ -640,6 +644,26 @@ export interface paths {
          * @description Returns structured, redacted Run Notes.
          */
         get: operations["listRunNotes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/operator-actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List pending operator actions
+         * @description Returns one bounded Go-owned projection of pending steering, approval, file-edit review/apply, and due wake facts. Items contain opaque identities and navigation destinations only; no operation key, command, prompt, Diff, path, content, digest, or execution authority is exposed.
+         */
+        get: operations["listRunOperatorActions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1274,7 +1298,8 @@ export interface components {
             source: string;
             subject_id?: string;
             type: string;
-            version: string;
+            /** @enum {string} */
+            version: "v1";
         };
         EvidenceAttachmentRequestView: {
             content_sha256: string;
@@ -1303,6 +1328,26 @@ export interface components {
             source_ref: string;
             tool_called: boolean;
             workspace_id: string;
+        };
+        EvidenceInventoryItemView: {
+            /** Format: date-time */
+            attached_at: string;
+            attachment_id: string;
+            content_sha256: string;
+            instruction_authorized: boolean;
+            run_id: string;
+            session_id: string;
+            /** @enum {string} */
+            source_kind: "workspace_file";
+            source_ref: string;
+            workspace_id: string;
+        };
+        EvidenceInventoryView: {
+            items: components["schemas"]["EvidenceInventoryItemView"][];
+            /** @enum {string} */
+            protocol_version: "session_evidence_inventory.v1";
+            run_id: string;
+            truncated: boolean;
         };
         ExternalSkillDeliveryView: {
             /** Format: int32 */
@@ -1710,6 +1755,28 @@ export interface components {
             retry_safe: boolean;
             /** @enum {string} */
             retry_strategy: "same_operation_key" | "same_wake_generation";
+        };
+        OperatorActionCenterView: {
+            /** Format: date-time */
+            generated_at: string;
+            items: components["schemas"]["OperatorActionItemView"][];
+            /** @enum {string} */
+            protocol_version: "operator_action_center.v1";
+            run_id: string;
+            truncated: boolean;
+        };
+        OperatorActionItemView: {
+            /** Format: date-time */
+            available_at: string;
+            /** @enum {string} */
+            destination: "queue" | "approvals" | "diffs" | "wake";
+            /** Format: date-time */
+            due_at?: string;
+            id: string;
+            /** @enum {string} */
+            kind: "steering_pending" | "approval_pending" | "file_edit_review" | "file_edit_apply" | "wake_due";
+            /** @enum {string} */
+            state: "pending" | "proposed" | "approved" | "queued";
         };
         OperatorSteeringMessageView: {
             /** Format: date-time */
@@ -3385,6 +3452,41 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    listRunEvidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["EvidenceInventoryView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     attachRunEvidence: {
         parameters: {
             query?: never;
@@ -3850,6 +3952,41 @@ export interface operations {
                     "application/json": {
                         data: components["schemas"]["NoteView"][];
                         page: components["schemas"]["Page"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listRunOperatorActions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["OperatorActionCenterView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";

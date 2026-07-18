@@ -492,7 +492,8 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 		a.serveSkillPackageInstallControl(tracked, request, requestID)
 		return
 	}
-	if runID, matched := matchEvidenceAttachmentPath(request.URL.Path); matched {
+	if runID, matched := matchEvidenceAttachmentPath(request.URL.Path); matched &&
+		request.Method != http.MethodGet {
 		a.serveEvidenceAttachmentControl(tracked, request, requestID, runID)
 		return
 	}

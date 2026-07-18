@@ -117,7 +117,7 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 		}
 		expectedOperations := 1
 		if path == RunCreationControlPath || path == SessionMessageControlPathTemplate ||
-			path == RunWakeIntentPathTemplate {
+			path == RunWakeIntentPathTemplate || path == EvidenceAttachmentPathTemplate {
 			expectedOperations = 2
 		}
 		if len(operations) != expectedOperations {

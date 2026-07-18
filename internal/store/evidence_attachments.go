@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/domain"
@@ -16,6 +17,34 @@ const evidenceAttachmentSelect = `SELECT id, protocol_version, operation_key_dig
 	request_fingerprint, run_id, session_id, workspace_id, source_kind, source_ref,
 	content_sha256, session_message_id, attached_by, event_sequence, created_at
 	FROM session_evidence_attachments`
+
+func (s *SQLiteStore) ListEvidenceAttachments(ctx context.Context,
+	runID string, limit int,
+) ([]session.EvidenceAttachment, error) {
+	if runID != strings.TrimSpace(runID) || !domain.ValidAgentID(runID) {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"evidence inventory Run identity is invalid")
+	}
+	if limit < 1 || limit > session.MaxEvidenceInventoryItems+1 {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"evidence inventory limit is invalid")
+	}
+	rows, err := s.db.QueryContext(ctx, evidenceAttachmentSelect+
+		` WHERE run_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`, runID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]session.EvidenceAttachment, 0, limit)
+	for rows.Next() {
+		value, err := scanEvidenceAttachment(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
 
 func (s *SQLiteStore) GetEvidenceAttachment(ctx context.Context,
 	keyDigest string,

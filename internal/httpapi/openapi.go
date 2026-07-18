@@ -14,10 +14,12 @@ import (
 	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/modelregistry"
 	"cyberagent-workbench/internal/operationreceipt"
+	"cyberagent-workbench/internal/operatoraction"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/workspace"
@@ -310,6 +312,17 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 					Required: true, Schema: map[string]any{"type": "string",
 						"minLength": domain.MinAgentOperationKeyBytes,
 						"maxLength": domain.MaxAgentOperationKeyBytes, "pattern": `^\S+$`}}}},
+		{Path: EvidenceAttachmentPathTemplate, OperationID: "listRunEvidence",
+			Summary: "List attached non-authorizing evidence", Tag: "Runs",
+			Description: "Returns a bounded metadata-only inventory of immutable Workspace evidence attachments. It omits document and Session message content, operation keys, request fingerprints, requester identities, event sequence, and capability metadata.",
+			DataType:    reflect.TypeOf(EvidenceInventoryView{}), NotFound: true,
+			Parameters: []openAPIParameter{runID}},
+		{Path: "/api/v1/runs/{run_id}/operator-actions",
+			OperationID: "listRunOperatorActions", Summary: "List pending operator actions",
+			Tag:         "Runs",
+			Description: "Returns one bounded Go-owned projection of pending steering, approval, file-edit review/apply, and due wake facts. Items contain opaque identities and navigation destinations only; no operation key, command, prompt, Diff, path, content, digest, or execution authority is exposed.",
+			DataType:    reflect.TypeOf(OperatorActionCenterView{}), NotFound: true,
+			Parameters: []openAPIParameter{runID}},
 		{Path: "/api/v1/runs/{run_id}", OperationID: "getRun", Summary: "Inspect a Run", Tag: "Runs",
 			Description: "Returns Run, Mission, checkpoint, tool usage, token-free execution-lease metadata, and read-only Plan/Delivery and external-Skill metadata projections when present.",
 			DataType:    reflect.TypeOf(RunDetailView{}), NotFound: true, Parameters: []openAPIParameter{runID}},
@@ -941,9 +954,16 @@ func applyOpenAPIFieldMetadata(typeName string, fieldName string, schema map[str
 	if typeName == "OperationReceiptHistoryView" && fieldName == "items" {
 		schema["maxItems"] = operationreceipt.MaxHistoryItems
 	}
+	if typeName == "OperatorActionCenterView" && fieldName == "items" {
+		schema["maxItems"] = operatoraction.MaxItems
+	}
+	if typeName == "EvidenceInventoryView" && fieldName == "items" {
+		schema["maxItems"] = session.MaxEvidenceInventoryItems
+	}
 }
 
 var openAPIFieldEnums = map[string][]string{
+	"EventView.version":                                 {events.EnvelopeVersion},
 	"IndexView.api_version":                             {Version},
 	"HealthView.status":                                 {"ok"},
 	"HealthView.api_version":                            {Version},
@@ -996,6 +1016,12 @@ var openAPIFieldEnums = map[string][]string{
 	"EvidenceAttachmentRequestView.source_kind":         {session.SourceWorkspaceFile},
 	"EvidenceAttachmentView.protocol_version":           {session.EvidenceAttachmentProtocolVersion},
 	"EvidenceAttachmentView.source_kind":                {session.SourceWorkspaceFile},
+	"EvidenceInventoryView.protocol_version":            {session.EvidenceInventoryProtocolVersion},
+	"EvidenceInventoryItemView.source_kind":             {session.SourceWorkspaceFile},
+	"OperatorActionCenterView.protocol_version":         {operatoraction.ProtocolVersion},
+	"OperatorActionItemView.kind":                       {string(operatoraction.KindSteeringPending), string(operatoraction.KindApprovalPending), string(operatoraction.KindFileEditReview), string(operatoraction.KindFileEditApply), string(operatoraction.KindWakeDue)},
+	"OperatorActionItemView.state":                      {"pending", "proposed", "approved", "queued"},
+	"OperatorActionItemView.destination":                {string(operatoraction.DestinationQueue), string(operatoraction.DestinationApprovals), string(operatoraction.DestinationDiffs), string(operatoraction.DestinationWake)},
 	"ProviderAvailabilityView.kind":                     {modelregistry.ProviderKindLocal, modelregistry.ProviderKindAnthropicCompatible},
 	"ProviderAvailabilityView.status":                   {modelregistry.ProviderAvailable, modelregistry.ProviderNotConfigured, modelregistry.ProviderInvalidConfiguration},
 	"ProviderAvailabilityView.credential_source":        {"none", "environment"},
@@ -1226,6 +1252,8 @@ var openAPIFieldMaxLengths = map[string]int{
 	"EvidenceAttachmentRequestView.content_sha256":   64,
 	"EvidenceAttachmentView.source_ref":              workspace.MaxExplorerPathRunes,
 	"EvidenceAttachmentView.content_sha256":          64,
+	"EvidenceInventoryItemView.source_ref":           workspace.MaxExplorerPathRunes,
+	"EvidenceInventoryItemView.content_sha256":       64,
 }
 
 func runStatuses() []string {

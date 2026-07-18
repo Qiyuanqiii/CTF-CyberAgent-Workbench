@@ -1,8 +1,8 @@
 # 本地 HTTP API / Local HTTP API
 
-CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`，用于检查 SQLite 持久状态并投影可恢复 Run events。独立 control capability 允许精确取消活动模型调用、选择不授予执行权的 Run 档位、受控 Run/Session/lifecycle/Plan/审批、显式无正文 Provider 诊断与持久化路由、Diff 独立审阅/apply、schema-v74 wake 意图与 schema-v75 单次前台消费，以及 D1-B1 显式确认的惰性 Skill 安装。API 仍不写 Delivery 检查点、不编辑/重排消息、不执行 Skill、不启动后台 worker 或通用宿主/容器进程，也不替代 Policy、Tool Gateway 或 Sandbox 门禁。
+CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`，用于检查 SQLite 持久状态并投影可恢复 Run events。独立 control capability 允许精确取消活动模型调用、选择不授予执行权的 Run 档位、受控 Run/Session/lifecycle/Plan/审批、显式无正文 Provider 诊断与持久化路由、Diff 独立审阅/apply、schema-v74 wake 意图与 schema-v75 单次前台消费，以及 D1-B1 显式确认的惰性 Skill 安装。D1-O1/C2 另提供只读操作者行动中心和已附加证据清单。API 仍不写 Delivery 检查点、不编辑/重排消息、不执行 Skill、不启动后台 worker 或通用宿主/容器进程，也不替代 Policy、Tool Gateway 或 Sandbox 门禁。
 
-CyberAgent Workbench exposes a Go-controlled local `api.v1` for durable SQLite state and resumable Run-event projections. Distinct control capabilities permit exact model cancellation, non-authorizing profile selection, controlled Run/Session/lifecycle/Plan/approval operations, explicit content-free Provider diagnostics and persisted routes, separate Diff review/apply, schema-v74 wake intent with schema-v75 one-shot foreground consumption, and explicitly confirmed inert Skill installation. The API still cannot write a Delivery checkpoint, edit/reorder messages, execute a Skill, start a background worker or general host/container process, or replace Policy, the Tool Gateway, or Sandbox gates.
+CyberAgent Workbench exposes a Go-controlled local `api.v1` for durable SQLite state and resumable Run-event projections. Distinct control capabilities permit exact model cancellation, non-authorizing profile selection, controlled Run/Session/lifecycle/Plan/approval operations, explicit content-free Provider diagnostics and persisted routes, separate Diff review/apply, schema-v74 wake intent with schema-v75 one-shot foreground consumption, and explicitly confirmed inert Skill installation. D1-O1/C2 additionally expose read-only operator actions and attached-evidence inventory. The API still cannot write a Delivery checkpoint, edit/reorder messages, execute a Skill, start a background worker or general host/container process, or replace Policy, the Tool Gateway, or Sandbox gates.
 
 ## 启动 / Start
 
@@ -38,9 +38,9 @@ note: the API is loopback-only; control is separately authorized and tokens are 
 
 ### Windows Desktop 进程内传输 / Windows Desktop In-Process Transport
 
-Desktop 至 D1-B1 复用同一 `api.v1` Handler，但不调用 `ListenAndServe`，也不绑定回环端口。Wails AssetServer 在同一进程内把 React 请求交给 Go；适配层只接受精确 `http://wails.localhost`。默认只生成内存 read token；十四个独立 flag 分别开放既有控制、model、FileEdit review/apply、Run wake intent/consume 和 Skill installation route。任一 capability 会生成同一个不同于 read token 的内存 control token，未启用 route 仍返回 404。模型可用性读取走 read token；两个 token 都不写磁盘、日志、Local Storage 或注册表。
+Desktop 至 D1-K1 复用同一 `api.v1` Handler，但不调用 `ListenAndServe`，也不绑定回环端口。Wails AssetServer 在同一进程内把 React 请求交给 Go；适配层只接受精确 `http://wails.localhost`。默认只生成内存 read token；十五个独立 flag 分别开放既有控制、model、FileEdit review/apply、Run wake intent/consume、Skill installation 和 evidence attachment route。任一 capability 会生成同一个不同于 read token 的内存 control token，未启用 route 仍返回 404。模型可用性、行动中心和证据清单读取走 read token；两个 token 都不写磁盘、日志、Local Storage 或注册表。
 
-Desktop through D1-B1 reuses the same `api.v1` Handler without calling `ListenAndServe` or binding a loopback port. The Wails AssetServer passes React requests to Go in process, and a narrow adapter accepts only exact `http://wails.localhost`. Fourteen independent flags expose the existing controls plus model, FileEdit review/apply, Run-wake intent/consume, and Skill-install routes. Any enabled capability creates one in-memory control token distinct from the read token, while disabled routes remain 404. Model availability reads use the read token; neither token is written to disk, logs, browser storage, or the registry.
+Desktop through D1-K1 reuses the same `api.v1` Handler without calling `ListenAndServe` or binding a loopback port. The Wails AssetServer passes React requests to Go in process, and a narrow adapter accepts only exact `http://wails.localhost`. Fifteen independent flags expose the existing controls plus model, FileEdit review/apply, Run-wake intent/consume, Skill-install, and evidence-attachment routes. Any enabled capability creates one in-memory control token distinct from the read token, while disabled routes remain 404. Model availability, operator actions, and evidence inventory use the read token; neither token is written to disk, logs, browser storage, or the registry.
 
 普通浏览器继续使用 `/events/stream` SSE。Wails v2 在 Windows 上不支持 AssetServer response streaming，因此 Desktop 使用 `GET /runs/{run_id}/events/poll` 做一秒有界轮询。该 endpoint 与 SSE 共用同一个绑定 Run 与 sequence 的高水位 cursor，单次最多返回 100 帧并明确给出 `has_more`；poll cursor 可续接 SSE，SSE cursor 也可续接 poll。Renderer 最多在模块内存保存 16 个 Run、每个 500 帧，重挂载继续最后 cursor，失效 cursor 每次挂载最多回退一次；不写 Local/Session Storage，也不再生成伪 cursor。它不会建立新的事件真源。原生 Wails bridge 不是通用业务 API 旁路：前三项只提供 connection bootstrap 和路径隔离 Skill 选择/预览，第四项只消费 Go 发放的一次性确认句柄并调用惰性 Registry。
 
@@ -122,11 +122,11 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/skills/packages/inst
 - request target 最大 8 KiB，query 最大 4 KiB，response 最大 8 MiB，header 上限为 32 KiB。
 - HTTP handler 构造后只保留两个 token 的 SHA-256 摘要；明文仍可能存在于启动环境或短期进程内存，但不会写入配置、SQLite 或 Run events。
 - Artifact API 只返回 descriptor，不读取或返回正文；Run detail 不返回 checkpoint pending input 或 execution fencing token。租约摘要仅包含 owner、generation、状态与时间。
-- read token 可以读取该进程数据库暴露的全部只读资源；control token 只能调用十六条窄 mutation，不能读取资源。两者都应视为本地管理员凭据。
+- read token 可以读取该进程数据库暴露的全部只读资源；control token 只能调用十九条窄 mutation，不能读取资源。两者都应视为本地管理员凭据。
 - 取消请求必须精确绑定 Run/Supervisor/model attempt，或 Run/Specialist Agent/AgentAttempt/model attempt，并携带 16 到 256 字节的 `Idempotency-Key`。客户端不能提交 `lease_id`、generation 或 fencing token；请求 body 上限为 4 KiB，未知字段和尾随 JSON 会被拒绝。
 - Session message 请求必须把 path Session 精确绑定到 running/paused Run，使用 `session_message_submission.v1`、1-16384 UTF-8 字节正文和 16-256 字节幂等键。编码 JSON body 上限为 128 KiB，以容纳合法转义；重复/未知字段、尾随数据、非法 UTF-8、query 和重复 header 均被拒绝。响应不返回正文或私有身份。
 - Session 取消必须精确绑定 path Session/消息及其 Run，且仅在消息仍为 pending、未 prepared 时接受。生命周期只接受 `start|pause|resume`；有界执行只接受 `max_steps=1..8`，冻结选择后使用私有 lease。两者的响应都不返回正文、模型输出、工具参数或 lease 身份。
-- Plan direction 必须绑定 path Run、已持久化 proposal 和 `direction=1..3`；Deliver 必须已有选择。审批必须绑定 path Run/approval/source，当前 Policy 复核通过也只能产生 dry-run/process-disabled 结果。Provider 诊断必须显式确认且只返回状态；FileEdit review 不得 apply；wake 只记录/取消意图并隐藏 owner/lease。十六条控制响应都不能携带或设置进程、Shell、Docker、文件写入、Session Grant 或 capability authority。
+- Plan direction 必须绑定 path Run、已持久化 proposal 和 `direction=1..3`；Deliver 必须已有选择。审批必须绑定 path Run/approval/source，当前 Policy 复核通过也只能产生 dry-run/process-disabled 结果。Provider 诊断必须显式确认且只返回状态；FileEdit review 不得 apply；wake 只记录/取消意图并隐藏 owner/lease。十九条控制响应都不能携带或设置通用进程、Shell、Docker、任意文件写入、Session Grant 或 capability authority；独立 FileEdit apply 仍只允许一个已审批且重新复核的精确目标。
 - SSE 使用同一 Authorization header，token 不进入 URL、cursor 或事件数据。默认最多同时 16 条 stream；每条连接最多 32-event 批量、2 MiB 单帧、10,000 events、5 分钟寿命，并对每次写入设置 2 秒 deadline。
 - Event poll 只接受 query `cursor` 与 1-100 的 `limit`，拒绝 `Last-Event-ID`、跨 Run cursor、gap 和未知参数；空批次仍返回可继续使用的高水位 cursor，读取本身不写事件。
 
@@ -167,6 +167,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/skills/packages/inst
 | `GET` | `/api/v1/runs/{run_id}/events` | Ordered Run events; pagination |
 | `GET` | `/api/v1/runs/{run_id}/events/poll` | Bounded non-streaming event batch; shared Run-bound high-water `cursor` |
 | `GET` | `/api/v1/runs/{run_id}/events/stream` | Bounded SSE projection; opaque `cursor` or `Last-Event-ID` resume |
+| `GET` | `/api/v1/runs/{run_id}/operator-actions` | At most 100 closed pending steering/approval/FileEdit/due-wake metadata items; no source operation or automatic action |
 | `GET` | `/api/v1/runs/{run_id}/agent-graph` | Root/Specialist nodes, budgets, lifecycle, and redacted completion summaries |
 | `GET` | `/api/v1/runs/{run_id}/delegations` | Operator-gated proposal/review/application/latest-schedule projection; pagination |
 | `GET` | `/api/v1/runs/{run_id}/fanout-plans` | Read-only plan metadata plus latest bounded execution/shard summary; pagination |
@@ -185,6 +186,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/skills/packages/inst
 | `GET` | `/api/v1/runs/{run_id}/file-edits/{edit_id}` | One exact metadata-only FileEdit preview; no original/proposed body |
 | `POST` | `/api/v1/runs/{run_id}/file-edits/{edit_id}/review` | Exact `approve_intent|deny`; review never writes the file |
 | `POST` | `/api/v1/runs/{run_id}/file-edits/{edit_id}/apply` | Separately authorized current-Policy/hash-checked apply; renderer submits no path/body |
+| `GET` | `/api/v1/runs/{run_id}/evidence-attachments` | At most 100 metadata-only attachments for the exact Run/Session; fixed false instruction authority, no message body |
 | `POST` | `/api/v1/runs/{run_id}/evidence-attachments` | Revalidate and append one exact Workspace file as non-authorizing Session evidence; no execution |
 | `GET` | `/api/v1/runs/{run_id}/wake-intent` | Bounded public wake state without owner/lease identity |
 | `POST` | `/api/v1/runs/{run_id}/wake-intent` | Schedule bounded digest-idempotent wake intent; no execution |
@@ -279,6 +281,20 @@ operation identities, paths, content digests, archive details, requesters, and l
 are absent. FileEdit cleanup inspection is read-only and reports uncertainty as
 `pending_review` without deleting anything.
 
+D1-O1 `operator_action_center.v1` exact-binds one Run/Mission/Session/Workspace and
+returns at most 100 closed metadata items for pending steering, pending approvals,
+FileEdit review/apply readiness, and due wake intent. Public IDs are domain-separated
+opaque hashes. Source row IDs, messages, commands, arguments, paths, Diffs, operation
+identity, requesters, leases, and authority fields are omitted. Listing never approves,
+applies, wakes, drains, or executes an item.
+
+D1-C2 `session_evidence_inventory.v1` lists at most 100 immutable attachments for the
+exact Run-bound active Session and Workspace. It exposes only the source kind,
+canonical relative reference, SHA-256, attachment time, and fixed
+`instruction_authorized=false`. Message ID/body, attaching operator, event sequence,
+private operation, and capability state remain inside Go/Store. Source navigation must
+re-enter the existing Workspace Explorer, which independently revalidates the path.
+
 ## OpenAPI Contract
 
 Go DTO 是响应结构的唯一来源。以下命令不启动数据库、不读取 token，并可复现仓库内受测试的 [openapi.json](openapi.json)：
@@ -290,9 +306,9 @@ cyberagent api openapi
 cyberagent api openapi --output docs/openapi.json
 ```
 
-运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 50 个 path、53 个 operation 和 112 个 schema。测试逐条命中公开 handler，并确认普通 DTO 不包含 Workspace root、Artifact/Skill/Session 正文、模型输出、工具参数、私有 lifecycle、operation/fencing/lease owner、API key、Provider Base URL 或环境变量名。Explorer/Search 绝不返回 Workspace root；两者只提供有界、脱敏且明确非授权的 Workspace 文本投影。Skill 安装请求仍是唯一有界 archive 传输，并明确排除 path/content/command/hook 字段；证据附件请求只包含相对引用与投影摘要。
+运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 51 个 path、55 个 operation 和 116 个 schema。测试逐条命中公开 handler，并确认普通 DTO 不包含 Workspace root、Artifact/Skill/Session 正文、模型输出、工具参数、私有 lifecycle、operation/fencing/lease owner、API key、Provider Base URL 或环境变量名。Explorer/Search 绝不返回 Workspace root；两者只提供有界、脱敏且明确非授权的 Workspace 文本投影。行动中心与证据清单也只提供闭集 metadata，不包含 source operation、message body 或 capability。Skill 安装请求仍是唯一有界 archive 传输，并明确排除 path/content/command/hook 字段；证据附件请求只包含相对引用与投影摘要。
 
-The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract contains 50 paths, 53 operations, and 112 schemas. Tests exercise every handler and verify that ordinary DTOs omit Workspace roots, Artifact/Skill/Session bodies, model output, tool arguments, private lifecycle, operation/fencing/lease-owner identities, API keys, Provider base URLs, and environment-variable names. Explorer and Search never return a Workspace root; both are bounded, redacted, explicitly non-authorizing Workspace-text projections. The Skill-install request remains the sole bounded archive transport and explicitly omits path, content, command, and hook fields; evidence attachment carries only a relative reference and projected digest.
+The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract contains 51 paths, 55 operations, and 116 schemas. Tests exercise every handler and verify that ordinary DTOs omit Workspace roots, Artifact/Skill/Session bodies, model output, tool arguments, private lifecycle, operation/fencing/lease-owner identities, API keys, Provider base URLs, and environment-variable names. Explorer and Search never return a Workspace root; both are bounded, redacted, explicitly non-authorizing Workspace-text projections. Operator actions and evidence inventory are closed metadata projections without source operations, message bodies, or capability fields. The Skill-install request remains the sole bounded archive transport and explicitly omits path, content, command, and hook fields; evidence attachment carries only a relative reference and projected digest.
 
 ## 主动取消 / Active-Call Cancellation
 
@@ -317,6 +333,11 @@ The persisted intent targets only the selected child. If that child belongs to a
 SSE endpoint 只读取 append-only `run_events`。首次连接从 sequence 1 开始；每个 `run.event` frame 同时携带持久化 `sequence` 和不透明、与 Run 绑定的 `id`。断线后把最后一个 `id` 放入 `Last-Event-ID` header，或首次请求的 `cursor` query；两者不能同时出现。cursor 只用于定位，不是授权凭据，跨 Run 复用会在发送 SSE headers 前被拒绝。
 
 The SSE endpoint reads only append-only `run_events`. A fresh connection starts at sequence 1. Every `run.event` frame includes the durable sequence and an opaque Run-bound `id`. Reconnect by sending the final id in `Last-Event-ID`, or use the `cursor` query on an initial request; the two cannot be combined. A cursor is positioning data, not authorization, and cross-Run reuse is rejected before SSE headers are committed.
+
+`EventView.version` is the literal `v1` imported from Go's canonical event-envelope
+constant into OpenAPI and generated TypeScript. A client parse or transport failure
+cancels the response reader before reconnecting, preserving the original error while
+preventing abandoned streams from exhausting browser per-origin connection slots.
 
 ```text
 : cyberagent run-events.v1

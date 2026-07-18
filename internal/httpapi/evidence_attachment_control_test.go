@@ -83,6 +83,24 @@ func TestEvidenceAttachmentIsIdempotentAndRemainsUntrustedContext(t *testing.T) 
 		countRunEvents(beforeEvents, events.SessionEvidenceAttachedEvent)+1 {
 		t.Fatalf("evidence event was not appended exactly once: err=%v", err)
 	}
+	inventoryResponse := fixture.get(t, path)
+	var inventory EvidenceInventoryView
+	decodeData(t, inventoryResponse, &inventory)
+	if inventory.ProtocolVersion != session.EvidenceInventoryProtocolVersion ||
+		inventory.RunID != fixture.run.ID || inventory.Truncated || len(inventory.Items) != 1 ||
+		inventory.Items[0].AttachmentID != view.AttachmentID ||
+		inventory.Items[0].SourceRef != "README.md" ||
+		inventory.Items[0].InstructionAuthorized {
+		t.Fatalf("unexpected evidence inventory: %#v", inventory)
+	}
+	for _, forbidden := range []string{secret, key, fixture.workspace.RootPath,
+		"automated assistants", "session_message_id", "attached_by", "event_sequence",
+		"operation_key", "request_fingerprint"} {
+		if strings.Contains(inventoryResponse.Body.String(), forbidden) {
+			t.Fatalf("evidence inventory exposed %q: %s", forbidden,
+				inventoryResponse.Body.String())
+		}
+	}
 
 	replay := performControlPathRequest(t, fixture.api, path, key, strings.NewReader(body))
 	var replayView EvidenceAttachmentView

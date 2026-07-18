@@ -9,6 +9,7 @@ import (
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/operationreceipt"
+	"cyberagent-workbench/internal/operatoraction"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/toolbudget"
 )
@@ -121,6 +122,42 @@ type OperationReceiptHistoryView struct {
 	ProtocolVersion string                            `json:"protocol_version"`
 	Items           []OperationReceiptHistoryItemView `json:"items"`
 	Truncated       bool                              `json:"truncated"`
+}
+
+type OperatorActionItemView struct {
+	ID          string                     `json:"id"`
+	Kind        operatoraction.Kind        `json:"kind"`
+	State       string                     `json:"state"`
+	Destination operatoraction.Destination `json:"destination"`
+	AvailableAt time.Time                  `json:"available_at"`
+	DueAt       *time.Time                 `json:"due_at,omitempty"`
+}
+
+type OperatorActionCenterView struct {
+	ProtocolVersion string                   `json:"protocol_version"`
+	RunID           string                   `json:"run_id"`
+	GeneratedAt     time.Time                `json:"generated_at"`
+	Items           []OperatorActionItemView `json:"items"`
+	Truncated       bool                     `json:"truncated"`
+}
+
+type EvidenceInventoryItemView struct {
+	AttachmentID          string    `json:"attachment_id"`
+	RunID                 string    `json:"run_id"`
+	SessionID             string    `json:"session_id"`
+	WorkspaceID           string    `json:"workspace_id"`
+	SourceKind            string    `json:"source_kind"`
+	SourceRef             string    `json:"source_ref"`
+	ContentSHA256         string    `json:"content_sha256"`
+	InstructionAuthorized bool      `json:"instruction_authorized"`
+	AttachedAt            time.Time `json:"attached_at"`
+}
+
+type EvidenceInventoryView struct {
+	ProtocolVersion string                      `json:"protocol_version"`
+	RunID           string                      `json:"run_id"`
+	Items           []EvidenceInventoryItemView `json:"items"`
+	Truncated       bool                        `json:"truncated"`
 }
 
 type FileEditApplyView struct {

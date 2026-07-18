@@ -87,7 +87,8 @@ func (s *OperationReceiptHistoryService) List(ctx context.Context,
 			return operationreceipt.History{}, apperror.New(apperror.CodeConflict,
 				"terminal operation receipt escaped the requested Run filter")
 		}
-		receipt, scope := operationreceipt.Receipt{}, "run"
+		var receipt operationreceipt.Receipt
+		scope := "run"
 		switch record.Kind {
 		case operationreceipt.KindFileEditApply:
 			pending := true

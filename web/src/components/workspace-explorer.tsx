@@ -6,21 +6,22 @@ import type { WorkspaceSearchView } from "../api/types";
 import { formatBytes } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
 
-export function WorkspaceExplorer({ client, workspaceID, runID = "" }: {
+export function WorkspaceExplorer({ client, workspaceID, runID = "", initialPath = "." }: {
   client: CyberAgentClient;
   workspaceID: string;
   runID?: string;
+  initialPath?: string;
 }) {
-  const [path, setPath] = useState(".");
+  const [path, setPath] = useState(initialPath);
   const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const operationKeys = useRef(new Map<string, string>());
   useEffect(() => {
-    setPath(".");
+    setPath(initialPath);
     setSearchInput("");
     setSearchQuery("");
     operationKeys.current.clear();
-  }, [workspaceID, runID]);
+  }, [workspaceID, runID, initialPath]);
   const query = useQuery({
     queryKey: ["workspace", workspaceID, "explore", path],
     queryFn: ({ signal }) => client.workspaceExplore(workspaceID, path, signal),

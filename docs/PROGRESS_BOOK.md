@@ -9,10 +9,10 @@
 从 schema v49 起采用“双指标”，不再使用容易混淆的单一“整体产品愿景”百分比：
 
 - 架构完成度：约 98%；其中 V2 Run-centric 控制平面约 99%。该指标衡量 Go 主控、持久化状态机和模块边界的覆盖程度。
-- 产品可用度：完整 Code + Cyber 产品约 78-82%；其中通用 Coding Agent 工作流约 74%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
+- 产品可用度：完整 Code + Cyber 产品约 80-84%；其中通用 Coding Agent 工作流约 77%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
 - 上述数值是依据已测试任务切片给出的工程估算，不是性能基准，也不代表仍被安全关闭的功能已经可用。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程 root 活动模型取消。P3 主体已落地 WorkItem/Note/Context，P4 已完成 schema v19-v38 的单 root Coordinator、最多两个核心 child 和独立 1/2/4/6 只读 Fan-out，P5 已落地统一 Tool Gateway、审批/Grant、预算、ScriptProcess、Artifact 和结构化工具。P9 已推进到 schema v77 / D1-U2：除 Run/Session/Plan/审批/有界执行外，现有 CLI/API/Desktop 还支持显式无正文 Provider 诊断、持久化模型路由、Diff 独立审阅/apply、可取消 wake/retry 意图与一次前台消费、惰性 Skill 安装、有界 Workspace explore/search、非授权 evidence 附加和可刷新终态回执历史。真实 Local/Docker/Shell 进程、后台 wake worker、安装脚本/钩子和远程 Skill 分发继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程 root 活动模型取消。P3 主体已落地 WorkItem/Note/Context，P4 已完成 schema v19-v38 的单 root Coordinator、最多两个核心 child 和独立 1/2/4/6 只读 Fan-out，P5 已落地统一 Tool Gateway、审批/Grant、预算、ScriptProcess、Artifact 和结构化工具。P9 已推进到 schema v77 / D1-K1：除 Run/Session/Plan/审批/有界执行外，现有 CLI/API/Desktop 还支持显式无正文 Provider 诊断、持久化模型路由、Diff 独立审阅/apply、可取消 wake/retry 意图与一次前台消费、惰性 Skill 安装、有界 Workspace explore/search、非授权 evidence 附加/清单、可刷新终态回执、操作者行动中心和只导航/刷新的命令面板。真实 Local/Docker/Shell 进程、后台 wake worker、安装脚本/钩子和远程 Skill 分发继续关闭。
 
 P8 已推进到 schema v37 及其只读 CI 投影：v35 把完成的 Fan-out execution 投影为通用 `draft` Finding、不可变 `model_assertion` Evidence 和可重建的 Markdown/JSON Report；v36 增加同 Run 冻结 Artifact Evidence、一次性 operator `validated/rejected` 决定与完整复核；v37 以独立不可变事实完成 `validated -> accepted -> fixed`，并强制修复 Evidence 来自接受后新建且未用于验证的同 Run Artifact。验证、接受和修复始终分离；SARIF、通用 CI gate 与 GitHub Actions annotations 均为同一持久化事实上的 Go 只读投影。
 
@@ -924,10 +924,20 @@ D1-U2 新增 `operation_receipt_history.v1` 与 React Receipts 页。Go 从 File
 
 双指标更新为架构完成度约 98%（V2 约 99%）、完整产品可用度约 78-82%、通用 Coding Agent 约 74%、Cyber 自动化约 20%。下一批建议为 D1-O1 Go-owned 有界操作者行动中心、D1-C2 metadata-only 已附加 evidence 清单与 D1-K1 只调用既有已启用能力的键盘命令面板；累计六片后执行 ordinary/race/vet/staticcheck/govulncheck/依赖/隐私完整健壮性门。Windows 10 人工矩阵、签名/安装包、Provider secret UI、真实进程、Rust analyzer 与 CTF 自动化继续独立后置，边界见 ADR 0043。
 
+非 schema D1-O1、D1-C2、D1-K1 三切片批次已完成，任务 ID 为 `P9-Operator-Actions-Evidence-Inventory-Command-Palette-D1OCK1`，SQLite schema 保持 v77。D1-O1 新增 `operator_action_center.v1`：Go 对精确 Run/Mission/Session/Workspace 聚合 pending steering、approval、FileEdit review/apply readiness 与 due wake，最多返回 100 条闭集 metadata。公开 ID 使用域分离 opaque hash，不返回 source row、operation、requester、message、command、path、Diff、private lease 或 authority；列表不做审批、apply、wake、drain 或执行。
+
+D1-C2 新增 `session_evidence_inventory.v1`：只列 exact Run-bound active Session/Workspace 已持久化附件的 source kind/reference、SHA-256、时间与固定 `instruction_authorized=false`；message ID/body、AttachedBy、event sequence、private operation 和 capability 均留在 Go/Store。React 只能把 Go 发放的 canonical 相对引用交回既有 Files Explorer，Explorer 仍独立复核路径。D1-K1 新增静态闭集 `Ctrl+K` 命令面板，只导航现有 Run 页签或刷新当前 Run 查询，不提交 path/content/approval/operation/capability/process/network/secret，也不写浏览器存储。
+
+累计六切片完整健壮性门全绿：最终 uncached 全仓 ordinary/race 319.6/299.8 秒；普通/secure-Desktop test 与 vet、零告警 staticcheck、零可达漏洞 govulncheck、module verify/tidy、26 个文件 97 项 React 测试、strict TypeScript、确定性 OpenAPI/TypeScript、Vite production build、npm 零漏洞、隔离 mock-only CLI smoke、凭据/本机路径/产物/UTF-8/Markdown 扫描和真实 Windows 可复现双构建全部通过。OpenAPI 为 51 个 path、55 个 operation、116 个 schema，SHA-256 `B9CD79254D9AE09A2DB4BCC6268F04CA8F4ADD6C638E6BAA4DA42FC223A10181`；未签名 GUI SHA-256 `a89b2357a5f1e7376ea8a533356028ccd5ea5eaec388b14d7623343fd041f520`，自动检查通过但 `release_ready=false`。
+
+真实浏览器在 1440x900 与 390x844 复核 Actions、Evidence、`Ctrl+K`、本地 tab scroll、overflow、source navigation 和 SSE。审计发现前端错误要求 `event.v1` 而 Go canonical envelope 是 `v1`，且失败重连只 release lock 没有 cancel response body，可能占满六条同源连接；现由 OpenAPI 导入 Go 常量生成 TypeScript literal `v1`，任何 parse/transport failure 先 cancel reader 再重连。当前无已知未解决高/中风险；未使用真实 Provider/API key、Shell、LocalRunner、Docker、外部网络、安装器、注册表、自启动或更新，边界见 ADR 0044。
+
+双指标更新为架构完成度约 98%（V2 约 99%）、完整产品可用度约 80-84%、通用 Coding Agent 约 77%、Cyber 自动化约 20%。下一批候选为 D1-I1 Go-issued Monaco proposal/Diff editor、D1-M3 Go/OS-owned Provider secret boundary 与 D1-J1 默认关闭的 bounded wake worker；三项均先做独立威胁模型，renderer 不直接写文件/读取明文密钥，worker 不取得 Shell/Local/Docker 权限。Windows 10 人工矩阵、签名/安装包、Rust analyzer 与 CTF 自动化继续独立后置。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0043-workspace-search-evidence-attachment-receipt-history.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0044-operator-action-center-evidence-inventory-command-palette.md`。

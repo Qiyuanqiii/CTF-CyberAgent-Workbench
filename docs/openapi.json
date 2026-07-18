@@ -2075,6 +2075,82 @@
       }
     },
     "/api/v1/runs/{run_id}/evidence-attachments": {
+      "get": {
+        "operationId": "listRunEvidence",
+        "summary": "List attached non-authorizing evidence",
+        "description": "Returns a bounded metadata-only inventory of immutable Workspace evidence attachments. It omits document and Session message content, operation keys, request fingerprints, requester identities, event sequence, and capability metadata.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/EvidenceInventoryView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      },
       "post": {
         "operationId": "attachRunEvidence",
         "summary": "Attach non-authorizing Workspace evidence",
@@ -3327,6 +3403,84 @@
                     "request_id",
                     "data",
                     "page"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/runs/{run_id}/operator-actions": {
+      "get": {
+        "operationId": "listRunOperatorActions",
+        "summary": "List pending operator actions",
+        "description": "Returns one bounded Go-owned projection of pending steering, approval, file-edit review/apply, and due wake facts. Items contain opaque identities and navigation destinations only; no operation key, command, prompt, Diff, path, content, digest, or execution authority is exposed.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/OperatorActionCenterView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
                   ],
                   "type": "object"
                 }
@@ -6388,6 +6542,9 @@
             "type": "string"
           },
           "version": {
+            "enum": [
+              "v1"
+            ],
             "type": "string"
           }
         },
@@ -6523,6 +6680,98 @@
           "model_called",
           "tool_called",
           "capability_grant"
+        ],
+        "type": "object"
+      },
+      "EvidenceInventoryItemView": {
+        "additionalProperties": false,
+        "properties": {
+          "attached_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "attachment_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "content_sha256": {
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "instruction_authorized": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_kind": {
+            "enum": [
+              "workspace_file"
+            ],
+            "type": "string"
+          },
+          "source_ref": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "attachment_id",
+          "run_id",
+          "session_id",
+          "workspace_id",
+          "source_kind",
+          "source_ref",
+          "content_sha256",
+          "instruction_authorized",
+          "attached_at"
+        ],
+        "type": "object"
+      },
+      "EvidenceInventoryView": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceInventoryItemView"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "protocol_version": {
+            "enum": [
+              "session_evidence_inventory.v1"
+            ],
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "items",
+          "truncated"
         ],
         "type": "object"
       },
@@ -8067,6 +8316,98 @@
           "retry_strategy",
           "recovery_action",
           "cleanup_state"
+        ],
+        "type": "object"
+      },
+      "OperatorActionCenterView": {
+        "additionalProperties": false,
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OperatorActionItemView"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "protocol_version": {
+            "enum": [
+              "operator_action_center.v1"
+            ],
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "generated_at",
+          "items",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "OperatorActionItemView": {
+        "additionalProperties": false,
+        "properties": {
+          "available_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "destination": {
+            "enum": [
+              "queue",
+              "approvals",
+              "diffs",
+              "wake"
+            ],
+            "type": "string"
+          },
+          "due_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "steering_pending",
+              "approval_pending",
+              "file_edit_review",
+              "file_edit_apply",
+              "wake_due"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "proposed",
+              "approved",
+              "queued"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "destination",
+          "available_at"
         ],
         "type": "object"
       },

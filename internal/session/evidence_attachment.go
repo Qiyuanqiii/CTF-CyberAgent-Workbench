@@ -8,7 +8,11 @@ import (
 	"unicode/utf8"
 )
 
-const EvidenceAttachmentProtocolVersion = "session_evidence_attachment.v1"
+const (
+	EvidenceAttachmentProtocolVersion = "session_evidence_attachment.v1"
+	EvidenceInventoryProtocolVersion  = "session_evidence_inventory.v1"
+	MaxEvidenceInventoryItems         = 100
+)
 
 type EvidenceAttachment struct {
 	ID                 string
@@ -25,6 +29,62 @@ type EvidenceAttachment struct {
 	AttachedBy         string
 	EventSequence      int64
 	CreatedAt          time.Time
+}
+
+type EvidenceInventoryItem struct {
+	AttachmentID          string
+	RunID                 string
+	SessionID             string
+	WorkspaceID           string
+	SourceKind            string
+	SourceRef             string
+	ContentSHA256         string
+	InstructionAuthorized bool
+	AttachedAt            time.Time
+}
+
+func (i EvidenceInventoryItem) Validate() error {
+	if i.InstructionAuthorized {
+		return errors.New("evidence inventory cannot authorize document instructions")
+	}
+	attachment := EvidenceAttachment{
+		ID: i.AttachmentID, ProtocolVersion: EvidenceAttachmentProtocolVersion,
+		OperationKeyDigest: strings.Repeat("0", 64),
+		RequestFingerprint: strings.Repeat("0", 64),
+		RunID:              i.RunID, SessionID: i.SessionID, WorkspaceID: i.WorkspaceID,
+		SourceKind: i.SourceKind, SourceRef: i.SourceRef, ContentSHA256: i.ContentSHA256,
+		SessionMessageID: 1, AttachedBy: "inventory", EventSequence: 1,
+		CreatedAt: i.AttachedAt,
+	}
+	return attachment.Validate()
+}
+
+type EvidenceInventory struct {
+	ProtocolVersion string
+	RunID           string
+	Items           []EvidenceInventoryItem
+	Truncated       bool
+}
+
+func (i EvidenceInventory) Validate() error {
+	if i.ProtocolVersion != EvidenceInventoryProtocolVersion ||
+		!validEvidenceIdentity(i.RunID) || len(i.Items) > MaxEvidenceInventoryItems {
+		return errors.New("evidence inventory envelope is invalid")
+	}
+	seen := make(map[string]struct{}, len(i.Items))
+	for _, item := range i.Items {
+		if err := item.Validate(); err != nil {
+			return err
+		}
+		if item.RunID != i.RunID {
+			return errors.New("evidence inventory item escaped its Run")
+		}
+		if _, exists := seen[item.AttachmentID]; exists {
+			return errors.New("evidence inventory contains a duplicate attachment")
+		}
+		seen[item.AttachmentID] = struct{}{}
+	}
+	return nil
 }
 
 func (a EvidenceAttachment) Validate() error {
@@ -65,6 +125,19 @@ func validWorkspaceEvidenceRef(value string) bool {
 	}
 	for _, part := range strings.Split(value, "/") {
 		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func validEvidenceIdentity(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) || !utf8.ValidString(value) ||
+		utf8.RuneCountInString(value) > 256 || strings.ContainsRune(value, 0) {
+		return false
+	}
+	for _, current := range value {
+		if unicode.IsControl(current) {
 			return false
 		}
 	}
