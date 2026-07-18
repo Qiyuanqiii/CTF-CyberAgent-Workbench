@@ -920,6 +920,8 @@ D1-U2 新增 `operation_receipt_history.v1` 与 React Receipts 页。Go 从 File
 
 组合审计修复两个具体边界：Unicode case mapping 可能改变字节长度，因此搜索改为逐原始行匹配，绝不用 lower-case 偏移切原文；搜索真实读预算补上每文件最多 `utf8.UTFMax` 的 Explorer 前瞻。canonical Workspace evidence reference 同时由 Go 与 schema v77 CHECK 约束。未发现未解决高/中风险；本批未调用真实 Provider、模型、工具、Shell、LocalRunner、Docker、网络、API key、安装器、注册表、自启动或更新。该批是新组六切片的前三片，因此不提前声称 full race/staticcheck/govulncheck 门。
 
+远端 GitHub Actions run `29661764283` 已通过实现提交 `ffbdc72`：TypeScript console 34 秒、Windows Desktop shell 2 分 21 秒、含 govulncheck 的 Go control plane 3 分 48 秒。
+
 双指标更新为架构完成度约 98%（V2 约 99%）、完整产品可用度约 78-82%、通用 Coding Agent 约 74%、Cyber 自动化约 20%。下一批建议为 D1-O1 Go-owned 有界操作者行动中心、D1-C2 metadata-only 已附加 evidence 清单与 D1-K1 只调用既有已启用能力的键盘命令面板；累计六片后执行 ordinary/race/vet/staticcheck/govulncheck/依赖/隐私完整健壮性门。Windows 10 人工矩阵、签名/安装包、Provider secret UI、真实进程、Rust analyzer 与 CTF 自动化继续独立后置，边界见 ADR 0043。
 
 ## 八、仓库同步与恢复约定
