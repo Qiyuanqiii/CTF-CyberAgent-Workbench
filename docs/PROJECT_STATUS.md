@@ -909,7 +909,9 @@ and Windows production Desktop build. No Provider, model call, tool, Shell,
 Docker, external network, process, or execution lease was used. In accordance
 with the new cadence, full race/vet/staticcheck/govulncheck and extended
 dependency/privacy analysis run after the next three slices complete the
-six-slice robustness gate. ADR 0037 records the boundary.
+six-slice robustness gate. GitHub Actions run `29633205163` passed commit
+`3ecb22a` in all Go/Linux, Windows Desktop, and TypeScript jobs, including
+remote vet, govulncheck, and dependency audit. ADR 0037 records the boundary.
 
 Current dual metrics: architecture about 98% (V2 about 99%), complete-product
 usability about 57-61%, generic Coding Agent workflow about 52%, and Cyber

@@ -360,7 +360,10 @@ production build, and Windows production Desktop build. The path invokes no
 Provider, execution lease, tool, Shell, Docker, external network, or process.
 The agreed six-slice robustness gate deliberately moves full race, vet,
 staticcheck, govulncheck, dependency, and extended privacy analysis to the end
-of the next three-slice batch. ADR 0037 records the boundary.
+of the next three-slice batch. GitHub Actions run `29633205163` passed
+implementation commit `3ecb22a`: Go/Linux 3m06s, Windows Desktop 1m38s, and
+TypeScript 25s, including remote vet, govulncheck, and dependency audit. ADR
+0037 records the boundary.
 
 Metrics after D1-S1: architecture remains about 98% (V2 about 99%);
 complete-product usability is about 57-61%, generic coding-agent workflow
