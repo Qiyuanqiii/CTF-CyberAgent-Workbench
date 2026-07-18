@@ -170,6 +170,7 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D1-C2：metadata-only attached-evidence inventory 已完成；正文/private identity 不出 Go，false instruction authority 不可推导扩权。
 - [x] D1-K1：existing-view navigation/refresh-only `Ctrl+K` command palette 已完成；没有 renderer host path、mutation 或进程入口。
 - [x] D1-O1/C2/K1 后累计六片完整健壮性门通过：ordinary/race 319.6/299.8 秒、ordinary/secure-Desktop test/vet、staticcheck、govulncheck、module/依赖/隐私、97 项 React、确定性契约、Vite/Windows 可复现构建和真实浏览器桌面/移动复核均为绿色；审计修复事件 literal `v1` 漂移与失败重连连接泄漏，无已知未解决高/中风险。
+- [x] GitHub Actions run `29665187925` 已通过实现提交 `1151aaf`：TypeScript 36 秒、Windows Desktop 2 分 23 秒、Go 3 分 35 秒。
 - [ ] 下一批候选 D1-I1 Go-issued Monaco proposal/Diff editor、D1-M3 Go/OS-owned Provider secret boundary、D1-J1 default-off bounded wake worker；先分别完成威胁模型，renderer 不直接写文件或读回明文密钥，worker 不启动 Shell/Local/Docker。
 - [ ] 所有状态 mutation 使用独立 control capability、Origin/Host 校验、稳定 operation key 和 typed errors；显式 Provider 诊断每次只允许一次有界无正文请求。CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。

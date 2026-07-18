@@ -932,6 +932,8 @@ D1-C2 新增 `session_evidence_inventory.v1`：只列 exact Run-bound active Ses
 
 真实浏览器在 1440x900 与 390x844 复核 Actions、Evidence、`Ctrl+K`、本地 tab scroll、overflow、source navigation 和 SSE。审计发现前端错误要求 `event.v1` 而 Go canonical envelope 是 `v1`，且失败重连只 release lock 没有 cancel response body，可能占满六条同源连接；现由 OpenAPI 导入 Go 常量生成 TypeScript literal `v1`，任何 parse/transport failure 先 cancel reader 再重连。当前无已知未解决高/中风险；未使用真实 Provider/API key、Shell、LocalRunner、Docker、外部网络、安装器、注册表、自启动或更新，边界见 ADR 0044。
 
+远端 GitHub Actions run `29665187925` 已通过实现提交 `1151aaf`：TypeScript console 36 秒、Windows Desktop shell 2 分 23 秒、Go control plane 3 分 35 秒。
+
 双指标更新为架构完成度约 98%（V2 约 99%）、完整产品可用度约 80-84%、通用 Coding Agent 约 77%、Cyber 自动化约 20%。下一批候选为 D1-I1 Go-issued Monaco proposal/Diff editor、D1-M3 Go/OS-owned Provider secret boundary 与 D1-J1 默认关闭的 bounded wake worker；三项均先做独立威胁模型，renderer 不直接写文件/读取明文密钥，worker 不取得 Shell/Local/Docker 权限。Windows 10 人工矩阵、签名/安装包、Rust analyzer 与 CTF 自动化继续独立后置。
 
 ## 八、仓库同步与恢复约定

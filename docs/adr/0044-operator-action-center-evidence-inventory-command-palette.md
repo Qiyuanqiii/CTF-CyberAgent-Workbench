@@ -92,6 +92,10 @@ console errors. The combined audit found no unresolved high- or medium-severity 
 No real Provider, API key, Shell, LocalRunner, Docker, external network, installer,
 registry mutation, startup task, or updater was used.
 
+GitHub Actions run `29665187925` passed implementation commit `1151aaf`: the
+TypeScript console completed in 36s, the Windows Desktop shell in 2m23s, and the Go
+control plane in 3m35s.
+
 ## Consequences
 
 - SQLite remains at schema v77; these are non-schema read/navigation slices.
