@@ -9,6 +9,7 @@ import (
 )
 
 func TestDeepSeekProviderRegistersFromEnvironmentAndUsesDefaults(t *testing.T) {
+	t.Setenv("CYBERAGENT_HOME", t.TempDir())
 	t.Setenv("DEEPSEEK_API_KEY", "test-deepseek-api-key")
 	t.Setenv("DEEPSEEK_MODEL", "")
 	requestSeen := make(chan struct{}, 1)
@@ -47,8 +48,13 @@ func TestDeepSeekProviderRegistersFromEnvironmentAndUsesDefaults(t *testing.T) {
 	}
 	output, stderr, code := executeTestCommand(t, "provider", "test", "deepseek/"+defaultDeepSeekModel)
 	if code != 0 || stderr != "" || !strings.Contains(output, "provider: deepseek") ||
-		!strings.Contains(output, "model: deepseek-v4-flash") || !strings.Contains(output, "response: provider healthy") {
+		!strings.Contains(output, "model: deepseek-v4-flash") ||
+		!strings.Contains(output, "status: reachable") ||
+		!strings.Contains(output, "response_content_returned: false") {
 		t.Fatalf("unexpected DeepSeek test output=%q stderr=%q code=%d", output, stderr, code)
+	}
+	if strings.Contains(output, "provider healthy") || strings.Contains(output, "response:") {
+		t.Fatal("Provider diagnostic exposed model response content")
 	}
 	if strings.Contains(output, "test-deepseek-api-key") || strings.Contains(stderr, "test-deepseek-api-key") {
 		t.Fatal("DeepSeek API key leaked into CLI output")

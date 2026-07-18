@@ -8,6 +8,7 @@ import {
   Container,
   Database,
   FileArchive,
+  FileDiff,
   Gauge,
   GitBranch,
   ListChecks,
@@ -47,13 +48,16 @@ import { useRunEventStream } from "../hooks/use-run-event-stream";
 import { formatBytes, formatDate, formatNumber, shortID } from "../lib/format";
 import { EmptyState, ErrorState, KeyValue, LoadMoreButton, LoadingState, StatusBadge } from "./common";
 import { ApprovalPanel } from "./approval-panel";
+import { FileEditPanel } from "./file-edit-panel";
+import { RunWakePanel } from "./run-wake-panel";
 import { AgentGraphPanel, DelegationsPanel, ExternalSkillsPanel, FanoutPanel, FindingsPanel } from "./run-projections";
 
-type RunTab = "overview" | "approvals" | "agents" | "delegations" | "fanout" | "findings" | "events" | "work" | "notes" | "artifacts" | "tools";
+type RunTab = "overview" | "approvals" | "diffs" | "agents" | "delegations" | "fanout" | "findings" | "events" | "work" | "notes" | "artifacts" | "tools";
 
 const tabs: Array<{ id: RunTab; label: string; icon: typeof Activity }> = [
   { id: "overview", label: "概览", icon: Gauge },
   { id: "approvals", label: "Approvals", icon: ShieldCheck },
+  { id: "diffs", label: "Diffs", icon: FileDiff },
   { id: "agents", label: "Agents", icon: GitBranch },
   { id: "delegations", label: "委派", icon: Network },
   { id: "fanout", label: "Fan-out", icon: ScanSearch },
@@ -139,6 +143,7 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
       <div className="workspace-content">
         {tab === "overview" && <RunOverview client={client} detail={detail} />}
         {tab === "approvals" && <ApprovalPanel client={client} runID={runID} />}
+        {tab === "diffs" && <FileEditPanel client={client} runID={runID} />}
         {tab === "agents" && <AgentGraphPanel client={client} runID={runID} />}
         {tab === "delegations" && <DelegationsPanel client={client} runID={runID} />}
         {tab === "fanout" && <FanoutPanel client={client} runID={runID} />}
@@ -207,6 +212,7 @@ function RunOverview({ client, detail }: { client: CyberAgentClient; detail: Run
         </dl>
       </section>
       <RunControlPanel client={client} detail={detail} />
+      <RunWakePanel client={client} detail={detail} />
       <ExecutionProfilePanel client={client} detail={detail} />
       <section className="detail-section">
         <h2>执行状态</h2>

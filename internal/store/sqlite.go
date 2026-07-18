@@ -296,6 +296,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 71, Name: "bounded external Skill provenance projection", Statements: externalSkillProjectionStatements},
 		{Version: 72, Name: "idempotent operator-controlled Run creation", Statements: runCreationOperationStatements},
 		{Version: 73, Name: "idempotent Run lifecycle and bounded execution handoff", Statements: controlledRunOperationsStatements},
+		{Version: 74, Name: "durable Run wake retry intents and ownership", Statements: runWakeOwnershipStatements},
 	})
 }
 

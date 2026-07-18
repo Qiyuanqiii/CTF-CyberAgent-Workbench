@@ -324,12 +324,29 @@ td code { font-size: 11px; }
 .model-availability-section { min-width: 0; }
 .model-availability-section h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 9px; font-size: 12px; }
 .model-provider-list, .model-route-list { border-top: 1px solid var(--border); }
-.model-provider-row { min-height: 58px; display: grid; grid-template-columns: minmax(110px, .8fr) minmax(150px, 1.5fr) 100px auto; align-items: center; gap: 12px; padding: 9px 3px; border-bottom: 1px solid var(--border); font-size: 11px; }
+.model-provider-row { min-height: 58px; display: grid; grid-template-columns: minmax(110px, .8fr) minmax(150px, 1.5fr) 100px auto 34px; align-items: center; gap: 12px; padding: 9px 3px; border-bottom: 1px solid var(--border); font-size: 11px; }
 .model-provider-row > div { min-width: 0; display: grid; gap: 3px; }
 .model-provider-row strong, .model-provider-row small, .model-provider-row > span { overflow-wrap: anywhere; }
 .model-provider-row small, .model-provider-row > span { color: var(--muted); }
-.model-route-row { min-height: 44px; display: grid; grid-template-columns: minmax(90px, .6fr) minmax(180px, 1.4fr) auto; align-items: center; gap: 12px; padding: 7px 3px; border-bottom: 1px solid var(--border); font-size: 11px; }
+.model-route-row { min-height: 44px; display: grid; grid-template-columns: minmax(90px, .6fr) minmax(180px, 1.4fr) auto 34px; align-items: center; gap: 12px; padding: 7px 3px; border-bottom: 1px solid var(--border); font-size: 11px; }
 .model-route-row span { min-width: 0; overflow-wrap: anywhere; color: var(--muted); }
+.model-route-row select { min-width: 0; height: 32px; padding: 0 7px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface); color: var(--ink); font-size: 11px; }
+.model-diagnostic-result { min-height: 38px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 7px 3px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; }
+.file-edit-panel { min-width: 0; }
+.file-edit-panel > header { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); }
+.file-edit-panel > header > div { display: flex; align-items: center; gap: 8px; }
+.file-edit-panel h2 { margin: 0; font-size: 14px; }
+.file-edit-panel > header > span { color: var(--muted); font-size: 11px; }
+.file-edit-list { display: grid; }
+.file-edit-row { min-width: 0; border-bottom: 1px solid var(--border); }
+.file-edit-row summary { min-height: 46px; display: grid; grid-template-columns: minmax(180px, 1fr) 130px auto auto; align-items: center; gap: 12px; padding: 7px 3px; cursor: pointer; font-size: 11px; }
+.file-edit-row summary code { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.file-edit-row summary > span:not(.status-badge) { color: var(--muted); }
+.file-edit-body { min-width: 0; padding: 0 3px 12px; }
+.file-edit-body pre { max-height: 430px; margin: 0; padding: 12px; overflow: auto; border: 1px solid var(--border); border-radius: 5px; background: #f6f8f9; color: #26343d; font-size: 11px; line-height: 1.5; white-space: pre; }
+.file-edit-body footer { min-height: 42px; display: flex; align-items: center; justify-content: flex-end; gap: 10px 18px; color: var(--muted); font-size: 10px; }
+.file-edit-body footer > div { display: flex; gap: 6px; }
+.run-wake-section .run-control-row { margin-top: 12px; }
 .approval-queue { min-width: 0; }
 .approval-queue-header { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); }
 .approval-queue-header > div { display: flex; align-items: center; gap: 8px; }
@@ -441,6 +458,9 @@ td code { font-size: 11px; }
   .desktop-package-metrics > div:nth-last-child(-n+2) { border-bottom: 0; }
   .model-provider-row, .model-route-row { grid-template-columns: minmax(0, 1fr) auto; }
   .model-provider-row > span { grid-column: 1; }
+	.file-edit-row summary { grid-template-columns: minmax(0, 1fr) auto; }
+	.file-edit-row summary > span:not(.status-badge) { grid-column: 1; }
+	.file-edit-body footer { align-items: flex-start; flex-direction: column; }
   .approval-row-main { grid-template-columns: minmax(0, 1fr) auto; }
   .approval-row-main code, .approval-row-main time { grid-column: 1 / -1; text-align: left; }
   .approval-actions { align-items: stretch; flex-direction: column; }

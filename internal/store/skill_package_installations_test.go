@@ -509,7 +509,7 @@ func removeSchemaV72ForTestStatements() []string {
 }
 
 func removeSchemaV73ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV74ForTestStatements(), []string{
 		`DROP TRIGGER trg_run_execution_handoff_result_delete_immutable`,
 		`DROP TRIGGER trg_run_execution_handoff_result_update_immutable`,
 		`DROP TRIGGER trg_run_execution_handoff_item_delete_immutable`,
@@ -527,5 +527,23 @@ func removeSchemaV73ForTestStatements() []string {
 		`DROP TABLE run_execution_handoff_operations`,
 		`DROP TABLE run_lifecycle_operations`,
 		`DELETE FROM schema_migrations WHERE version = 73`,
+	}...)
+}
+
+func removeSchemaV74ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_run_wake_operation_delete_immutable`,
+		`DROP TRIGGER trg_run_wake_operation_update_immutable`,
+		`DROP TRIGGER trg_run_wake_operation_insert`,
+		`DROP TRIGGER trg_run_wake_lease_delete_immutable`,
+		`DROP TRIGGER trg_run_wake_lease_update`,
+		`DROP TRIGGER trg_run_wake_lease_insert`,
+		`DROP TRIGGER trg_run_wake_intent_delete_immutable`,
+		`DROP TRIGGER trg_run_wake_intent_update`,
+		`DROP TRIGGER trg_run_wake_intent_insert`,
+		`DROP TABLE run_wake_operations`,
+		`DROP TABLE run_wake_leases`,
+		`DROP TABLE run_wake_intents`,
+		`DELETE FROM schema_migrations WHERE version = 74`,
 	}
 }

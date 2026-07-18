@@ -41,6 +41,9 @@ type ConnectionBootstrap struct {
 	RunExecutionEnabled           bool   `json:"run_execution_enabled"`
 	PlanDeliveryControlEnabled    bool   `json:"plan_delivery_control_enabled"`
 	ApprovalControlEnabled        bool   `json:"approval_control_enabled"`
+	ModelControlEnabled           bool   `json:"model_control_enabled"`
+	FileEditReviewEnabled         bool   `json:"file_edit_review_enabled"`
+	RunWakeControlEnabled         bool   `json:"run_wake_control_enabled"`
 	ReadOnlyDefault               bool   `json:"read_only_default"`
 	ProcessExecutionEnabled       bool   `json:"process_execution_enabled"`
 	ShellExecutionEnabled         bool   `json:"shell_execution_enabled"`
@@ -84,6 +87,9 @@ type DesktopBridgeConfig struct {
 	RunExecutionEnabled           bool
 	PlanDeliveryControlEnabled    bool
 	ApprovalControlEnabled        bool
+	ModelControlEnabled           bool
+	FileEditReviewEnabled         bool
+	RunWakeControlEnabled         bool
 	APIVersion                    string
 	AppVersion                    string
 	UIDigest                      string
@@ -117,7 +123,8 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 		config.SessionMessageEnabled ||
 		config.SessionSteeringControlEnabled || config.RunLifecycleEnabled ||
 		config.RunExecutionEnabled || config.PlanDeliveryControlEnabled ||
-		config.ApprovalControlEnabled
+		config.ApprovalControlEnabled || config.ModelControlEnabled ||
+		config.FileEditReviewEnabled || config.RunWakeControlEnabled
 	if controlEnabled && config.ControlToken == "" {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop control capabilities require a control token")
@@ -156,6 +163,9 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 			RunExecutionEnabled:           config.RunExecutionEnabled,
 			PlanDeliveryControlEnabled:    config.PlanDeliveryControlEnabled,
 			ApprovalControlEnabled:        config.ApprovalControlEnabled,
+			ModelControlEnabled:           config.ModelControlEnabled,
+			FileEditReviewEnabled:         config.FileEditReviewEnabled,
+			RunWakeControlEnabled:         config.RunWakeControlEnabled,
 			ReadOnlyDefault:               !controlEnabled,
 			ProcessExecutionEnabled:       false, ShellExecutionEnabled: false, DockerExecutionEnabled: false,
 			SkillInstallationEnabled: false, RendererPathInputSupported: false,

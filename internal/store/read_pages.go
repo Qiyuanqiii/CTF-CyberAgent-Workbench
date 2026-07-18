@@ -182,6 +182,13 @@ func (s *SQLiteStore) ListFileEditPreviewsPage(ctx context.Context,
 	return out, rows.Err()
 }
 
+func (s *SQLiteStore) GetFileEditPreview(ctx context.Context, id string) (fileedit.Preview, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT id, session_id, workspace_id, path, status, diff_text,
+		original_hash, proposed_hash, reason, secrets_redacted, created_at, updated_at
+		FROM file_edits WHERE id = ?`, strings.TrimSpace(id))
+	return scanFileEditPreview(row)
+}
+
 func (s *SQLiteStore) ListRunEventsPage(ctx context.Context, runID string,
 	offset int, limit int,
 ) ([]events.Event, error) {

@@ -3,10 +3,12 @@ package modelregistry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -17,6 +19,12 @@ import (
 const ProtocolVersion = "model_availability.v1"
 
 const (
+	DiagnosticProtocolVersion   = "provider_diagnostic.v1"
+	RouteControlProtocolVersion = "model_route_control.v1"
+	DiagnosticTimeout           = 15 * time.Second
+)
+
+const (
 	ProviderAvailable            = "available"
 	ProviderNotConfigured        = "not_configured"
 	ProviderInvalidConfiguration = "invalid_configuration"
@@ -25,6 +33,11 @@ const (
 const (
 	ProviderKindLocal               = "local"
 	ProviderKindAnthropicCompatible = "anthropic_compatible"
+)
+
+const (
+	DiagnosticReachable   = "reachable"
+	DiagnosticUnreachable = "unreachable"
 )
 
 const (
@@ -66,14 +79,36 @@ type Snapshot struct {
 	Routes          []RouteAvailability
 }
 
+// DiagnosticResult is intentionally content-free. A diagnostic may make one
+// minimal model request, but neither model text nor a raw Provider error crosses
+// this boundary.
+type DiagnosticResult struct {
+	ProtocolVersion         string
+	Provider                string
+	Model                   string
+	Status                  string
+	Outcome                 string
+	Retryable               bool
+	NetworkRequestAttempted bool
+	ModelCalled             bool
+	ToolCalled              bool
+	ResponseContentReturned bool
+	DurationMillis          int64
+}
+
 type RouteSettingReader interface {
 	GetProviderSetting(ctx context.Context, key string) (string, bool, error)
+}
+
+type RouteSettingWriter interface {
+	SetProviderSetting(ctx context.Context, key string, value string) error
 }
 
 type EnvironmentLookup func(string) (string, bool)
 
 type Registry struct {
 	mu        sync.RWMutex
+	routeMu   sync.Mutex
 	router    *llm.Router
 	providers []ProviderAvailability
 	available map[string]struct{}
@@ -160,6 +195,95 @@ func (r *Registry) LoadRouteSettings(ctx context.Context, reader RouteSettingRea
 	return nil
 }
 
+func (r *Registry) SelectRoute(ctx context.Context, writer RouteSettingWriter,
+	route string, provider string, model string,
+) (RouteAvailability, error) {
+	if r == nil || r.router == nil {
+		return RouteAvailability{}, errors.New("model registry is unavailable")
+	}
+	if writer == nil {
+		return RouteAvailability{}, errors.New("model route setting writer is required")
+	}
+	r.routeMu.Lock()
+	defer r.routeMu.Unlock()
+	route = strings.TrimSpace(route)
+	provider = strings.TrimSpace(provider)
+	model = strings.TrimSpace(model)
+	if !containsRoute(route) {
+		return RouteAvailability{}, errors.New("model route is not supported")
+	}
+	if !validAvailabilityIdentifier(provider, maxPublicProviderNameBytes) ||
+		!validAvailabilityIdentifier(model, maxPublicModelNameBytes) ||
+		!r.providerModelAvailable(provider, model) {
+		return RouteAvailability{}, errors.New("selected Provider model is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return RouteAvailability{}, err
+	}
+	value := provider + "/" + model
+	if err := writer.SetProviderSetting(ctx, "route."+route, value); err != nil {
+		return RouteAvailability{}, fmt.Errorf("persist model route: %w", err)
+	}
+	// SetRoute cannot fail after the exact Provider/model validation above. If
+	// the process exits between persistence and this update, startup reloads the
+	// durable setting before serving requests.
+	r.router.SetRoute(route, llm.ModelRef{Provider: provider, Model: model})
+	return RouteAvailability{Name: route, Provider: provider, Model: model, Available: true}, nil
+}
+
+func (r *Registry) Diagnose(ctx context.Context, provider string,
+	model string,
+) (DiagnosticResult, error) {
+	if r == nil || r.router == nil {
+		return DiagnosticResult{}, errors.New("model registry is unavailable")
+	}
+	provider = strings.TrimSpace(provider)
+	model = strings.TrimSpace(model)
+	if !validAvailabilityIdentifier(provider, maxPublicProviderNameBytes) ||
+		!validAvailabilityIdentifier(model, maxPublicModelNameBytes) ||
+		!r.providerModelAvailable(provider, model) {
+		return DiagnosticResult{}, errors.New("diagnostic Provider model is unavailable")
+	}
+	networkRequired := r.providerNetworkRequired(provider)
+	diagnosticCtx, cancel := context.WithTimeout(ctx, DiagnosticTimeout)
+	defer cancel()
+	started := time.Now()
+	result := DiagnosticResult{
+		ProtocolVersion: DiagnosticProtocolVersion,
+		Provider:        provider, Model: model, Status: DiagnosticUnreachable,
+		NetworkRequestAttempted: networkRequired, ModelCalled: true,
+		ToolCalled: false, ResponseContentReturned: false,
+	}
+	response, err := r.router.ChatModelRef(diagnosticCtx,
+		llm.ModelRef{Provider: provider, Model: model}, llm.ChatRequest{
+			Model: model,
+			Messages: []llm.Message{{Role: "user",
+				Content: "Reply with one short acknowledgement for a connectivity diagnostic."}},
+			Temperature: 0, MaxTokens: 8,
+			Metadata: map[string]string{"purpose": "connectivity_diagnostic"},
+		})
+	result.DurationMillis = time.Since(started).Milliseconds()
+	if result.DurationMillis < 0 {
+		result.DurationMillis = 0
+	}
+	if err != nil {
+		outcome := llm.ProviderErrorKind(llm.NormalizeProviderError(provider, err))
+		if !outcome.Valid() || outcome == llm.OutcomeSuccess {
+			outcome = llm.OutcomePermanent
+		}
+		result.Outcome = string(outcome)
+		result.Retryable = outcome.Retryable()
+		return result, nil
+	}
+	if response == nil || strings.TrimSpace(response.Provider) != provider {
+		result.Outcome = string(llm.OutcomeInvalidResponse)
+		return result, nil
+	}
+	result.Status = DiagnosticReachable
+	result.Outcome = string(llm.OutcomeSuccess)
+	return result, nil
+}
+
 func (r *Registry) Snapshot() Snapshot {
 	if r == nil || r.router == nil {
 		return Snapshot{ProtocolVersion: ProtocolVersion, Providers: []ProviderAvailability{},
@@ -193,6 +317,45 @@ func (r *Registry) Snapshot() Snapshot {
 		})
 	}
 	return Snapshot{ProtocolVersion: ProtocolVersion, Providers: providers, Routes: outRoutes}
+}
+
+func (r *Registry) providerModelAvailable(provider string, model string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if _, ok := r.available[provider]; !ok {
+		return false
+	}
+	for _, current := range r.providers {
+		if current.Name != provider || current.Status != ProviderAvailable {
+			continue
+		}
+		for _, candidate := range current.Models {
+			if candidate == model {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (r *Registry) providerNetworkRequired(provider string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, current := range r.providers {
+		if current.Name == provider {
+			return current.NetworkRequired
+		}
+	}
+	return false
+}
+
+func containsRoute(route string) bool {
+	for _, current := range routeNames {
+		if current == route {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Registry) registerAnthropicEnvironment(config anthropicEnvironment,

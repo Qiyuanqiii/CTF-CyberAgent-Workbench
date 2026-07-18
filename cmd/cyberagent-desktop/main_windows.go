@@ -49,6 +49,9 @@ type desktopOptions struct {
 	runExecution           bool
 	planDeliveryControl    bool
 	approvalControl        bool
+	modelControl           bool
+	fileEditReview         bool
+	runWakeControl         bool
 	version                bool
 }
 
@@ -185,6 +188,12 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 		"enable operator Plan direction selection and explicit Deliver transition")
 	approvalControl := fs.Bool("enable-approvals", false,
 		"enable bounded approve-once and deny decisions for durable approvals")
+	modelControl := fs.Bool("enable-model-control", false,
+		"enable persisted model route selection and explicit connectivity diagnostics")
+	fileEditReview := fs.Bool("enable-file-edit-review", false,
+		"enable review-only file edit approval or denial without applying files")
+	runWakeControl := fs.Bool("enable-run-wake", false,
+		"enable durable bounded Run wake intent scheduling and cancellation")
 	version := fs.Bool("version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
 		return desktopOptions{}, err
@@ -199,6 +208,9 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 		runExecution:           *runExecution,
 		planDeliveryControl:    *planDeliveryControl,
 		approvalControl:        *approvalControl,
+		modelControl:           *modelControl,
+		fileEditReview:         *fileEditReview,
+		runWakeControl:         *runWakeControl,
 		version:                *version}, nil
 }
 
@@ -221,7 +233,8 @@ func runDesktop(config desktopOptions) error {
 	controlToken := ""
 	if config.profileControl || config.runCreation || config.sessionMessages ||
 		config.sessionSteeringControl || config.runLifecycle || config.runExecution ||
-		config.planDeliveryControl || config.approvalControl {
+		config.planDeliveryControl || config.approvalControl || config.modelControl ||
+		config.fileEditReview || config.runWakeControl {
 		controlToken, err = httpapi.GenerateAccessToken()
 		if err != nil {
 			return err
@@ -238,6 +251,9 @@ func runDesktop(config desktopOptions) error {
 		RunExecutionEnabled:           config.runExecution,
 		PlanDeliveryControlEnabled:    config.planDeliveryControl,
 		ApprovalControlEnabled:        config.approvalControl,
+		ModelControlEnabled:           config.modelControl,
+		FileEditReviewEnabled:         config.fileEditReview,
+		RunWakeControlEnabled:         config.runWakeControl,
 		AppVersion:                    app.Version, UIHandler: bundle,
 	})
 	if err != nil {
@@ -258,6 +274,9 @@ func runDesktop(config desktopOptions) error {
 		RunExecutionEnabled:           config.runExecution,
 		PlanDeliveryControlEnabled:    config.planDeliveryControl,
 		ApprovalControlEnabled:        config.approvalControl,
+		ModelControlEnabled:           config.modelControl,
+		FileEditReviewEnabled:         config.fileEditReview,
+		RunWakeControlEnabled:         config.runWakeControl,
 		AppVersion:                    app.Version, UIDigest: bundle.Digest(), Selector: selector, PreviewBridge: preview,
 	})
 	if err != nil {

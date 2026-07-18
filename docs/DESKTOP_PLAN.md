@@ -1,6 +1,6 @@
 # CyberAgent Workbench Desktop Plan
 
-状态：Desktop D0-A、D0-B、schema-v72 D1-R1、非 schema D1-S1/S2、schema-v73 D1-L1/X1 与非 schema D1-M1/P1/A1 自动化核心已完成。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill 预览、受控 Run 创建、Session 排队/pending-only 取消、幂等 Run 生命周期、最多八条冻结输入的显式 RunSupervisor 交接、脱敏模型可用性、Plan 三选一/Deliver 和受限审批决策已经落地；Windows 10 实机矩阵、Desktop Provider 密钥设置/在线诊断、后台 wake/retry、Diff/Skill mutation、安装包、正式便携发行、注册表、自启动、更新和高权限执行仍未实现。
+状态：Desktop D0-A、D0-B 与 D1-R1 至 schema-v74 D1-Q1 自动化核心已完成。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill 预览、受控 Run/Session/Plan/审批、显式无正文 Provider 诊断、持久化模型路由、只审阅不 apply 的 Diff，以及有界 wake/retry 意图已经落地；Windows 10 实机矩阵、Desktop Provider 密钥设置、前台/后台 wake 消费、独立 Diff apply、Skill mutation、安装包、正式便携发行、注册表、自启动、更新和高权限执行仍未实现。
 
 ## 目标
 
@@ -33,9 +33,9 @@
 - `desktop_skill_package_preview.v1` 只返回有界风险元数据，排除路径、文件名、正文、Manifest description/content path/content digest，并固定安装、命令、网络、Provider、工具和能力授权为 false。
 - D0-A 已把该边界接入 Wails 原生对话框和 React 只读预览。渲染层仍不能提交路径、文件字节或安装请求，也不会因预览创建数据库事实或 Run 事件；ADR 0033 与 ADR 0034 分别记录路径隔离和桌面壳边界。
 
-## D0-A 至 D1-A1 当前实现
+## D0-A 至 D1-Q1 当前实现
 
-- `cmd/cyberagent-desktop` 只在 Windows `desktop,wv2runtime.error` build tags 下编译，production 构建再增加 `production`；默认 read-only。`--enable-profile-control`、`--enable-run-creation`、`--enable-session-messages`、`--enable-session-steering-control`、`--enable-run-lifecycle`、`--enable-run-execution`、`--enable-plan-delivery` 和 `--enable-approvals` 分别开放窄 Go route；八项 capability 独立，单项启用不能访问其他 route。模型可用性只使用 read token。
+- `cmd/cyberagent-desktop` 只在 Windows `desktop,wv2runtime.error` build tags 下编译，production 构建再增加 `production`；默认 read-only。`--enable-profile-control`、`--enable-run-creation`、`--enable-session-messages`、`--enable-session-steering-control`、`--enable-run-lifecycle`、`--enable-run-execution`、`--enable-plan-delivery`、`--enable-approvals`、`--enable-model-control`、`--enable-file-edit-review` 和 `--enable-run-wake` 分别开放窄 Go route；十一项 capability 独立，单项启用不能访问其他 route。模型可用性只使用 read token。
 - `web/dist` 以 compile-time embed 进入二进制；Go 在启动前验证 index、内容哈希资源、类型、数量、单项/总大小并复制为不可变内存快照。
 - Wails AssetServer 直接调用现有 `httpapi.API` Handler，不监听 TCP 端口；同一 Go 层继续负责 Bearer、Host、CSP、Policy、SQLite 和 DTO。
 - Renderer 绑定面只有 `Bootstrap`、`SelectSkillPackage`、`PreviewSkillPackage` 三个方法。进程、Shell、Docker、Skill 安装和 renderer path input 权限全部固定为 false。
@@ -107,7 +107,7 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D0-B 增加精确 renderer origin、规范 `RequestURI`、外部 navigation/form/popup 阻断、secure build-tag 门禁、Windows CI 和 Windows 11 实机恢复记录；仍不增加业务 mutation。
 - [ ] 在正式便携或签名发行前补齐 Windows 10 x64 实机启动、第二实例、强制结束/重开和 WebView2 缺失路径矩阵。
 
-### D1：日常工作台（产品可用度约 65-70%）
+### D1：日常工作台（产品可用度约 67-71%）
 
 - [x] D1-R1 / schema v72：Go API 受控创建 Mission/Run/Session，严格注册 Workspace、Scope、默认预算、幂等 operation、事务事件和关闭 execution profile；React 可选择 Workspace/Profile/Surface/Phase 并在成功后刷新、选中新 Run。
 - [x] D1-R1 capability 与 `--enable-profile-control` 独立；creation-only token 不能访问旧控制 route，Wails native bridge 不增加方法。
@@ -122,8 +122,12 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D1-P1：已增加独立 Plan 三选一与显式 Plan-to-Deliver control；模型不能代选，选择不能自动切换阶段或执行。
 - [x] D1-A1：已增加 durable approval queue 的 metadata-only 投影和 approve-once/deny；永久拒绝、文件写入、Session Grant 与真实进程不可覆盖。
 - [x] D1-M1/P1/A1 三切片普通功能门通过全仓 Go、Desktop tag、73 项前端测试、strict TypeScript、OpenAPI、Vite/Windows production build 和 npm audit；组合审计无已知高/中风险。
-- [ ] 随后的独立切片增加 Provider 在线诊断/路由设置、Diff 审查和 Skill 管理；每类 mutation 分别做状态、幂等、权限与重启审计。
-- [ ] 所有 mutation 使用独立 control token、Origin/Host 校验、幂等 operation key 和 typed errors；CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
+- [x] D1-M2：增加显式 content-free Provider 诊断和 persist-before-memory 路由选择；状态 DTO 不含模型正文、密钥、端点、环境变量名或原始错误。
+- [x] D1-D1：增加 exact-bound metadata-only FileEdit 队列、脱敏 Diff 与 approve-intent/deny；文件正文不进 DTO，批准不写文件。
+- [x] D1-Q1 / schema v74：增加可取消的有界 wake/retry 意图、deadline/backoff 和单 owner fencing；公开 DTO 不含 lease owner，后台 loop/执行权固定为 false。
+- [x] D1-M2/D1-D1/D1-Q1 后累计六片完整健壮性门已通过：最终 ordinary/race 278.6/296.1 秒、双路径静态/漏洞检查、80 项前端测试、确定性契约、Windows/Vite production build、CLI smoke 与仓库隐私复核均为绿色。
+- [ ] 下一批分别增加显式前台 wake 消费、已批准 Diff 的独立 apply 和 inert Skill 安装确认；每类 mutation 分别做状态、幂等、权限、预算与重启审计。
+- [ ] 所有状态 mutation 使用独立 control capability、Origin/Host 校验、稳定 operation key 和 typed errors；显式 Provider 诊断每次只允许一次有界无正文请求。CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。
 
 ### D2：Windows Beta 分发（产品可用度约 75-80%）

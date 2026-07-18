@@ -71,6 +71,9 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 	planDeliveryControl := application.NewPlanDeliveryControlService(a.store)
 	approvalControl := application.NewApprovalControlService(a.store,
 		a.newToolGateway(), a.checker)
+	modelControl := application.NewModelControlService(a.models, a.store)
+	fileEditReview := application.NewFileEditReviewService(a.store)
+	runWakeControl := application.NewRunWakeControlService(a.store)
 	api, err := httpapi.New(a.store, httpapi.Config{
 		AccessToken: accessToken, ControlToken: controlToken,
 		RunControlEnabled: controlToken != "", RunCreationEnabled: controlToken != "",
@@ -80,10 +83,16 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 		RunExecutionEnabled:           controlToken != "",
 		PlanDeliveryControlEnabled:    controlToken != "",
 		ApprovalControlEnabled:        controlToken != "",
+		ModelControlEnabled:           controlToken != "",
+		FileEditReviewEnabled:         controlToken != "",
+		RunWakeControlEnabled:         controlToken != "",
 		RunLifecycleController:        lifecycleControl,
 		RunExecutionController:        executionControl,
 		PlanDeliveryController:        planDeliveryControl,
 		ApprovalController:            approvalControl,
+		ModelControlController:        modelControl,
+		FileEditReviewController:      fileEditReview,
+		RunWakeController:             runWakeControl,
 		ModelRegistry:                 a.models,
 		AppVersion:                    Version,
 		UIHandler:                     uiBundle,

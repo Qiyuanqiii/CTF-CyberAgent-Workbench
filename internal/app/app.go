@@ -196,7 +196,7 @@ func (a *App) printHelp() {
 	fmt.Fprintln(a.out, "  cyberagent context compact|show")
 	fmt.Fprintln(a.out, "  cyberagent session create|list|send|history")
 	fmt.Fprintln(a.out, "  cyberagent tool schema|invoke|list|show|approve|deny")
-	fmt.Fprintln(a.out, "  cyberagent edit propose|list|show|approve|deny")
+	fmt.Fprintln(a.out, "  cyberagent edit propose|list|show|review-approve|review-deny|approve|deny")
 	fmt.Fprintln(a.out, "  cyberagent approval list|show|grant")
 	fmt.Fprintln(a.out, "  cyberagent sandbox validate|template")
 	fmt.Fprintln(a.out, "  cyberagent artifact list|show|read|verify")
@@ -204,7 +204,7 @@ func (a *App) printHelp() {
 	fmt.Fprintln(a.out, "  cyberagent report finding attach|validate|reject|accept|remediation|fix|verify")
 	fmt.Fprintln(a.out, "  cyberagent api serve|openapi")
 	fmt.Fprintln(a.out, "  cyberagent headless events")
-	fmt.Fprintln(a.out, "  cyberagent run create|adapt-task|list|show|mode|phase|execution-profile|events|usage|start|step|execute|checkpoint|graph|lease|finish|fail|pause|resume|cancel|delegations|delegation|plans|plan|delivery|steer|fanouts|fanout|sandbox")
+	fmt.Fprintln(a.out, "  cyberagent run create|adapt-task|list|show|mode|phase|execution-profile|events|usage|start|step|execute|checkpoint|graph|lease|finish|fail|pause|resume|cancel|delegations|delegation|plans|plan|delivery|steer|fanouts|fanout|sandbox|wake")
 	fmt.Fprintln(a.out, "  cyberagent run plan show|choose|selection")
 	fmt.Fprintln(a.out, "  cyberagent run delivery checkpoint|list|show")
 	fmt.Fprintln(a.out, "  cyberagent run fanout plan|execute|show|execution|report")
@@ -653,26 +653,44 @@ func (a *App) providerCommand(ctx context.Context, args []string) error {
 		}
 		return nil
 	case "test":
+		if err := a.ensureStore(); err != nil {
+			return err
+		}
 		route := "learn"
 		if len(args) > 1 {
 			route = args[1]
 		}
-		req := llm.ChatRequest{Messages: []llm.Message{{Role: "user", Content: "provider health check"}}}
-		var resp *llm.ChatResponse
-		var err error
+		var ref llm.ModelRef
 		if strings.Contains(route, "/") {
-			ref, parseErr := llm.ParseModelRef(route)
+			parsed, parseErr := llm.ParseModelRef(route)
 			if parseErr != nil {
 				return parseErr
 			}
-			resp, err = a.router.ChatModelRef(ctx, ref, req)
+			ref = parsed
 		} else {
-			resp, err = a.router.Chat(ctx, route, req)
+			for _, candidate := range a.models.Snapshot().Routes {
+				if candidate.Name == route && candidate.Available {
+					ref = llm.ModelRef{Provider: candidate.Provider, Model: candidate.Model}
+					break
+				}
+			}
+			if ref.Provider == "" {
+				return fmt.Errorf("model route %q is unavailable", route)
+			}
 		}
+		result, err := application.NewModelControlService(a.models, a.store).Diagnose(ctx,
+			application.DiagnoseProviderRequest{
+				Version: modelregistry.DiagnosticProtocolVersion, Provider: ref.Provider,
+				Model: ref.Model, ConfirmDiagnostic: true,
+			})
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(a.out, "provider: %s\nmodel: %s\nresponse: %s\n", resp.Provider, resp.Model, resp.Text)
+		fmt.Fprintf(a.out, "protocol: %s\nprovider: %s\nmodel: %s\nstatus: %s\noutcome: %s\nretryable: %t\nnetwork_request_attempted: %t\nmodel_called: %t\ntool_called: %t\nresponse_content_returned: %t\nduration_ms: %d\n",
+			result.ProtocolVersion, result.Provider, result.Model, result.Status,
+			result.Outcome, result.Retryable, result.NetworkRequestAttempted,
+			result.ModelCalled, result.ToolCalled, result.ResponseContentReturned,
+			result.DurationMillis)
 		return nil
 	default:
 		return fmt.Errorf("unknown provider subcommand %q", args[0])
@@ -722,11 +740,16 @@ func (a *App) modelCommand(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		a.router.SetRoute(fs.Arg(0), ref)
-		if err := a.store.SetProviderSetting(ctx, "route."+fs.Arg(0), fs.Arg(1)); err != nil {
+		selected, err := application.NewModelControlService(a.models, a.store).SelectRoute(ctx,
+			application.SelectModelRouteRequest{
+				Version: modelregistry.RouteControlProtocolVersion, Route: fs.Arg(0),
+				Provider: ref.Provider, Model: ref.Model,
+			})
+		if err != nil {
 			return err
 		}
-		fmt.Fprintf(a.out, "route %s set to %s/%s\n", fs.Arg(0), ref.Provider, ref.Model)
+		fmt.Fprintf(a.out, "route %s set to %s/%s\navailable: %t\n",
+			selected.Name, selected.Provider, selected.Model, selected.Available)
 		return nil
 	default:
 		return fmt.Errorf("unknown model subcommand %q", args[0])

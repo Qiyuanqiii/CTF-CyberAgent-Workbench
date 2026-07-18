@@ -329,6 +329,196 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/models/diagnostics": {
+      "post": {
+        "operationId": "diagnoseProvider",
+        "summary": "Run an explicit Provider diagnostic",
+        "description": "Makes at most one minimal no-tool model request after explicit confirmation. The response is content-free and never includes model text, raw Provider errors, credentials, or endpoint URLs.",
+        "tags": [
+          "Control"
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProviderDiagnosticView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderDiagnosticRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
+    "/api/v1/models/routes/{route}": {
+      "post": {
+        "operationId": "selectModelRoute",
+        "summary": "Persist a model route selection",
+        "description": "Persists one available Provider/model selection before updating the in-process Router. It does not call a model or expose credentials.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "route",
+            "in": "path",
+            "description": "Model route name",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ModelRouteAvailabilityView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelRouteControlRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
     "/api/v1/notes/{note_id}": {
       "get": {
         "operationId": "getNote",
@@ -2217,6 +2407,291 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/runs/{run_id}/file-edits": {
+      "get": {
+        "operationId": "listRunFileEdits",
+        "summary": "List Run file edit previews",
+        "description": "Returns at most one hundred Run-bound metadata-only file edit previews. Original and proposed file bodies are omitted and apply authority is always false.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FileEditQueueView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/runs/{run_id}/file-edits/{edit_id}": {
+      "get": {
+        "operationId": "getRunFileEdit",
+        "summary": "Inspect a Run file edit preview",
+        "description": "Returns one exact Run-bound redacted diff without original or proposed file bodies.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "edit_id",
+            "in": "path",
+            "description": "File edit identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FileEditPreviewView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/runs/{run_id}/file-edits/{edit_id}/review": {
+      "post": {
+        "operationId": "reviewRunFileEdit",
+        "summary": "Approve intent or deny a file edit",
+        "description": "Records an exact Run-bound review decision. Approve-intent never writes the file; applying an approved edit remains a separate non-HTTP operation.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "edit_id",
+            "in": "path",
+            "description": "File edit identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FileEditReviewView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileEditReviewRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
     "/api/v1/runs/{run_id}/lifecycle": {
       "post": {
         "operationId": "controlRunLifecycle",
@@ -3086,6 +3561,316 @@
           }
         },
         "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/runs/{run_id}/wake-intent": {
+      "get": {
+        "operationId": "getRunWakeIntent",
+        "summary": "Inspect the latest Run wake intent",
+        "description": "Returns a closed-authority wake projection without lease owner or fencing metadata.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RunWakeStateView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      },
+      "post": {
+        "operationId": "scheduleRunWake",
+        "summary": "Schedule a bounded Run wake intent",
+        "description": "Persists bounded retry timing and single-owner intent for queued operator work. It does not start a background loop, model call, tool call, or Run execution.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque retry key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RunWakeControlView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunWakeScheduleRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
+    "/api/v1/runs/{run_id}/wake-intent/cancel": {
+      "post": {
+        "operationId": "cancelRunWake",
+        "summary": "Cancel an active Run wake intent",
+        "description": "Cancels one active wake intent and revokes any current ownership lease without starting execution.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque retry key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RunWakeControlView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunWakeCancelRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
       }
     },
     "/api/v1/runs/{run_id}/work-items": {
@@ -5281,6 +6066,187 @@
         ],
         "type": "object"
       },
+      "FileEditPreviewView": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "apply_enabled": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "diff": {
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "original_hash": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "proposed_hash": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "secrets_redacted": {
+            "type": "boolean"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "proposed",
+              "approved",
+              "applied",
+              "denied",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "workspace_id",
+          "path",
+          "status",
+          "diff",
+          "original_hash",
+          "proposed_hash",
+          "secrets_redacted",
+          "allowed_actions",
+          "created_at",
+          "updated_at",
+          "apply_enabled"
+        ],
+        "type": "object"
+      },
+      "FileEditQueueView": {
+        "additionalProperties": false,
+        "properties": {
+          "apply_enabled": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FileEditPreviewView"
+            },
+            "type": "array"
+          },
+          "protocol_version": {
+            "enum": [
+              "file_edit_review.v1"
+            ],
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "items",
+          "truncated",
+          "apply_enabled"
+        ],
+        "type": "object"
+      },
+      "FileEditReviewRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "approve_intent",
+              "deny"
+            ],
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "file_edit_review.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "action"
+        ],
+        "type": "object"
+      },
+      "FileEditReviewView": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "approve_intent",
+              "deny"
+            ],
+            "type": "string"
+          },
+          "edit": {
+            "$ref": "#/components/schemas/FileEditPreviewView"
+          },
+          "file_written": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "file_edit_review.v1"
+            ],
+            "type": "string"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "action",
+          "edit",
+          "replayed",
+          "file_written"
+        ],
+        "type": "object"
+      },
       "FindingArtifactEvidenceView": {
         "additionalProperties": false,
         "properties": {
@@ -5933,6 +6899,29 @@
           "provider",
           "model",
           "available"
+        ],
+        "type": "object"
+      },
+      "ModelRouteControlRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "model_route_control.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "provider",
+          "model"
         ],
         "type": "object"
       },
@@ -6621,6 +7610,102 @@
           "credential_source",
           "network_required",
           "configuration_error"
+        ],
+        "type": "object"
+      },
+      "ProviderDiagnosticRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm_diagnostic": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "provider_diagnostic.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "provider",
+          "model",
+          "confirm_diagnostic"
+        ],
+        "type": "object"
+      },
+      "ProviderDiagnosticView": {
+        "additionalProperties": false,
+        "properties": {
+          "duration_ms": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "model_called": {
+            "type": "boolean"
+          },
+          "network_request_attempted": {
+            "type": "boolean"
+          },
+          "outcome": {
+            "enum": [
+              "success",
+              "retryable",
+              "rate_limited",
+              "invalid_response",
+              "cancelled",
+              "permanent"
+            ],
+            "type": "string"
+          },
+          "protocol_version": {
+            "enum": [
+              "provider_diagnostic.v1"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "response_content_returned": {
+            "type": "boolean"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "reachable",
+              "unreachable"
+            ],
+            "type": "string"
+          },
+          "tool_called": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "provider",
+          "model",
+          "status",
+          "outcome",
+          "retryable",
+          "network_request_attempted",
+          "model_called",
+          "tool_called",
+          "response_content_returned",
+          "duration_ms"
         ],
         "type": "object"
       },
@@ -7426,6 +8511,249 @@
           "budget",
           "created_at",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "RunWakeCancelRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "enum": [
+              "run_wake_control.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "RunWakeControlView": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "schedule",
+              "cancel"
+            ],
+            "type": "string"
+          },
+          "execution_started": {
+            "type": "boolean"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/RunWakeIntentView"
+          },
+          "model_called": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "run_wake_control.v1"
+            ],
+            "type": "string"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "tool_called": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "action",
+          "intent",
+          "replayed",
+          "execution_started",
+          "model_called",
+          "tool_called"
+        ],
+        "type": "object"
+      },
+      "RunWakeIntentView": {
+        "additionalProperties": false,
+        "properties": {
+          "attempt_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "background_loop_enabled": {
+            "type": "boolean"
+          },
+          "base_backoff_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "cancelled_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "deadline_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "execution_enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "initial_delay_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "max_attempts": {
+            "format": "int32",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_backoff_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "max_elapsed_seconds": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "next_wake_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "protocol_version": {
+            "enum": [
+              "run_wake_intent.v1"
+            ],
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "leased",
+              "cancelled",
+              "exhausted"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "protocol_version",
+          "run_id",
+          "session_id",
+          "status",
+          "max_attempts",
+          "attempt_count",
+          "initial_delay_seconds",
+          "base_backoff_seconds",
+          "max_backoff_seconds",
+          "max_elapsed_seconds",
+          "next_wake_at",
+          "deadline_at",
+          "execution_enabled",
+          "background_loop_enabled",
+          "created_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "RunWakeScheduleRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "base_backoff_seconds": {
+            "format": "int32",
+            "maximum": 21600,
+            "minimum": 5,
+            "type": "integer"
+          },
+          "initial_delay_seconds": {
+            "format": "int32",
+            "maximum": 3600,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_attempts": {
+            "format": "int32",
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "max_backoff_seconds": {
+            "format": "int32",
+            "maximum": 21600,
+            "minimum": 5,
+            "type": "integer"
+          },
+          "max_elapsed_seconds": {
+            "format": "int32",
+            "maximum": 86400,
+            "minimum": 60,
+            "type": "integer"
+          },
+          "version": {
+            "enum": [
+              "run_wake_control.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "max_attempts",
+          "initial_delay_seconds",
+          "base_backoff_seconds",
+          "max_backoff_seconds",
+          "max_elapsed_seconds"
+        ],
+        "type": "object"
+      },
+      "RunWakeStateView": {
+        "additionalProperties": false,
+        "properties": {
+          "found": {
+            "type": "boolean"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/RunWakeIntentView"
+          },
+          "protocol_version": {
+            "enum": [
+              "run_wake_intent.v1"
+            ],
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "found"
         ],
         "type": "object"
       },

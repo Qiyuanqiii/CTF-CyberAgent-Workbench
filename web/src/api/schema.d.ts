@@ -84,6 +84,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/models/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run an explicit Provider diagnostic
+         * @description Makes at most one minimal no-tool model request after explicit confirmation. The response is content-free and never includes model text, raw Provider errors, credentials, or endpoint URLs.
+         */
+        post: operations["diagnoseProvider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models/routes/{route}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Persist a model route selection
+         * @description Persists one available Provider/model selection before updating the in-process Router. It does not call a model or expose credentials.
+         */
+        post: operations["selectModelRoute"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notes/{note_id}": {
         parameters: {
             query?: never;
@@ -448,6 +488,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/file-edits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Run file edit previews
+         * @description Returns at most one hundred Run-bound metadata-only file edit previews. Original and proposed file bodies are omitted and apply authority is always false.
+         */
+        get: operations["listRunFileEdits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/file-edits/{edit_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect a Run file edit preview
+         * @description Returns one exact Run-bound redacted diff without original or proposed file bodies.
+         */
+        get: operations["getRunFileEdit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/file-edits/{edit_id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve intent or deny a file edit
+         * @description Records an exact Run-bound review decision. Approve-intent never writes the file; applying an approved edit remains a separate non-HTTP operation.
+         */
+        post: operations["reviewRunFileEdit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/lifecycle": {
         parameters: {
             query?: never;
@@ -582,6 +682,50 @@ export interface paths {
         get: operations["listRunToolRounds"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/wake-intent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect the latest Run wake intent
+         * @description Returns a closed-authority wake projection without lease owner or fencing metadata.
+         */
+        get: operations["getRunWakeIntent"];
+        put?: never;
+        /**
+         * Schedule a bounded Run wake intent
+         * @description Persists bounded retry timing and single-owner intent for queued operator work. It does not start a background loop, model call, tool call, or Run execution.
+         */
+        post: operations["scheduleRunWake"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/wake-intent/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel an active Run wake intent
+         * @description Cancels one active wake intent and revokes any current ownership lease without starting execution.
+         */
+        post: operations["cancelRunWake"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1105,6 +1249,49 @@ export interface components {
             total_bytes: number;
             workspace_id: string;
         };
+        FileEditPreviewView: {
+            allowed_actions: string[];
+            apply_enabled: boolean;
+            /** Format: date-time */
+            created_at: string;
+            diff: string;
+            id: string;
+            original_hash: string;
+            path: string;
+            proposed_hash: string;
+            reason?: string;
+            secrets_redacted: boolean;
+            session_id: string;
+            /** @enum {string} */
+            status: "proposed" | "approved" | "applied" | "denied" | "failed";
+            /** Format: date-time */
+            updated_at: string;
+            workspace_id: string;
+        };
+        FileEditQueueView: {
+            apply_enabled: boolean;
+            items: components["schemas"]["FileEditPreviewView"][];
+            /** @enum {string} */
+            protocol_version: "file_edit_review.v1";
+            run_id: string;
+            truncated: boolean;
+        };
+        FileEditReviewRequestView: {
+            /** @enum {string} */
+            action: "approve_intent" | "deny";
+            /** @enum {string} */
+            version: "file_edit_review.v1";
+        };
+        FileEditReviewView: {
+            /** @enum {string} */
+            action: "approve_intent" | "deny";
+            edit: components["schemas"]["FileEditPreviewView"];
+            file_written: boolean;
+            /** @enum {string} */
+            protocol_version: "file_edit_review.v1";
+            replayed: boolean;
+            run_id: string;
+        };
         FindingArtifactEvidenceView: {
             artifact_id: string;
             artifact_mime: string;
@@ -1275,6 +1462,12 @@ export interface components {
             model: string;
             name: string;
             provider: string;
+        };
+        ModelRouteControlRequestView: {
+            model: string;
+            provider: string;
+            /** @enum {string} */
+            version: "model_route_control.v1";
         };
         NoteView: {
             /** Format: date-time */
@@ -1448,6 +1641,30 @@ export interface components {
             network_required: boolean;
             /** @enum {string} */
             status: "available" | "not_configured" | "invalid_configuration";
+        };
+        ProviderDiagnosticRequestView: {
+            confirm_diagnostic: boolean;
+            model: string;
+            provider: string;
+            /** @enum {string} */
+            version: "provider_diagnostic.v1";
+        };
+        ProviderDiagnosticView: {
+            /** Format: int64 */
+            duration_ms: number;
+            model: string;
+            model_called: boolean;
+            network_request_attempted: boolean;
+            /** @enum {string} */
+            outcome: "success" | "retryable" | "rate_limited" | "invalid_response" | "cancelled" | "permanent";
+            /** @enum {string} */
+            protocol_version: "provider_diagnostic.v1";
+            provider: string;
+            response_content_returned: boolean;
+            retryable: boolean;
+            /** @enum {string} */
+            status: "reachable" | "unreachable";
+            tool_called: boolean;
         };
         RunConfigView: {
             interactive: boolean;
@@ -1656,6 +1873,75 @@ export interface components {
             status: "created" | "preparing" | "running" | "waiting_approval" | "paused" | "completed" | "failed" | "cancelled";
             /** Format: date-time */
             updated_at: string;
+        };
+        RunWakeCancelRequestView: {
+            /** @enum {string} */
+            version: "run_wake_control.v1";
+        };
+        RunWakeControlView: {
+            /** @enum {string} */
+            action: "schedule" | "cancel";
+            execution_started: boolean;
+            intent: components["schemas"]["RunWakeIntentView"];
+            model_called: boolean;
+            /** @enum {string} */
+            protocol_version: "run_wake_control.v1";
+            replayed: boolean;
+            tool_called: boolean;
+        };
+        RunWakeIntentView: {
+            /** Format: int32 */
+            attempt_count: number;
+            background_loop_enabled: boolean;
+            /** Format: int32 */
+            base_backoff_seconds: number;
+            /** Format: date-time */
+            cancelled_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            deadline_at: string;
+            execution_enabled: boolean;
+            id: string;
+            /** Format: int32 */
+            initial_delay_seconds: number;
+            /** Format: int32 */
+            max_attempts: number;
+            /** Format: int32 */
+            max_backoff_seconds: number;
+            /** Format: int32 */
+            max_elapsed_seconds: number;
+            /** Format: date-time */
+            next_wake_at: string;
+            /** @enum {string} */
+            protocol_version: "run_wake_intent.v1";
+            run_id: string;
+            session_id: string;
+            /** @enum {string} */
+            status: "queued" | "leased" | "cancelled" | "exhausted";
+            /** Format: date-time */
+            updated_at: string;
+        };
+        RunWakeScheduleRequestView: {
+            /** Format: int32 */
+            base_backoff_seconds: number;
+            /** Format: int32 */
+            initial_delay_seconds: number;
+            /** Format: int32 */
+            max_attempts: number;
+            /** Format: int32 */
+            max_backoff_seconds: number;
+            /** Format: int32 */
+            max_elapsed_seconds: number;
+            /** @enum {string} */
+            version: "run_wake_control.v1";
+        };
+        RunWakeStateView: {
+            found: boolean;
+            intent?: components["schemas"]["RunWakeIntentView"];
+            /** @enum {string} */
+            protocol_version: "run_wake_intent.v1";
+            run_id: string;
         };
         ScopeView: {
             allowed_targets?: string[];
@@ -2055,6 +2341,87 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    diagnoseProvider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderDiagnosticRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ProviderDiagnosticView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    selectModelRoute: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Model route name */
+                route: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelRouteControlRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ModelRouteAvailabilityView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];
         };
@@ -2823,6 +3190,123 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    listRunFileEdits: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FileEditQueueView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getRunFileEdit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+                /** @description File edit identity */
+                edit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FileEditPreviewView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    reviewRunFileEdit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+                /** @description File edit identity */
+                edit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FileEditReviewRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FileEditReviewView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     controlRunLifecycle: {
         parameters: {
             query?: never;
@@ -3131,6 +3615,133 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getRunWakeIntent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RunWakeStateView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    scheduleRunWake: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunWakeScheduleRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RunWakeControlView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    cancelRunWake: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunWakeCancelRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RunWakeControlView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];
         };

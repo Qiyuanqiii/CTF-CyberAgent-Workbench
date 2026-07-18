@@ -4,19 +4,29 @@ import type {
   ApprovalDecisionControlView,
   ApprovalQueueView,
   ErrorEnvelope,
+  FileEditQueueView,
+  FileEditReviewRequestView,
+  FileEditReviewView,
   HealthView,
   ModelAvailabilityView,
+  ModelRouteControlRequestView,
   PageResult,
   PlanDeliveryTransitionControlRequestView,
   PlanDeliveryTransitionControlView,
   PlanDirectionControlRequestView,
   PlanDirectionControlView,
+  ProviderDiagnosticRequestView,
+  ProviderDiagnosticView,
   RunCreationControlRequestView,
   RunCreationControlView,
   RunExecutionControlRequestView,
   RunExecutionControlView,
   RunLifecycleControlRequestView,
   RunLifecycleControlView,
+  RunWakeCancelRequestView,
+  RunWakeControlView,
+  RunWakeScheduleRequestView,
+  RunWakeStateView,
   RunEventPollView,
   RunEventStreamView,
   SessionMessageControlRequestView,
@@ -37,6 +47,9 @@ export interface ClientCapabilities {
   runExecutionEnabled?: boolean;
   planDeliveryControlEnabled?: boolean;
   approvalControlEnabled?: boolean;
+  modelControlEnabled?: boolean;
+  fileEditReviewEnabled?: boolean;
+  runWakeControlEnabled?: boolean;
 }
 
 export class APIRequestError extends Error {
@@ -435,6 +448,127 @@ function parseApprovalDecision(value: unknown, expectedRunID: string, expectedAp
   return value as unknown as ApprovalDecisionControlView;
 }
 
+function parseModelRouteControl(value: unknown, route: string,
+  request: ModelRouteControlRequestView): ModelAvailabilityView["routes"][number] {
+  if (!hasExactKeys(value, ["available", "model", "name", "provider"]) ||
+    value.name !== route || value.provider !== request.provider || value.model !== request.model ||
+    value.available !== true) {
+    throw new APIRequestError("Model route response violated its exact binding",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as ModelAvailabilityView["routes"][number];
+}
+
+function parseProviderDiagnostic(value: unknown, request: ProviderDiagnosticRequestView): ProviderDiagnosticView {
+  if (!hasExactKeys(value, ["duration_ms", "model", "model_called",
+    "network_request_attempted", "outcome", "protocol_version", "provider",
+    "response_content_returned", "retryable", "status", "tool_called"]) ||
+    value.protocol_version !== "provider_diagnostic.v1" || value.provider !== request.provider ||
+    value.model !== request.model || (value.status !== "reachable" && value.status !== "unreachable") ||
+    !boundedText(value.outcome, 64) || typeof value.retryable !== "boolean" ||
+    typeof value.network_request_attempted !== "boolean" || value.model_called !== true ||
+    value.tool_called !== false || value.response_content_returned !== false ||
+    !safeBoundedCount(value.duration_ms, 60_000)) {
+    throw new APIRequestError("Provider diagnostic response violated its content-free contract",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as ProviderDiagnosticView;
+}
+
+function parseFileEditPreview(value: unknown): FileEditQueueView["items"][number] {
+  if (!isRecord(value) || !hasOnlyKeys(value, ["allowed_actions", "apply_enabled", "created_at",
+    "diff", "id", "original_hash", "path", "proposed_hash", "reason", "secrets_redacted",
+    "session_id", "status", "updated_at", "workspace_id"]) ||
+    !["proposed", "approved", "applied", "denied", "failed"].includes(String(value.status)) ||
+    !boundedIdentity(value.id) || !boundedIdentity(value.session_id) ||
+    !boundedIdentity(value.workspace_id) || !boundedText(value.path, 4096) ||
+    typeof value.diff !== "string" || value.diff.length > 1_100_000 ||
+    !boundedText(value.original_hash, 128) || !boundedText(value.proposed_hash, 128) ||
+    typeof value.secrets_redacted !== "boolean" || value.apply_enabled !== false ||
+    !Array.isArray(value.allowed_actions) || value.allowed_actions.length > 2 ||
+    !value.allowed_actions.every((action) => action === "approve_intent" || action === "deny") ||
+    !validDate(value.created_at) || !validDate(value.updated_at) ||
+    (value.reason !== undefined && typeof value.reason !== "string")) {
+    throw new APIRequestError("File edit preview violated its metadata-only contract",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as FileEditQueueView["items"][number];
+}
+
+function parseFileEditQueue(value: unknown, runID: string): FileEditQueueView {
+  if (!hasExactKeys(value, ["apply_enabled", "items", "protocol_version", "run_id", "truncated"]) ||
+    value.protocol_version !== "file_edit_review.v1" || value.run_id !== runID ||
+    value.apply_enabled !== false || typeof value.truncated !== "boolean" ||
+    !Array.isArray(value.items) || value.items.length > 100) {
+    throw new APIRequestError("File edit queue response is invalid", "INVALID_RESPONSE", 502);
+  }
+  return { ...value, items: value.items.map(parseFileEditPreview) } as unknown as FileEditQueueView;
+}
+
+function parseFileEditReview(value: unknown, runID: string, editID: string,
+  request: FileEditReviewRequestView): FileEditReviewView {
+  if (!hasExactKeys(value, ["action", "edit", "file_written", "protocol_version", "replayed", "run_id"]) ||
+    value.protocol_version !== "file_edit_review.v1" || value.run_id !== runID ||
+    value.action !== request.action || value.file_written !== false || typeof value.replayed !== "boolean") {
+    throw new APIRequestError("File edit review response violated its no-write contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const edit = parseFileEditPreview(value.edit);
+  const expected = request.action === "approve_intent" ? "approved" : "denied";
+  if (edit.id !== editID || edit.status !== expected || edit.apply_enabled !== false) {
+    throw new APIRequestError("File edit review result does not match the requested decision",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, edit } as unknown as FileEditReviewView;
+}
+
+function parseRunWakeIntent(value: unknown, runID: string): NonNullable<RunWakeStateView["intent"]> {
+  if (!isRecord(value) || !hasOnlyKeys(value, ["attempt_count", "background_loop_enabled",
+    "base_backoff_seconds", "cancelled_at", "created_at", "deadline_at", "execution_enabled",
+    "id", "initial_delay_seconds", "max_attempts", "max_backoff_seconds",
+    "max_elapsed_seconds", "next_wake_at", "protocol_version", "run_id", "session_id",
+    "status", "updated_at"]) || value.protocol_version !== "run_wake_intent.v1" ||
+    value.run_id !== runID || !boundedIdentity(value.id) || !boundedIdentity(value.session_id) ||
+    !["queued", "leased", "cancelled", "exhausted"].includes(String(value.status)) ||
+    !safeBoundedCount(value.attempt_count, 8) || !safePositiveInteger(value.max_attempts) ||
+    Number(value.attempt_count) > Number(value.max_attempts) ||
+    !safeBoundedCount(value.initial_delay_seconds, 3600) ||
+    !safeBoundedCount(value.base_backoff_seconds, 21_600) ||
+    !safeBoundedCount(value.max_backoff_seconds, 21_600) ||
+    !safeBoundedCount(value.max_elapsed_seconds, 86_400) || value.execution_enabled !== false ||
+    value.background_loop_enabled !== false || !validDate(value.next_wake_at) ||
+    !validDate(value.deadline_at) || !validDate(value.created_at) || !validDate(value.updated_at) ||
+    (value.cancelled_at !== undefined && !validDate(value.cancelled_at))) {
+    throw new APIRequestError("Run wake intent violated its closed authority contract",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as NonNullable<RunWakeStateView["intent"]>;
+}
+
+function parseRunWakeState(value: unknown, runID: string): RunWakeStateView {
+  if (!isRecord(value) || !hasOnlyKeys(value, ["found", "intent", "protocol_version", "run_id"]) ||
+    value.protocol_version !== "run_wake_intent.v1" || value.run_id !== runID ||
+    typeof value.found !== "boolean" || (value.found !== (value.intent !== undefined))) {
+    throw new APIRequestError("Run wake state response is invalid", "INVALID_RESPONSE", 502);
+  }
+  return value.found
+    ? { ...value, intent: parseRunWakeIntent(value.intent, runID) } as unknown as RunWakeStateView
+    : value as unknown as RunWakeStateView;
+}
+
+function parseRunWakeControl(value: unknown, runID: string,
+  expectedAction: "cancel" | "schedule"): RunWakeControlView {
+  if (!hasExactKeys(value, ["action", "execution_started", "intent", "model_called",
+    "protocol_version", "replayed", "tool_called"]) ||
+    value.protocol_version !== "run_wake_control.v1" || value.action !== expectedAction ||
+    typeof value.replayed !== "boolean" || value.execution_started !== false ||
+    value.model_called !== false || value.tool_called !== false) {
+    throw new APIRequestError("Run wake response widened execution authority",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, intent: parseRunWakeIntent(value.intent, runID) } as unknown as RunWakeControlView;
+}
+
 function hasNoAllowedTargets(scope: Record<string, unknown>): boolean {
   return scope.allowed_targets === undefined ||
     (Array.isArray(scope.allowed_targets) && scope.allowed_targets.length === 0);
@@ -492,6 +626,9 @@ export class CyberAgentClient {
   readonly hasRunExecution: boolean;
   readonly hasPlanDelivery: boolean;
   readonly hasApprovalControl: boolean;
+  readonly hasModelControl: boolean;
+  readonly hasFileEditReview: boolean;
+  readonly hasRunWakeControl: boolean;
 
   constructor(
     private readonly token: string,
@@ -513,6 +650,9 @@ export class CyberAgentClient {
     this.hasRunExecution = controlPresent && (capabilities.runExecutionEnabled ?? true);
     this.hasPlanDelivery = controlPresent && (capabilities.planDeliveryControlEnabled ?? true);
     this.hasApprovalControl = controlPresent && (capabilities.approvalControlEnabled ?? true);
+    this.hasModelControl = controlPresent && (capabilities.modelControlEnabled ?? true);
+    this.hasFileEditReview = controlPresent && (capabilities.fileEditReviewEnabled ?? true);
+    this.hasRunWakeControl = controlPresent && (capabilities.runWakeControlEnabled ?? true);
   }
 
   async health(signal?: AbortSignal): Promise<HealthView> {
@@ -522,6 +662,76 @@ export class CyberAgentClient {
   async modelAvailability(signal?: AbortSignal): Promise<ModelAvailabilityView> {
     const value = await this.get<unknown>("/models", {}, signal);
     return parseModelAvailability(value);
+  }
+
+  async selectModelRoute(route: string, body: ModelRouteControlRequestView,
+    signal?: AbortSignal): Promise<ModelAvailabilityView["routes"][number]> {
+    if (!this.hasModelControl || !boundedIdentity(route) || route.trim() !== route) {
+      throw new Error("Model control capability and a normalized route are required");
+    }
+    const result = await this.sendControlRequest<unknown>(
+      `/models/routes/${encodeURIComponent(route)}`, body, signal,
+    );
+    return parseModelRouteControl(result, route, body);
+  }
+
+  async diagnoseProvider(body: ProviderDiagnosticRequestView,
+    signal?: AbortSignal): Promise<ProviderDiagnosticView> {
+    if (!this.hasModelControl || body.confirm_diagnostic !== true) {
+      throw new Error("Explicit Provider diagnostic confirmation is required");
+    }
+    const result = await this.sendControlRequest<unknown>("/models/diagnostics", body, signal);
+    return parseProviderDiagnostic(result, body);
+  }
+
+  async fileEditQueue(runID: string, signal?: AbortSignal): Promise<FileEditQueueView> {
+    if (!boundedIdentity(runID) || runID.trim() !== runID) {
+      throw new Error("A normalized Run identity is required");
+    }
+    return parseFileEditQueue(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/file-edits`, {}, signal,
+    ), runID);
+  }
+
+  async reviewFileEdit(runID: string, editID: string, body: FileEditReviewRequestView,
+    signal?: AbortSignal): Promise<FileEditReviewView> {
+    if (!this.hasFileEditReview || !boundedIdentity(runID) || !boundedIdentity(editID)) {
+      throw new Error("File edit review capability and normalized identities are required");
+    }
+    const result = await this.sendControlRequest<unknown>(
+      `/runs/${encodeURIComponent(runID)}/file-edits/${encodeURIComponent(editID)}/review`,
+      body, signal,
+    );
+    return parseFileEditReview(result, runID, editID, body);
+  }
+
+  async runWakeState(runID: string, signal?: AbortSignal): Promise<RunWakeStateView> {
+    if (!boundedIdentity(runID) || runID.trim() !== runID) {
+      throw new Error("A normalized Run identity is required");
+    }
+    return parseRunWakeState(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/wake-intent`, {}, signal,
+    ), runID);
+  }
+
+  async scheduleRunWake(runID: string, body: RunWakeScheduleRequestView,
+    idempotencyKey: string, signal?: AbortSignal): Promise<RunWakeControlView> {
+    if (!this.hasRunWakeControl) {
+      throw new Error("Run wake control capability is required");
+    }
+    return parseRunWakeControl(await this.sendControl<unknown>(
+      `/runs/${encodeURIComponent(runID)}/wake-intent`, body, idempotencyKey, signal,
+    ), runID, "schedule");
+  }
+
+  async cancelRunWake(runID: string, body: RunWakeCancelRequestView,
+    idempotencyKey: string, signal?: AbortSignal): Promise<RunWakeControlView> {
+    if (!this.hasRunWakeControl) {
+      throw new Error("Run wake control capability is required");
+    }
+    return parseRunWakeControl(await this.sendControl<unknown>(
+      `/runs/${encodeURIComponent(runID)}/wake-intent/cancel`, body, idempotencyKey, signal,
+    ), runID, "cancel");
   }
 
   async get<T>(path: string, query: Record<string, QueryValue> = {}, signal?: AbortSignal): Promise<T> {
@@ -689,14 +899,22 @@ export class CyberAgentClient {
     if (idempotencyKey.trim() !== idempotencyKey || idempotencyKey.length < 16) {
       throw new Error("A normalized idempotency key is required");
     }
+    return this.sendControlRequest<T>(path, body, signal, idempotencyKey);
+  }
+
+  private async sendControlRequest<T>(path: string, body: unknown, signal?: AbortSignal,
+    idempotencyKey = ""): Promise<T> {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      Authorization: `Bearer ${this.controlToken}`,
+      "Content-Type": "application/json",
+    };
+    if (idempotencyKey) {
+      headers["Idempotency-Key"] = idempotencyKey;
+    }
     const response = await fetch(this.url(path), {
       method: "POST",
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${this.controlToken}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": idempotencyKey,
-      },
+      headers,
       body: JSON.stringify(body),
       signal,
       cache: "no-store",

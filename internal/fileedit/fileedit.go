@@ -250,6 +250,32 @@ func (m *Manager) Approve(ctx context.Context, id string, workspaceRoot string) 
 	return m.store.SaveFileEdit(ctx, edit)
 }
 
+// ApproveIntent records an operator review without touching the workspace.
+// Applying the approved proposal remains a separate operation that must call
+// Approve with an independently authorized workspace root.
+func (m *Manager) ApproveIntent(ctx context.Context, id string) (Edit, error) {
+	if m == nil || m.store == nil {
+		return Edit{}, errors.New("file edit store is required")
+	}
+	edit, err := m.store.GetFileEdit(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return Edit{}, err
+	}
+	if edit.Status == StatusApproved {
+		return edit, nil
+	}
+	if edit.Status != StatusProposed {
+		return Edit{}, fmt.Errorf("file edit %s is %s, not %s", edit.ID, edit.Status, StatusProposed)
+	}
+	if contentHash(edit.ProposedText, true) != edit.ProposedHash {
+		return Edit{}, errors.New("stored proposed content failed integrity validation")
+	}
+	edit.Status = StatusApproved
+	edit.Reason = ""
+	edit.UpdatedAt = time.Now().UTC()
+	return m.store.SaveFileEdit(ctx, edit)
+}
+
 func (m *Manager) Deny(ctx context.Context, id string, reason string) (Edit, error) {
 	edit, err := m.store.GetFileEdit(ctx, strings.TrimSpace(id))
 	if err != nil {

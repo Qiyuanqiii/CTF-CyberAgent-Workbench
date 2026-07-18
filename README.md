@@ -8,12 +8,12 @@
 项目从 schema v49 起同时使用两项工程指标，避免把“架构已经搭好”误解为“产品已经完整可用”。这些百分比是基于当前任务书和可验证工作流的工程估算，不是性能基准。
 
 - **架构完成度 / Architecture completion：约 98%**。衡量 Go 控制平面、Run/Session、状态恢复、Policy、审批、预算、事件流、Tool Gateway、Agent 协调、Skills、报告、Sandbox 协议及 Go/TypeScript 边界的覆盖程度；其中 V2 Run-centric Runtime 约 99%。
-- **产品可用度 / Product usability：约 64-68%**。衡量普通用户能否依靠当前 CLI、TUI、Web 和 Windows Desktop 完成真实端到端工作。通用 Coding Agent 工作流约 60%，Cyber 自动化工作流约 20%；除既有 Run/Session/事件与有界执行交接外，桌面端现在还能查看脱敏 Provider/模型路由、完成 Plan 三选一与显式 Deliver 转换，并处理不授予真实执行权的持久化审批队列。真实 Sandbox/宿主进程执行、完整 Diff apply、Desktop/Web Skill 安装、后台 wake/retry scheduler 和 Cyber 工具链仍未开放。
+- **产品可用度 / Product usability：约 67-71%**。衡量普通用户能否依靠当前 CLI、TUI、Web 和 Windows Desktop 完成真实端到端工作。通用 Coding Agent 工作流约 63%，Cyber 自动化工作流约 20%；除既有 Run/Session、Plan/Deliver、审批和有界执行交接外，桌面端现在还能显式诊断 Provider、持久化模型路由、审阅不含文件正文的 Diff，并创建或取消持久化 wake/retry 意图。真实 Sandbox/宿主进程执行、已批准 Diff 的独立 apply、Desktop/Web Skill 安装、后台 wake worker 和 Cyber 工具链仍未开放。
 
 Starting with schema v49, the project reports two engineering indicators so architectural maturity is not mistaken for end-user completeness. These percentages are roadmap estimates backed by tested workflows, not performance benchmarks.
 
 - **Architecture completion: about 98%.** This covers the Go control plane and its Run/Session recovery, Policy, approval, budget, event, Tool Gateway, Agent coordination, Skills, reporting, Sandbox protocol, and Go/TypeScript boundaries. The V2 run-centric runtime itself is about 99% complete.
-- **Product usability: about 64-68%.** This measures how much real end-to-end work a user can complete through the current CLI, TUI, Web, and Windows Desktop shell. The generic coding-agent workflow is about 60% usable and the Cyber automation workflow about 20%. In addition to existing Run/Session/event and bounded-handoff workflows, Desktop can now inspect redacted Provider/model routes, make the three-way Plan choice, explicitly enter Deliver, and decide durable approvals without granting real execution. Real Sandbox/host-process execution, complete Diff apply, Desktop/Web Skill installation, a background wake/retry scheduler, and the Cyber toolchain remain disabled or unfinished.
+- **Product usability: about 67-71%.** This measures how much real end-to-end work a user can complete through the current CLI, TUI, Web, and Windows Desktop shell. The generic coding-agent workflow is about 63% usable and the Cyber automation workflow about 20%. In addition to Run/Session, Plan/Deliver, approval, and bounded-handoff workflows, Desktop can now explicitly diagnose a Provider, persist model routes, review body-free Diffs, and create or cancel durable wake/retry intent. Real Sandbox/host-process execution, separately authorized apply of an approved Diff, Desktop/Web Skill installation, a background wake worker, and the Cyber toolchain remain disabled or unfinished.
 
 ## 项目简介 / Project Overview
 
@@ -35,9 +35,9 @@ The current priority is the general-purpose Agent runtime and its controlled mul
 
 ## 开发历程 / Development History
 
-下表是唯一按时间排序的 schema 开发历程，完整保留了早期 `v1`、`v2`、`v3`，并连续列到当前 `v73`。这里的 `vN` 是不可变 SQLite schema/runtime 里程碑，不等同于产品发布版本；后面的架构说明按能力域组织，因此不再承担版本排序职责。
+下表是唯一按时间排序的 schema 开发历程，完整保留了早期 `v1`、`v2`、`v3`，并连续列到当前 `v74`。这里的 `vN` 是不可变 SQLite schema/runtime 里程碑，不等同于产品发布版本；后面的架构说明按能力域组织，因此不再承担版本排序职责。
 
-The table below is the canonical chronological schema history. It includes every immutable SQLite schema/runtime milestone from `v1` through the current `v73`. These schema numbers are not product release versions; the architecture notes that follow are grouped by capability instead of chronology.
+The table below is the canonical chronological schema history. It includes every immutable SQLite schema/runtime milestone from `v1` through the current `v74`. These schema numbers are not product release versions; the architecture notes that follow are grouped by capability instead of chronology.
 
 | Schema | 中文里程碑 | English milestone |
 | --- | --- | --- |
@@ -114,6 +114,7 @@ The table below is the canonical chronological schema history. It includes every
 | v71 | 有界外部 Skill 来源与交付只读投影 | bounded read-only external-Skill provenance and delivery projection |
 | v72 | 幂等受控 Mission/Run/Session 创建账本 | idempotent controlled Mission/Run/Session creation ledger |
 | v73 | 幂等 Run 生命周期与有界执行交接 | idempotent Run lifecycle and bounded execution handoff |
+| v74 | 持久化 Run wake 重试意图与单一所有权 | durable Run wake retry intents and single-owner fencing |
 
 ## 执行环境档位 / Execution Profiles
 
@@ -299,13 +300,31 @@ Non-schema D1-M1, D1-P1, and D1-A1 form the third three-slice product batch whil
 
 D1-P1 adds two independent digest-idempotent controls. The operator first selects one of the persisted three directions, atomically creating its WorkItems and handoff Note, and must then explicitly enter Deliver. Selection does not change phase; entering Deliver does not resume the Run, acquire an execution lease, call a model/tool, or execute work. D1-A1 adds a metadata-only queue of at most 100 pending approvals plus separate `approve_once|deny` decisions. File replacement can only be denied, Shell remains dry-run, ScriptProcess must remain process-disabled, current Policy is rechecked before approval, permanent denials cannot be overridden, and no Session Grant, file write, or Shell/Local/Docker process is created. ADR 0039 records these boundaries.
 
+## Provider 诊断、Diff 审阅与 Wake 意图 / Provider Diagnostics, Diff Review, And Wake Intent
+
+非 schema D1-M2 增加显式 `provider_diagnostic.v1` 和 `model_route_control.v1`。模型路由先写入 SQLite，成功后才更新进程内 Router；诊断只在操作者点击或执行命令后发起一次有界、无用户内容、禁用工具的极小模型请求。公开结果仅包含 Provider/模型、成功状态、是否重试、网络/模型是否调用和耗时，不返回模型正文、API key、Base URL、环境变量名或原始错误。每次显式诊断仍可能产生一次 Provider 请求和少量计费。
+
+D1-D1 为精确 Run/Session/Workspace 增加 metadata-only 文件编辑队列、脱敏有界 Diff 和 `approve_intent|deny` 审阅。批准意图只把提案推进到 `approved`，不会读取 API key、调用模型或写工作区；真正的 apply 仍是独立 CLI 路径，后续还要增加专属 control capability、当前文件哈希复核和幂等事务。审批事实先于编辑状态落库，崩溃窗口可通过同向终态安全恢复，相反决定继续失败关闭。
+
+schema v74 增加 `run_wake_control.v1`：操作者可以持久化或取消一个 Run 的有界 wake/retry 意图。SQLite 固定最大尝试次数、退避、截止时间、单一活动 owner 和 generation fencing，旧 owner 不能提交新一代结果。当前 CLI/API/Desktop 只管理意图；没有后台 goroutine、系统服务、模型调用、工具调用、execution lease 或自动执行权。ADR 0040 记录这组三个边界。
+
+Non-schema D1-M2 adds explicit `provider_diagnostic.v1` and `model_route_control.v1`. A route is persisted to SQLite before the in-memory Router changes. A diagnostic performs one bounded, content-free, tool-disabled model request only after an operator click or command. Its public result contains bounded status metadata only, never model text, API keys, base URLs, environment-variable names, or raw errors. Each explicit diagnostic may still incur one Provider request and a small charge.
+
+D1-D1 adds an exact Run/Session/Workspace metadata-only file-edit queue, bounded redacted Diff, and `approve_intent|deny` review. Approval intent advances a proposal to `approved` without writing the workspace. Actual apply remains a separate CLI path and still needs its own control capability, current-file hash recheck, and idempotent transaction. The durable approval is committed before edit state; a same-outcome retry repairs that crash window, while an opposite decision fails closed.
+
+Schema v74 adds `run_wake_control.v1`, allowing an operator to persist or cancel one bounded wake/retry intent per Run. SQLite enforces maximum attempts, backoff, deadline, one active owner, and generation fencing. The CLI/API/Desktop currently manage intent only: there is no background goroutine, system service, model/tool call, execution lease, or automatic execution authority. ADR 0040 records these boundaries.
+
+本批累计六切片完整健壮性门已通过：最终全仓 ordinary/race 分别为 278.6 秒和 296.1 秒；普通与安全 Desktop tags 下的 vet/staticcheck/govulncheck、module verify/tidy、20 个文件 80 项 React 测试、strict TypeScript、Vite/Windows production build、npm 零漏洞、确定性 OpenAPI、CLI 隔离 smoke、UTF-8/89 条本地 Markdown 链接/凭据变更/运行产物/新增进程入口扫描均为绿色。审计修复了 Diff 精确读取仍加载文件正文、审批两阶段崩溃恢复、过期最终 wake lease 的事件顺序、非法 delay/deadline 组合，以及并发模型路由的持久化/内存乱序；没有已知未解决的高/中风险。本门禁只调用 mock Provider，未使用真实 API key、网络 Provider、Shell、LocalRunner、Docker 或文件 apply。
+
+The cumulative six-slice robustness gate is green on the final code: full ordinary/race suites took 278.6s/296.1s; ordinary and secure-Desktop vet/staticcheck/govulncheck, module verification/tidy, 80 React tests across 20 files, strict TypeScript, Vite/Windows production builds, zero-vulnerability npm audit, deterministic OpenAPI, isolated CLI smoke, and UTF-8/local-link/changed-credential/runtime-artifact/new-process-entry scans all passed. The audit fixed an exact Diff read that still loaded file bodies, two-phase approval crash recovery, event ordering for an expired final wake lease, invalid delay/deadline combinations, and concurrent route persistence/memory reordering. No unresolved high- or medium-severity issue is known. The gate used only the mock Provider and made no live API-key, network-Provider, Shell, LocalRunner, Docker, or file-apply call.
+
 ## Windows 桌面端 / Windows Desktop
 
-Desktop D0-A、D0-B、D1-R1、D1-S1/S2、D1-L1/X1 与 D1-M1/P1/A1 自动化核心已完成，SQLite 当前为 v73。项目固定 Wails v2.13.0 稳定版，并提供 Windows `cyberagent-desktop` 开发/便携测试二进制。Vite production bundle 在编译期嵌入；现有 Go `api.v1` Handler 直接接入 Wails AssetServer，不监听 TCP 端口，也不建立第二套业务 API。桌面端默认只读，随机 read token 仅驻留 Go/React 内存；执行档位、Run 创建、Session 排队/取消、Run 生命周期、有界队列执行、Plan/Deliver 和审批决策分别由独立显式 flag 开启，并共享同一个不同于 read token 的内存 control token。模型可用性始终是只读脱敏投影。
+Desktop D0-A、D0-B 与 D1-R1 至 D1-Q1 自动化核心已完成，SQLite 当前为 v74。项目固定 Wails v2.13.0 稳定版，并提供 Windows `cyberagent-desktop` 开发/便携测试二进制。Vite production bundle 在编译期嵌入；现有 Go `api.v1` Handler 直接接入 Wails AssetServer，不监听 TCP 端口，也不建立第二套业务 API。桌面端默认只读，随机 read token 仅驻留 Go/React 内存；每类 mutation 都由独立显式 flag 开启，并共享一个不同于 read token 的内存 control token。Provider 诊断、路由选择、Diff 审阅和 wake 意图也是彼此独立的 Go capability；它们不授予 apply、后台执行或进程权限。
 
 原生 `.zip` 对话框现已接入 ADR 0033：本地路径只在 Go 内部短暂存在，经过严格 `skill_package.v1` 校验后立即丢弃；React 只能得到五分钟、单次消费的不透明句柄和有界风险元数据。Renderer 绑定面只有 `Bootstrap`、`SelectSkillPackage`、`PreviewSkillPackage` 三个方法，不能提交路径、文件字节、命令或权限位。进程、Shell、Docker、Skill 安装、网络、Provider、工具和 capability authority 全部固定为 false。
 
-The automated core of Desktop D0-A, D0-B, D1-R1, D1-S1/S2, D1-L1/X1, and D1-M1/P1/A1 is complete at schema v73. The project pins stable Wails v2.13.0 and builds a Windows `cyberagent-desktop` development/portable-test executable. Its Vite production bundle is embedded at compile time, and the existing Go `api.v1` Handler is connected directly to the Wails AssetServer without opening a TCP listener or creating a second business API. The shell defaults to read-only with an ephemeral in-memory read token. Execution-profile selection, Run creation, Session enqueue/cancel, Run lifecycle, bounded queue execution, Plan/Deliver control, and approval decisions are exposed only through separate explicit flags and share one in-memory control token distinct from the read token. Model availability remains a read-only redacted projection.
+The automated core of Desktop D0-A, D0-B, and D1-R1 through D1-Q1 is complete at schema v74. The project pins stable Wails v2.13.0 and builds a Windows `cyberagent-desktop` development/portable-test executable. Its Vite production bundle is embedded at compile time, and the existing Go `api.v1` Handler is connected directly to the Wails AssetServer without opening a TCP listener or creating a second business API. The shell defaults to read-only with an ephemeral in-memory read token. Each mutation class is enabled by an independent explicit flag and shares one in-memory control token distinct from the read token. Provider diagnostics, route selection, Diff review, and wake intent remain separate Go capabilities and grant no apply, background-execution, or process authority.
 
 The ADR 0033 native `.zip` flow is now visible. A selected path exists briefly inside Go, is strictly validated as `skill_package.v1`, and is then discarded. React receives only a five-minute, single-use opaque handle and bounded risk metadata. The complete renderer binding surface is `Bootstrap`, `SelectSkillPackage`, and `PreviewSkillPackage`; it accepts no path, bytes, command, or authority field. Process, Shell, Docker, Skill installation, network, Provider, tool, and capability authority remain false.
 
@@ -325,7 +344,7 @@ Build locally with `powershell -ExecutionPolicy Bypass -File scripts/build-deskt
 
 ### 中文详解
 
-以下内容按能力域和当前阅读价值组织，不代表 schema 时间顺序；需要核对开发先后时，请以上方 `v1 -> v73` 表为准。
+以下内容按能力域和当前阅读价值组织，不代表 schema 时间顺序；需要核对开发先后时，请以上方 `v1 -> v74` 表为准。
 
 P7 Skills 的第一条纵向链路已经落地。Go 内置并严格校验 `code`、`review`、`learn`、`script` 与跨 Profile 的 `plan-delivery` 五份 `skill.v1` 工作流指导，包括固定版本、兼容 Profile、工具前置声明、相对内容路径、UTF-8、字节数、保守 token 上界和 SHA-256。只读 Registry 与 `skill list/show/validate` 不创建数据库，也不读取任意外部路径；当前内置指导版本为 `1.1.0`，工具依赖绝不直接授予执行权限。
 
@@ -498,7 +517,7 @@ Bubble Tea TUI 现在以 Run-first 选择器启动，可在最近 50 个 Run 与
 
 ### English details
 
-The following notes are organized by capability and current reading value, not by schema order. Use the canonical `v1 -> v73` table above whenever chronology matters.
+The following notes are organized by capability and current reading value, not by schema order. Use the canonical `v1 -> v74` table above whenever chronology matters.
 
 The first P7 Skills vertical slice is now in place. Go embeds and strictly validates five `skill.v1` workflow guides for `code`, `review`, `learn`, `script`, and cross-Profile `plan-delivery`, including pinned versions, compatible Profiles, tool prerequisites, relative content paths, UTF-8, byte counts, a conservative token upper bound, and SHA-256. The read-only Registry and `skill list/show/validate` create no database and accept no arbitrary external path. The current built-in guidance version is `1.1.0`, and a declared tool dependency is never a capability grant.
 
@@ -821,7 +840,12 @@ go run ./cmd/cyberagent session send <session-id> "/write README.md # Proposed r
 go run ./cmd/cyberagent session send <session-id> "/run echo hello"
 go run ./cmd/cyberagent edit list --workspace demo --status proposed
 go run ./cmd/cyberagent edit show <edit-id>
+go run ./cmd/cyberagent edit review-approve <run-id> <edit-id>
+go run ./cmd/cyberagent edit review-deny <run-id> <edit-id>
 go run ./cmd/cyberagent edit approve <edit-id>
+go run ./cmd/cyberagent run wake schedule <run-id> --operation-key <stable-key>
+go run ./cmd/cyberagent run wake show <run-id>
+go run ./cmd/cyberagent run wake cancel <run-id> --operation-key <stable-cancel-key>
 go run ./cmd/cyberagent tool list --session <session-id>
 go run ./cmd/cyberagent tool show <proposal-id>
 go run ./cmd/cyberagent tool approve <proposal-id>
@@ -874,9 +898,9 @@ Use `CYBERAGENT_HOME` to point runtime data at another directory during tests or
 在 Unix 上，新建的运行目录与 SQLite 数据库分别限制为 `0700` 和 `0600`；Windows 继续使用系统 ACL。LocalRunner 当前显式 fail-closed，不会启动宿主机进程，Noop dry-run 输出也会先脱敏。<br>
 On Unix, newly created runtime directories and SQLite databases are restricted to `0700` and `0600`; Windows continues to use system ACLs. LocalRunner is explicitly fail-closed and cannot start a host process, while Noop dry-run output is redacted before display.
 
-`api serve` generates and prints a temporary read token when `CYBERAGENT_API_TOKEN` is absent. Model-call cancellation, execution-profile selection, controlled Run creation, Session enqueue/cancel, Run lifecycle, bounded execution handoff, Plan/Deliver, and approval decisions remain disabled unless a distinct `CYBERAGENT_API_CONTROL_TOKEN` is supplied and the corresponding Go capability is enabled; environment-provided tokens are validated but never echoed. Model availability is read-only. See [docs/http-api.md](docs/http-api.md) for endpoints, envelopes, pagination, and security boundaries.
+`api serve` generates and prints a temporary read token when `CYBERAGENT_API_TOKEN` is absent. Model-call cancellation, execution-profile selection, controlled Run creation, Session enqueue/cancel, Run lifecycle, bounded execution handoff, Plan/Deliver, approval decisions, model diagnostics/routes, Diff review, and wake intent remain disabled unless a distinct `CYBERAGENT_API_CONTROL_TOKEN` is supplied and the corresponding Go capability is enabled; environment-provided tokens are validated but never echoed. Model availability is read-only, and wake intent grants no background execution. See [docs/http-api.md](docs/http-api.md) for endpoints, envelopes, pagination, and security boundaries.
 
-### Windows Desktop (through D1-M1/P1/A1)
+### Windows Desktop (through schema v74 / D1-Q1)
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
@@ -906,11 +930,20 @@ powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
 # Optional: expose bounded approve-once/deny decisions.
 .\build\desktop\cyberagent-desktop.exe --enable-approvals
 
+# Optional: expose explicit Provider diagnostics and persisted routes.
+.\build\desktop\cyberagent-desktop.exe --enable-model-control
+
+# Optional: expose review-only Diff decisions; apply stays unavailable.
+.\build\desktop\cyberagent-desktop.exe --enable-file-edit-review
+
+# Optional: expose durable wake intent; no background worker is started.
+.\build\desktop\cyberagent-desktop.exe --enable-run-wake
+
 # Capabilities may be combined; host/container process execution remains disabled.
-.\build\desktop\cyberagent-desktop.exe --enable-profile-control --enable-run-creation --enable-session-messages --enable-session-steering-control --enable-run-lifecycle --enable-run-execution --enable-plan-delivery --enable-approvals
+.\build\desktop\cyberagent-desktop.exe --enable-model-control --enable-file-edit-review --enable-run-wake
 ```
 
-The desktop shell embeds the same React production UI and calls the Go API in process; it opens no listening port and needs no manually copied bearer token. It requires Windows 10/11 with WebView2 Evergreen Runtime, fails closed without implicitly downloading it, and resumes event polling from a Run-bound high-water cursor. The default launch is read-only. Explicit flags independently expose closed Run creation, Session enqueue/cancel, Run lifecycle, a bounded RunSupervisor handoff, Plan/Deliver control, and constrained approval decisions. The handoff may call the configured model and approved structured tools, but neither it nor approve-once can start Local, Docker, Shell, or any other host/container process. The unsigned executable is a development/portable-test artifact, not an installer or formal release. See [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md) and [ADR 0034](docs/adr/0034-embedded-read-first-wails-shell.md) through [ADR 0039](docs/adr/0039-model-plan-and-approval-controls.md).
+The desktop shell embeds the same React production UI and calls the Go API in process; it opens no listening port and needs no manually copied bearer token. It requires Windows 10/11 with WebView2 Evergreen Runtime, fails closed without implicitly downloading it, and resumes event polling from a Run-bound high-water cursor. The default launch is read-only. Explicit flags independently expose each Go control. Provider diagnostics may make one content-free request only after a click; Diff review cannot apply a file; wake controls persist intent without starting a worker. The bounded Run handoff may call the configured model and approved structured tools, but no control can start Local, Docker, Shell, or another host/container process. The unsigned executable is a development/portable-test artifact, not an installer or formal release. See [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md) and [ADR 0034](docs/adr/0034-embedded-read-first-wails-shell.md) through [ADR 0040](docs/adr/0040-provider-diff-wake-controls.md).
 
 schema v72 / D1-R1 本地发布门已通过：全仓普通与 race 测试分别用时 271.5 秒和 257.9 秒，普通/安全 Desktop 测试与 vet/staticcheck/govulncheck 均通过；React 为 14 个文件 45 项测试，严格 TypeScript、生产构建、确定性 OpenAPI 生成和 npm 零高危漏洞检查均为绿色。审计修复了旧 schema 降级夹具中的 v72 trigger 拆除顺序、创建与旧 Run 控制权限串联风险、重放初态复核、非法 UTF-8 JSON、初始 root/时间线/事件总数约束，以及响应 Goal/Workspace/模式绑定和 UTF-8 字节边界；当前没有已知未解决高/中风险。<br>
 The schema-v72/D1-R1 local release gate passed the full ordinary and race suites in 271.5s and 257.9s, ordinary/secure-Desktop tests plus vet/staticcheck/govulncheck, 45 React tests across 14 files, strict TypeScript, the production build, deterministic OpenAPI generation, and the zero-high-severity npm audit. The audit fixed historical-schema trigger teardown order, capability coupling, initial-state replay validation, invalid UTF-8 JSON, exact root/timeline/event-count binding, response binding for Goal/Workspace/mode, and UTF-8 byte limits. No unresolved high/medium issue is known.
@@ -928,11 +961,11 @@ Non-schema D1-M1, D1-P1, and D1-A1 complete the third three-slice batch: one Go 
 
 Read [docs/PROJECT_MEMORY.md](docs/PROJECT_MEMORY.md), [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [docs/PROGRESS_BOOK.md](docs/PROGRESS_BOOK.md), [docs/TASK_BOOK.md](docs/TASK_BOOK.md), [docs/http-api.md](docs/http-api.md), [docs/openapi.json](docs/openapi.json), [web/README.md](web/README.md), [docs/errors.md](docs/errors.md), and the chronological [ADR 0001](docs/adr/0001-go-control-plane.md), [ADR 0002](docs/adr/0002-run-centric-runtime.md), [ADR 0003](docs/adr/0003-run-execution-modes.md), [ADR 0004](docs/adr/0004-plan-delivery-workflow.md), [ADR 0005](docs/adr/0005-operator-steering-queue.md), [ADR 0006](docs/adr/0006-operator-steering-controls.md), [ADR 0007](docs/adr/0007-specialist-skill-context.md), [ADR 0008](docs/adr/0008-sandbox-manifest-boundary.md), [ADR 0009](docs/adr/0009-sandbox-approval-candidate.md), [ADR 0010](docs/adr/0010-disabled-sandbox-lifecycle.md), [ADR 0011](docs/adr/0011-disabled-sandbox-preflight.md), [ADR 0012](docs/adr/0012-simulation-only-sandbox-evidence.md), [ADR 0013](docs/adr/0013-read-only-docker-observation.md), [ADR 0014](docs/adr/0014-deterministic-docker-container-plan.md), [ADR 0015](docs/adr/0015-bounded-docker-write-rehearsal.md), [ADR 0016](docs/adr/0016-recoverable-docker-rehearsal-attempt.md), [ADR 0017](docs/adr/0017-descriptor-sealed-host-input-staging.md), [ADR 0018](docs/adr/0018-durable-pre-stage-host-input-requirement.md), [ADR 0019](docs/adr/0019-daemon-owned-host-input-handoff.md), [ADR 0020](docs/adr/0020-deterministic-runtime-input-projection.md), [ADR 0021](docs/adr/0021-recoverable-runtime-input-application.md), [ADR 0022](docs/adr/0022-retained-runtime-input-resource-lifecycle.md), [ADR 0023](docs/adr/0023-blocked-docker-start-gate-review.md), [ADR 0024](docs/adr/0024-strict-inert-skill-package.md), [ADR 0025](docs/adr/0025-protected-delete-command-guard.md), [ADR 0026](docs/adr/0026-run-execution-profile-selection.md), [ADR 0027](docs/adr/0027-non-authorizing-docker-production-evidence-ledger.md), and [ADR 0028](docs/adr/0028-recoverable-docker-production-evidence-attempts.md) when resuming development after a long conversation. They record current progress, language ownership, run architecture, execution mode, Plan/Delivery and steering invariants, Specialist Skill delivery, Sandbox authority boundaries, API and error contracts, audit notes, verified commands, and the recommended next slice.
 
-The latest decisions are [ADR 0029](docs/adr/0029-bounded-linux-read-only-docker-evidence-harness.md), [ADR 0030](docs/adr/0030-immutable-docker-production-evidence-review.md), [ADR 0031](docs/adr/0031-content-addressed-inert-skill-registry.md), [ADR 0032](docs/adr/0032-external-skill-run-context.md), [ADR 0033](docs/adr/0033-pathless-desktop-skill-preview.md), [ADR 0034](docs/adr/0034-embedded-read-first-wails-shell.md), [ADR 0035](docs/adr/0035-desktop-lifecycle-and-event-resumption.md), [ADR 0036](docs/adr/0036-idempotent-controlled-run-creation.md), [ADR 0037](docs/adr/0037-controlled-session-message-submission.md), [ADR 0038](docs/adr/0038-idempotent-run-control-and-bounded-handoff.md), and [ADR 0039](docs/adr/0039-model-plan-and-approval-controls.md).
+The latest decisions are [ADR 0029](docs/adr/0029-bounded-linux-read-only-docker-evidence-harness.md), [ADR 0030](docs/adr/0030-immutable-docker-production-evidence-review.md), [ADR 0031](docs/adr/0031-content-addressed-inert-skill-registry.md), [ADR 0032](docs/adr/0032-external-skill-run-context.md), [ADR 0033](docs/adr/0033-pathless-desktop-skill-preview.md), [ADR 0034](docs/adr/0034-embedded-read-first-wails-shell.md), [ADR 0035](docs/adr/0035-desktop-lifecycle-and-event-resumption.md), [ADR 0036](docs/adr/0036-idempotent-controlled-run-creation.md), [ADR 0037](docs/adr/0037-controlled-session-message-submission.md), [ADR 0038](docs/adr/0038-idempotent-run-control-and-bounded-handoff.md), [ADR 0039](docs/adr/0039-model-plan-and-approval-controls.md), and [ADR 0040](docs/adr/0040-provider-diff-wake-controls.md).
 
-Windows Desktop D0-A/D0-B/D1-R1/D1-S1/S2/D1-L1/X1/D1-M1/P1/A1 自动化核心已实现，但仍是未签名开发/便携测试壳，不是安装版或完整工作台；Windows 10 实机发布矩阵仍待完成。分阶段方案见 [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md)。自定义 Skill 已具备严格 `skill_package.v1` 校验、schema v69 本地惰性 Registry、schema v70 CLI Run 选择/最小上下文、schema v71 三端只读来源投影，以及原生 `.zip` 对话框的一次性本地预览；HTTP/桌面安装上传、签名和安装时执行仍未开放。详情见 [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md)，内部 `LoadFS` 也不能视为产品导入通道。
+Windows Desktop D0-A/D0-B 与 D1-R1 至 D1-Q1 自动化核心已实现，但仍是未签名开发/便携测试壳，不是安装版或完整工作台；Windows 10 实机发布矩阵仍待完成。分阶段方案见 [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md)。自定义 Skill 已具备严格 `skill_package.v1` 校验、schema v69 本地惰性 Registry、schema v70 CLI Run 选择/最小上下文、schema v71 三端只读来源投影，以及原生 `.zip` 对话框的一次性本地预览；HTTP/桌面安装上传、签名和安装时执行仍未开放。详情见 [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md)，内部 `LoadFS` 也不能视为产品导入通道。
 
-The automated core of Windows Desktop through D1-M1/P1/A1 now exists, but it remains an unsigned development/portable-test client rather than an installer or complete workbench; the Windows 10 real-machine release matrix is still pending. See [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md) for the phased Wails/React/Go plan. Custom Skills now have strict `skill_package.v1` validation, the schema-v69 local inert Registry, schema-v70 CLI Run selection/minimized context, schema-v71 read-only provenance across HTTP/TUI/Web, and a native `.zip` dialog backed by one-time local preview handles. HTTP/Desktop install upload, signatures, and install-time execution remain closed. See [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md); the internal `LoadFS` helper is still not a product import channel.
+The automated core of Windows Desktop through D1-Q1 now exists, but it remains an unsigned development/portable-test client rather than an installer or complete workbench; the Windows 10 real-machine release matrix is still pending. See [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md) for the phased Wails/React/Go plan. Custom Skills now have strict `skill_package.v1` validation, the schema-v69 local inert Registry, schema-v70 CLI Run selection/minimized context, schema-v71 read-only provenance across HTTP/TUI/Web, and a native `.zip` dialog backed by one-time local preview handles. HTTP/Desktop install upload, signatures, and install-time execution remain closed. See [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md); the internal `LoadFS` helper is still not a product import channel.
 
 ## Repository Workflow
 
@@ -948,9 +981,9 @@ This project is licensed by the repository owner under the [Apache License 2.0](
 
 ## Development Priority
 
-The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, local and schema v18 cross-process active-call cancellation, Bubble Tea live metadata, durable model events, exactly one restart-safe lifecycle-protocol repair, the schema v16 bounded structured-memory tool loop, and schema v17 execution leases with heartbeat/fencing. P3 includes migration v9 WorkItems, migration v10 Notes, transactional relationships/events, `todo` and `note` CLI lifecycles, root/owner visibility, token-budgeted memory selection, and durable context provenance. P4 now has the schema v19 single-root Coordinator through schema v34 read-only Fan-out, while core delegation remains capped at two and Fan-out remains tool/network/write-free. P5 includes the unified Tool Gateway, trusted workspace scope binding, durable approvals/Session grants, typed script processes, source-bound Artifacts, structured-memory mutations, Provider tool rounds, and Agent proposals. P9 now includes authenticated loopback `api.v1`, active-call cancellation, controlled Run/Session/lifecycle/bounded-execution operations, redacted model availability, explicit Plan/Deliver, constrained approvals, deterministic OpenAPI, resumable SSE/poll, generated React/Vite operations views, production bundle hosting, `headless.v1`, Run-first TUI, and the Windows shell through D1-M1/P1/A1. The cross-surface golden matrix pins lifecycle state and exact event tails across CLI/TUI/HTTP/Web/Headless. Background scheduling, Provider settings/diagnostics, Diff/Skill mutations, Monaco/xterm surfaces, and the Windows 10 release matrix remain pending. Real Local/Docker command execution and executing process tools remain disabled. CTF-specific solving logic stays deferred until the generic runtime is stable.
+The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, local and schema v18 cross-process active-call cancellation, Bubble Tea live metadata, durable model events, exactly one restart-safe lifecycle-protocol repair, the schema v16 bounded structured-memory tool loop, and schema v17 execution leases with heartbeat/fencing. P3 includes migration v9 Work Board and v10 Notes. P4 covers the schema-v19 root Coordinator through schema-v34 read-only Fan-out. P5 includes the unified Tool Gateway, durable approvals/Grants, typed processes, Artifacts, and structured tools. P9 now includes authenticated API/event surfaces, controlled Run/Session/lifecycle/bounded execution, explicit content-free Provider diagnostics and persisted routes, Plan/Deliver, constrained approvals, body-free Diff review, schema-v74 wake intent, React/Vite, TUI, Headless, and Windows Desktop through D1-Q1. Background wake consumption, independently authorized Diff apply, Skill installation mutation, Monaco/xterm, and the Windows 10 release matrix remain pending. Real Local/Docker command execution and executing process tools remain disabled. CTF-specific solving logic stays deferred until the generic runtime is stable.
 
-General file apply/Skill installation, Provider settings, Monaco, and xterm remain pending. The currently exposed narrow controls are schema v64 profile intent, schema v72 closed Run creation, Session enqueue/pending cancellation, schema v73 Run lifecycle/bounded Supervisor handoff, and non-schema Plan/Deliver plus constrained approval decisions. None grants host/container process authority.
+Desktop/Web Skill installation, independently authorized Diff apply, Provider secret settings, Monaco, and xterm remain pending. The currently exposed narrow controls also include explicit status-only Provider diagnostics/routes, review-only Diff decisions, and schema-v74 wake intent. None grants host/container process or background-worker authority.
 
 P7 includes the Go-owned `skill.v1` Registry, immutable embedded-Skill Run selection, durable metadata-only provenance, bounded root context, schema v41 execution modes, schema v42's three-direction Plan/Delivery proposal and operator selection, schema v43 provenance separation, schema v44 per-slice audit/handoff gates, schema v45-v46 operator steering, schema v47 minimal embedded Specialist Skill delivery, schema v69's inert content-addressed user Registry, schema v70's separately confirmed exact external-Skill Run selection plus redacted root/Specialist context, and schema v71's bounded read-only external-Skill provenance across HTTP/TUI/Web. External content is always user-role untrusted guidance and declared dependencies never become capabilities. P6 now includes schema v48's Sandbox Manifest boundary through schema v68's immutable operator receipt review. Real Local/container-process execution remains disabled until every v51 threat-model item has independently verified and accepted production evidence and the real container/input/output transaction passes its own release gate; v52 simulation, v53 metadata observation, v54 compilation/fake writes, v55-v56 non-started daemon rehearsals, v57-v58 local capture facts, v59 never-started handoff evidence, v60 projection metadata, v61 volume/target preparation, v62 resource cleanup, v63 design review, v65 receipts, v66 quiescent checkpoints, v67 read-only metadata, and v68 receipt acceptance do not satisfy that gate. Skill installation/selection, execution modes, Plan selection, document content, audit assertions, queued input, approvals, Sandbox records, profile selection, capture receipts, attempts, harness receipts, and review decisions do not alter Tool Gateway or Policy authority by themselves.
 
@@ -966,8 +999,8 @@ File changes, Shell proposals, typed script-process proposals, and create-only s
 
 ## 可选在线 Provider / Optional Online Providers
 
-统一 Go Registry 只在对应 API key 存在于当前进程环境时注册 `mimo` 或 `deepseek` Anthropic-compatible Provider，CLI、API 和 Desktop 共用该初始化。密钥不会写入仓库文件、SQLite、Run 事件或 TypeScript；模型可用性接口也不返回 Base URL/环境变量名或发起探测。Provider 地址必须使用 HTTPS，只有 loopback 本地服务可使用 HTTP；客户端不会跟随重定向，API key 也不能包含空白或控制字符。<br>
-The unified Go Registry registers `mimo` or `deepseek` only when its API key exists in the current process environment, and CLI, API, and Desktop share that initialization. Keys are never written to repository files, SQLite, Run events, or TypeScript; model availability also exposes no base URL/environment-variable name and performs no probe. Provider endpoints must use HTTPS except for loopback-local HTTP services; redirects are not followed, and API keys cannot contain whitespace or control characters.
+统一 Go Registry 只在对应 API key 存在于当前进程环境时注册 `mimo` 或 `deepseek` Anthropic-compatible Provider，CLI、API 和 Desktop 共用该初始化。密钥不会写入仓库文件、SQLite、Run 事件或 TypeScript；模型可用性读取不发起探测，只有显式 `provider test`/桌面诊断会发送一次无用户正文、禁用工具的有界请求。诊断结果不返回模型正文、Base URL、环境变量名或原始错误。Provider 地址必须使用 HTTPS，只有 loopback 本地服务可使用 HTTP；客户端不会跟随重定向，API key 也不能包含空白或控制字符。<br>
+The unified Go Registry registers `mimo` or `deepseek` only when its API key exists in the current process environment, and CLI, API, and Desktop share that initialization. Keys are never written to repository files, SQLite, Run events, or TypeScript. Availability reads perform no probe; only explicit `provider test` or a Desktop diagnostic sends one bounded, content-free, tool-disabled request. Diagnostic output contains no model text, base URL, environment-variable name, or raw error. Provider endpoints must use HTTPS except for loopback-local HTTP services; redirects are not followed, and API keys cannot contain whitespace or control characters.
 
 ```powershell
 $env:MIMO_API_KEY = "<token-plan-key>"
@@ -981,7 +1014,11 @@ $env:DEEPSEEK_BASE_URL = "https://api.deepseek.com/anthropic"
 $env:DEEPSEEK_MODEL = "deepseek-v4-flash"
 go run ./cmd/cyberagent provider list
 go run ./cmd/cyberagent provider test deepseek/deepseek-v4-flash
+go run ./cmd/cyberagent model set code deepseek/deepseek-v4-flash
 go run ./cmd/cyberagent run create "review this workspace" --profile review --route deepseek/deepseek-v4-flash
 ```
+
+每次 `provider test` 可能产生一次 Provider 请求和少量计费。`model set` 会先持久化 SQLite，成功后才更新当前进程 Router。Run wake 目前只记录意图：`run wake schedule/show/cancel` 不启动后台任务，也不调用模型或工具。<br>
+Each `provider test` may incur one Provider request and a small charge. `model set` persists SQLite before updating the current process Router. Run wake currently records intent only: `run wake schedule/show/cancel` starts no background task and calls no model or tool.
 
 `DEEPSEEK_BASE_URL` and `DEEPSEEK_MODEL` are optional; their current defaults are the values shown above. Use `deepseek-v4-pro` explicitly when the higher-capability model is required. See the official [DeepSeek Anthropic API guide](https://api-docs.deepseek.com/guides/anthropic_api) for current compatibility and model details.

@@ -25,6 +25,9 @@ export default function App() {
   const planDeliveryControlEnabled = useConnectionStore(
     (state) => state.planDeliveryControlEnabled);
   const approvalControlEnabled = useConnectionStore((state) => state.approvalControlEnabled);
+  const modelControlEnabled = useConnectionStore((state) => state.modelControlEnabled);
+  const fileEditReviewEnabled = useConnectionStore((state) => state.fileEditReviewEnabled);
+  const runWakeControlEnabled = useConnectionStore((state) => state.runWakeControlEnabled);
   if (!token) {
     return <ConnectionGate />;
   }
@@ -34,12 +37,14 @@ export default function App() {
     sessionSteeringControlEnabled={sessionSteeringControlEnabled}
     runLifecycleEnabled={runLifecycleEnabled} runExecutionEnabled={runExecutionEnabled}
     planDeliveryControlEnabled={planDeliveryControlEnabled}
-    approvalControlEnabled={approvalControlEnabled} />;
+    approvalControlEnabled={approvalControlEnabled} modelControlEnabled={modelControlEnabled}
+    fileEditReviewEnabled={fileEditReviewEnabled} runWakeControlEnabled={runWakeControlEnabled} />;
 }
 
 function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreationEnabled,
   sessionMessageEnabled, sessionSteeringControlEnabled, runLifecycleEnabled,
-  runExecutionEnabled, planDeliveryControlEnabled, approvalControlEnabled }: {
+  runExecutionEnabled, planDeliveryControlEnabled, approvalControlEnabled,
+  modelControlEnabled, fileEditReviewEnabled, runWakeControlEnabled }: {
   token: string;
   controlToken: string;
   runControlEnabled: boolean;
@@ -50,6 +55,9 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
   runExecutionEnabled: boolean;
   planDeliveryControlEnabled: boolean;
   approvalControlEnabled: boolean;
+  modelControlEnabled: boolean;
+  fileEditReviewEnabled: boolean;
+  runWakeControlEnabled: boolean;
 }) {
   const [skillPreviewOpen, setSkillPreviewOpen] = useState(false);
   const [runCreationOpen, setRunCreationOpen] = useState(false);
@@ -59,10 +67,12 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
     runControlEnabled, runCreationEnabled, sessionMessageEnabled,
     sessionSteeringControlEnabled,
     runLifecycleEnabled, runExecutionEnabled,
-    planDeliveryControlEnabled, approvalControlEnabled,
+    planDeliveryControlEnabled, approvalControlEnabled, modelControlEnabled,
+    fileEditReviewEnabled, runWakeControlEnabled,
   }), [token, controlToken, runControlEnabled, runCreationEnabled, sessionMessageEnabled,
     sessionSteeringControlEnabled, runLifecycleEnabled, runExecutionEnabled,
-    planDeliveryControlEnabled, approvalControlEnabled]);
+    planDeliveryControlEnabled, approvalControlEnabled, modelControlEnabled,
+    fileEditReviewEnabled, runWakeControlEnabled]);
   const queryClient = useQueryClient();
   const health = useConnectionStore((state) => state.health);
   const setHealth = useConnectionStore((state) => state.setHealth);

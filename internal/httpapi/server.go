@@ -24,6 +24,7 @@ import (
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
+	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/modelregistry"
 	"cyberagent-workbench/internal/session"
@@ -109,6 +110,9 @@ type Store interface {
 	GetFindingReport(ctx context.Context, id string) (domain.FindingReport, error)
 	GetApproval(ctx context.Context, id string) (approval.Record, error)
 	ListApprovals(ctx context.Context, filter approval.ListFilter) ([]approval.Record, error)
+	GetFileEditPreview(ctx context.Context, id string) (fileedit.Preview, error)
+	ListFileEditPreviewsPage(ctx context.Context, filter fileedit.ListFilter,
+		offset int, limit int) ([]fileedit.Preview, error)
 
 	GetSession(ctx context.Context, id string) (session.Session, error)
 	GetWorkspaceInfo(ctx context.Context, id string) (session.WorkspaceInfo, error)
@@ -137,10 +141,16 @@ type Config struct {
 	RunExecutionEnabled           bool
 	PlanDeliveryControlEnabled    bool
 	ApprovalControlEnabled        bool
+	ModelControlEnabled           bool
+	FileEditReviewEnabled         bool
+	RunWakeControlEnabled         bool
 	RunLifecycleController        RunLifecycleController
 	RunExecutionController        RunExecutionController
 	PlanDeliveryController        PlanDeliveryController
 	ApprovalController            ApprovalController
+	ModelControlController        ModelControlController
+	FileEditReviewController      FileEditReviewController
+	RunWakeController             RunWakeController
 	ModelRegistry                 *modelregistry.Registry
 	AppVersion                    string
 	EventStream                   EventStreamConfig
@@ -159,10 +169,16 @@ type API struct {
 	runExecutionEnabled           bool
 	planDeliveryControlEnabled    bool
 	approvalControlEnabled        bool
+	modelControlEnabled           bool
+	fileEditReviewEnabled         bool
+	runWakeControlEnabled         bool
 	runLifecycleController        RunLifecycleController
 	runExecutionController        RunExecutionController
 	planDeliveryController        PlanDeliveryController
 	approvalController            ApprovalController
+	modelControlController        ModelControlController
+	fileEditReviewController      FileEditReviewController
+	runWakeController             RunWakeController
 	modelRegistry                 *modelregistry.Registry
 	appVersion                    string
 	openAPI                       []byte
@@ -196,7 +212,8 @@ func New(store Store, config Config) (*API, error) {
 	if (config.RunControlEnabled || config.RunCreationEnabled || config.SessionMessageEnabled ||
 		config.SessionSteeringControlEnabled || config.RunLifecycleEnabled ||
 		config.RunExecutionEnabled || config.PlanDeliveryControlEnabled ||
-		config.ApprovalControlEnabled) &&
+		config.ApprovalControlEnabled || config.ModelControlEnabled ||
+		config.FileEditReviewEnabled || config.RunWakeControlEnabled) &&
 		!controlTokenPresent {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"HTTP API control capabilities require a control token")
@@ -216,6 +233,18 @@ func New(store Store, config Config) (*API, error) {
 	if config.ApprovalControlEnabled && config.ApprovalController == nil {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"HTTP API approval controller is required when enabled")
+	}
+	if config.ModelControlEnabled && config.ModelControlController == nil {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API model controller is required when enabled")
+	}
+	if config.FileEditReviewEnabled && config.FileEditReviewController == nil {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API file edit review controller is required when enabled")
+	}
+	if config.RunWakeControlEnabled && config.RunWakeController == nil {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API Run wake controller is required when enabled")
 	}
 	version := strings.TrimSpace(config.AppVersion)
 	if version == "" {
@@ -243,10 +272,16 @@ func New(store Store, config Config) (*API, error) {
 		runExecutionEnabled:           controlTokenPresent && config.RunExecutionEnabled,
 		planDeliveryControlEnabled:    controlTokenPresent && config.PlanDeliveryControlEnabled,
 		approvalControlEnabled:        controlTokenPresent && config.ApprovalControlEnabled,
+		modelControlEnabled:           controlTokenPresent && config.ModelControlEnabled,
+		fileEditReviewEnabled:         controlTokenPresent && config.FileEditReviewEnabled,
+		runWakeControlEnabled:         controlTokenPresent && config.RunWakeControlEnabled,
 		runLifecycleController:        config.RunLifecycleController,
 		runExecutionController:        config.RunExecutionController,
 		planDeliveryController:        config.PlanDeliveryController,
 		approvalController:            config.ApprovalController,
+		modelControlController:        config.ModelControlController,
+		fileEditReviewController:      config.FileEditReviewController,
+		runWakeController:             config.RunWakeController,
 		modelRegistry:                 modelRegistry,
 		openAPI:                       document, eventStream: eventStream,
 		eventStreamSlots: make(chan struct{}, eventStream.MaxConnections),
@@ -388,6 +423,19 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if runID, approvalID, matched := matchApprovalDecisionControlPath(request.URL.Path); matched {
 		a.serveApprovalDecisionControl(tracked, request, requestID, runID, approvalID)
+		return
+	}
+	if route, diagnostic, matched := matchModelControlPath(request.URL.Path); matched {
+		a.serveModelControl(tracked, request, requestID, route, diagnostic)
+		return
+	}
+	if runID, editID, matched := matchFileEditReviewControlPath(request.URL.Path); matched {
+		a.serveFileEditReviewControl(tracked, request, requestID, runID, editID)
+		return
+	}
+	if runID, cancel, matched := matchRunWakeControlPath(request.URL.Path); matched &&
+		request.Method != http.MethodGet {
+		a.serveRunWakeControl(tracked, request, requestID, runID, cancel)
 		return
 	}
 	if runID, matched := matchRunExecutionControlPath(request.URL.Path); matched {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"cyberagent-workbench/internal/llm"
 )
@@ -20,6 +22,44 @@ type failingRouteSettings struct{}
 
 func (failingRouteSettings) GetProviderSetting(context.Context, string) (string, bool, error) {
 	return "", false, errors.New("route store unavailable")
+}
+
+type orderedRouteWriter struct {
+	registry *Registry
+	values   map[string]string
+}
+
+type blockingRouteWriter struct {
+	mu            sync.Mutex
+	values        []string
+	firstEntered  chan struct{}
+	secondEntered chan struct{}
+	releaseFirst  chan struct{}
+}
+
+func (w *blockingRouteWriter) SetProviderSetting(_ context.Context, _ string,
+	value string,
+) error {
+	w.mu.Lock()
+	ordinal := len(w.values)
+	w.values = append(w.values, value)
+	w.mu.Unlock()
+	if ordinal == 0 {
+		close(w.firstEntered)
+		<-w.releaseFirst
+	} else if ordinal == 1 {
+		close(w.secondEntered)
+	}
+	return nil
+}
+
+func (w *orderedRouteWriter) SetProviderSetting(_ context.Context, key string, value string) error {
+	if current := w.registry.Router().Resolve("code"); current.Provider != "mock" ||
+		current.Model != "mock-code" {
+		return errors.New("route changed before durable setting")
+	}
+	w.values[key] = value
+	return nil
 }
 
 func TestRegistryBuildsRedactedEnvironmentAvailabilityAndRoutes(t *testing.T) {
@@ -115,6 +155,93 @@ func TestRegistryRouteSettingFailureIsReturned(t *testing.T) {
 	registry := New(nil)
 	if err := registry.LoadRouteSettings(context.Background(), failingRouteSettings{}); err == nil {
 		t.Fatal("expected route setting failure")
+	}
+}
+
+func TestRegistrySelectRoutePersistsBeforeConcurrentRouterUpdate(t *testing.T) {
+	registry := New(nil)
+	writer := &orderedRouteWriter{registry: registry, values: map[string]string{}}
+	selected, err := registry.SelectRoute(context.Background(), writer,
+		"code", "mock", "mock-fast")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if writer.values["route.code"] != "mock/mock-fast" || !selected.Available ||
+		selected.Name != "code" || selected.Provider != "mock" || selected.Model != "mock-fast" {
+		t.Fatalf("unexpected persisted route selection: %#v %#v", writer.values, selected)
+	}
+	if current := registry.Router().Resolve("code"); current.Provider != "mock" ||
+		current.Model != "mock-fast" {
+		t.Fatalf("router was not updated: %#v", current)
+	}
+	if _, err := registry.SelectRoute(context.Background(), writer,
+		"unknown", "mock", "mock-fast"); err == nil {
+		t.Fatal("unsupported route was accepted")
+	}
+	if _, err := registry.SelectRoute(context.Background(), writer,
+		"code", "missing", "model"); err == nil {
+		t.Fatal("unavailable Provider was accepted")
+	}
+}
+
+func TestRegistrySelectRouteSerializesDurableAndMemoryUpdates(t *testing.T) {
+	registry := New(nil)
+	writer := &blockingRouteWriter{firstEntered: make(chan struct{}),
+		secondEntered: make(chan struct{}), releaseFirst: make(chan struct{})}
+	errorsSeen := make(chan error, 2)
+	go func() {
+		_, err := registry.SelectRoute(context.Background(), writer,
+			"code", "mock", "mock-fast")
+		errorsSeen <- err
+	}()
+	<-writer.firstEntered
+	secondStarted := make(chan struct{})
+	go func() {
+		close(secondStarted)
+		_, err := registry.SelectRoute(context.Background(), writer,
+			"code", "mock", "mock-code")
+		errorsSeen <- err
+	}()
+	<-secondStarted
+	select {
+	case <-writer.secondEntered:
+		t.Fatal("second route persistence overtook the first in-memory update")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(writer.releaseFirst)
+	for range 2 {
+		if err := <-errorsSeen; err != nil {
+			t.Fatal(err)
+		}
+	}
+	writer.mu.Lock()
+	values := append([]string(nil), writer.values...)
+	writer.mu.Unlock()
+	if len(values) != 2 || values[0] != "mock/mock-fast" ||
+		values[1] != "mock/mock-code" {
+		t.Fatalf("route persistence order=%#v", values)
+	}
+	if current := registry.Router().Resolve("code"); current.Provider != "mock" ||
+		current.Model != "mock-code" {
+		t.Fatalf("durable and in-memory order diverged: %#v", current)
+	}
+}
+
+func TestRegistryDiagnosticReturnsOnlyBoundedConnectivityFacts(t *testing.T) {
+	registry := New(nil)
+	result, err := registry.Diagnose(context.Background(), "mock", "mock-fast")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ProtocolVersion != DiagnosticProtocolVersion ||
+		result.Status != DiagnosticReachable || result.Outcome != string(llm.OutcomeSuccess) ||
+		result.Provider != "mock" || result.Model != "mock-fast" ||
+		result.NetworkRequestAttempted || !result.ModelCalled || result.ToolCalled ||
+		result.ResponseContentReturned || result.DurationMillis < 0 {
+		t.Fatalf("unexpected diagnostic projection: %#v", result)
+	}
+	if _, err := registry.Diagnose(context.Background(), "mimo", DefaultMimoModel); err == nil {
+		t.Fatal("unconfigured Provider diagnostic was accepted")
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/redact"
 )
 
@@ -65,6 +66,15 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 		if a.approvalControlEnabled {
 			resources = append(resources, "approval-control")
+		}
+		if a.modelControlEnabled {
+			resources = append(resources, "model-control")
+		}
+		if a.fileEditReviewEnabled {
+			resources = append(resources, "file-edit-review-control")
+		}
+		if a.runWakeControlEnabled {
+			resources = append(resources, "run-wake-control")
 		}
 		return IndexView{APIVersion: Version, AppVersion: a.appVersion, Resources: resources}, nil, nil
 	case "/api/v1/health":
@@ -190,13 +200,112 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 			return a.runToolRounds(request, segments[1])
 		case "approvals":
 			return a.runApprovals(request, segments[1])
+		case "file-edits":
+			return a.runFileEdits(request, segments[1])
+		case "wake-intent":
+			return a.runWakeIntent(request, segments[1])
 		}
 	case 4:
 		if segments[2] == "reports" {
 			return a.runFindingReport(request, segments[1], segments[3])
 		}
+		if segments[2] == "file-edits" {
+			return a.runFileEdit(request, segments[1], segments[3])
+		}
 	}
 	return nil, nil, apperror.New(apperror.CodeNotFound, "Run HTTP API endpoint was not found")
+}
+
+func (a *API) runFileEdits(request *http.Request, runID string) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	run, mission, err := a.fileEditRunBinding(request, runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	const limit = 100
+	values, err := a.store.ListFileEditPreviewsPage(request.Context(), fileedit.ListFilter{
+		SessionID: run.SessionID, WorkspaceID: mission.WorkspaceID,
+	}, 0, limit+1)
+	if err != nil {
+		return nil, nil, err
+	}
+	truncated := len(values) > limit
+	if truncated {
+		values = values[:limit]
+	}
+	items := make([]FileEditPreviewView, len(values))
+	for index, value := range values {
+		if value.SessionID != run.SessionID || value.WorkspaceID != mission.WorkspaceID {
+			return nil, nil, apperror.New(apperror.CodeInternal,
+				"file edit queue contains a mismatched record")
+		}
+		items[index] = fileEditPreviewView(value, run.Terminal())
+	}
+	return FileEditQueueView{ProtocolVersion: application.FileEditReviewProtocolVersion,
+		RunID: run.ID, Items: items, Truncated: truncated, ApplyEnabled: false}, nil, nil
+}
+
+func (a *API) runFileEdit(request *http.Request, runID string,
+	editID string,
+) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	run, mission, err := a.fileEditRunBinding(request, runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	value, err := a.store.GetFileEditPreview(request.Context(), editID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if value.SessionID != run.SessionID || value.WorkspaceID != mission.WorkspaceID {
+		return nil, nil, apperror.New(apperror.CodeNotFound,
+			"file edit does not belong to the requested Run")
+	}
+	return fileEditPreviewView(value, run.Terminal()), nil, nil
+}
+
+func (a *API) fileEditRunBinding(request *http.Request,
+	runID string,
+) (domain.Run, domain.Mission, error) {
+	run, err := a.store.GetRun(request.Context(), runID)
+	if err != nil {
+		return domain.Run{}, domain.Mission{}, err
+	}
+	if run.SessionID == "" {
+		return domain.Run{}, domain.Mission{}, apperror.New(
+			apperror.CodeFailedPrecondition, "Run has no attached Session")
+	}
+	mission, err := a.store.GetMission(request.Context(), run.MissionID)
+	if err != nil {
+		return domain.Run{}, domain.Mission{}, err
+	}
+	if mission.WorkspaceID == "" {
+		return domain.Run{}, domain.Mission{}, apperror.New(
+			apperror.CodeFailedPrecondition, "Run Mission has no Workspace")
+	}
+	return run, mission, nil
+}
+
+func (a *API) runWakeIntent(request *http.Request,
+	runID string,
+) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	if a.runWakeController == nil {
+		return nil, nil, apperror.New(apperror.CodeNotFound,
+			"Run wake intent is unavailable")
+	}
+	intent, found, err := a.runWakeController.Get(request.Context(), runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return RunWakeStateView{ProtocolVersion: domain.RunWakeIntentProtocolVersion,
+		RunID: runID, Found: found, Intent: runWakeIntentView(intent, found)}, nil, nil
 }
 
 func (a *API) runApprovals(request *http.Request, runID string) (any, *Page, error) {

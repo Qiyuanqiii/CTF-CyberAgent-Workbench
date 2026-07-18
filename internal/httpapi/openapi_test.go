@@ -17,6 +17,7 @@ import (
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/coordinator"
 	"cyberagent-workbench/internal/domain"
+	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/toolgateway"
@@ -83,7 +84,17 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				(path == ApprovalDecisionControlPathTemplate &&
 					item.Post.OperationID == "decideRunApproval") ||
 				(path == RunExecutionControlPathTemplate &&
-					item.Post.OperationID == "executeRunSelection")
+					item.Post.OperationID == "executeRunSelection") ||
+				(path == ModelRouteControlPathTemplate &&
+					item.Post.OperationID == "selectModelRoute") ||
+				(path == ProviderDiagnosticPath &&
+					item.Post.OperationID == "diagnoseProvider") ||
+				(path == FileEditReviewPathTemplate &&
+					item.Post.OperationID == "reviewRunFileEdit") ||
+				(path == RunWakeIntentPathTemplate &&
+					item.Post.OperationID == "scheduleRunWake") ||
+				(path == RunWakeCancellationPathTemplate &&
+					item.Post.OperationID == "cancelRunWake")
 			if !validControl ||
 				item.Post.ReadOnly || item.Post.Responses["202"] == nil || item.Post.RequestBody == nil ||
 				len(item.Post.Security) != 1 || item.Post.Security[0]["ControlBearerAuth"] == nil {
@@ -92,7 +103,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 			operations = append(operations, item.Post)
 		}
 		expectedOperations := 1
-		if path == RunCreationControlPath || path == SessionMessageControlPathTemplate {
+		if path == RunCreationControlPath || path == SessionMessageControlPathTemplate ||
+			path == RunWakeIntentPathTemplate {
 			expectedOperations = 2
 		}
 		if len(operations) != expectedOperations {
@@ -128,7 +140,11 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				path == PlanDirectionControlPathTemplate ||
 				path == PlanDeliveryControlPathTemplate ||
 				path == ApprovalDecisionControlPathTemplate ||
-				path == RunExecutionControlPathTemplate) &&
+				path == RunExecutionControlPathTemplate ||
+				path == ModelRouteControlPathTemplate ||
+				path == ProviderDiagnosticPath || path == FileEditReviewPathTemplate ||
+				path == RunWakeIntentPathTemplate ||
+				path == RunWakeCancellationPathTemplate) &&
 				method == "post") {
 				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
 			}
@@ -234,16 +250,47 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fileEditRecord, err := fileedit.NewManager(fixture.store).Propose(t.Context(), fileedit.Proposal{
+		SessionID: fixture.run.SessionID, WorkspaceID: fixture.workspace.ID,
+		WorkspaceRoot: fixture.workspace.RootPath, Path: "openapi-review.txt",
+		ProposedText: "bounded OpenAPI review\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, wakeCreated, err := application.NewRunService(fixture.store).Create(t.Context(),
+		application.CreateRunRequest{Goal: "OpenAPI wake target", Profile: "code",
+			Budget: domain.Budget{MaxTurns: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wakeRun, err := application.NewRunService(fixture.store).Start(t.Context(), wakeCreated.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.store.EnqueueOperatorSteering(t.Context(),
+		domain.EnqueueOperatorSteeringRequest{RunID: wakeRun.ID, SessionID: wakeRun.SessionID,
+			Content: "OpenAPI wake input", OperationKey: "openapi-wake-queue-0001",
+			RequestedBy: "openapi_test"}); err != nil {
+		t.Fatal(err)
+	}
 	fixture.api.runLifecycleEnabled = true
 	fixture.api.runExecutionEnabled = true
 	fixture.api.planDeliveryControlEnabled = true
 	fixture.api.approvalControlEnabled = true
+	fixture.api.modelControlEnabled = true
+	fixture.api.fileEditReviewEnabled = true
+	fixture.api.runWakeControlEnabled = true
 	fixture.api.runLifecycleController = application.NewRunLifecycleControlService(fixture.store)
 	fixture.api.runExecutionController = application.NewRunExecutionHandoffService(
 		fixture.store, llm.NewDefaultRouter(), policy.NewDefaultChecker())
 	fixture.api.planDeliveryController = application.NewPlanDeliveryControlService(fixture.store)
 	fixture.api.approvalController = application.NewApprovalControlService(fixture.store,
 		gateway, checker)
+	fixture.api.modelControlController = application.NewModelControlService(
+		fixture.api.modelRegistry, fixture.store)
+	fixture.api.fileEditReviewController = application.NewFileEditReviewService(fixture.store)
+	fixture.api.runWakeController = application.NewRunWakeControlService(fixture.store)
 	steering, err := fixture.store.EnqueueOperatorSteering(t.Context(),
 		domain.EnqueueOperatorSteeringRequest{
 			RunID: fixture.run.ID, SessionID: fixture.run.SessionID,
@@ -264,6 +311,8 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		"{artifact_id}":  fixture.artifactID,
 		"{report_id}":    "report-openapi-missing-0001",
 		"{approval_id}":  approvalRecord.ID,
+		"{edit_id}":      fileEditRecord.ID,
+		"{route}":        "code",
 	}
 	for _, spec := range openAPIOperationSpecs() {
 		requestPath := spec.Path
@@ -282,6 +331,9 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", planRun.ID)
 		} else if spec.Path == RunExecutionControlPathTemplate {
 			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", executionRun.ID)
+		} else if spec.Path == RunWakeIntentPathTemplate ||
+			spec.Path == RunWakeCancellationPathTemplate {
+			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", wakeRun.ID)
 		}
 		t.Run(spec.OperationID, func(t *testing.T) {
 			var response *httptest.ResponseRecorder
@@ -311,6 +363,18 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 					body = `{"version":"approval_control.v1","action":"approve_once"}`
 				} else if spec.Path == RunExecutionControlPathTemplate {
 					body = `{"version":"run_execution_handoff.v1","max_steps":1}`
+				} else if spec.Path == ModelRouteControlPathTemplate {
+					body = `{"version":"model_route_control.v1","provider":"mock","model":"mock-code"}`
+				} else if spec.Path == ProviderDiagnosticPath {
+					body = `{"version":"provider_diagnostic.v1","provider":"mock","model":"mock-code","confirm_diagnostic":true}`
+				} else if spec.Path == FileEditReviewPathTemplate {
+					body = `{"version":"file_edit_review.v1","action":"approve_intent"}`
+				} else if spec.Path == RunWakeIntentPathTemplate {
+					body = `{"version":"run_wake_control.v1","max_attempts":3,` +
+						`"initial_delay_seconds":0,"base_backoff_seconds":5,` +
+						`"max_backoff_seconds":60,"max_elapsed_seconds":300}`
+				} else if spec.Path == RunWakeCancellationPathTemplate {
+					body = `{"version":"run_wake_control.v1"}`
 				} else if spec.Path != RunExecutionProfileControlPathTemplate {
 					attemptID := fixture.checkpoint.AttemptID
 					modelAttempt := 1

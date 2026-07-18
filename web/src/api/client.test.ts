@@ -609,6 +609,113 @@ describe("CyberAgentClient", () => {
     await expect(client.approvalQueue("run-1")).rejects.toThrow("invalid");
   });
 
+  it("validates content-free model diagnostics and exact persisted routes", async () => {
+    const route = { name: "code", provider: "mock", model: "mock-code", available: true };
+    const diagnostic = {
+      protocol_version: "provider_diagnostic.v1", provider: "mock", model: "mock-code",
+      status: "reachable", outcome: "success", retryable: false,
+      network_request_attempted: false, model_called: true, tool_called: false,
+      response_content_returned: false, duration_ms: 2,
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        version: "api.v1", request_id: "req-route", data: route,
+      }), { status: 202, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        version: "api.v1", request_id: "req-diagnostic", data: diagnostic,
+      }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false, modelControlEnabled: true,
+    });
+    await expect(client.selectModelRoute("code", {
+      version: "model_route_control.v1", provider: "mock", model: "mock-code",
+    })).resolves.toEqual(route);
+    await expect(client.diagnoseProvider({
+      version: "provider_diagnostic.v1", provider: "mock", model: "mock-code",
+      confirm_diagnostic: true,
+    })).resolves.toEqual(diagnostic);
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).headers)
+      .not.toHaveProperty("Idempotency-Key");
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-diagnostic-forged",
+      data: { ...diagnostic, response_content_returned: true, response: "private" },
+    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    await expect(client.diagnoseProvider({
+      version: "provider_diagnostic.v1", provider: "mock", model: "mock-code",
+      confirm_diagnostic: true,
+    })).rejects.toThrow("content-free");
+  });
+
+  it("rejects FileEdit body leakage and validates review-only decisions", async () => {
+    const edit = { id: "edit-1", session_id: "session-1", workspace_id: "workspace-1",
+      path: "README.md", status: "proposed", diff: "--- a/README.md\n+++ b/README.md\n",
+      original_hash: "missing", proposed_hash: "a".repeat(64), secrets_redacted: false,
+      allowed_actions: ["approve_intent", "deny"], created_at: "2026-07-18T00:00:00Z",
+      updated_at: "2026-07-18T00:00:00Z", apply_enabled: false };
+    const queue = { protocol_version: "file_edit_review.v1", run_id: "run-1",
+      items: [edit], truncated: false, apply_enabled: false };
+    const decided = { protocol_version: "file_edit_review.v1", run_id: "run-1",
+      action: "approve_intent", edit: { ...edit, status: "approved", allowed_actions: [] },
+      replayed: false, file_written: false };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        version: "api.v1", request_id: "req-edits", data: queue,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        version: "api.v1", request_id: "req-edit-review", data: decided,
+      }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false, fileEditReviewEnabled: true,
+    });
+    await expect(client.fileEditQueue("run-1")).resolves.toEqual(queue);
+    await expect(client.reviewFileEdit("run-1", "edit-1", {
+      version: "file_edit_review.v1", action: "approve_intent",
+    })).resolves.toEqual(decided);
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-edit-leak",
+      data: { ...queue, items: [{ ...edit, proposed_text: "private body" }] },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    await expect(client.fileEditQueue("run-1")).rejects.toThrow("metadata-only");
+  });
+
+  it("validates bounded wake scheduling without accepting execution authority", async () => {
+    const intent = { id: "wake-1", protocol_version: "run_wake_intent.v1", run_id: "run-1",
+      session_id: "session-1", status: "queued", max_attempts: 3, attempt_count: 0,
+      initial_delay_seconds: 0, base_backoff_seconds: 5, max_backoff_seconds: 60,
+      max_elapsed_seconds: 300, next_wake_at: "2026-07-18T00:00:00Z",
+      deadline_at: "2026-07-18T00:05:00Z", execution_enabled: false,
+      background_loop_enabled: false, created_at: "2026-07-18T00:00:00Z",
+      updated_at: "2026-07-18T00:00:00Z" };
+    const result = { protocol_version: "run_wake_control.v1", action: "schedule", intent,
+      replayed: false, execution_started: false, model_called: false, tool_called: false };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-wake", data: result,
+    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false, runWakeControlEnabled: true,
+    });
+    await expect(client.scheduleRunWake("run-1", {
+      version: "run_wake_control.v1", max_attempts: 3, initial_delay_seconds: 0,
+      base_backoff_seconds: 5, max_backoff_seconds: 60, max_elapsed_seconds: 300,
+    }, "web-wake-operation-0001")).resolves.toEqual(result);
+    expect((fetchMock.mock.calls[0]?.[1] as RequestInit).headers)
+      .toMatchObject({ "Idempotency-Key": "web-wake-operation-0001" });
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-wake-forged",
+      data: { ...result, execution_started: true },
+    }), { status: 202, headers: { "Content-Type": "application/json" } }));
+    await expect(client.scheduleRunWake("run-1", {
+      version: "run_wake_control.v1", max_attempts: 3, initial_delay_seconds: 0,
+      base_backoff_seconds: 5, max_backoff_seconds: 60, max_elapsed_seconds: 300,
+    }, "web-wake-operation-0002")).rejects.toThrow("authority");
+  });
+
   it("polls Run events with a stream-compatible opaque cursor and validates the envelope", async () => {
     const frame: RunEventStreamView = {
       version: "run-events.v1",

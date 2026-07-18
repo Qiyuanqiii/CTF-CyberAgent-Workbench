@@ -33,6 +33,7 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 	if defaults.profileControl || defaults.runCreation || defaults.sessionMessages ||
 		defaults.sessionSteeringControl || defaults.runLifecycle || defaults.runExecution ||
 		defaults.planDeliveryControl || defaults.approvalControl ||
+		defaults.modelControl || defaults.fileEditReview || defaults.runWakeControl ||
 		defaults.version {
 		t.Fatalf("unexpected defaults: %#v", defaults)
 	}
@@ -43,6 +44,7 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 	if !enabled.profileControl || enabled.runCreation || enabled.sessionMessages ||
 		enabled.sessionSteeringControl || enabled.runLifecycle || enabled.runExecution ||
 		enabled.planDeliveryControl || enabled.approvalControl ||
+		enabled.modelControl || enabled.fileEditReview || enabled.runWakeControl ||
 		enabled.version {
 		t.Fatalf("profile control was not explicit: %#v", enabled)
 	}
@@ -53,6 +55,7 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 	if creation.profileControl || !creation.runCreation || creation.sessionMessages ||
 		creation.sessionSteeringControl || creation.runLifecycle || creation.runExecution ||
 		creation.planDeliveryControl || creation.approvalControl ||
+		creation.modelControl || creation.fileEditReview || creation.runWakeControl ||
 		creation.version {
 		t.Fatalf("Run creation was not independently explicit: %#v", creation)
 	}
@@ -63,6 +66,7 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 	if messages.profileControl || messages.runCreation || !messages.sessionMessages ||
 		messages.sessionSteeringControl || messages.runLifecycle || messages.runExecution ||
 		messages.planDeliveryControl || messages.approvalControl ||
+		messages.modelControl || messages.fileEditReview || messages.runWakeControl ||
 		messages.version {
 		t.Fatalf("Session messages were not independently explicit: %#v", messages)
 	}
@@ -73,6 +77,7 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 	if steering.profileControl || steering.runCreation || steering.sessionMessages ||
 		!steering.sessionSteeringControl || steering.runLifecycle || steering.runExecution ||
 		steering.planDeliveryControl || steering.approvalControl ||
+		steering.modelControl || steering.fileEditReview || steering.runWakeControl ||
 		steering.version {
 		t.Fatalf("Session steering cancellation was not independently explicit: %#v", steering)
 	}
@@ -111,6 +116,30 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitProfileControl(t *test
 		approvals.runLifecycle || approvals.profileControl || approvals.runCreation ||
 		approvals.sessionMessages || approvals.sessionSteeringControl {
 		t.Fatalf("Approval control was not independently explicit: %#v", approvals)
+	}
+	for _, current := range []struct {
+		flag  string
+		check func(desktopOptions) bool
+	}{
+		{flag: "--enable-model-control", check: func(value desktopOptions) bool {
+			return value.modelControl && !value.fileEditReview && !value.runWakeControl
+		}},
+		{flag: "--enable-file-edit-review", check: func(value desktopOptions) bool {
+			return !value.modelControl && value.fileEditReview && !value.runWakeControl
+		}},
+		{flag: "--enable-run-wake", check: func(value desktopOptions) bool {
+			return !value.modelControl && !value.fileEditReview && value.runWakeControl
+		}},
+	} {
+		parsed, err := parseDesktopOptions([]string{current.flag})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !current.check(parsed) || parsed.profileControl || parsed.runCreation ||
+			parsed.sessionMessages || parsed.sessionSteeringControl || parsed.runLifecycle ||
+			parsed.runExecution || parsed.planDeliveryControl || parsed.approvalControl {
+			t.Fatalf("%s was not independently explicit: %#v", current.flag, parsed)
+		}
 	}
 	if _, err := parseDesktopOptions([]string{"unexpected"}); err == nil {
 		t.Fatal("desktop positional argument was accepted")

@@ -19,6 +19,9 @@ interface ConnectionState {
   runExecutionEnabled: boolean;
   planDeliveryControlEnabled: boolean;
   approvalControlEnabled: boolean;
+  modelControlEnabled: boolean;
+  fileEditReviewEnabled: boolean;
+  runWakeControlEnabled: boolean;
   connect: (token: string, health: HealthView, controlToken?: string,
     capabilities?: ClientCapabilities) => void;
   disconnect: () => void;
@@ -47,6 +50,9 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   runExecutionEnabled: false,
   planDeliveryControlEnabled: false,
   approvalControlEnabled: false,
+  modelControlEnabled: false,
+  fileEditReviewEnabled: false,
+  runWakeControlEnabled: false,
   connect: (token, health, controlToken = "", capabilities = {}) => {
     const present = controlToken.trim() !== "";
     set({ token, health, controlToken,
@@ -60,13 +66,17 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
       planDeliveryControlEnabled: present &&
         (capabilities.planDeliveryControlEnabled ?? true),
       approvalControlEnabled: present && (capabilities.approvalControlEnabled ?? true),
+	  modelControlEnabled: present && (capabilities.modelControlEnabled ?? true),
+	  fileEditReviewEnabled: present && (capabilities.fileEditReviewEnabled ?? true),
+	  runWakeControlEnabled: present && (capabilities.runWakeControlEnabled ?? true),
     });
   },
   disconnect: () => set({ token: "", controlToken: "", health: null,
     runControlEnabled: false, runCreationEnabled: false, sessionMessageEnabled: false,
     sessionSteeringControlEnabled: false,
     runLifecycleEnabled: false, runExecutionEnabled: false,
-    planDeliveryControlEnabled: false, approvalControlEnabled: false,
+	planDeliveryControlEnabled: false, approvalControlEnabled: false,
+	modelControlEnabled: false, fileEditReviewEnabled: false, runWakeControlEnabled: false,
     ...initialSelection }),
   selectRun: (selectedRunID) => set({ selectedRunID, resourceKind: "run" }),
   selectSession: (selectedSessionID) => set({ selectedSessionID, resourceKind: "session" }),

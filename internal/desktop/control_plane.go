@@ -38,6 +38,9 @@ type ControlPlaneConfig struct {
 	RunExecutionEnabled           bool
 	PlanDeliveryControlEnabled    bool
 	ApprovalControlEnabled        bool
+	ModelControlEnabled           bool
+	FileEditReviewEnabled         bool
+	RunWakeControlEnabled         bool
 	AppVersion                    string
 	UIHandler                     http.Handler
 }
@@ -64,6 +67,9 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 	planDeliveryControl := application.NewPlanDeliveryControlService(stateStore)
 	approvalControl := application.NewApprovalControlService(stateStore,
 		toolgateway.New(stateStore, checker), checker)
+	modelControl := application.NewModelControlService(models, stateStore)
+	fileEditReview := application.NewFileEditReviewService(stateStore)
+	runWakeControl := application.NewRunWakeControlService(stateStore)
 	api, err := httpapi.New(stateStore, httpapi.Config{
 		AccessToken: config.ReadToken, ControlToken: config.ControlToken,
 		RunControlEnabled:             config.RunControlEnabled,
@@ -74,10 +80,16 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 		RunExecutionEnabled:           config.RunExecutionEnabled,
 		PlanDeliveryControlEnabled:    config.PlanDeliveryControlEnabled,
 		ApprovalControlEnabled:        config.ApprovalControlEnabled,
+		ModelControlEnabled:           config.ModelControlEnabled,
+		FileEditReviewEnabled:         config.FileEditReviewEnabled,
+		RunWakeControlEnabled:         config.RunWakeControlEnabled,
 		RunLifecycleController:        lifecycleControl,
 		RunExecutionController:        executionControl,
 		PlanDeliveryController:        planDeliveryControl,
 		ApprovalController:            approvalControl,
+		ModelControlController:        modelControl,
+		FileEditReviewController:      fileEditReview,
+		RunWakeController:             runWakeControl,
 		ModelRegistry:                 models,
 		AppVersion:                    config.AppVersion, UIHandler: config.UIHandler,
 	})

@@ -120,6 +120,24 @@ func RunExecutionHandoffRequestFingerprint(runID string, requestedBy string,
 		strconv.Itoa(maxSteps))
 }
 
+func RunWakeOperationDigest(runID string, operationKey string) string {
+	return Fingerprint("run_wake_operation.v1", runID, operationKey)
+}
+
+func RunWakeScheduleRequestFingerprint(runID string, requestedBy string,
+	maxAttempts int, initialDelaySeconds int, baseBackoffSeconds int,
+	maxBackoffSeconds int, maxElapsedSeconds int,
+) string {
+	return Fingerprint("run_wake_schedule_request.v1", runID, requestedBy,
+		strconv.Itoa(maxAttempts), strconv.Itoa(initialDelaySeconds),
+		strconv.Itoa(baseBackoffSeconds), strconv.Itoa(maxBackoffSeconds),
+		strconv.Itoa(maxElapsedSeconds))
+}
+
+func RunWakeCancelRequestFingerprint(runID string, requestedBy string) string {
+	return Fingerprint("run_wake_cancel_request.v1", runID, requestedBy)
+}
+
 func SupervisorToolOperationKey(runID string, turn int, toolName string, payloadJSON string) string {
 	return Fingerprint("supervisor_structured_tool.v1", strings.TrimSpace(runID), strconv.Itoa(turn),
 		strings.TrimSpace(toolName), strings.TrimSpace(payloadJSON))

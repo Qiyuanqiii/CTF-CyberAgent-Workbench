@@ -48,6 +48,92 @@ type ModelAvailabilityView struct {
 	Routes          []ModelRouteAvailabilityView `json:"routes"`
 }
 
+type ProviderDiagnosticView struct {
+	ProtocolVersion         string `json:"protocol_version"`
+	Provider                string `json:"provider"`
+	Model                   string `json:"model"`
+	Status                  string `json:"status"`
+	Outcome                 string `json:"outcome"`
+	Retryable               bool   `json:"retryable"`
+	NetworkRequestAttempted bool   `json:"network_request_attempted"`
+	ModelCalled             bool   `json:"model_called"`
+	ToolCalled              bool   `json:"tool_called"`
+	ResponseContentReturned bool   `json:"response_content_returned"`
+	DurationMillis          int64  `json:"duration_ms"`
+}
+
+type FileEditPreviewView struct {
+	ID              string                             `json:"id"`
+	SessionID       string                             `json:"session_id"`
+	WorkspaceID     string                             `json:"workspace_id"`
+	Path            string                             `json:"path"`
+	Status          string                             `json:"status"`
+	Diff            string                             `json:"diff"`
+	OriginalHash    string                             `json:"original_hash"`
+	ProposedHash    string                             `json:"proposed_hash"`
+	Reason          string                             `json:"reason,omitempty"`
+	SecretsRedacted bool                               `json:"secrets_redacted"`
+	AllowedActions  []application.FileEditReviewAction `json:"allowed_actions"`
+	CreatedAt       time.Time                          `json:"created_at"`
+	UpdatedAt       time.Time                          `json:"updated_at"`
+	ApplyEnabled    bool                               `json:"apply_enabled"`
+}
+
+type FileEditQueueView struct {
+	ProtocolVersion string                `json:"protocol_version"`
+	RunID           string                `json:"run_id"`
+	Items           []FileEditPreviewView `json:"items"`
+	Truncated       bool                  `json:"truncated"`
+	ApplyEnabled    bool                  `json:"apply_enabled"`
+}
+
+type FileEditReviewView struct {
+	ProtocolVersion string              `json:"protocol_version"`
+	RunID           string              `json:"run_id"`
+	Action          string              `json:"action"`
+	Edit            FileEditPreviewView `json:"edit"`
+	Replayed        bool                `json:"replayed"`
+	FileWritten     bool                `json:"file_written"`
+}
+
+type RunWakeIntentView struct {
+	ID                    string     `json:"id"`
+	ProtocolVersion       string     `json:"protocol_version"`
+	RunID                 string     `json:"run_id"`
+	SessionID             string     `json:"session_id"`
+	Status                string     `json:"status"`
+	MaxAttempts           int        `json:"max_attempts"`
+	AttemptCount          int        `json:"attempt_count"`
+	InitialDelaySeconds   int        `json:"initial_delay_seconds"`
+	BaseBackoffSeconds    int        `json:"base_backoff_seconds"`
+	MaxBackoffSeconds     int        `json:"max_backoff_seconds"`
+	MaxElapsedSeconds     int        `json:"max_elapsed_seconds"`
+	NextWakeAt            time.Time  `json:"next_wake_at"`
+	DeadlineAt            time.Time  `json:"deadline_at"`
+	ExecutionEnabled      bool       `json:"execution_enabled"`
+	BackgroundLoopEnabled bool       `json:"background_loop_enabled"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
+	CancelledAt           *time.Time `json:"cancelled_at,omitempty"`
+}
+
+type RunWakeStateView struct {
+	ProtocolVersion string             `json:"protocol_version"`
+	RunID           string             `json:"run_id"`
+	Found           bool               `json:"found"`
+	Intent          *RunWakeIntentView `json:"intent,omitempty"`
+}
+
+type RunWakeControlView struct {
+	ProtocolVersion  string            `json:"protocol_version"`
+	Action           string            `json:"action"`
+	Intent           RunWakeIntentView `json:"intent"`
+	Replayed         bool              `json:"replayed"`
+	ExecutionStarted bool              `json:"execution_started"`
+	ModelCalled      bool              `json:"model_called"`
+	ToolCalled       bool              `json:"tool_called"`
+}
+
 type ApprovalQueueItemView struct {
 	ID                      string                              `json:"id"`
 	ProposalID              string                              `json:"proposal_id"`

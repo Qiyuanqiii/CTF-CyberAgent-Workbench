@@ -94,6 +94,14 @@ func TestSQLiteReadPagesUseStableOffsetsAndBoundedMetadataQueries(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	preview, err := st.GetFileEditPreview(ctx, editPage[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.ID != editPage[0].ID || preview.Diff != editPage[0].Diff ||
+		preview.Status != editPage[0].Status {
+		t.Fatalf("unexpected exact file edit preview: %#v", preview)
+	}
 	firstRun, err = runService.Start(ctx, firstRun.ID)
 	if err != nil {
 		t.Fatal(err)

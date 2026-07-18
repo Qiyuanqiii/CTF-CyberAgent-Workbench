@@ -8,6 +8,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"sync"
 
 	"cyberagent-workbench/internal/redact"
 )
@@ -18,6 +19,7 @@ type ModelRef struct {
 }
 
 type Router struct {
+	mu         sync.RWMutex
 	providers  map[string]Provider
 	routes     map[string]ModelRef
 	defaultRef ModelRef
@@ -43,10 +45,17 @@ func NewDefaultRouter() *Router {
 }
 
 func (r *Router) RegisterProvider(provider Provider) {
+	if r == nil || provider == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.providers[provider.Name()] = provider
 }
 
 func (r *Router) ProviderNames() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	names := make([]string, 0, len(r.providers))
 	for name := range r.providers {
 		names = append(names, name)
@@ -56,6 +65,8 @@ func (r *Router) ProviderNames() []string {
 }
 
 func (r *Router) Routes() map[string]ModelRef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	out := make(map[string]ModelRef, len(r.routes))
 	for k, v := range r.routes {
 		out[k] = v
@@ -64,10 +75,14 @@ func (r *Router) Routes() map[string]ModelRef {
 }
 
 func (r *Router) SetRoute(name string, ref ModelRef) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.routes[name] = ref
 }
 
 func (r *Router) Resolve(route string) ModelRef {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	if ref, ok := r.routes[route]; ok {
 		return ref
 	}
@@ -75,6 +90,8 @@ func (r *Router) Resolve(route string) ModelRef {
 }
 
 func (r *Router) SupportsJSONMode(ref ModelRef) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	provider, ok := r.providers[strings.TrimSpace(ref.Provider)]
 	return ok && provider.SupportsJSONMode(strings.TrimSpace(ref.Model))
 }
@@ -85,7 +102,9 @@ func (r *Router) Chat(ctx context.Context, route string, req ChatRequest) (*Chat
 }
 
 func (r *Router) ChatModelRef(ctx context.Context, ref ModelRef, req ChatRequest) (*ChatResponse, error) {
+	r.mu.RLock()
 	provider, ok := r.providers[ref.Provider]
+	r.mu.RUnlock()
 	if !ok {
 		return nil, NewProviderError(OutcomePermanent, ref.Provider, fmt.Sprintf("provider %q is not registered", ref.Provider), nil)
 	}
@@ -108,7 +127,9 @@ func (r *Router) StreamChat(ctx context.Context, route string, req ChatRequest) 
 }
 
 func (r *Router) StreamChatModelRef(ctx context.Context, ref ModelRef, req ChatRequest) (<-chan ChatChunk, error) {
+	r.mu.RLock()
 	provider, ok := r.providers[ref.Provider]
+	r.mu.RUnlock()
 	if !ok {
 		return nil, NewProviderError(OutcomePermanent, ref.Provider, fmt.Sprintf("provider %q is not registered", ref.Provider), nil)
 	}
@@ -131,9 +152,20 @@ func (r *Router) StreamChatModelRef(ctx context.Context, ref ModelRef, req ChatR
 }
 
 func (r *Router) ListModels(ctx context.Context) ([]ModelInfo, error) {
+	r.mu.RLock()
+	providers := make(map[string]Provider, len(r.providers))
+	for name, provider := range r.providers {
+		providers[name] = provider
+	}
+	r.mu.RUnlock()
 	var all []ModelInfo
-	for _, name := range r.ProviderNames() {
-		models, err := r.providers[name].ListModels(ctx)
+	names := make([]string, 0, len(providers))
+	for name := range providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		models, err := providers[name].ListModels(ctx)
 		if err != nil {
 			return nil, err
 		}

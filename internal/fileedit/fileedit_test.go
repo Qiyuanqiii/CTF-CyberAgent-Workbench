@@ -86,6 +86,39 @@ func TestManagerProposeAndApproveExistingFile(t *testing.T) {
 	}
 }
 
+func TestManagerApproveIntentDoesNotWriteWorkspace(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "README.md")
+	if err := os.WriteFile(path, []byte("old\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(newMemoryStore())
+	edit, err := manager.Propose(context.Background(), Proposal{
+		WorkspaceID: "ws-demo", WorkspaceRoot: root, Path: "README.md", ProposedText: "new\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewed, err := manager.ApproveIntent(context.Background(), edit.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reviewed.Status != StatusApproved {
+		t.Fatalf("unexpected review state: %#v", reviewed)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "old\n" {
+		t.Fatalf("approval intent wrote the workspace: %q", data)
+	}
+	replayed, err := manager.ApproveIntent(context.Background(), edit.ID)
+	if err != nil || replayed.Status != StatusApproved {
+		t.Fatalf("approval intent replay failed: %#v %v", replayed, err)
+	}
+}
+
 func TestManagerCreatesNewFileUnderExistingDirectory(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "scripts"), 0o755); err != nil {

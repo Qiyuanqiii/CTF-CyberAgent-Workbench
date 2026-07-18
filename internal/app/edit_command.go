@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/workspace"
 )
@@ -39,11 +40,42 @@ func (a *App) editCommand(ctx context.Context, args []string) error {
 		return a.editShow(ctx, manager, args[1:])
 	case "approve":
 		return a.editApprove(ctx, manager, args[1:])
+	case "review-approve":
+		return a.editReview(ctx, application.FileEditApproveIntent, args[1:])
+	case "review-deny":
+		return a.editReview(ctx, application.FileEditDeny, args[1:])
 	case "deny":
 		return a.editDeny(ctx, manager, args[1:])
 	default:
 		return fmt.Errorf("unknown edit subcommand %q", args[0])
 	}
+}
+
+func (a *App) editReview(ctx context.Context, action application.FileEditReviewAction,
+	args []string,
+) error {
+	name := "edit review-approve"
+	if action == application.FileEditDeny {
+		name = "edit review-deny"
+	}
+	fs := newFlagSet(name, a.errOut)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 {
+		return fmt.Errorf("usage: cyberagent %s <run-id> <edit-id>", name)
+	}
+	result, err := application.NewFileEditReviewService(a.store).Review(ctx,
+		application.ReviewFileEditRequest{
+			Version: application.FileEditReviewProtocolVersion, RunID: fs.Arg(0),
+			EditID: fs.Arg(1), Action: action,
+		})
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(a.out, "file edit %s %s\nrun: %s\naction: %s\nreplayed: %t\nfile_written: false\n",
+		result.Edit.ID, result.Edit.Status, fs.Arg(0), result.Action, result.Replayed)
+	return nil
 }
 
 func (a *App) editPropose(ctx context.Context, manager fileEditManager, args []string) error {

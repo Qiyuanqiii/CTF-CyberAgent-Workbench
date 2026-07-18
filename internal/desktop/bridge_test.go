@@ -90,6 +90,8 @@ func TestDesktopBridgeBootstrapsMemoryOnlyClosedAuthority(t *testing.T) {
 		!bootstrap.RunCreationEnabled || !bootstrap.SessionMessageEnabled ||
 		!bootstrap.RunLifecycleEnabled || !bootstrap.RunExecutionEnabled ||
 		bootstrap.PlanDeliveryControlEnabled || bootstrap.ApprovalControlEnabled ||
+		bootstrap.ModelControlEnabled || bootstrap.FileEditReviewEnabled ||
+		bootstrap.RunWakeControlEnabled ||
 		bootstrap.ReadOnlyDefault || bootstrap.ProcessExecutionEnabled ||
 		bootstrap.ShellExecutionEnabled || bootstrap.DockerExecutionEnabled ||
 		bootstrap.SkillInstallationEnabled || bootstrap.RendererPathInputSupported {
@@ -102,13 +104,55 @@ func TestDesktopBridgeBootstrapsMemoryOnlyClosedAuthority(t *testing.T) {
 	assertExactJSONKeys(t, string(raw), []string{
 		"api_base_url", "api_version", "app_version", "approval_control_enabled",
 		"control_enabled", "control_token",
-		"docker_execution_enabled", "process_execution_enabled", "protocol_version", "read_only_default",
+		"docker_execution_enabled", "file_edit_review_enabled", "model_control_enabled",
+		"process_execution_enabled", "protocol_version", "read_only_default",
 		"plan_delivery_control_enabled", "read_token", "renderer_path_input_supported",
 		"run_creation_enabled", "shell_execution_enabled",
-		"run_execution_enabled", "run_lifecycle_enabled",
+		"run_execution_enabled", "run_lifecycle_enabled", "run_wake_control_enabled",
 		"session_message_enabled", "session_steering_control_enabled",
 		"skill_installation_enabled", "ui_digest",
 	})
+}
+
+func TestDesktopBridgeSeparatesModelDiffAndWakeControls(t *testing.T) {
+	for _, current := range []struct {
+		name  string
+		model bool
+		diff  bool
+		wake  bool
+	}{
+		{name: "model", model: true},
+		{name: "diff", diff: true},
+		{name: "wake", wake: true},
+	} {
+		t.Run(current.name, func(t *testing.T) {
+			selector, preview := NewSkillPackagePreviewBoundary()
+			bridge, err := NewDesktopBridge(DesktopBridgeConfig{
+				ContextProvider: func() context.Context { return context.Background() },
+				FilePicker:      &testSkillPackagePicker{}, ReadToken: testDesktopReadToken,
+				ControlToken: testDesktopControlToken, ModelControlEnabled: current.model,
+				FileEditReviewEnabled: current.diff, RunWakeControlEnabled: current.wake,
+				APIVersion: "api.v1", AppVersion: "test", UIDigest: testDesktopUIDigest,
+				Selector: selector, PreviewBridge: preview,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			bootstrap, err := bridge.Bootstrap()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if bootstrap.ModelControlEnabled != current.model ||
+				bootstrap.FileEditReviewEnabled != current.diff ||
+				bootstrap.RunWakeControlEnabled != current.wake ||
+				bootstrap.ControlEnabled || bootstrap.RunCreationEnabled ||
+				bootstrap.RunExecutionEnabled || bootstrap.ProcessExecutionEnabled ||
+				bootstrap.ShellExecutionEnabled || bootstrap.DockerExecutionEnabled ||
+				bootstrap.ReadOnlyDefault {
+				t.Fatalf("new control capability widened authority: %#v", bootstrap)
+			}
+		})
+	}
 }
 
 func TestDesktopBridgeSeparatesPlanAndApprovalControls(t *testing.T) {
