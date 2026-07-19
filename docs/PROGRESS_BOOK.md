@@ -1123,6 +1123,10 @@ Shell、LocalRunner、Docker、hook、攻击流量或外部网络。双指标更
 约 99%）、完整产品可用度约 93-95%、通用 Coding Agent 约 93%、Cyber 自动化约 20%，
 边界见 ADR 0050。
 
+远端 GitHub Actions run `29695882120` 已通过实现提交 `d70d96c`：TypeScript console
+43 秒、Windows Desktop shell 2 分 39 秒、含 vet 与 govulncheck 的 Go control plane
+3 分 56 秒。
+
 下一批建议 D1-G4 exact-commit changed-file metadata、D1-V3 plan-item/evidence 显式关联
 和 R1 Go-owned Runner start/wait/cancel/timeout/process-tree-orphan 非产品 harness。它们是
 当前周期后半三片，批末执行全仓 ordinary/race/vet/staticcheck/govulncheck/依赖/隐私/
