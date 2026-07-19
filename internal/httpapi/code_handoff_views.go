@@ -66,6 +66,82 @@ type VerificationEvidenceInventoryView struct {
 	Truncated       bool                           `json:"truncated"`
 }
 
+type VerificationPlanItemRequestView struct {
+	Title               string `json:"title"`
+	ExpectedObservation string `json:"expected_observation"`
+}
+
+type VerificationPlanRequestView struct {
+	Version string                            `json:"version"`
+	Title   string                            `json:"title"`
+	Summary string                            `json:"summary"`
+	Items   []VerificationPlanItemRequestView `json:"items"`
+}
+
+type VerificationPlanItemView struct {
+	Ordinal             int    `json:"ordinal"`
+	Title               string `json:"title"`
+	ExpectedObservation string `json:"expected_observation"`
+	ItemSHA256          string `json:"item_sha256"`
+	Redacted            bool   `json:"redacted"`
+}
+
+type VerificationPlanView struct {
+	ProtocolVersion  string                     `json:"protocol_version"`
+	ID               string                     `json:"id"`
+	RunID            string                     `json:"run_id"`
+	SessionID        string                     `json:"session_id"`
+	WorkspaceID      string                     `json:"workspace_id"`
+	Title            string                     `json:"title"`
+	Summary          string                     `json:"summary"`
+	PlanSHA256       string                     `json:"plan_sha256"`
+	Redacted         bool                       `json:"redacted"`
+	CreatedAt        time.Time                  `json:"created_at"`
+	Items            []VerificationPlanItemView `json:"items"`
+	ItemCount        int                        `json:"item_count"`
+	Immutable        bool                       `json:"immutable"`
+	OperatorSupplied bool                       `json:"operator_supplied"`
+	GuidanceOnly     bool                       `json:"guidance_only"`
+	CommandExecuted  bool                       `json:"command_executed"`
+	ModelAssertion   bool                       `json:"model_assertion"`
+	ResultInferred   bool                       `json:"result_inferred"`
+	Approval         bool                       `json:"approval"`
+	AuthorityGranted bool                       `json:"authority_granted"`
+}
+
+type VerificationPlanControlView struct {
+	ProtocolVersion  string                     `json:"protocol_version"`
+	ID               string                     `json:"id"`
+	RunID            string                     `json:"run_id"`
+	SessionID        string                     `json:"session_id"`
+	WorkspaceID      string                     `json:"workspace_id"`
+	Title            string                     `json:"title"`
+	Summary          string                     `json:"summary"`
+	PlanSHA256       string                     `json:"plan_sha256"`
+	Redacted         bool                       `json:"redacted"`
+	CreatedAt        time.Time                  `json:"created_at"`
+	Items            []VerificationPlanItemView `json:"items"`
+	ItemCount        int                        `json:"item_count"`
+	Immutable        bool                       `json:"immutable"`
+	OperatorSupplied bool                       `json:"operator_supplied"`
+	GuidanceOnly     bool                       `json:"guidance_only"`
+	CommandExecuted  bool                       `json:"command_executed"`
+	ModelAssertion   bool                       `json:"model_assertion"`
+	ResultInferred   bool                       `json:"result_inferred"`
+	Approval         bool                       `json:"approval"`
+	AuthorityGranted bool                       `json:"authority_granted"`
+	Replayed         bool                       `json:"replayed"`
+}
+
+type VerificationPlanInventoryView struct {
+	ProtocolVersion string                 `json:"protocol_version"`
+	RunID           string                 `json:"run_id"`
+	SessionID       string                 `json:"session_id"`
+	WorkspaceID     string                 `json:"workspace_id"`
+	Items           []VerificationPlanView `json:"items"`
+	Truncated       bool                   `json:"truncated"`
+}
+
 type CodeHandoffPlanView struct {
 	State             string `json:"state"`
 	ProposalID        string `json:"proposal_id"`
@@ -114,6 +190,20 @@ type CodeHandoffVerificationView struct {
 	References    []CodeHandoffVerificationReferenceView `json:"references"`
 }
 
+type CodeHandoffVerificationPlanReferenceView struct {
+	ID         string    `json:"id"`
+	PlanSHA256 string    `json:"plan_sha256"`
+	ItemCount  int       `json:"item_count"`
+	Redacted   bool      `json:"redacted"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type CodeHandoffVerificationPlansView struct {
+	ReturnedCount int                                        `json:"returned_count"`
+	Truncated     bool                                       `json:"truncated"`
+	References    []CodeHandoffVerificationPlanReferenceView `json:"references"`
+}
+
 type CodeHandoffActionReferenceView struct {
 	ID          string                     `json:"id"`
 	Kind        operatoraction.Kind        `json:"kind"`
@@ -140,11 +230,13 @@ type CodeHandoffView struct {
 	Surface                   string                           `json:"surface"`
 	Phase                     string                           `json:"phase"`
 	ModeRevision              int64                            `json:"mode_revision"`
+	SourceEventSequence       int64                            `json:"source_event_sequence"`
 	GeneratedAt               time.Time                        `json:"generated_at"`
 	Plan                      CodeHandoffPlanView              `json:"plan"`
 	Queue                     CodeHandoffQueueView             `json:"queue"`
 	ChangeSet                 CodeHandoffChangeSetView         `json:"change_set"`
 	Verification              CodeHandoffVerificationView      `json:"verification"`
+	VerificationPlans         CodeHandoffVerificationPlansView `json:"verification_plans"`
 	PendingActionCount        int                              `json:"pending_action_count"`
 	PendingActionsTruncated   bool                             `json:"pending_actions_truncated"`
 	PendingActions            []CodeHandoffActionReferenceView `json:"pending_actions"`
@@ -156,4 +248,24 @@ type CodeHandoffView struct {
 	CompositeMutation         bool                             `json:"composite_mutation"`
 	ResumeAuthorized          bool                             `json:"resume_authorized"`
 	ExecutionStarted          bool                             `json:"execution_started"`
+}
+
+type CodeHandoffExportView struct {
+	ProtocolVersion     string    `json:"protocol_version"`
+	Format              string    `json:"format"`
+	Filename            string    `json:"filename"`
+	MIMEType            string    `json:"mime_type"`
+	RunID               string    `json:"run_id"`
+	SourceEventSequence int64     `json:"source_event_sequence"`
+	GeneratedAt         time.Time `json:"generated_at"`
+	ContentSHA256       string    `json:"content_sha256"`
+	ContentBytes        int       `json:"content_bytes"`
+	Content             string    `json:"content"`
+	ReadOnly            bool      `json:"read_only"`
+	DownloadOnly        bool      `json:"download_only"`
+	PrivateBodies       bool      `json:"private_bodies"`
+	ResumeAuthorized    bool      `json:"resume_authorized"`
+	MutationSupported   bool      `json:"mutation_supported"`
+	ReportAcceptance    bool      `json:"report_acceptance"`
+	ExecutionStarted    bool      `json:"execution_started"`
 }

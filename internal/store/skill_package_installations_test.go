@@ -601,11 +601,26 @@ func removeSchemaV78ForTestStatements() []string {
 }
 
 func removeSchemaV79ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV80ForTestStatements(), []string{
 		`DROP TRIGGER trg_run_progress_guard_update`,
 		`DROP TRIGGER trg_run_progress_guard_insert`,
 		`DROP INDEX idx_run_progress_guards_status_updated`,
 		`DROP TABLE run_progress_guards`,
 		`DELETE FROM schema_migrations WHERE version = 79`,
+	}...)
+}
+
+func removeSchemaV80ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_operator_verification_plan_item_delete_immutable`,
+		`DROP TRIGGER trg_operator_verification_plan_item_update_immutable`,
+		`DROP TRIGGER trg_operator_verification_plan_delete_immutable`,
+		`DROP TRIGGER trg_operator_verification_plan_update_immutable`,
+		`DROP TRIGGER trg_operator_verification_plan_item_insert`,
+		`DROP TRIGGER trg_operator_verification_plan_insert`,
+		`DROP INDEX idx_operator_verification_plans_run_created`,
+		`DROP TABLE operator_verification_plan_items`,
+		`DROP TABLE operator_verification_plans`,
+		`DELETE FROM schema_migrations WHERE version = 80`,
 	}
 }

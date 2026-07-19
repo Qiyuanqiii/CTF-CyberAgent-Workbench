@@ -11,6 +11,7 @@ import (
 	"cyberagent-workbench/internal/store"
 
 	git "github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
 func TestWorkspaceExplorerHTTPKeepsPathsAndInstructionsNonAuthorizing(t *testing.T) {
@@ -68,7 +69,24 @@ func TestWorkspaceRepositoryStateHTTPIsReadOnlyAndRootBound(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = state.Close() })
 	root := t.TempDir()
-	if _, err := git.PlainInit(root, false); err != nil {
+	repo, err := git.PlainInit(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("initial\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	worktree, err := repo.Worktree()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worktree.Add("tracked.txt"); err != nil {
+		t.Fatal(err)
+	}
+	commitSecret := "sk-123456789012345678901234567890"
+	if _, err := worktree.Commit("safe "+commitSecret+"\nprivate body", &git.CommitOptions{
+		Author: &object.Signature{Name: "Private", Email: "private@example.invalid"},
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "untracked.txt"), []byte(
@@ -128,6 +146,26 @@ func TestWorkspaceRepositoryStateHTTPIsReadOnlyAndRootBound(t *testing.T) {
 	diffQuery := performSessionMessageRequest(t, api, http.MethodGet,
 		diffPath+"?refresh=true", testAccessToken, "", "", nil)
 	assertAPIError(t, diffQuery, http.StatusBadRequest, "INVALID_ARGUMENT")
+
+	historyPath := "/api/v1/workspaces/" + registered.ID + "/repository-history"
+	history := performSessionMessageRequest(t, api, http.MethodGet, historyPath,
+		testAccessToken, "", "", nil)
+	historyBody := history.Body.String()
+	if history.Code != http.StatusOK ||
+		!strings.Contains(historyBody, `"protocol_version":"repository_history.v1"`) ||
+		!strings.Contains(historyBody, `"first_parent_only":true`) ||
+		!strings.Contains(historyBody, `"read_only":true`) ||
+		!strings.Contains(historyBody, `"author_identity_included":false`) ||
+		!strings.Contains(historyBody, `"commit_body_included":false`) ||
+		!strings.Contains(historyBody, "[REDACTED:") ||
+		strings.Contains(historyBody, commitSecret) || strings.Contains(historyBody, "Private") ||
+		strings.Contains(historyBody, "private@example.invalid") ||
+		strings.Contains(historyBody, "private body") || strings.Contains(historyBody, root) {
+		t.Fatalf("repository history status=%d body=%s", history.Code, historyBody)
+	}
+	historyQuery := performSessionMessageRequest(t, api, http.MethodGet,
+		historyPath+"?refresh=true", testAccessToken, "", "", nil)
+	assertAPIError(t, historyQuery, http.StatusBadRequest, "INVALID_ARGUMENT")
 }
 
 func TestWorkspaceSearchHTTPReturnsOnlyRedactedNonAuthorizingEvidence(t *testing.T) {

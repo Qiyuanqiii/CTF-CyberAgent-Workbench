@@ -85,10 +85,15 @@ export type WorkspaceExplorerView = components["schemas"]["WorkspaceExplorerView
 export type WorkspaceSearchView = components["schemas"]["WorkspaceSearchView"];
 export type RepositoryStateView = components["schemas"]["RepositoryStateView"];
 export type RepositoryDiffView = components["schemas"]["RepositoryDiffView"];
+export type RepositoryHistoryView = components["schemas"]["RepositoryHistoryView"];
 export type VerificationEvidenceRequestView = components["schemas"]["VerificationEvidenceRequestView"];
 export type VerificationEvidenceControlView = components["schemas"]["VerificationEvidenceControlView"];
 export type VerificationEvidenceInventoryView = components["schemas"]["VerificationEvidenceInventoryView"];
+export type VerificationPlanRequestView = components["schemas"]["VerificationPlanRequestView"];
+export type VerificationPlanControlView = components["schemas"]["VerificationPlanControlView"];
+export type VerificationPlanInventoryView = components["schemas"]["VerificationPlanInventoryView"];
 export type CodeHandoffView = components["schemas"]["CodeHandoffView"];
+export type CodeHandoffExportView = components["schemas"]["CodeHandoffExportView"];
 
 export interface SuccessEnvelope<T> {
   version: "api.v1";

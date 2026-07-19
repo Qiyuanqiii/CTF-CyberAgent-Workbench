@@ -114,7 +114,9 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				(path == EvidenceAttachmentPathTemplate &&
 					item.Post.OperationID == "attachRunEvidence") ||
 				(path == VerificationEvidencePathTemplate &&
-					item.Post.OperationID == "recordRunVerificationEvidence")
+					item.Post.OperationID == "recordRunVerificationEvidence") ||
+				(path == VerificationPlanPathTemplate &&
+					item.Post.OperationID == "recordRunVerificationPlan")
 			if !validControl ||
 				item.Post.ReadOnly || item.Post.Responses["202"] == nil || item.Post.RequestBody == nil ||
 				len(item.Post.Security) != 1 || item.Post.Security[0]["ControlBearerAuth"] == nil {
@@ -125,7 +127,7 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 		expectedOperations := 1
 		if path == RunCreationControlPath || path == SessionMessageControlPathTemplate ||
 			path == RunWakeIntentPathTemplate || path == EvidenceAttachmentPathTemplate ||
-			path == VerificationEvidencePathTemplate {
+			path == VerificationEvidencePathTemplate || path == VerificationPlanPathTemplate {
 			expectedOperations = 2
 		}
 		if len(operations) != expectedOperations {
@@ -171,7 +173,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				path == RunWakeExecutionPathTemplate ||
 				path == SkillPackageInstallPath ||
 				path == EvidenceAttachmentPathTemplate ||
-				path == VerificationEvidencePathTemplate) &&
+				path == VerificationEvidencePathTemplate ||
+				path == VerificationPlanPathTemplate) &&
 				method == "post") {
 				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
 			}
@@ -458,6 +461,8 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 			requestPath += "?query=README"
 		} else if spec.OperationID == "issueFileEditProposalSource" {
 			requestPath += "?path=README.md"
+		} else if spec.OperationID == "exportCodeHandoff" {
+			requestPath += "?format=markdown"
 		}
 		t.Run(spec.OperationID, func(t *testing.T) {
 			var response *httptest.ResponseRecorder
@@ -521,6 +526,11 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 					body = `{"version":"operator_verification_evidence.v1",` +
 						`"outcome":"pass","title":"OpenAPI verification",` +
 						`"summary":"Live route verified"}`
+				} else if spec.Path == VerificationPlanPathTemplate {
+					body = `{"version":"operator_verification_plan.v1",` +
+						`"title":"OpenAPI verification plan","summary":"Operator guidance",` +
+						`"items":[{"title":"Live route",` +
+						`"expected_observation":"Observe a successful response"}]}`
 				} else if spec.Path != RunExecutionProfileControlPathTemplate {
 					attemptID := fixture.checkpoint.AttemptID
 					modelAttempt := 1

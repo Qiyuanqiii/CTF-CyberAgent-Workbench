@@ -428,6 +428,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/code-handoff/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export the current Code handoff
+         * @description Builds a bounded Markdown or JSON download projection from one stable Code handoff snapshot. The response includes the durable source event high-water mark and SHA-256 of the exact content; it grants no resume, mutation, report-acceptance, or execution authority.
+         */
+        get: operations["exportCodeHandoff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/delegations": {
         parameters: {
             query?: never;
@@ -956,6 +976,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/verification-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List immutable operator verification plans
+         * @description Returns at most fifty exact Code Run/Session/Workspace-bound operator checklists. Plans contain guidance only and cannot represent a result, model assertion, command, approval, or execution authority.
+         */
+        get: operations["listRunVerificationPlans"];
+        put?: never;
+        /**
+         * Record an operator verification plan
+         * @description Atomically records one secret-redacted immutable operator checklist against the exact active Code Run Session and Workspace. It executes no command and has no outcome, pass inference, model assertion, approval, or action authority.
+         */
+        post: operations["recordRunVerificationPlan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/wake-intent": {
         parameters: {
             query?: never;
@@ -1224,6 +1268,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/repository-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect bounded local repository history
+         * @description Returns at most fifty first-parent commit subjects and sixty-four local branch heads for a Git repository rooted exactly at the registered Workspace. Subjects are secret-redacted; author identities, commit bodies, remotes, host paths, processes, hooks, and network access are excluded.
+         */
+        get: operations["getWorkspaceRepositoryHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/repository-state": {
         parameters: {
             query?: never;
@@ -1441,6 +1505,28 @@ export interface components {
             total_diff_bytes: number;
             truncated: boolean;
         };
+        CodeHandoffExportView: {
+            content: string;
+            /** Format: int32 */
+            content_bytes: number;
+            content_sha256: string;
+            download_only: boolean;
+            execution_started: boolean;
+            filename: string;
+            format: string;
+            /** Format: date-time */
+            generated_at: string;
+            mime_type: string;
+            mutation_supported: boolean;
+            private_bodies: boolean;
+            protocol_version: string;
+            read_only: boolean;
+            report_acceptance: boolean;
+            resume_authorized: boolean;
+            run_id: string;
+            /** Format: int64 */
+            source_event_sequence: number;
+        };
         CodeHandoffPlanView: {
             /** Format: int32 */
             blocked_count: number;
@@ -1481,6 +1567,21 @@ export interface components {
             id: string;
             /** @enum {string} */
             status: "generated";
+        };
+        CodeHandoffVerificationPlanReferenceView: {
+            /** Format: date-time */
+            created_at: string;
+            id: string;
+            /** Format: int32 */
+            item_count: number;
+            plan_sha256: string;
+            redacted: boolean;
+        };
+        CodeHandoffVerificationPlansView: {
+            references: components["schemas"]["CodeHandoffVerificationPlanReferenceView"][];
+            /** Format: int32 */
+            returned_count: number;
+            truncated: boolean;
         };
         CodeHandoffVerificationReferenceView: {
             id: string;
@@ -1531,9 +1632,12 @@ export interface components {
             /** @enum {string} */
             run_status: "created" | "preparing" | "running" | "waiting_approval" | "paused" | "completed" | "failed" | "cancelled";
             session_id: string;
+            /** Format: int64 */
+            source_event_sequence: number;
             /** @enum {string} */
             surface: "code";
             verification: components["schemas"]["CodeHandoffVerificationView"];
+            verification_plans: components["schemas"]["CodeHandoffVerificationPlansView"];
             workspace_id: string;
         };
         DelegationApplicationView: {
@@ -2471,6 +2575,49 @@ export interface components {
             truncated: boolean;
             workspace_id: string;
         };
+        RepositoryHistoryBranchView: {
+            current: boolean;
+            head: string;
+            name: string;
+        };
+        RepositoryHistoryCommitView: {
+            /** Format: date-time */
+            committed_at: string;
+            hash: string;
+            /** Format: int32 */
+            parent_count: number;
+            redacted: boolean;
+            subject: string;
+            subject_bounded: boolean;
+        };
+        RepositoryHistoryView: {
+            author_identity_included: boolean;
+            available: boolean;
+            branches: components["schemas"]["RepositoryHistoryBranchView"][];
+            commit_body_included: boolean;
+            commits: components["schemas"]["RepositoryHistoryCommitView"][];
+            detached: boolean;
+            first_parent_only: boolean;
+            head: string;
+            hooks_executed: boolean;
+            kind: string;
+            network_used: boolean;
+            /** Format: int32 */
+            omitted_branch_count: number;
+            process_started: boolean;
+            protocol_version: string;
+            read_only: boolean;
+            /** Format: int32 */
+            redaction_count: number;
+            remote_config_included: boolean;
+            /** Format: int32 */
+            returned_branch_count: number;
+            /** Format: int32 */
+            returned_commit_count: number;
+            root_path_exposed: boolean;
+            truncated: boolean;
+            workspace_id: string;
+        };
         RepositoryStateView: {
             available: boolean;
             branch: string;
@@ -3075,6 +3222,81 @@ export interface components {
             title: string;
             /** @enum {string} */
             version: "operator_verification_evidence.v1";
+        };
+        VerificationPlanControlView: {
+            approval: boolean;
+            authority_granted: boolean;
+            command_executed: boolean;
+            /** Format: date-time */
+            created_at: string;
+            guidance_only: boolean;
+            id: string;
+            immutable: boolean;
+            /** Format: int32 */
+            item_count: number;
+            items: components["schemas"]["VerificationPlanItemView"][];
+            model_assertion: boolean;
+            operator_supplied: boolean;
+            plan_sha256: string;
+            protocol_version: string;
+            redacted: boolean;
+            replayed: boolean;
+            result_inferred: boolean;
+            run_id: string;
+            session_id: string;
+            summary: string;
+            title: string;
+            workspace_id: string;
+        };
+        VerificationPlanInventoryView: {
+            items: components["schemas"]["VerificationPlanView"][];
+            protocol_version: string;
+            run_id: string;
+            session_id: string;
+            truncated: boolean;
+            workspace_id: string;
+        };
+        VerificationPlanItemRequestView: {
+            expected_observation: string;
+            title: string;
+        };
+        VerificationPlanItemView: {
+            expected_observation: string;
+            item_sha256: string;
+            /** Format: int32 */
+            ordinal: number;
+            redacted: boolean;
+            title: string;
+        };
+        VerificationPlanRequestView: {
+            items: components["schemas"]["VerificationPlanItemRequestView"][];
+            summary: string;
+            title: string;
+            version: string;
+        };
+        VerificationPlanView: {
+            approval: boolean;
+            authority_granted: boolean;
+            command_executed: boolean;
+            /** Format: date-time */
+            created_at: string;
+            guidance_only: boolean;
+            id: string;
+            immutable: boolean;
+            /** Format: int32 */
+            item_count: number;
+            items: components["schemas"]["VerificationPlanItemView"][];
+            model_assertion: boolean;
+            operator_supplied: boolean;
+            plan_sha256: string;
+            protocol_version: string;
+            redacted: boolean;
+            result_inferred: boolean;
+            run_id: string;
+            session_id: string;
+            summary: string;
+            title: string;
+            workspace_id: string;
         };
         WorkItemView: {
             acceptance_criteria: string[];
@@ -4082,6 +4304,44 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["CodeHandoffView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    exportCodeHandoff: {
+        parameters: {
+            query: {
+                /** @description Bounded export representation */
+                format: "markdown" | "json";
+            };
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CodeHandoffExportView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";
@@ -5252,6 +5512,87 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    listRunVerificationPlans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["VerificationPlanInventoryView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    recordRunVerificationPlan: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerificationPlanRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["VerificationPlanControlView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     getRunWakeIntent: {
         parameters: {
             query?: never;
@@ -5850,6 +6191,41 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["RepositoryDiffView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getWorkspaceRepositoryHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace identity */
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RepositoryHistoryView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";

@@ -1,7 +1,8 @@
-import { useQuery } from "@tanstack/react-query";
-import { BookOpenCheck, RefreshCw } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { BookOpenCheck, Download, RefreshCw } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import { formatBytes, formatDate, shortID } from "../lib/format";
+import { downloadTextFile } from "../lib/download";
 import { EmptyState, ErrorState, KeyValue, LoadingState, StatusBadge } from "./common";
 
 export function CodeHandoffPanel({ client, runID }: {
@@ -12,6 +13,10 @@ export function CodeHandoffPanel({ client, runID }: {
     queryKey: ["run", runID, "code-handoff"],
     queryFn: ({ signal }) => client.codeHandoff(runID, signal),
     enabled: Boolean(runID),
+  });
+  const exportHandoff = useMutation({
+    mutationFn: (format: "markdown" | "json") => client.codeHandoffExport(runID, format),
+    onSuccess: (value) => downloadTextFile(value.filename, value.mime_type, value.content),
   });
   return <section aria-label="Code handoff" className="code-handoff-panel">
     <header className="projection-heading">
@@ -32,9 +37,21 @@ export function CodeHandoffPanel({ client, runID }: {
         <KeyValue label="Queue" value={`${query.data.queue.pending} pending`} />
         <KeyValue label="Changes" value={`${query.data.change_set.returned_count} / ${formatBytes(query.data.change_set.total_diff_bytes)}`} />
         <KeyValue label="Verification" value={`${query.data.verification.pass_count} pass / ${query.data.verification.fail_count} fail`} />
+        <KeyValue label="Checklists" value={query.data.verification_plans.returned_count} />
         <KeyValue label="Actions" value={query.data.pending_action_count} />
+        <KeyValue label="Event high-water" value={query.data.source_event_sequence} />
         <KeyValue label="Generated" value={formatDate(query.data.generated_at)} />
       </dl>
+      <div className="handoff-export-actions">
+        <span>SHA-256 verified download</span>
+        <button className="compact-command" disabled={exportHandoff.isPending}
+          onClick={() => exportHandoff.mutate("markdown")} type="button">
+          <Download aria-hidden="true" size={14} />Markdown</button>
+        <button className="compact-command" disabled={exportHandoff.isPending}
+          onClick={() => exportHandoff.mutate("json")} type="button">
+          <Download aria-hidden="true" size={14} />JSON</button>
+      </div>
+      {exportHandoff.error && <ErrorState error={exportHandoff.error} />}
       <div className="handoff-reference-columns">
         <section><h3>Pending actions</h3>
           {query.data.pending_actions.length === 0 ? <EmptyState>No pending actions</EmptyState> :

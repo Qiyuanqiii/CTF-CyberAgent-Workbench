@@ -63,7 +63,9 @@ import { OperatorActionCenter } from "./operator-action-center";
 import { RunWakePanel } from "./run-wake-panel";
 import { RepositoryStatePanel } from "./repository-state-panel";
 import { RepositoryDiffPanel } from "./repository-diff-panel";
+import { RepositoryHistoryPanel } from "./repository-history-panel";
 import { VerificationEvidence } from "./verification-evidence";
+import { VerificationPlan } from "./verification-plan";
 import { WorkspaceExplorer } from "./workspace-explorer";
 import { AgentGraphPanel, DelegationsPanel, ExternalSkillsPanel, FanoutPanel, FindingsPanel } from "./run-projections";
 
@@ -192,6 +194,7 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
         {tab === "diffs" && <FileEditPanel client={client} runID={runID} />}
         {tab === "repository" && <div className="projection-stack">
           <RepositoryStatePanel client={client} workspaceID={detail.mission.workspace_id ?? ""} />
+          <RepositoryHistoryPanel client={client} workspaceID={detail.mission.workspace_id ?? ""} />
           <RepositoryDiffPanel client={client} workspaceID={detail.mission.workspace_id ?? ""} />
         </div>}
         {tab === "files" && <WorkspaceExplorer client={client}
@@ -204,7 +207,8 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
             setTab("files");
           }} />}
         {tab === "verify" && detail.mode.surface === "code" &&
-          <VerificationEvidence client={client} runID={runID} />}
+          <div className="projection-stack"><VerificationPlan client={client} runID={runID} />
+            <VerificationEvidence client={client} runID={runID} /></div>}
         {tab === "handoff" && detail.mode.surface === "code" &&
           <CodeHandoffPanel client={client} runID={runID} />}
         {tab === "receipts" && <OperationReceiptHistory client={client} runID={runID} />}

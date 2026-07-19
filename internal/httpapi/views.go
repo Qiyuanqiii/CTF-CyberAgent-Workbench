@@ -192,6 +192,46 @@ type RepositoryDiffView struct {
 	HooksExecuted         bool                     `json:"hooks_executed"`
 }
 
+type RepositoryHistoryCommitView struct {
+	Hash           string    `json:"hash"`
+	Subject        string    `json:"subject"`
+	ParentCount    int       `json:"parent_count"`
+	CommittedAt    time.Time `json:"committed_at"`
+	Redacted       bool      `json:"redacted"`
+	SubjectBounded bool      `json:"subject_bounded"`
+}
+
+type RepositoryHistoryBranchView struct {
+	Name    string `json:"name"`
+	Head    string `json:"head"`
+	Current bool   `json:"current"`
+}
+
+type RepositoryHistoryView struct {
+	ProtocolVersion        string                        `json:"protocol_version"`
+	WorkspaceID            string                        `json:"workspace_id"`
+	Kind                   string                        `json:"kind"`
+	Available              bool                          `json:"available"`
+	Head                   string                        `json:"head"`
+	Detached               bool                          `json:"detached"`
+	Commits                []RepositoryHistoryCommitView `json:"commits"`
+	Branches               []RepositoryHistoryBranchView `json:"branches"`
+	ReturnedCommitCount    int                           `json:"returned_commit_count"`
+	ReturnedBranchCount    int                           `json:"returned_branch_count"`
+	OmittedBranchCount     int                           `json:"omitted_branch_count"`
+	RedactionCount         int                           `json:"redaction_count"`
+	Truncated              bool                          `json:"truncated"`
+	FirstParentOnly        bool                          `json:"first_parent_only"`
+	ReadOnly               bool                          `json:"read_only"`
+	RootPathExposed        bool                          `json:"root_path_exposed"`
+	AuthorIdentityIncluded bool                          `json:"author_identity_included"`
+	CommitBodyIncluded     bool                          `json:"commit_body_included"`
+	RemoteConfigIncluded   bool                          `json:"remote_config_included"`
+	ProcessStarted         bool                          `json:"process_started"`
+	NetworkUsed            bool                          `json:"network_used"`
+	HooksExecuted          bool                          `json:"hooks_executed"`
+}
+
 type FileEditReviewView struct {
 	ProtocolVersion string              `json:"protocol_version"`
 	RunID           string              `json:"run_id"`

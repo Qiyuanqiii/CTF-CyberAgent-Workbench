@@ -4,6 +4,7 @@ import type {
   ApprovalDecisionControlView,
   ApprovalQueueView,
   CodeHandoffView,
+  CodeHandoffExportView,
   ErrorEnvelope,
   EvidenceAttachmentRequestView,
   EvidenceAttachmentView,
@@ -36,6 +37,7 @@ import type {
   ProviderCredentialStatusView,
   RepositoryStateView,
   RepositoryDiffView,
+  RepositoryHistoryView,
   RunCreationControlRequestView,
   RunCreationControlView,
   RunExecutionControlRequestView,
@@ -63,6 +65,9 @@ import type {
   VerificationEvidenceControlView,
   VerificationEvidenceInventoryView,
   VerificationEvidenceRequestView,
+  VerificationPlanControlView,
+  VerificationPlanInventoryView,
+  VerificationPlanRequestView,
 } from "./types";
 
 export type QueryValue = boolean | number | string | undefined;
@@ -1120,6 +1125,74 @@ function parseRepositoryDiff(value: unknown, workspaceID: string): RepositoryDif
   return { ...value, items } as unknown as RepositoryDiffView;
 }
 
+function parseRepositoryHistory(value: unknown, workspaceID: string): RepositoryHistoryView {
+  const keys = ["author_identity_included", "available", "branches", "commit_body_included",
+    "commits", "detached", "first_parent_only", "head", "hooks_executed", "kind",
+    "network_used", "omitted_branch_count", "process_started", "protocol_version",
+    "read_only", "redaction_count", "remote_config_included", "returned_branch_count",
+    "returned_commit_count", "root_path_exposed", "truncated", "workspace_id"];
+  if (!hasExactKeys(value, keys) || value.protocol_version !== "repository_history.v1" ||
+    value.workspace_id !== workspaceID || !["none", "git"].includes(String(value.kind)) ||
+    typeof value.available !== "boolean" || value.available !== (value.kind === "git") ||
+    typeof value.detached !== "boolean" || typeof value.truncated !== "boolean" ||
+    value.first_parent_only !== true || value.read_only !== true ||
+    value.root_path_exposed !== false || value.author_identity_included !== false ||
+    value.commit_body_included !== false || value.remote_config_included !== false ||
+    value.process_started !== false || value.network_used !== false ||
+    value.hooks_executed !== false || typeof value.head !== "string" ||
+    !/^(?:[0-9a-f]{12})?$/u.test(value.head) || !Array.isArray(value.commits) ||
+    !Array.isArray(value.branches) || value.commits.length > 50 || value.branches.length > 64 ||
+    !safeBoundedCount(value.returned_commit_count, 50) ||
+    value.returned_commit_count !== value.commits.length ||
+    !safeBoundedCount(value.returned_branch_count, 64) ||
+    value.returned_branch_count !== value.branches.length ||
+    !safeBoundedCount(value.omitted_branch_count, 1024) ||
+    !safeBoundedCount(value.redaction_count, 10_000)) {
+    throw new APIRequestError("Repository history violated its bounded local contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const hashes = new Set<string>();
+  const commits = value.commits.map((commit) => {
+    if (!hasExactKeys(commit, ["committed_at", "hash", "parent_count", "redacted",
+      "subject", "subject_bounded"]) || typeof commit.hash !== "string" ||
+      !/^[0-9a-f]{12}$/u.test(commit.hash) || hashes.has(commit.hash) ||
+      typeof commit.subject !== "string" || commit.subject.length === 0 ||
+      [...commit.subject].length > 512 || /[\u0000-\u001f\u007f]/u.test(commit.subject) ||
+      !safeBoundedCount(commit.parent_count, 10_000) || !validDate(commit.committed_at) ||
+      typeof commit.redacted !== "boolean" || typeof commit.subject_bounded !== "boolean") {
+      throw new APIRequestError("Repository commit widened history or privacy authority",
+        "INVALID_RESPONSE", 502);
+    }
+    hashes.add(commit.hash);
+    return commit;
+  });
+  const branchNames = new Set<string>();
+  let currentBranches = 0;
+  const branches = value.branches.map((branch) => {
+    if (!hasExactKeys(branch, ["current", "head", "name"]) ||
+      typeof branch.name !== "string" || branch.name.length === 0 ||
+      [...branch.name].length > 255 || /[\u0000-\u001f\u007f]/u.test(branch.name) ||
+      branchNames.has(branch.name) || typeof branch.head !== "string" ||
+      !/^[0-9a-f]{12}$/u.test(branch.head) || typeof branch.current !== "boolean") {
+      throw new APIRequestError("Repository branch widened local metadata authority",
+        "INVALID_RESPONSE", 502);
+    }
+    branchNames.add(branch.name);
+    currentBranches += branch.current ? 1 : 0;
+    return branch;
+  });
+  if (currentBranches > 1 ||
+    (!value.available && (value.head !== "" || value.detached || commits.length !== 0 ||
+      branches.length !== 0 || value.omitted_branch_count !== 0 ||
+      value.redaction_count !== 0 || value.truncated)) ||
+    (value.detached && currentBranches !== 0) ||
+    (value.head === "" && commits.length !== 0)) {
+    throw new APIRequestError("Repository history contains inconsistent local facts",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, commits, branches } as unknown as RepositoryHistoryView;
+}
+
 function validVerificationText(value: unknown, maximum: number, multiline: boolean): value is string {
   if (typeof value !== "string" || value === "" || value.trim() !== value ||
     [...value].length > maximum || value.includes("\0")) {
@@ -1184,24 +1257,97 @@ function parseVerificationEvidenceInventory(value: unknown,
   return { ...value, items } as unknown as VerificationEvidenceInventoryView;
 }
 
+function parseVerificationPlan(value: unknown, runID: string, sessionID = "",
+  workspaceID = "", control = false): VerificationPlanControlView {
+  const keys = ["approval", "authority_granted", "command_executed", "created_at",
+    "guidance_only", "id", "immutable", "item_count", "items", "model_assertion",
+    "operator_supplied", "plan_sha256", "protocol_version", "redacted", "result_inferred",
+    "run_id", "session_id", "summary", "title", "workspace_id"];
+  if (control) keys.push("replayed");
+  if (!hasExactKeys(value, keys) || value.protocol_version !== "operator_verification_plan.v1" ||
+    value.run_id !== runID || !boundedIdentity(value.id) || !boundedIdentity(value.session_id) ||
+    !boundedIdentity(value.workspace_id) || (sessionID !== "" && value.session_id !== sessionID) ||
+    (workspaceID !== "" && value.workspace_id !== workspaceID) ||
+    !validVerificationText(value.title, 160, false) ||
+    !validVerificationText(value.summary, 2048, true) || !isSHA256(value.plan_sha256) ||
+    typeof value.redacted !== "boolean" || !validDate(value.created_at) ||
+    !Array.isArray(value.items) || value.items.length < 1 || value.items.length > 32 ||
+    value.item_count !== value.items.length || value.immutable !== true ||
+    value.operator_supplied !== true || value.guidance_only !== true ||
+    value.command_executed !== false || value.model_assertion !== false ||
+    value.result_inferred !== false || value.approval !== false ||
+    value.authority_granted !== false || (control && typeof value.replayed !== "boolean")) {
+    throw new APIRequestError("Verification plan widened guidance or result authority",
+      "INVALID_RESPONSE", 502);
+  }
+  let itemRedacted = false;
+  const items = value.items.map((item, index) => {
+    if (!hasExactKeys(item, ["expected_observation", "item_sha256", "ordinal", "redacted",
+      "title"]) || item.ordinal !== index + 1 ||
+      !validVerificationText(item.title, 160, false) ||
+      !validVerificationText(item.expected_observation, 1024, true) ||
+      !isSHA256(item.item_sha256) || typeof item.redacted !== "boolean") {
+      throw new APIRequestError("Verification plan item violated its bounded checklist contract",
+        "INVALID_RESPONSE", 502);
+    }
+    itemRedacted = itemRedacted || item.redacted;
+    return item;
+  });
+  if (itemRedacted && !value.redacted) {
+    throw new APIRequestError("Verification plan redaction state is inconsistent",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, items } as unknown as VerificationPlanControlView;
+}
+
+function parseVerificationPlanInventory(value: unknown,
+  runID: string): VerificationPlanInventoryView {
+  if (!hasExactKeys(value, ["items", "protocol_version", "run_id", "session_id", "truncated",
+    "workspace_id"]) || value.protocol_version !== "operator_verification_plan_inventory.v1" ||
+    value.run_id !== runID || !boundedIdentity(value.session_id) ||
+    !boundedIdentity(value.workspace_id) || !Array.isArray(value.items) ||
+    value.items.length > 50 || typeof value.truncated !== "boolean") {
+    throw new APIRequestError("Verification plan inventory violated its immutable bounded contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const identities = new Set<string>();
+  const items = value.items.map((item) => {
+    const parsed = parseVerificationPlan(item, runID, String(value.session_id),
+      String(value.workspace_id));
+    if (identities.has(parsed.id)) {
+      throw new APIRequestError("Verification plan inventory repeated an immutable identity",
+        "INVALID_RESPONSE", 502);
+    }
+    identities.add(parsed.id);
+    return parsed;
+  });
+  if (value.truncated && items.length !== 50) {
+	throw new APIRequestError("Verification plan inventory truncation is inconsistent",
+	  "INVALID_RESPONSE", 502);
+  }
+  return { ...value, items } as unknown as VerificationPlanInventoryView;
+}
+
 function parseCodeHandoff(value: unknown, runID: string): CodeHandoffView {
   const keys = ["change_set", "composite_mutation", "durable_sources", "execution_started",
     "generated_at", "mission_id", "mode_revision", "pending_action_count", "pending_actions",
     "pending_actions_truncated", "phase", "plan", "private_bodies_included", "protocol_version",
     "queue", "regenerable", "report_references", "report_references_truncated",
-    "resume_authorized", "run_id", "run_status", "session_id", "surface", "verification",
-    "workspace_id"];
+    "resume_authorized", "run_id", "run_status", "session_id", "source_event_sequence",
+    "surface", "verification", "verification_plans", "workspace_id"];
   if (!hasExactKeys(value, keys) || value.protocol_version !== "code_handoff.v1" ||
     value.run_id !== runID || !boundedIdentity(value.mission_id) || !boundedIdentity(value.session_id) ||
     !boundedIdentity(value.workspace_id) || value.surface !== "code" ||
     !["plan", "deliver"].includes(String(value.phase)) ||
     !["created", "preparing", "running", "waiting_approval", "paused", "completed", "failed",
       "cancelled"].includes(String(value.run_status)) || !safePositiveInteger(value.mode_revision) ||
-    !validDate(value.generated_at) || value.regenerable !== true || value.durable_sources !== true ||
+    !safePositiveInteger(value.source_event_sequence) || !validDate(value.generated_at) ||
+    value.regenerable !== true || value.durable_sources !== true ||
     value.private_bodies_included !== false || value.composite_mutation !== false ||
     value.resume_authorized !== false || value.execution_started !== false ||
     !isRecord(value.plan) || !isRecord(value.queue) || !isRecord(value.change_set) ||
-    !isRecord(value.verification) || !Array.isArray(value.pending_actions) ||
+    !isRecord(value.verification) || !isRecord(value.verification_plans) ||
+    !Array.isArray(value.pending_actions) ||
     value.pending_actions.length > 20 || !Array.isArray(value.report_references) ||
     value.report_references.length > 20 || !safeBoundedCount(value.pending_action_count, 100) ||
     typeof value.pending_actions_truncated !== "boolean" ||
@@ -1272,6 +1418,28 @@ function parseCodeHandoff(value: unknown, runID: string): CodeHandoffView {
     }
     verificationIDs.add(String(reference.id));
   }
+  const verificationPlans = value.verification_plans;
+  if (!hasExactKeys(verificationPlans, ["references", "returned_count", "truncated"]) ||
+    !Array.isArray(verificationPlans.references) || verificationPlans.references.length > 20 ||
+    !safeBoundedCount(verificationPlans.returned_count, 50) ||
+    typeof verificationPlans.truncated !== "boolean" ||
+    verificationPlans.references.length !== Math.min(Number(verificationPlans.returned_count), 20) ||
+    verificationPlans.truncated !== (verificationPlans.returned_count > 20)) {
+    throw new APIRequestError("Code handoff verification plan summary is invalid",
+      "INVALID_RESPONSE", 502);
+  }
+  const verificationPlanIDs = new Set<string>();
+  for (const reference of verificationPlans.references) {
+    if (!hasExactKeys(reference, ["created_at", "id", "item_count", "plan_sha256", "redacted"]) ||
+      !boundedIdentity(reference.id) || verificationPlanIDs.has(String(reference.id)) ||
+      !isSHA256(reference.plan_sha256) || !safeBoundedCount(reference.item_count, 32) ||
+      reference.item_count < 1 || typeof reference.redacted !== "boolean" ||
+      !validDate(reference.created_at)) {
+      throw new APIRequestError("Code handoff verification plan reference is invalid",
+        "INVALID_RESPONSE", 502);
+    }
+    verificationPlanIDs.add(String(reference.id));
+  }
   const actionMapping = {
     steering_pending: ["pending", "queue"], approval_pending: ["pending", "approvals"],
     file_edit_review: ["proposed", "diffs"], file_edit_apply: ["approved", "diffs"],
@@ -1315,6 +1483,59 @@ function parseCodeHandoff(value: unknown, runID: string): CodeHandoffView {
     reportIDs.add(String(report.id));
   }
   return value as unknown as CodeHandoffView;
+}
+
+async function parseCodeHandoffExport(value: unknown, runID: string,
+  format: "json" | "markdown"): Promise<CodeHandoffExportView> {
+  const keys = ["content", "content_bytes", "content_sha256", "download_only",
+    "execution_started", "filename", "format", "generated_at", "mime_type",
+    "mutation_supported", "private_bodies", "protocol_version", "read_only",
+    "report_acceptance", "resume_authorized", "run_id", "source_event_sequence"];
+  if (!hasExactKeys(value, keys) || value.protocol_version !== "code_handoff_export.v1" ||
+    value.run_id !== runID || value.format !== format || !validDate(value.generated_at) ||
+    !safePositiveInteger(value.source_event_sequence) || typeof value.filename !== "string" ||
+    value.filename.length < 1 || value.filename.length > 255 || /[\\/:*?"<>|\u0000-\u001f]/u.test(value.filename) ||
+    typeof value.mime_type !== "string" || typeof value.content !== "string" ||
+    !safePositiveInteger(value.content_bytes) || value.content_bytes > 256 * 1024 ||
+    !isSHA256(value.content_sha256) || value.read_only !== true || value.download_only !== true ||
+    value.private_bodies !== false || value.resume_authorized !== false ||
+    value.mutation_supported !== false || value.report_acceptance !== false ||
+    value.execution_started !== false) {
+    throw new APIRequestError("Code handoff export violated its download-only boundary",
+      "INVALID_RESPONSE", 502);
+  }
+  const expectedMIME = format === "json" ? "application/json" : "text/markdown; charset=utf-8";
+  const expectedSuffix = format === "json" ? ".json" : ".md";
+  const encoded = new TextEncoder().encode(value.content);
+  if (value.mime_type !== expectedMIME || !value.filename.endsWith(expectedSuffix) ||
+    encoded.length !== value.content_bytes) {
+    throw new APIRequestError("Code handoff export metadata does not match its content",
+      "INVALID_RESPONSE", 502);
+  }
+  const digest = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", encoded));
+  const digestHex = [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  if (digestHex !== value.content_sha256) {
+    throw new APIRequestError("Code handoff export digest verification failed",
+      "INVALID_RESPONSE", 502);
+  }
+  if (format === "json") {
+    let document: unknown;
+    try {
+      document = JSON.parse(value.content);
+    } catch {
+      throw new APIRequestError("Code handoff JSON export is invalid", "INVALID_RESPONSE", 502);
+    }
+    if (!isRecord(document) || document.protocol_version !== "code_handoff.v1" ||
+      document.run_id !== runID || document.source_event_sequence !== value.source_event_sequence) {
+      throw new APIRequestError("Code handoff JSON export escaped its source binding",
+        "INVALID_RESPONSE", 502);
+    }
+  } else if (!value.content.startsWith("# CyberAgent Code Handoff\n") ||
+    !value.content.includes(`Source event high-water: \`${value.source_event_sequence}\``)) {
+    throw new APIRequestError("Code handoff Markdown export omitted its source binding",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as CodeHandoffExportView;
 }
 
 function parseEvidenceAttachment(value: unknown, runID: string,
@@ -1631,6 +1852,16 @@ export class CyberAgentClient {
     ), workspaceID);
   }
 
+  async repositoryHistory(workspaceID: string,
+    signal?: AbortSignal): Promise<RepositoryHistoryView> {
+    if (!boundedIdentity(workspaceID) || workspaceID.trim() !== workspaceID) {
+      throw new Error("A normalized Workspace identity is required");
+    }
+    return parseRepositoryHistory(await this.get<unknown>(
+      `/workspaces/${encodeURIComponent(workspaceID)}/repository-history`, {}, signal,
+    ), workspaceID);
+  }
+
   async operationReceiptHistory(runID = "",
     signal?: AbortSignal): Promise<OperationReceiptHistoryView> {
     if (runID !== "" && (!boundedIdentity(runID) || runID.trim() !== runID)) {
@@ -1685,6 +1916,32 @@ export class CyberAgentClient {
     ), runID, "", "", true);
   }
 
+  async verificationPlans(runID: string,
+    signal?: AbortSignal): Promise<VerificationPlanInventoryView> {
+    if (!boundedIdentity(runID) || runID.trim() !== runID) {
+      throw new Error("A normalized Run identity is required");
+    }
+    return parseVerificationPlanInventory(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/verification-plan`, {}, signal,
+    ), runID);
+  }
+
+  async recordVerificationPlan(runID: string, body: VerificationPlanRequestView,
+    idempotencyKey: string, signal?: AbortSignal): Promise<VerificationPlanControlView> {
+    if (!this.hasVerificationEvidence || !boundedIdentity(runID) ||
+      body.version !== "operator_verification_plan.v1" ||
+      !validVerificationText(body.title, 160, false) ||
+      !validVerificationText(body.summary, 2048, true) || !Array.isArray(body.items) ||
+      body.items.length < 1 || body.items.length > 32 || body.items.some((item) =>
+        !validVerificationText(item.title, 160, false) ||
+        !validVerificationText(item.expected_observation, 1024, true))) {
+      throw new Error("Verification capability and a bounded operator checklist are required");
+    }
+    return parseVerificationPlan(await this.sendControl<unknown>(
+      `/runs/${encodeURIComponent(runID)}/verification-plan`, body,
+      idempotencyKey, signal), runID, "", "", true);
+  }
+
   async codeHandoff(runID: string, signal?: AbortSignal): Promise<CodeHandoffView> {
     if (!boundedIdentity(runID) || runID.trim() !== runID) {
       throw new Error("A normalized Run identity is required");
@@ -1692,6 +1949,17 @@ export class CyberAgentClient {
     return parseCodeHandoff(await this.get<unknown>(
       `/runs/${encodeURIComponent(runID)}/code-handoff`, {}, signal,
     ), runID);
+  }
+
+  async codeHandoffExport(runID: string, format: "json" | "markdown",
+    signal?: AbortSignal): Promise<CodeHandoffExportView> {
+    if (!boundedIdentity(runID) || runID.trim() !== runID ||
+      !["json", "markdown"].includes(format)) {
+      throw new Error("A normalized Run identity and supported handoff format are required");
+    }
+    return parseCodeHandoffExport(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/code-handoff/export`, { format }, signal,
+    ), runID, format);
   }
 
   async attachEvidence(runID: string, body: EvidenceAttachmentRequestView,

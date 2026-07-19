@@ -135,6 +135,9 @@ type Store interface {
 	ListVerificationEvidence(context.Context, string, int) ([]verification.Evidence, error)
 	RecordVerificationEvidence(context.Context, verification.Evidence) (
 		verification.Evidence, bool, error)
+	GetVerificationPlanByOperation(context.Context, string) (verification.Plan, bool, error)
+	ListVerificationPlans(context.Context, string, int) ([]verification.Plan, error)
+	RecordVerificationPlan(context.Context, verification.Plan) (verification.Plan, bool, error)
 	ListOperatorActionRecords(context.Context, string, string, string, time.Time, int) (
 		[]operatoraction.Record, error)
 
@@ -555,6 +558,11 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if runID, matched := matchVerificationEvidencePath(request.URL.Path); matched &&
 		request.Method != http.MethodGet {
 		a.serveVerificationEvidenceControl(tracked, request, requestID, runID)
+		return
+	}
+	if runID, matched := matchVerificationPlanPath(request.URL.Path); matched &&
+		request.Method != http.MethodGet {
+		a.serveVerificationPlanControl(tracked, request, requestID, runID)
 		return
 	}
 	if runID, matched := matchRunExecutionControlPath(request.URL.Path); matched {

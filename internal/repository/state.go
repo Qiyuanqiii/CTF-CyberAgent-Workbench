@@ -66,36 +66,12 @@ func Inspect(ctx context.Context, root string, workspaceID string) (State, error
 	if err := ctx.Err(); err != nil {
 		return State{}, err
 	}
-	resolvedRoot, err := resolveRoot(root)
+	_, repo, available, err := openExactRepository(ctx, root)
 	if err != nil {
 		return State{}, err
 	}
-	dotGit := filepath.Join(resolvedRoot, ".git")
-	info, err := os.Lstat(dotGit)
-	if os.IsNotExist(err) {
+	if !available {
 		return base, nil
-	}
-	if err != nil {
-		return State{}, apperror.New(apperror.CodeFailedPrecondition,
-			"repository metadata could not be inspected")
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return State{}, apperror.New(apperror.CodeFailedPrecondition,
-			"linked or redirected Git metadata is not supported")
-	}
-	if err := rejectRedirectedMetadata(ctx, dotGit); err != nil {
-		return State{}, err
-	}
-
-	repo, err := git.PlainOpenWithOptions(resolvedRoot, &git.PlainOpenOptions{
-		DetectDotGit: false,
-	})
-	if errors.Is(err, git.ErrRepositoryNotExists) {
-		return base, nil
-	}
-	if err != nil {
-		return State{}, apperror.New(apperror.CodeFailedPrecondition,
-			"repository metadata could not be opened")
 	}
 	worktree, err := repo.Worktree()
 	if err != nil {
@@ -176,6 +152,40 @@ func Inspect(ctx context.Context, root string, workspaceID string) (State, error
 			Staging: staging, Worktree: worktreeState})
 	}
 	return base, nil
+}
+
+func openExactRepository(ctx context.Context, root string) (string, *git.Repository, bool, error) {
+	resolvedRoot, err := resolveRoot(root)
+	if err != nil {
+		return "", nil, false, err
+	}
+	dotGit := filepath.Join(resolvedRoot, ".git")
+	info, err := os.Lstat(dotGit)
+	if os.IsNotExist(err) {
+		return resolvedRoot, nil, false, nil
+	}
+	if err != nil {
+		return "", nil, false, apperror.New(apperror.CodeFailedPrecondition,
+			"repository metadata could not be inspected")
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", nil, false, apperror.New(apperror.CodeFailedPrecondition,
+			"linked or redirected Git metadata is not supported")
+	}
+	if err := rejectRedirectedMetadata(ctx, dotGit); err != nil {
+		return "", nil, false, err
+	}
+	repo, err := git.PlainOpenWithOptions(resolvedRoot, &git.PlainOpenOptions{
+		DetectDotGit: false,
+	})
+	if errors.Is(err, git.ErrRepositoryNotExists) {
+		return resolvedRoot, nil, false, nil
+	}
+	if err != nil {
+		return "", nil, false, apperror.New(apperror.CodeFailedPrecondition,
+			"repository metadata could not be opened")
+	}
+	return resolvedRoot, repo, true, nil
 }
 
 func rejectRedirectedMetadata(ctx context.Context, dotGit string) error {

@@ -606,3 +606,14 @@ This layout is a migration target. Packages move only when a vertical slice uses
 The redesign was informed by the public architecture and product behavior of [usestrix/strix](https://github.com/usestrix/strix), especially its resumable run state, addressable agent graph, per-agent work memory, sandbox lifecycle, explicit completion tools, event-driven UI, skills, and structured reports.
 
 CyberAgent Workbench does not copy Strix source code or reproduce its Python architecture. The implementation remains original Go code with stricter approval defaults, SQLite as the authoritative state store, a separate Rust analyzer boundary, and a broader generic-agent scope.
+
+## Schema v80 Code Delivery Projections
+
+The Code workbench now treats repository history, verification intent, verification outcome, and portable handoff as four distinct facts:
+
+- `repository_history.v1` is a pure-Go, exact-root, first-parent-only local metadata projection. It exposes no host root, author identity, email, commit body, remote, subprocess, network, or hook behavior.
+- `operator_verification_plan.v1` is immutable operator guidance with ordered checks. Schema v80 binds it to one Code Run, active Session, Workspace, event, and content digest while explicitly denying command, model-result, approval, and authority semantics.
+- `operator_verification_evidence.v1` remains the separate v78 operator observation. A plan never creates or changes evidence.
+- `code_handoff_export.v1` renders one stable high-water `code_handoff.v1` snapshot as digest-bound Markdown or JSON. It is a download projection, not a resume or mutation protocol.
+
+TypeScript consumes all four through strict generated contracts and cannot bypass Go to read Git metadata, write verification state, or construct an authoritative export. ADR 0050 records the detailed bounds.

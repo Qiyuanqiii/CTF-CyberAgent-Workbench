@@ -9,7 +9,7 @@
 从 schema v49 起采用“双指标”，不再使用容易混淆的单一“整体产品愿景”百分比：
 
 - 架构完成度：约 99%；其中 V2 Run-centric 控制平面约 99%。该指标衡量 Go 主控、持久化状态机和模块边界的覆盖程度。
-- 产品可用度：完整 Code + Cyber 产品约 92-94%；其中通用 Coding Agent 工作流约 92%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
+- 产品可用度：完整 Code + Cyber 产品约 93-95%；其中通用 Coding Agent 工作流约 93%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
 - 上述数值是依据已测试任务切片给出的工程估算，不是性能基准，也不代表仍被安全关闭的功能已经可用。
 
 V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、主动取消、有界工具循环和跨进程 execution lease。P3-P5 已落地 Work/Note/Context、最多两个核心 child、独立 1/2/4/6 只读 Fan-out、Tool Gateway、审批/Grant、预算、ScriptProcess 与 Artifact。P9 已推进到 schema v77 / D1-G1/I3/F1：除既有 Run/Session/Plan/审批/Workspace/证据/回执/行动中心外，现有 API/Desktop 还支持安全恢复的 Monaco FileEdit、独立多文件汇总、exact-root 只读 Repository、Code Journey、Provider generation reload 和有界 wake worker。真实 Local/Docker/Shell/Git 进程、安装脚本/钩子和远程 Skill 分发继续关闭。
@@ -1094,9 +1094,40 @@ orphan 独立门禁，因为真实执行继续关闭。双指标保持架构约 
 42 秒、Windows Desktop shell 3 分 13 秒、含 vet 与 govulncheck 的 Go control plane
 3 分 54 秒。
 
-下一批回到产品切片 D1-G3 recent commit/branch history、D1-V2 verification plan/checklist
-和 D1-F3 Markdown/JSON handoff export。它是新六切片周期的前三片，批末执行普通整合门；
-再下一批累计六片时执行完整健壮性门。
+D1-G3/D1-V2/D1-F3 三切片产品批次已经完成，schema 升至 v80。纯 Go
+`repository_history.v1` 只读取 exact registered Workspace root，最多 50 个 first-parent
+commit、64 个 local branch 与 1,024 次 reference scan；主题先规范化/限长/密钥脱敏，
+author/email/body/remote/root/process/network/hook 全部不进入协议，重定向或链接 Git
+metadata 失败关闭，恶意 parent/omission 计数在 Go 侧饱和。
+
+不可变 `operator_verification_plan.v1` 支持 1-32 项操作者检查清单，事务内复核 active Code
+Session/Workspace，并由 schema v80 trigger 绑定 metadata event、item count 和 plan digest。
+`guidance_only=true`，command/model assertion/result inference/approval/authority 全部固定
+false；计划与 v78 `pass|fail|unknown` 结果分表、分协议，不会把模型或文档要求当成通过。
+`code_handoff_export.v1` 将稳定 Handoff 输出为最多 256 KiB Markdown/JSON，携带 source
+event high-water、UTF-8 byte count 和 SHA-256；TypeScript 下载前重新验证摘要、格式和
+Run/source binding，不能 resume、accept report、apply、mutate 或 execute。
+
+本批 ordinary 集成门通过：final functional uncached 全仓 Go 334.6 秒，审计后 Repository/
+Application/Store/HTTP 聚焦回归与 `go vet` 再通过；37 文件 124 项 React、strict
+TypeScript、确定性 OpenAPI/TypeScript 与 Vite production build 为绿色。OpenAPI 为
+65 path/71 operation/155 schema，SHA-256
+`99887F651B563C56C87D19C5624EDD776AFC29AA6095EAB8C685E6767C165E7F`。Chrome 插件对
+最终 Go-hosted bundle 复验 Repository/Verify/Handoff，无 root/email 泄漏、无结果推导、
+无页面横向溢出、console 零 warning/error。
+
+组合审计修复恰好 50 份计划时的 strict-client truncation 误判、恶意 Git 计数越界、
+失败计划修改后误复用旧幂等 key 和 download object URL 释放过早。当前无已知未解决
+高/中风险，未使用真实 key、Provider、
+Shell、LocalRunner、Docker、hook、攻击流量或外部网络。双指标更新为架构约 99%（V2
+约 99%）、完整产品可用度约 93-95%、通用 Coding Agent 约 93%、Cyber 自动化约 20%，
+边界见 ADR 0050。
+
+下一批建议 D1-G4 exact-commit changed-file metadata、D1-V3 plan-item/evidence 显式关联
+和 R1 Go-owned Runner start/wait/cancel/timeout/process-tree-orphan 非产品 harness。它们是
+当前周期后半三片，批末执行全仓 ordinary/race/vet/staticcheck/govulncheck/依赖/隐私/
+构建/浏览器完整健壮性门；Local/Docker 产品执行、xterm 输入、Rust analyzer 和 CTF 自动化
+继续独立后置。
 
 ## 八、仓库同步与恢复约定
 
@@ -1104,4 +1135,4 @@ orphan 独立门禁，因为真实执行继续关闭。双指标保持架构约 
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0049-deadlock-livelock-runtime-guards.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0050-repository-history-verification-plan-handoff-export.md`。

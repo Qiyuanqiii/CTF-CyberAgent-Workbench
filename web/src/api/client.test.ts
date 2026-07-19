@@ -941,6 +941,7 @@ describe("CyberAgentClient", () => {
     const handoff = { protocol_version: "code_handoff.v1", run_id: "run-1",
       mission_id: "mission-1", session_id: "session-1", workspace_id: "workspace-1",
       run_status: "paused", surface: "code", phase: "deliver", mode_revision: 2,
+      source_event_sequence: 42,
       generated_at: "2026-07-19T12:01:00Z",
       plan: { state: "none", proposal_id: "", selection_id: "", direction_count: 0,
         selected_direction: 0, module_count: 0, pending_count: 0, in_progress_count: 0,
@@ -951,6 +952,7 @@ describe("CyberAgentClient", () => {
       verification: { pass_count: 1, fail_count: 0, unknown_count: 0, returned_count: 1,
         truncated: false, references: [{ id: item.id, outcome: "pass", redacted: false,
           recorded_at: item.recorded_at }] },
+      verification_plans: { returned_count: 0, truncated: false, references: [] },
       pending_action_count: 0, pending_actions_truncated: false, pending_actions: [],
       report_references_truncated: false, report_references: [], regenerable: true,
       durable_sources: true, private_bodies_included: false, composite_mutation: false,
@@ -993,6 +995,72 @@ describe("CyberAgentClient", () => {
       title: "Focused tests", summary: "line one\rline two",
     }, "web-verification-operation-control"))
       .rejects.toThrow("bounded observation");
+  });
+
+  it("validates local history, guidance-only verification plans, and digest-bound handoff exports", async () => {
+    const history = { protocol_version: "repository_history.v1", workspace_id: "workspace-1",
+      kind: "git", available: true, head: "1234567890ab", detached: false,
+      commits: [{ hash: "1234567890ab", subject: "bounded commit", parent_count: 0,
+        committed_at: "2026-07-19T10:00:00Z", redacted: false, subject_bounded: false }],
+      branches: [{ name: "main", head: "1234567890ab", current: true }],
+      returned_commit_count: 1, returned_branch_count: 1, omitted_branch_count: 0,
+      redaction_count: 0, truncated: false, first_parent_only: true, read_only: true,
+      root_path_exposed: false, author_identity_included: false, commit_body_included: false,
+      remote_config_included: false, process_started: false, network_used: false,
+      hooks_executed: false };
+    const planItem = { ordinal: 1, title: "Focused tests",
+      expected_observation: "Observe a pass", item_sha256: "b".repeat(64), redacted: false };
+    const plan = { protocol_version: "operator_verification_plan.v1",
+      id: "verification-plan-1", run_id: "run-1", session_id: "session-1",
+      workspace_id: "workspace-1", title: "Release checks", summary: "Operator guidance",
+      plan_sha256: "c".repeat(64), redacted: false, created_at: "2026-07-19T11:00:00Z",
+      items: [planItem], item_count: 1, immutable: true, operator_supplied: true,
+      guidance_only: true, command_executed: false, model_assertion: false,
+      result_inferred: false, approval: false, authority_granted: false };
+    const plans = { protocol_version: "operator_verification_plan_inventory.v1",
+      run_id: "run-1", session_id: "session-1", workspace_id: "workspace-1",
+      items: [plan], truncated: false };
+    const exactLimitPlans = { ...plans,
+      items: Array.from({ length: 50 }, (_, index) => ({
+        ...plan, id: `verification-plan-${index + 1}`,
+      })),
+    };
+    const recorded = { ...plan, replayed: false };
+    const content = "{\n  \"protocol_version\": \"code_handoff.v1\",\n  \"run_id\": \"run-1\",\n  \"source_event_sequence\": 42\n}\n";
+    const bytes = new TextEncoder().encode(content);
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    const contentSHA256 = [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    const exported = { protocol_version: "code_handoff_export.v1", format: "json",
+      filename: "cyberagent-code-handoff-run-1.json", mime_type: "application/json",
+      run_id: "run-1", source_event_sequence: 42, generated_at: "2026-07-19T12:00:00Z",
+      content_sha256: contentSHA256, content_bytes: bytes.length, content,
+      read_only: true, download_only: true, private_bodies: false, resume_authorized: false,
+      mutation_supported: false, report_acceptance: false, execution_started: false };
+    const envelope = (data: unknown, status = 200) => new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-new-projections", data,
+    }), { status, headers: { "Content-Type": "application/json" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(envelope(history))
+      .mockResolvedValueOnce(envelope(plans))
+      .mockResolvedValueOnce(envelope(recorded, 202))
+      .mockResolvedValueOnce(envelope(exported))
+      .mockResolvedValueOnce(envelope(exactLimitPlans));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      verificationEvidenceEnabled: true,
+    });
+    await expect(client.repositoryHistory("workspace-1")).resolves.toEqual(history);
+    await expect(client.verificationPlans("run-1")).resolves.toEqual(plans);
+    await expect(client.recordVerificationPlan("run-1", {
+      version: "operator_verification_plan.v1", title: plan.title, summary: plan.summary,
+      items: [{ title: planItem.title, expected_observation: planItem.expected_observation }],
+    }, "web-verification-plan-operation-0001")).resolves.toEqual(recorded);
+    await expect(client.codeHandoffExport("run-1", "json")).resolves.toEqual(exported);
+    await expect(client.verificationPlans("run-1")).resolves.toEqual(exactLimitPlans);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "/api/v1/workspaces/workspace-1/repository-history");
+    expect(String(fetchMock.mock.calls[3]?.[0])).toBe(
+      "/api/v1/runs/run-1/code-handoff/export?format=json");
   });
 
   it("validates Workspace search, evidence attachment, and metadata-only receipt history", async () => {

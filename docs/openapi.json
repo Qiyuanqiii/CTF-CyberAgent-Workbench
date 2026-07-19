@@ -1986,6 +1986,97 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/runs/{run_id}/code-handoff/export": {
+      "get": {
+        "operationId": "exportCodeHandoff",
+        "summary": "Export the current Code handoff",
+        "description": "Builds a bounded Markdown or JSON download projection from one stable Code handoff snapshot. The response includes the durable source event high-water mark and SHA-256 of the exact content; it grants no resume, mutation, report-acceptance, or execution authority.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Bounded export representation",
+            "required": true,
+            "schema": {
+              "enum": [
+                "markdown",
+                "json"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CodeHandoffExportView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
     "/api/v1/runs/{run_id}/delegations": {
       "get": {
         "operationId": "listRunDelegations",
@@ -4914,6 +5005,199 @@
         "x-cyberagent-read-only": false
       }
     },
+    "/api/v1/runs/{run_id}/verification-plan": {
+      "get": {
+        "operationId": "listRunVerificationPlans",
+        "summary": "List immutable operator verification plans",
+        "description": "Returns at most fifty exact Code Run/Session/Workspace-bound operator checklists. Plans contain guidance only and cannot represent a result, model assertion, command, approval, or execution authority.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/VerificationPlanInventoryView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      },
+      "post": {
+        "operationId": "recordRunVerificationPlan",
+        "summary": "Record an operator verification plan",
+        "description": "Atomically records one secret-redacted immutable operator checklist against the exact active Code Run Session and Workspace. It executes no command and has no outcome, pass inference, model assertion, approval, or action authority.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque retry key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/VerificationPlanControlView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationPlanRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
     "/api/v1/runs/{run_id}/wake-intent": {
       "get": {
         "operationId": "getRunWakeIntent",
@@ -6443,6 +6727,84 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/workspaces/{workspace_id}/repository-history": {
+      "get": {
+        "operationId": "getWorkspaceRepositoryHistory",
+        "summary": "Inspect bounded local repository history",
+        "description": "Returns at most fifty first-parent commit subjects and sixty-four local branch heads for a Git repository rooted exactly at the registered Workspace. Subjects are secret-redacted; author identities, commit bodies, remotes, host paths, processes, hooks, and network access are excluded.",
+        "tags": [
+          "Workspaces"
+        ],
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "Workspace identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RepositoryHistoryView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/repository-state": {
       "get": {
         "operationId": "getWorkspaceRepositoryState",
@@ -7300,6 +7662,88 @@
         ],
         "type": "object"
       },
+      "CodeHandoffExportView": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "content_bytes": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "content_sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "download_only": {
+            "type": "boolean"
+          },
+          "execution_started": {
+            "type": "boolean"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "mutation_supported": {
+            "type": "boolean"
+          },
+          "private_bodies": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "report_acceptance": {
+            "type": "boolean"
+          },
+          "resume_authorized": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_event_sequence": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "format",
+          "filename",
+          "mime_type",
+          "run_id",
+          "source_event_sequence",
+          "generated_at",
+          "content_sha256",
+          "content_bytes",
+          "content",
+          "read_only",
+          "download_only",
+          "private_bodies",
+          "resume_authorized",
+          "mutation_supported",
+          "report_acceptance",
+          "execution_started"
+        ],
+        "type": "object"
+      },
       "CodeHandoffPlanView": {
         "additionalProperties": false,
         "properties": {
@@ -7446,6 +7890,62 @@
           "status",
           "finding_count",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "CodeHandoffVerificationPlanReferenceView": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "item_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "plan_sha256": {
+            "type": "string"
+          },
+          "redacted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "plan_sha256",
+          "item_count",
+          "redacted",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "CodeHandoffVerificationPlansView": {
+        "additionalProperties": false,
+        "properties": {
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/CodeHandoffVerificationPlanReferenceView"
+            },
+            "type": "array"
+          },
+          "returned_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "returned_count",
+          "truncated",
+          "references"
         ],
         "type": "object"
       },
@@ -7635,6 +8135,10 @@
             "minLength": 1,
             "type": "string"
           },
+          "source_event_sequence": {
+            "format": "int64",
+            "type": "integer"
+          },
           "surface": {
             "enum": [
               "code"
@@ -7643,6 +8147,9 @@
           },
           "verification": {
             "$ref": "#/components/schemas/CodeHandoffVerificationView"
+          },
+          "verification_plans": {
+            "$ref": "#/components/schemas/CodeHandoffVerificationPlansView"
           },
           "workspace_id": {
             "maxLength": 256,
@@ -7660,11 +8167,13 @@
           "surface",
           "phase",
           "mode_revision",
+          "source_event_sequence",
           "generated_at",
           "plan",
           "queue",
           "change_set",
           "verification",
+          "verification_plans",
           "pending_action_count",
           "pending_actions_truncated",
           "pending_actions",
@@ -11343,6 +11852,168 @@
         ],
         "type": "object"
       },
+      "RepositoryHistoryBranchView": {
+        "additionalProperties": false,
+        "properties": {
+          "current": {
+            "type": "boolean"
+          },
+          "head": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "head",
+          "current"
+        ],
+        "type": "object"
+      },
+      "RepositoryHistoryCommitView": {
+        "additionalProperties": false,
+        "properties": {
+          "committed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "parent_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "redacted": {
+            "type": "boolean"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "subject_bounded": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "hash",
+          "subject",
+          "parent_count",
+          "committed_at",
+          "redacted",
+          "subject_bounded"
+        ],
+        "type": "object"
+      },
+      "RepositoryHistoryView": {
+        "additionalProperties": false,
+        "properties": {
+          "author_identity_included": {
+            "type": "boolean"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "branches": {
+            "items": {
+              "$ref": "#/components/schemas/RepositoryHistoryBranchView"
+            },
+            "type": "array"
+          },
+          "commit_body_included": {
+            "type": "boolean"
+          },
+          "commits": {
+            "items": {
+              "$ref": "#/components/schemas/RepositoryHistoryCommitView"
+            },
+            "type": "array"
+          },
+          "detached": {
+            "type": "boolean"
+          },
+          "first_parent_only": {
+            "type": "boolean"
+          },
+          "head": {
+            "type": "string"
+          },
+          "hooks_executed": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "network_used": {
+            "type": "boolean"
+          },
+          "omitted_branch_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "process_started": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "redaction_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "remote_config_included": {
+            "type": "boolean"
+          },
+          "returned_branch_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "returned_commit_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "root_path_exposed": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "workspace_id",
+          "kind",
+          "available",
+          "head",
+          "detached",
+          "commits",
+          "branches",
+          "returned_commit_count",
+          "returned_branch_count",
+          "omitted_branch_count",
+          "redaction_count",
+          "truncated",
+          "first_parent_only",
+          "read_only",
+          "root_path_exposed",
+          "author_identity_included",
+          "commit_body_included",
+          "remote_config_included",
+          "process_started",
+          "network_used",
+          "hooks_executed"
+        ],
+        "type": "object"
+      },
       "RepositoryStateView": {
         "additionalProperties": false,
         "properties": {
@@ -13688,6 +14359,325 @@
           "outcome",
           "title",
           "summary"
+        ],
+        "type": "object"
+      },
+      "VerificationPlanControlView": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "type": "boolean"
+          },
+          "authority_granted": {
+            "type": "boolean"
+          },
+          "command_executed": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "guidance_only": {
+            "type": "boolean"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "immutable": {
+            "type": "boolean"
+          },
+          "item_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VerificationPlanItemView"
+            },
+            "type": "array"
+          },
+          "model_assertion": {
+            "type": "boolean"
+          },
+          "operator_supplied": {
+            "type": "boolean"
+          },
+          "plan_sha256": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "string"
+          },
+          "redacted": {
+            "type": "boolean"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "result_inferred": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "id",
+          "run_id",
+          "session_id",
+          "workspace_id",
+          "title",
+          "summary",
+          "plan_sha256",
+          "redacted",
+          "created_at",
+          "items",
+          "item_count",
+          "immutable",
+          "operator_supplied",
+          "guidance_only",
+          "command_executed",
+          "model_assertion",
+          "result_inferred",
+          "approval",
+          "authority_granted",
+          "replayed"
+        ],
+        "type": "object"
+      },
+      "VerificationPlanInventoryView": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VerificationPlanView"
+            },
+            "type": "array"
+          },
+          "protocol_version": {
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "session_id",
+          "workspace_id",
+          "items",
+          "truncated"
+        ],
+        "type": "object"
+      },
+      "VerificationPlanItemRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_observation": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "expected_observation"
+        ],
+        "type": "object"
+      },
+      "VerificationPlanItemView": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_observation": {
+            "type": "string"
+          },
+          "item_sha256": {
+            "type": "string"
+          },
+          "ordinal": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "redacted": {
+            "type": "boolean"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ordinal",
+          "title",
+          "expected_observation",
+          "item_sha256",
+          "redacted"
+        ],
+        "type": "object"
+      },
+      "VerificationPlanRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VerificationPlanItemRequestView"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "title",
+          "summary",
+          "items"
+        ],
+        "type": "object"
+      },
+      "VerificationPlanView": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "type": "boolean"
+          },
+          "authority_granted": {
+            "type": "boolean"
+          },
+          "command_executed": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "guidance_only": {
+            "type": "boolean"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "immutable": {
+            "type": "boolean"
+          },
+          "item_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VerificationPlanItemView"
+            },
+            "type": "array"
+          },
+          "model_assertion": {
+            "type": "boolean"
+          },
+          "operator_supplied": {
+            "type": "boolean"
+          },
+          "plan_sha256": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "string"
+          },
+          "redacted": {
+            "type": "boolean"
+          },
+          "result_inferred": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "id",
+          "run_id",
+          "session_id",
+          "workspace_id",
+          "title",
+          "summary",
+          "plan_sha256",
+          "redacted",
+          "created_at",
+          "items",
+          "item_count",
+          "immutable",
+          "operator_supplied",
+          "guidance_only",
+          "command_executed",
+          "model_assertion",
+          "result_inferred",
+          "approval",
+          "authority_granted"
         ],
         "type": "object"
       },

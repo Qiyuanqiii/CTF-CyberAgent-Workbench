@@ -12,8 +12,11 @@ import (
 
 const (
 	VerificationEvidencePathTemplate = "/api/v1/runs/{run_id}/verification-evidence"
+	VerificationPlanPathTemplate     = "/api/v1/runs/{run_id}/verification-plan"
 	CodeHandoffPathTemplate          = "/api/v1/runs/{run_id}/code-handoff"
+	CodeHandoffExportPathTemplate    = "/api/v1/runs/{run_id}/code-handoff/export"
 	MaxVerificationEvidenceBodyBytes = 16 * 1024
+	MaxVerificationPlanBodyBytes     = 64 * 1024
 )
 
 func (a *API) workspaceRepositoryDiff(request *http.Request,
@@ -62,6 +65,57 @@ func (a *API) workspaceRepositoryDiff(request *http.Request,
 	}, nil, nil
 }
 
+func (a *API) workspaceRepositoryHistory(request *http.Request,
+	workspaceID string,
+) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	registered, err := a.store.GetWorkspaceInfo(request.Context(), workspaceID)
+	if err != nil {
+		return nil, nil, apperror.Normalize(err)
+	}
+	if registered.ID != workspaceID {
+		return nil, nil, apperror.New(apperror.CodeInternal,
+			"workspace lookup returned a mismatched identity")
+	}
+	projection, err := repository.InspectHistory(request.Context(), registered.RootPath,
+		registered.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	commits := make([]RepositoryHistoryCommitView, len(projection.Commits))
+	for index, commit := range projection.Commits {
+		commits[index] = RepositoryHistoryCommitView{
+			Hash: commit.Hash, Subject: commit.Subject, ParentCount: commit.ParentCount,
+			CommittedAt: commit.CommittedAt, Redacted: commit.Redacted,
+			SubjectBounded: commit.SubjectBound,
+		}
+	}
+	branches := make([]RepositoryHistoryBranchView, len(projection.Branches))
+	for index, branch := range projection.Branches {
+		branches[index] = RepositoryHistoryBranchView{
+			Name: branch.Name, Head: branch.Head, Current: branch.Current,
+		}
+	}
+	return RepositoryHistoryView{
+		ProtocolVersion: projection.ProtocolVersion, WorkspaceID: projection.WorkspaceID,
+		Kind: projection.Kind, Available: projection.Available, Head: projection.Head,
+		Detached: projection.Detached, Commits: commits, Branches: branches,
+		ReturnedCommitCount: projection.ReturnedCommitCount,
+		ReturnedBranchCount: projection.ReturnedBranchCount,
+		OmittedBranchCount:  projection.OmittedBranchCount,
+		RedactionCount:      projection.RedactionCount, Truncated: projection.Truncated,
+		FirstParentOnly: projection.FirstParentOnly, ReadOnly: projection.ReadOnly,
+		RootPathExposed:        projection.RootPathExposed,
+		AuthorIdentityIncluded: projection.AuthorIdentityIncluded,
+		CommitBodyIncluded:     projection.CommitBodyIncluded,
+		RemoteConfigIncluded:   projection.RemoteConfigIncluded,
+		ProcessStarted:         projection.ProcessStarted, NetworkUsed: projection.NetworkUsed,
+		HooksExecuted: projection.HooksExecuted,
+	}, nil, nil
+}
+
 func (a *API) runVerificationEvidence(request *http.Request,
 	runID string,
 ) (any, *Page, error) {
@@ -85,6 +139,28 @@ func (a *API) runVerificationEvidence(request *http.Request,
 	}, nil, nil
 }
 
+func (a *API) runVerificationPlans(request *http.Request,
+	runID string,
+) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	inventory, err := application.NewVerificationPlanService(a.store).Inventory(
+		request.Context(), runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	items := make([]VerificationPlanView, len(inventory.Items))
+	for index, value := range inventory.Items {
+		items[index] = verificationPlanView(value)
+	}
+	return VerificationPlanInventoryView{
+		ProtocolVersion: inventory.ProtocolVersion, RunID: inventory.RunID,
+		SessionID: inventory.SessionID, WorkspaceID: inventory.WorkspaceID,
+		Items: items, Truncated: inventory.Truncated,
+	}, nil, nil
+}
+
 func (a *API) runCodeHandoff(request *http.Request, runID string) (any, *Page, error) {
 	if err := rejectQuery(request.URL.Query()); err != nil {
 		return nil, nil, err
@@ -96,9 +172,48 @@ func (a *API) runCodeHandoff(request *http.Request, runID string) (any, *Page, e
 	return codeHandoffView(value), nil, nil
 }
 
+func (a *API) runCodeHandoffExport(request *http.Request,
+	runID string,
+) (any, *Page, error) {
+	values := request.URL.Query()
+	if err := validateSingleQueryValues(values, "format"); err != nil {
+		return nil, nil, err
+	}
+	format := values.Get("format")
+	if format == "" {
+		return nil, nil, apperror.New(apperror.CodeInvalidArgument,
+			"Code handoff export format is required")
+	}
+	value, err := application.NewCodeHandoffExportService(a.store).Build(
+		request.Context(), runID, format)
+	if err != nil {
+		return nil, nil, err
+	}
+	return CodeHandoffExportView{
+		ProtocolVersion: value.ProtocolVersion, Format: value.Format,
+		Filename: value.Filename, MIMEType: value.MIMEType, RunID: value.RunID,
+		SourceEventSequence: value.SourceEventSequence, GeneratedAt: value.GeneratedAt,
+		ContentSHA256: value.ContentSHA256, ContentBytes: value.ContentBytes,
+		Content: value.Content, ReadOnly: value.ReadOnly, DownloadOnly: value.DownloadOnly,
+		PrivateBodies: value.PrivateBodies, ResumeAuthorized: value.ResumeAuthorized,
+		MutationSupported: value.MutationSupported, ReportAcceptance: value.ReportAcceptance,
+		ExecutionStarted: value.ExecutionStarted,
+	}, nil, nil
+}
+
 func matchVerificationEvidencePath(requestPath string) (string, bool) {
 	const prefix = "/api/v1/runs/"
 	const suffix = "/verification-evidence"
+	if !strings.HasPrefix(requestPath, prefix) || !strings.HasSuffix(requestPath, suffix) {
+		return "", false
+	}
+	runID := strings.TrimSuffix(strings.TrimPrefix(requestPath, prefix), suffix)
+	return runID, runID != "" && !strings.Contains(runID, "/")
+}
+
+func matchVerificationPlanPath(requestPath string) (string, bool) {
+	const prefix = "/api/v1/runs/"
+	const suffix = "/verification-plan"
 	if !strings.HasPrefix(requestPath, prefix) || !strings.HasSuffix(requestPath, suffix) {
 		return "", false
 	}
@@ -160,6 +275,64 @@ func (a *API) serveVerificationEvidenceControl(writer http.ResponseWriter,
 		http.StatusAccepted)
 }
 
+func (a *API) serveVerificationPlanControl(writer http.ResponseWriter,
+	request *http.Request, requestID string, runID string,
+) {
+	const label = "Verification plan"
+	if !a.authorizeRunOperation(writer, request, requestID,
+		a.verificationEvidenceEnabled, label) {
+		return
+	}
+	if err := validatePathIdentity(runID); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	if err := validateJSONContentType(request.Header); err != nil {
+		a.writeError(writer, requestID, err, http.StatusUnsupportedMediaType)
+		return
+	}
+	operationKey, err := sessionControlIdempotencyKey(request.Header, label)
+	if err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	body, err := readBoundedRequestBody(request, MaxVerificationPlanBodyBytes)
+	if err != nil {
+		a.writeError(writer, requestID, err, runOperationErrorStatus(err))
+		return
+	}
+	if err := rejectDuplicateJSONObjectFields(body, label); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	var view VerificationPlanRequestView
+	if err := decodeStrictRunOperation(body, &view, label); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	items := make([]application.VerificationPlanItemRequest, len(view.Items))
+	for index, item := range view.Items {
+		items[index] = application.VerificationPlanItemRequest{
+			Title: item.Title, ExpectedObservation: item.ExpectedObservation,
+		}
+	}
+	result, err := application.NewVerificationPlanService(a.store).Record(
+		request.Context(), application.RecordVerificationPlanRequest{
+			Version: view.Version, RunID: runID, Title: view.Title, Summary: view.Summary,
+			Items: items, OperationKey: operationKey, AuthoredBy: "http_run_operator",
+		})
+	if err != nil {
+		a.writeError(writer, requestID, apperror.Normalize(err), 0)
+		return
+	}
+	a.writeSuccessStatus(writer, requestID,
+		verificationPlanControlView(result.Plan, result.Replayed), nil, http.StatusAccepted)
+}
+
 func verificationEvidenceItemView(value verification.Evidence) VerificationEvidenceItemView {
 	return VerificationEvidenceItemView{
 		ProtocolVersion: value.ProtocolVersion, ID: value.ID, RunID: value.RunID,
@@ -183,6 +356,42 @@ func verificationEvidenceControlView(value verification.Evidence,
 	}
 }
 
+func verificationPlanItemsView(value verification.Plan) []VerificationPlanItemView {
+	items := make([]VerificationPlanItemView, len(value.Items))
+	for index, item := range value.Items {
+		items[index] = VerificationPlanItemView{
+			Ordinal: item.Ordinal, Title: item.Title,
+			ExpectedObservation: item.ExpectedObservation,
+			ItemSHA256:          item.ItemSHA256, Redacted: item.Redacted,
+		}
+	}
+	return items
+}
+
+func verificationPlanView(value verification.Plan) VerificationPlanView {
+	return VerificationPlanView{
+		ProtocolVersion: value.ProtocolVersion, ID: value.ID, RunID: value.RunID,
+		SessionID: value.SessionID, WorkspaceID: value.WorkspaceID,
+		Title: value.Title, Summary: value.Summary, PlanSHA256: value.PlanSHA256,
+		Redacted: value.Redacted, CreatedAt: value.CreatedAt,
+		Items: verificationPlanItemsView(value), ItemCount: len(value.Items),
+		Immutable: true, OperatorSupplied: true, GuidanceOnly: true,
+	}
+}
+
+func verificationPlanControlView(value verification.Plan,
+	replayed bool,
+) VerificationPlanControlView {
+	return VerificationPlanControlView{
+		ProtocolVersion: value.ProtocolVersion, ID: value.ID, RunID: value.RunID,
+		SessionID: value.SessionID, WorkspaceID: value.WorkspaceID,
+		Title: value.Title, Summary: value.Summary, PlanSHA256: value.PlanSHA256,
+		Redacted: value.Redacted, CreatedAt: value.CreatedAt,
+		Items: verificationPlanItemsView(value), ItemCount: len(value.Items),
+		Immutable: true, OperatorSupplied: true, GuidanceOnly: true, Replayed: replayed,
+	}
+}
+
 func codeHandoffView(value application.CodeHandoff) CodeHandoffView {
 	verificationReferences := make([]CodeHandoffVerificationReferenceView,
 		len(value.Verification.References))
@@ -190,6 +399,15 @@ func codeHandoffView(value application.CodeHandoff) CodeHandoffView {
 		verificationReferences[index] = CodeHandoffVerificationReferenceView{
 			ID: reference.ID, Outcome: string(reference.Outcome), Redacted: reference.Redacted,
 			RecordedAt: reference.CreatedAt,
+		}
+	}
+	verificationPlanReferences := make([]CodeHandoffVerificationPlanReferenceView,
+		len(value.VerificationPlans.References))
+	for index, reference := range value.VerificationPlans.References {
+		verificationPlanReferences[index] = CodeHandoffVerificationPlanReferenceView{
+			ID: reference.ID, PlanSHA256: reference.PlanSHA256,
+			ItemCount: reference.ItemCount, Redacted: reference.Redacted,
+			CreatedAt: reference.CreatedAt,
 		}
 	}
 	actions := make([]CodeHandoffActionReferenceView, len(value.PendingActions))
@@ -211,7 +429,8 @@ func codeHandoffView(value application.CodeHandoff) CodeHandoffView {
 		MissionID: value.MissionID, SessionID: value.SessionID,
 		WorkspaceID: value.WorkspaceID, RunStatus: string(value.RunStatus),
 		Surface: string(value.Surface), Phase: string(value.Phase),
-		ModeRevision: value.ModeRevision, GeneratedAt: value.GeneratedAt,
+		ModeRevision: value.ModeRevision, SourceEventSequence: value.SourceEventSequence,
+		GeneratedAt: value.GeneratedAt,
 		Plan: CodeHandoffPlanView{
 			State: value.Plan.State, ProposalID: value.Plan.ProposalID,
 			SelectionID: value.Plan.SelectionID, DirectionCount: value.Plan.DirectionCount,
@@ -233,6 +452,11 @@ func codeHandoffView(value application.CodeHandoff) CodeHandoffView {
 			UnknownCount:  value.Verification.UnknownCount,
 			ReturnedCount: value.Verification.ReturnedCount,
 			Truncated:     value.Verification.Truncated, References: verificationReferences,
+		},
+		VerificationPlans: CodeHandoffVerificationPlansView{
+			ReturnedCount: value.VerificationPlans.ReturnedCount,
+			Truncated:     value.VerificationPlans.Truncated,
+			References:    verificationPlanReferences,
 		},
 		PendingActionCount:      value.PendingActionCount,
 		PendingActionsTruncated: value.PendingActionsTruncated, PendingActions: actions,

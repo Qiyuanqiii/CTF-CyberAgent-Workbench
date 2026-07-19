@@ -18,6 +18,7 @@ const (
 	MaxCodeHandoffActionReferences = 20
 	MaxCodeHandoffReportReferences = 20
 	MaxCodeHandoffVerifyReferences = 20
+	MaxCodeHandoffVerifyPlanRefs   = 20
 	maxCodeHandoffSnapshotAttempts = 4
 )
 
@@ -34,6 +35,7 @@ type CodeHandoffStore interface {
 	GetOperatorSteeringQueueSummary(context.Context, string) (domain.OperatorSteeringQueueSummary, error)
 	ListFileEditPreviewsPage(context.Context, fileedit.ListFilter, int, int) ([]fileedit.Preview, error)
 	ListVerificationEvidence(context.Context, string, int) ([]verification.Evidence, error)
+	ListVerificationPlans(context.Context, string, int) ([]verification.Plan, error)
 	ListFindingReportSummariesPage(context.Context, string, int, int) ([]domain.FindingReportSummary, error)
 }
 
@@ -43,95 +45,111 @@ type CodeHandoffService struct {
 }
 
 type CodeHandoffPlan struct {
-	State             string
-	ProposalID        string
-	SelectionID       string
-	DirectionCount    int
-	SelectedDirection int
-	ModuleCount       int
-	PendingCount      int
-	InProgressCount   int
-	BlockedCount      int
-	CompletedCount    int
-	CancelledCount    int
+	State             string `json:"state"`
+	ProposalID        string `json:"proposal_id"`
+	SelectionID       string `json:"selection_id"`
+	DirectionCount    int    `json:"direction_count"`
+	SelectedDirection int    `json:"selected_direction"`
+	ModuleCount       int    `json:"module_count"`
+	PendingCount      int    `json:"pending_count"`
+	InProgressCount   int    `json:"in_progress_count"`
+	BlockedCount      int    `json:"blocked_count"`
+	CompletedCount    int    `json:"completed_count"`
+	CancelledCount    int    `json:"cancelled_count"`
 }
 
 type CodeHandoffQueue struct {
-	Pending   int
-	Prepared  int
-	Committed int
-	Cancelled int
+	Pending   int `json:"pending"`
+	Prepared  int `json:"prepared"`
+	Committed int `json:"committed"`
+	Cancelled int `json:"cancelled"`
 }
 
 type CodeHandoffChangeSet struct {
-	Proposed       int
-	Approved       int
-	Applied        int
-	Denied         int
-	Failed         int
-	ReturnedCount  int
-	TotalDiffBytes int
-	Truncated      bool
+	Proposed       int  `json:"proposed"`
+	Approved       int  `json:"approved"`
+	Applied        int  `json:"applied"`
+	Denied         int  `json:"denied"`
+	Failed         int  `json:"failed"`
+	ReturnedCount  int  `json:"returned_count"`
+	TotalDiffBytes int  `json:"total_diff_bytes"`
+	Truncated      bool `json:"truncated"`
 }
 
 type CodeHandoffVerificationReference struct {
-	ID        string
-	Outcome   verification.Outcome
-	Redacted  bool
-	CreatedAt time.Time
+	ID        string               `json:"id"`
+	Outcome   verification.Outcome `json:"outcome"`
+	Redacted  bool                 `json:"redacted"`
+	CreatedAt time.Time            `json:"recorded_at"`
 }
 
 type CodeHandoffVerification struct {
-	PassCount     int
-	FailCount     int
-	UnknownCount  int
-	ReturnedCount int
-	Truncated     bool
-	References    []CodeHandoffVerificationReference
+	PassCount     int                                `json:"pass_count"`
+	FailCount     int                                `json:"fail_count"`
+	UnknownCount  int                                `json:"unknown_count"`
+	ReturnedCount int                                `json:"returned_count"`
+	Truncated     bool                               `json:"truncated"`
+	References    []CodeHandoffVerificationReference `json:"references"`
+}
+
+type CodeHandoffVerificationPlanReference struct {
+	ID         string    `json:"id"`
+	PlanSHA256 string    `json:"plan_sha256"`
+	ItemCount  int       `json:"item_count"`
+	Redacted   bool      `json:"redacted"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type CodeHandoffVerificationPlans struct {
+	ReturnedCount int                                    `json:"returned_count"`
+	Truncated     bool                                   `json:"truncated"`
+	References    []CodeHandoffVerificationPlanReference `json:"references"`
 }
 
 type CodeHandoffActionReference struct {
-	ID          string
-	Kind        operatoraction.Kind
-	State       string
-	Destination operatoraction.Destination
-	AvailableAt time.Time
-	DueAt       *time.Time
+	ID          string                     `json:"id"`
+	Kind        operatoraction.Kind        `json:"kind"`
+	State       string                     `json:"state"`
+	Destination operatoraction.Destination `json:"destination"`
+	AvailableAt time.Time                  `json:"available_at"`
+	DueAt       *time.Time                 `json:"due_at,omitempty"`
 }
 
 type CodeHandoffReportReference struct {
-	ID           string
-	Status       domain.FindingReportStatus
-	FindingCount int
-	CreatedAt    time.Time
+	ID           string                     `json:"id"`
+	Status       domain.FindingReportStatus `json:"status"`
+	FindingCount int                        `json:"finding_count"`
+	CreatedAt    time.Time                  `json:"created_at"`
 }
 
 type CodeHandoff struct {
-	ProtocolVersion           string
-	RunID                     string
-	MissionID                 string
-	SessionID                 string
-	WorkspaceID               string
-	RunStatus                 domain.RunStatus
-	Surface                   domain.ExecutionSurface
-	Phase                     domain.ExecutionPhase
-	ModeRevision              int64
-	GeneratedAt               time.Time
-	Plan                      CodeHandoffPlan
-	Queue                     CodeHandoffQueue
-	ChangeSet                 CodeHandoffChangeSet
-	Verification              CodeHandoffVerification
-	PendingActionCount        int
-	PendingActionsTruncated   bool
-	PendingActions            []CodeHandoffActionReference
-	ReportReferencesTruncated bool
-	ReportReferences          []CodeHandoffReportReference
-	Regenerable               bool
-	DurableSources            bool
-	PrivateBodiesIncluded     bool
-	CompositeMutation         bool
-	ResumeAuthorized          bool
-	ExecutionStarted          bool
+	ProtocolVersion           string                       `json:"protocol_version"`
+	RunID                     string                       `json:"run_id"`
+	MissionID                 string                       `json:"mission_id"`
+	SessionID                 string                       `json:"session_id"`
+	WorkspaceID               string                       `json:"workspace_id"`
+	RunStatus                 domain.RunStatus             `json:"run_status"`
+	Surface                   domain.ExecutionSurface      `json:"surface"`
+	Phase                     domain.ExecutionPhase        `json:"phase"`
+	ModeRevision              int64                        `json:"mode_revision"`
+	SourceEventSequence       int64                        `json:"source_event_sequence"`
+	GeneratedAt               time.Time                    `json:"generated_at"`
+	Plan                      CodeHandoffPlan              `json:"plan"`
+	Queue                     CodeHandoffQueue             `json:"queue"`
+	ChangeSet                 CodeHandoffChangeSet         `json:"change_set"`
+	Verification              CodeHandoffVerification      `json:"verification"`
+	VerificationPlans         CodeHandoffVerificationPlans `json:"verification_plans"`
+	PendingActionCount        int                          `json:"pending_action_count"`
+	PendingActionsTruncated   bool                         `json:"pending_actions_truncated"`
+	PendingActions            []CodeHandoffActionReference `json:"pending_actions"`
+	ReportReferencesTruncated bool                         `json:"report_references_truncated"`
+	ReportReferences          []CodeHandoffReportReference `json:"report_references"`
+	Regenerable               bool                         `json:"regenerable"`
+	DurableSources            bool                         `json:"durable_sources"`
+	PrivateBodiesIncluded     bool                         `json:"private_bodies_included"`
+	CompositeMutation         bool                         `json:"composite_mutation"`
+	ResumeAuthorized          bool                         `json:"resume_authorized"`
+	ExecutionStarted          bool                         `json:"execution_started"`
 }
 
 func NewCodeHandoffService(store CodeHandoffStore) *CodeHandoffService {
@@ -162,6 +180,7 @@ func (s *CodeHandoffService) Build(ctx context.Context, runID string) (CodeHando
 			return CodeHandoff{}, apperror.Normalize(err)
 		}
 		if beforeSequence == afterSequence {
+			result.SourceEventSequence = afterSequence
 			return result, nil
 		}
 	}
@@ -227,6 +246,9 @@ func (s *CodeHandoffService) buildOnce(ctx context.Context, runID string) (CodeH
 	if err := s.addVerification(ctx, run, mission, &result); err != nil {
 		return CodeHandoff{}, err
 	}
+	if err := s.addVerificationPlans(ctx, run, mission, &result); err != nil {
+		return CodeHandoff{}, err
+	}
 	if err := s.addActions(ctx, &result); err != nil {
 		return CodeHandoff{}, err
 	}
@@ -234,6 +256,40 @@ func (s *CodeHandoffService) buildOnce(ctx context.Context, runID string) (CodeH
 		return CodeHandoff{}, err
 	}
 	return result, nil
+}
+
+func (s *CodeHandoffService) addVerificationPlans(ctx context.Context, run domain.Run,
+	mission domain.Mission, result *CodeHandoff,
+) error {
+	values, err := s.store.ListVerificationPlans(ctx, run.ID,
+		verification.MaxPlanInventoryItems+1)
+	if err != nil {
+		return apperror.Normalize(err)
+	}
+	result.VerificationPlans.Truncated = len(values) > verification.MaxPlanInventoryItems
+	if result.VerificationPlans.Truncated {
+		values = values[:verification.MaxPlanInventoryItems]
+	}
+	result.VerificationPlans.ReturnedCount = len(values)
+	limit := min(len(values), MaxCodeHandoffVerifyPlanRefs)
+	result.VerificationPlans.References = make([]CodeHandoffVerificationPlanReference, limit)
+	for index, value := range values {
+		if value.RunID != run.ID || value.SessionID != run.SessionID ||
+			value.WorkspaceID != mission.WorkspaceID {
+			return apperror.New(apperror.CodeConflict,
+				"Code handoff verification plan escaped its Run binding")
+		}
+		if index < limit {
+			result.VerificationPlans.References[index] = CodeHandoffVerificationPlanReference{
+				ID: value.ID, PlanSHA256: value.PlanSHA256, ItemCount: len(value.Items),
+				Redacted: value.Redacted, CreatedAt: value.CreatedAt,
+			}
+		}
+	}
+	if len(values) > MaxCodeHandoffVerifyPlanRefs {
+		result.VerificationPlans.Truncated = true
+	}
+	return nil
 }
 
 func (s *CodeHandoffService) addPlan(ctx context.Context, result *CodeHandoff) error {

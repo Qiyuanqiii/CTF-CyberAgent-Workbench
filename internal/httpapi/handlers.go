@@ -50,7 +50,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
 			"external-skills", "workspaces", "workspace-explorer", "workspace-search", "models",
-			"repository-state", "repository-diff", "verification-evidence", "code-handoff",
+			"repository-state", "repository-diff", "repository-history", "verification-evidence", "verification-plan", "code-handoff", "code-handoff-export",
 			"operation-receipts", "operator-actions", "evidence-inventory",
 			"event-stream", "event-poll", "capabilities", "openapi"}
 		if a.controlEnabled {
@@ -58,7 +58,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 				"specialist-model-cancellation-control", "execution-profile-control")
 		}
 		if a.verificationEvidenceEnabled {
-			resources = append(resources, "verification-evidence-control")
+			resources = append(resources, "verification-evidence-control", "verification-plan-control")
 		}
 		if a.runCreationEnabled {
 			resources = append(resources, "run-creation-control")
@@ -147,6 +147,9 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 		if len(segments) == 3 && segments[2] == "repository-diff" {
 			return a.workspaceRepositoryDiff(request, segments[1])
+		}
+		if len(segments) == 3 && segments[2] == "repository-history" {
+			return a.workspaceRepositoryHistory(request, segments[1])
 		}
 	case "sessions":
 		return a.routeSessions(request, segments)
@@ -431,10 +434,15 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 			return a.runEvidenceInventory(request, segments[1])
 		case "verification-evidence":
 			return a.runVerificationEvidence(request, segments[1])
+		case "verification-plan":
+			return a.runVerificationPlans(request, segments[1])
 		case "code-handoff":
 			return a.runCodeHandoff(request, segments[1])
 		}
 	case 4:
+		if segments[2] == "code-handoff" && segments[3] == "export" {
+			return a.runCodeHandoffExport(request, segments[1])
+		}
 		if segments[2] == "reports" {
 			return a.runFindingReport(request, segments[1], segments[3])
 		}

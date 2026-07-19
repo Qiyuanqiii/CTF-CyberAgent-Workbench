@@ -35,6 +35,7 @@ const (
 	SessionMessageEvent                           = "session.message_created"
 	SessionEvidenceAttachedEvent                  = "session.evidence_attached"
 	VerificationEvidenceRecordedEvent             = "verification.evidence_recorded"
+	VerificationPlanRecordedEvent                 = "verification.plan_recorded"
 	PolicyDecisionEvent                           = "policy.decision"
 	ToolProposedEvent                             = "tool.proposed"
 	ToolApprovedEvent                             = "tool.approved"

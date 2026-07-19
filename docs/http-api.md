@@ -410,6 +410,30 @@ Heartbeats are SSE comments and consume neither database rows nor sequences. The
 
 Native browser `EventSource` cannot attach the current Bearer header. The React/Vite console therefore uses authenticated `fetch` streaming and never puts the token in a query string or browser storage. Production assets and `api.v1` now share the Go loopback origin when `--ui-dir` is set; Vite provides the same-origin proxy only during development. CORS remains disabled.
 
+## Repository History, Verification Plans, And Handoff Export
+
+`GET /api/v1/workspaces/{workspace_id}/repository-history` returns
+`repository_history.v1`. It accepts no query parameters and reads only the exact
+registered Workspace root. The projection is capped at 50 first-parent commits, 64
+returned local branches, and 1,024 scanned branch references. It excludes author
+identity, email, commit body, remote configuration, host root, subprocess, network,
+and hook data. Redirected or linked Git metadata fails closed.
+
+`GET /api/v1/runs/{run_id}/verification-plan` lists at most 50 immutable
+operator-authored plans. `POST` on the same path uses the existing distinct verification
+control capability, strict `operator_verification_plan.v1` JSON, and an in-memory
+`Idempotency-Key`. A request carries only title, summary, and 1-32 title/expected-
+observation items. Go and SQLite exact-bind the active Code Session and keep
+`guidance_only=true`; command execution, model assertion, result inference, approval,
+and authority are always false. Results remain on the separate verification-evidence
+route.
+
+`GET /api/v1/runs/{run_id}/code-handoff/export?format=markdown|json` returns a
+`code_handoff_export.v1` envelope with at most 256 KiB of content, source event
+high-water, UTF-8 byte count, SHA-256, safe filename, and fixed MIME type. It uses the
+same stable Handoff assembly and cannot resume, apply, accept a report, mutate, or
+execute. The React client recomputes the digest before creating a local download.
+
 ## Envelopes
 
 Except for the raw OpenAPI document and SSE frames, successful responses use one versioned envelope:
@@ -456,3 +480,4 @@ Pagination is a bounded live SQLite projection, not a multi-request snapshot. Ap
 - No Artifact content route. Use the authenticated local CLI `artifact read` when content is explicitly required.
 - No real Shell, LocalSandbox, or Docker process execution. Schema v64 profile selection records intent only; HTTP exposes no runner start, Sandbox execution, approval, output-export, or Artifact-commit route. Existing approvals still resolve to audited dry-run results.
 - No per-resource authorization below the process token. Future remote or multi-user use requires a separate identity and authorization design.
+- Repository history has no checkout/fetch/push/ref-update endpoint. Verification plans do not run checks or imply outcomes. Handoff exports have no import/resume endpoint.
