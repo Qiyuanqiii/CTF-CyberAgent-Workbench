@@ -40,6 +40,7 @@ export type FileEditPreviewView = components["schemas"]["FileEditPreviewView"];
 export type FileEditApplyRequestView = components["schemas"]["FileEditApplyRequestView"];
 export type FileEditApplyView = components["schemas"]["FileEditApplyView"];
 export type FileEditQueueView = components["schemas"]["FileEditQueueView"];
+export type FileEditChangeSetView = components["schemas"]["FileEditChangeSetView"];
 export type FileEditReviewRequestView = components["schemas"]["FileEditReviewRequestView"];
 export type FileEditReviewView = components["schemas"]["FileEditReviewView"];
 export type RunWakeCancelRequestView = components["schemas"]["RunWakeCancelRequestView"];
@@ -82,6 +83,7 @@ export type WorkItemView = components["schemas"]["WorkItemView"];
 export type WorkspaceView = components["schemas"]["WorkspaceView"];
 export type WorkspaceExplorerView = components["schemas"]["WorkspaceExplorerView"];
 export type WorkspaceSearchView = components["schemas"]["WorkspaceSearchView"];
+export type RepositoryStateView = components["schemas"]["RepositoryStateView"];
 
 export interface SuccessEnvelope<T> {
   version: "api.v1";

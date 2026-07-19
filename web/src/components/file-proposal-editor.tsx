@@ -48,6 +48,7 @@ export function FileProposalEditor({ client, runID, source, onClose }: {
     }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "file-edits"] });
+      void queryClient.invalidateQueries({ queryKey: ["run", runID, "file-edit-change-set"] });
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "approvals"] });
     },
   });

@@ -711,6 +711,42 @@ describe("CyberAgentClient", () => {
     await expect(client.fileEditQueue("run-1")).rejects.toThrow("metadata-only");
   });
 
+  it("validates a multi-file change set without accepting batch authority", async () => {
+    const item = { id: "edit-1", path: "README.md", status: "proposed", diff_bytes: 42,
+      secrets_redacted: false, allowed_actions: ["approve_intent", "deny"],
+      apply_enabled: false, updated_at: "2026-07-18T00:00:00Z" };
+    const changeSet = { protocol_version: "file_edit_change_set.v1", run_id: "run-1",
+      session_id: "session-1", workspace_id: "workspace-1", items: [item],
+      proposed_count: 1, approved_count: 0, applied_count: 0, denied_count: 0,
+      failed_count: 0, returned_count: 1, total_diff_bytes: 42, truncated: false,
+      review_independent: true, apply_independent: true, atomic_apply: false,
+      batch_mutation_supported: false, partial_apply_visible: true,
+      diff_content_included: false };
+    const envelope = (data: unknown) => new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-change-set", data,
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(envelope(changeSet))
+      .mockResolvedValueOnce(envelope({ ...changeSet, batch_mutation_supported: true }))
+      .mockResolvedValueOnce(envelope({ ...changeSet, applied_count: 1 }))
+      .mockResolvedValueOnce(envelope({ ...changeSet, items: [
+        { ...item, allowed_actions: [] },
+      ] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret");
+
+    await expect(client.fileEditChangeSet("run-1")).resolves.toEqual(changeSet);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "/api/v1/runs/run-1/file-edit-change-set");
+    await expect(client.fileEditChangeSet("run-1"))
+      .rejects.toThrow("batch mutation authority");
+    await expect(client.fileEditChangeSet("run-1"))
+      .rejects.toThrow("inconsistent partial state");
+    await expect(client.fileEditChangeSet("run-1")).resolves.toEqual({
+      ...changeSet, items: [{ ...item, allowed_actions: [] }],
+    });
+  });
+
   it("validates bounded wake scheduling without accepting execution authority", async () => {
     const intent = { id: "wake-1", protocol_version: "run_wake_intent.v1", run_id: "run-1",
       session_id: "session-1", status: "queued", max_attempts: 3, attempt_count: 0,
@@ -843,6 +879,36 @@ describe("CyberAgentClient", () => {
       .rejects.toThrow("Go-issued relative path");
     await expect(client.workspaceExplore("workspace-1", "C:private"))
       .rejects.toThrow("Go-issued relative path");
+  });
+
+  it("validates repository state as a root-bound read-only projection", async () => {
+    const state = { protocol_version: "repository_state.v1", workspace_id: "workspace-1",
+      kind: "git", available: true, clean: false, detached: false, branch: "main",
+      head: "1234567890ab", changes: [{ path: "src/main.go", staging: "unmodified",
+        worktree: "modified" }], staged_count: 0, worktree_count: 1,
+      untracked_count: 0, conflicted_count: 0, redaction_count: 0, truncated: false,
+      read_only: true, root_path_exposed: false, content_included: false,
+      remote_config_included: false, process_started: false, network_used: false,
+      hooks_executed: false };
+    const envelope = (data: unknown) => new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-repository", data,
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(envelope(state))
+      .mockResolvedValueOnce(envelope({ ...state, root_path_exposed: true }))
+      .mockResolvedValueOnce(envelope({ ...state, changes: [
+        { ...state.changes[0], path: "../outside" },
+      ] }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret");
+
+    await expect(client.repositoryState("workspace-1")).resolves.toEqual(state);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "/api/v1/workspaces/workspace-1/repository-state");
+    await expect(client.repositoryState("workspace-1"))
+      .rejects.toThrow("read-only bounded contract");
+    await expect(client.repositoryState("workspace-1"))
+      .rejects.toThrow("path or status authority");
   });
 
   it("validates Workspace search, evidence attachment, and metadata-only receipt history", async () => {

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"cyberagent-workbench/internal/store"
+
+	git "github.com/go-git/go-git/v5"
 )
 
 func TestWorkspaceExplorerHTTPKeepsPathsAndInstructionsNonAuthorizing(t *testing.T) {
@@ -57,6 +59,50 @@ func TestWorkspaceExplorerHTTPKeepsPathsAndInstructionsNonAuthorizing(t *testing
 	duplicate := performSessionMessageRequest(t, api, http.MethodGet,
 		base+"?path=.&path=README.md", testAccessToken, "", "", nil)
 	assertAPIError(t, duplicate, http.StatusBadRequest, "INVALID_ARGUMENT")
+}
+
+func TestWorkspaceRepositoryStateHTTPIsReadOnlyAndRootBound(t *testing.T) {
+	state, err := store.Open(filepath.Join(t.TempDir(), "workspace-repository-http.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = state.Close() })
+	root := t.TempDir()
+	if _, err := git.PlainInit(root, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "untracked.txt"), []byte("evidence\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registered := store.WorkspaceRecord{ID: "workspace-repository-http", Name: "repository",
+		RootPath: root, CreatedAt: time.Now().UTC()}
+	if err := state.SaveWorkspace(t.Context(), registered); err != nil {
+		t.Fatal(err)
+	}
+	api, err := New(state, Config{AccessToken: testAccessToken, AppVersion: "repository-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/v1/workspaces/" + registered.ID + "/repository-state"
+	response := performSessionMessageRequest(t, api, http.MethodGet, path,
+		testAccessToken, "", "", nil)
+	body := response.Body.String()
+	if response.Code != http.StatusOK ||
+		!strings.Contains(body, `"protocol_version":"repository_state.v1"`) ||
+		!strings.Contains(body, `"path":"untracked.txt"`) ||
+		!strings.Contains(body, `"read_only":true`) ||
+		!strings.Contains(body, `"root_path_exposed":false`) ||
+		!strings.Contains(body, `"content_included":false`) ||
+		!strings.Contains(body, `"remote_config_included":false`) ||
+		!strings.Contains(body, `"process_started":false`) ||
+		!strings.Contains(body, `"network_used":false`) ||
+		!strings.Contains(body, `"hooks_executed":false`) ||
+		strings.Contains(body, root) || strings.Contains(body, "evidence") {
+		t.Fatalf("repository status=%d body=%s", response.Code, body)
+	}
+	query := performSessionMessageRequest(t, api, http.MethodGet, path+"?refresh=true",
+		testAccessToken, "", "", nil)
+	assertAPIError(t, query, http.StatusBadRequest, "INVALID_ARGUMENT")
 }
 
 func TestWorkspaceSearchHTTPReturnsOnlyRedactedNonAuthorizingEvidence(t *testing.T) {

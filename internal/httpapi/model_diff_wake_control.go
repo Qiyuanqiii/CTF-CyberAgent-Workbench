@@ -46,6 +46,7 @@ const (
 	ModelRouteControlPathTemplate   = "/api/v1/models/routes/{route}"
 	ProviderDiagnosticPath          = "/api/v1/models/diagnostics"
 	FileEditQueuePathTemplate       = "/api/v1/runs/{run_id}/file-edits"
+	FileEditChangeSetPathTemplate   = "/api/v1/runs/{run_id}/file-edit-change-set"
 	FileEditReviewPathTemplate      = "/api/v1/runs/{run_id}/file-edits/{edit_id}/review"
 	FileEditApplyPathTemplate       = "/api/v1/runs/{run_id}/file-edits/{edit_id}/apply"
 	RunWakeIntentPathTemplate       = "/api/v1/runs/{run_id}/wake-intent"

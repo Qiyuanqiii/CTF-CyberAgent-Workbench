@@ -2909,6 +2909,84 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/runs/{run_id}/file-edit-change-set": {
+      "get": {
+        "operationId": "getRunFileEditChangeSet",
+        "summary": "Inspect a bounded multi-file change set",
+        "description": "Returns status and size metadata for at most one hundred Run-bound FileEdits. Every review and apply remains independently authorized through the existing per-file endpoints; no batch mutation or atomic apply authority is introduced, and Diff content is omitted.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FileEditChangeSetView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
     "/api/v1/runs/{run_id}/file-edit-proposal-recovery/{edit_id}": {
       "get": {
         "operationId": "recoverFileEditProposal",
@@ -6016,6 +6094,84 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/workspaces/{workspace_id}/repository-state": {
+      "get": {
+        "operationId": "getWorkspaceRepositoryState",
+        "summary": "Inspect read-only repository state",
+        "description": "Returns a bounded status-only projection for a Git repository rooted exactly at the registered Workspace. Go does not discover parent repositories, return file content, patches, remotes or local root paths, start a process, execute hooks, or use the network.",
+        "tags": [
+          "Workspaces"
+        ],
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "Workspace identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RepositoryStateView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/search": {
       "get": {
         "operationId": "searchWorkspace",
@@ -7730,6 +7886,181 @@
           "file_written",
           "policy_rechecked",
           "receipt"
+        ],
+        "type": "object"
+      },
+      "FileEditChangeSetItemView": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "apply_enabled": {
+            "type": "boolean"
+          },
+          "diff_bytes": {
+            "format": "int32",
+            "maximum": 1064960,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          "secrets_redacted": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "proposed",
+              "approved",
+              "applied",
+              "denied",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "path",
+          "status",
+          "diff_bytes",
+          "secrets_redacted",
+          "allowed_actions",
+          "apply_enabled",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "FileEditChangeSetView": {
+        "additionalProperties": false,
+        "properties": {
+          "applied_count": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "apply_independent": {
+            "type": "boolean"
+          },
+          "approved_count": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "atomic_apply": {
+            "type": "boolean"
+          },
+          "batch_mutation_supported": {
+            "type": "boolean"
+          },
+          "denied_count": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "diff_content_included": {
+            "type": "boolean"
+          },
+          "failed_count": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FileEditChangeSetItemView"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "partial_apply_visible": {
+            "type": "boolean"
+          },
+          "proposed_count": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "protocol_version": {
+            "enum": [
+              "file_edit_change_set.v1"
+            ],
+            "type": "string"
+          },
+          "returned_count": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "review_independent": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "total_diff_bytes": {
+            "format": "int32",
+            "maximum": 106496000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "session_id",
+          "workspace_id",
+          "items",
+          "proposed_count",
+          "approved_count",
+          "applied_count",
+          "denied_count",
+          "failed_count",
+          "returned_count",
+          "total_diff_bytes",
+          "truncated",
+          "review_independent",
+          "apply_independent",
+          "atomic_apply",
+          "batch_mutation_supported",
+          "partial_apply_visible",
+          "diff_content_included"
         ],
         "type": "object"
       },
@@ -9921,6 +10252,168 @@
           "tool_called",
           "response_content_returned",
           "duration_ms"
+        ],
+        "type": "object"
+      },
+      "RepositoryChangeView": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "staging": {
+            "enum": [
+              "unmodified",
+              "untracked",
+              "modified",
+              "added",
+              "deleted",
+              "renamed",
+              "copied",
+              "conflicted"
+            ],
+            "type": "string"
+          },
+          "worktree": {
+            "enum": [
+              "unmodified",
+              "untracked",
+              "modified",
+              "added",
+              "deleted",
+              "renamed",
+              "copied",
+              "conflicted"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "staging",
+          "worktree"
+        ],
+        "type": "object"
+      },
+      "RepositoryStateView": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "branch": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/RepositoryChangeView"
+            },
+            "maxItems": 200,
+            "type": "array"
+          },
+          "clean": {
+            "type": "boolean"
+          },
+          "conflicted_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "content_included": {
+            "type": "boolean"
+          },
+          "detached": {
+            "type": "boolean"
+          },
+          "head": {
+            "maxLength": 12,
+            "type": "string"
+          },
+          "hooks_executed": {
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "none",
+              "git"
+            ],
+            "type": "string"
+          },
+          "network_used": {
+            "type": "boolean"
+          },
+          "process_started": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "repository_state.v1"
+            ],
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "redaction_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "remote_config_included": {
+            "type": "boolean"
+          },
+          "root_path_exposed": {
+            "type": "boolean"
+          },
+          "staged_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "untracked_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "worktree_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "workspace_id",
+          "kind",
+          "available",
+          "clean",
+          "detached",
+          "branch",
+          "head",
+          "changes",
+          "staged_count",
+          "worktree_count",
+          "untracked_count",
+          "conflicted_count",
+          "redaction_count",
+          "truncated",
+          "read_only",
+          "root_path_exposed",
+          "content_included",
+          "remote_config_included",
+          "process_started",
+          "network_used",
+          "hooks_executed"
         ],
         "type": "object"
       },

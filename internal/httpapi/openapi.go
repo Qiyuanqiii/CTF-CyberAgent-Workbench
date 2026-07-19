@@ -21,6 +21,7 @@ import (
 	"cyberagent-workbench/internal/modelregistry"
 	"cyberagent-workbench/internal/operationreceipt"
 	"cyberagent-workbench/internal/operatoraction"
+	"cyberagent-workbench/internal/repository"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/workspace"
@@ -318,6 +319,12 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 				{Name: "query", In: "query", Description: "Normalized case-insensitive filename or redacted text query",
 					Required: true, Schema: map[string]any{"type": "string", "minLength": 1,
 						"maxLength": workspace.MaxSearchQueryRunes}}}},
+		{Path: "/api/v1/workspaces/{workspace_id}/repository-state",
+			OperationID: "getWorkspaceRepositoryState",
+			Summary:     "Inspect read-only repository state", Tag: "Workspaces",
+			Description: "Returns a bounded status-only projection for a Git repository rooted exactly at the registered Workspace. Go does not discover parent repositories, return file content, patches, remotes or local root paths, start a process, execute hooks, or use the network.",
+			DataType:    reflect.TypeOf(RepositoryStateView{}), NotFound: true,
+			Parameters: []openAPIParameter{workspaceID}},
 		{Path: EvidenceAttachmentPathTemplate, Method: http.MethodPost,
 			OperationID: "attachRunEvidence", Summary: "Attach non-authorizing Workspace evidence",
 			Tag:         "Control",
@@ -493,6 +500,11 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 			Summary: "List Run file edit previews", Tag: "Runs",
 			Description: "Returns at most one hundred Run-bound metadata-only file edit previews. Original and proposed file bodies are omitted and apply authority is always false.",
 			DataType:    reflect.TypeOf(FileEditQueueView{}), NotFound: true,
+			Parameters: []openAPIParameter{runID}},
+		{Path: FileEditChangeSetPathTemplate, OperationID: "getRunFileEditChangeSet",
+			Summary: "Inspect a bounded multi-file change set", Tag: "Runs",
+			Description: "Returns status and size metadata for at most one hundred Run-bound FileEdits. Every review and apply remains independently authorized through the existing per-file endpoints; no batch mutation or atomic apply authority is introduced, and Diff content is omitted.",
+			DataType:    reflect.TypeOf(FileEditChangeSetView{}), NotFound: true,
 			Parameters: []openAPIParameter{runID}},
 		{Path: FileEditProposalSourcePathTemplate,
 			OperationID: "issueFileEditProposalSource", Summary: "Issue an exact interactive edit source",
@@ -992,6 +1004,12 @@ func applyOpenAPIFieldMetadata(typeName string, fieldName string, schema map[str
 	if typeName == "WorkspaceSearchView" && fieldName == "results" {
 		schema["maxItems"] = workspace.MaxSearchResults
 	}
+	if typeName == "RepositoryStateView" && fieldName == "changes" {
+		schema["maxItems"] = repository.MaxChangeItems
+	}
+	if typeName == "FileEditChangeSetView" && fieldName == "items" {
+		schema["maxItems"] = application.MaxFileEditChangeSetItems
+	}
 	if typeName == "OperationReceiptHistoryView" && fieldName == "items" {
 		schema["maxItems"] = operationreceipt.MaxHistoryItems
 	}
@@ -1063,6 +1081,8 @@ var openAPIFieldEnums = map[string][]string{
 	"FileEditProposalRecoveryView.protocol_version":     {application.FileEditRecoveryProtocolVersion},
 	"FileEditProposalRecoveryView.status":               {fileedit.StatusProposed},
 	"FileEditQueueView.protocol_version":                {application.FileEditReviewProtocolVersion},
+	"FileEditChangeSetView.protocol_version":            {application.FileEditChangeSetProtocolVersion},
+	"FileEditChangeSetItemView.status":                  {fileedit.StatusProposed, fileedit.StatusApproved, fileedit.StatusApplied, fileedit.StatusDenied, fileedit.StatusFailed},
 	"FileEditReviewRequestView.version":                 {application.FileEditReviewProtocolVersion},
 	"FileEditReviewRequestView.action":                  {string(application.FileEditApproveIntent), string(application.FileEditDeny)},
 	"FileEditReviewView.protocol_version":               {application.FileEditReviewProtocolVersion},
@@ -1101,6 +1121,10 @@ var openAPIFieldEnums = map[string][]string{
 	"WorkspaceExplorerProvenanceView.source_kind":       {session.SourceWorkspaceFile, session.SourceWorkspaceList},
 	"WorkspaceSearchView.protocol_version":              {workspace.SearchProtocolVersion},
 	"WorkspaceSearchResultView.match_kind":              {"filename", "content", "filename_and_content"},
+	"RepositoryStateView.protocol_version":              {repository.ProtocolVersion},
+	"RepositoryStateView.kind":                          {"none", "git"},
+	"RepositoryChangeView.staging":                      {"unmodified", "untracked", "modified", "added", "deleted", "renamed", "copied", "conflicted"},
+	"RepositoryChangeView.worktree":                     {"unmodified", "untracked", "modified", "added", "deleted", "renamed", "copied", "conflicted"},
 	"EvidenceAttachmentRequestView.version":             {session.EvidenceAttachmentProtocolVersion},
 	"EvidenceAttachmentRequestView.source_kind":         {session.SourceWorkspaceFile},
 	"EvidenceAttachmentView.protocol_version":           {session.EvidenceAttachmentProtocolVersion},
@@ -1293,10 +1317,31 @@ var openAPIFieldMinimums = map[string]float64{
 	"WorkspaceSearchView.scanned_entries":                 0,
 	"WorkspaceSearchView.scanned_files":                   0,
 	"WorkspaceSearchView.scanned_bytes":                   0,
+	"RepositoryStateView.staged_count":                    0,
+	"RepositoryStateView.worktree_count":                  0,
+	"RepositoryStateView.untracked_count":                 0,
+	"RepositoryStateView.conflicted_count":                0,
+	"RepositoryStateView.redaction_count":                 0,
+	"FileEditChangeSetItemView.diff_bytes":                0,
+	"FileEditChangeSetView.proposed_count":                0,
+	"FileEditChangeSetView.approved_count":                0,
+	"FileEditChangeSetView.applied_count":                 0,
+	"FileEditChangeSetView.denied_count":                  0,
+	"FileEditChangeSetView.failed_count":                  0,
+	"FileEditChangeSetView.returned_count":                0,
+	"FileEditChangeSetView.total_diff_bytes":              0,
 	"EvidenceAttachmentView.session_message_id":           1,
 }
 
 var openAPIFieldMaximums = map[string]float64{
+	"FileEditChangeSetItemView.diff_bytes":             fileedit.MaxDiffBytes,
+	"FileEditChangeSetView.proposed_count":             application.MaxFileEditChangeSetItems,
+	"FileEditChangeSetView.approved_count":             application.MaxFileEditChangeSetItems,
+	"FileEditChangeSetView.applied_count":              application.MaxFileEditChangeSetItems,
+	"FileEditChangeSetView.denied_count":               application.MaxFileEditChangeSetItems,
+	"FileEditChangeSetView.failed_count":               application.MaxFileEditChangeSetItems,
+	"FileEditChangeSetView.returned_count":             application.MaxFileEditChangeSetItems,
+	"FileEditChangeSetView.total_diff_bytes":           application.MaxFileEditChangeSetItems * fileedit.MaxDiffBytes,
 	"RunExecutionControlRequestView.max_steps":         domain.MaxRunExecutionHandoffSteps,
 	"RunExecutionControlView.max_steps":                domain.MaxRunExecutionHandoffSteps,
 	"RunExecutionControlView.selected_count":           domain.MaxRunExecutionHandoffSteps,
@@ -1343,6 +1388,10 @@ var openAPIFieldMaxLengths = map[string]int{
 	"WorkspaceExplorerEntryView.path":                workspace.MaxExplorerPathRunes,
 	"WorkspaceSearchResultView.path":                 workspace.MaxExplorerPathRunes,
 	"WorkspaceSearchResultView.snippet":              workspace.MaxSearchSnippetBytes,
+	"RepositoryStateView.branch":                     repository.MaxReferenceRunes,
+	"RepositoryStateView.head":                       12,
+	"RepositoryChangeView.path":                      repository.MaxPathRunes,
+	"FileEditChangeSetItemView.path":                 4096,
 	"EvidenceAttachmentRequestView.source_ref":       workspace.MaxExplorerPathRunes,
 	"EvidenceAttachmentRequestView.content_sha256":   64,
 	"EvidenceAttachmentView.source_ref":              workspace.MaxExplorerPathRunes,

@@ -52,23 +52,27 @@ import { formatBytes, formatDate, formatNumber, shortID } from "../lib/format";
 import { EmptyState, ErrorState, KeyValue, LoadMoreButton, LoadingState, StatusBadge } from "./common";
 import { ApprovalPanel } from "./approval-panel";
 import { CommandPalette, type CommandPaletteCommand } from "./command-palette";
+import { CodeJourney } from "./code-journey";
 import { EvidenceInventory } from "./evidence-inventory";
 import { FileEditPanel } from "./file-edit-panel";
 import { OperationReceiptHistory } from "./operation-receipt-history";
 import { OperatorActionCenter } from "./operator-action-center";
 import { RunWakePanel } from "./run-wake-panel";
+import { RepositoryStatePanel } from "./repository-state-panel";
 import { WorkspaceExplorer } from "./workspace-explorer";
 import { AgentGraphPanel, DelegationsPanel, ExternalSkillsPanel, FanoutPanel, FindingsPanel } from "./run-projections";
 
-type RunTab = "overview" | "actions" | "approvals" | "diffs" | "files" | "evidence" |
+type RunTab = "overview" | "journey" | "actions" | "approvals" | "diffs" | "repository" | "files" | "evidence" |
   "receipts" | "agents" | "delegations" | "fanout" | "findings" | "events" | "work" |
   "notes" | "artifacts" | "tools";
 
 const tabs: Array<{ id: RunTab; label: string; icon: typeof Activity }> = [
   { id: "overview", label: "概览", icon: Gauge },
+  { id: "journey", label: "Journey", icon: ListOrdered },
   { id: "actions", label: "Actions", icon: ListChecks },
   { id: "approvals", label: "Approvals", icon: ShieldCheck },
   { id: "diffs", label: "Diffs", icon: FileDiff },
+  { id: "repository", label: "Repository", icon: GitBranch },
   { id: "files", label: "Files", icon: FolderOpen },
   { id: "evidence", label: "Evidence", icon: Paperclip },
   { id: "receipts", label: "Receipts", icon: History },
@@ -120,14 +124,16 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
   const notes = useMemo(() => notesQuery.data?.pages.flatMap((page) => page.items) ?? [], [notesQuery.data]);
   const artifacts = useMemo(() => artifactsQuery.data?.pages.flatMap((page) => page.items) ?? [], [artifactsQuery.data]);
   const rounds = useMemo(() => toolsQuery.data?.pages.flatMap((page) => page.items) ?? [], [toolsQuery.data]);
+  const visibleTabs = useMemo(() => detailQuery.data?.mode.surface === "cyber"
+    ? tabs.filter(({ id }) => id !== "journey") : tabs, [detailQuery.data?.mode.surface]);
   const commands = useMemo<CommandPaletteCommand[]>(() => [
-    ...tabs.map(({ id, label }) => ({ id: `view-${id}`, label: `Open ${label}`,
+    ...visibleTabs.map(({ id, label }) => ({ id: `view-${id}`, label: `Open ${label}`,
       group: "Navigate", keywords: [id, "run"], run: () => setTab(id) })),
     { id: "refresh-run", label: "Refresh Run data", group: "Data",
       keywords: ["reload", "sync"], run: () => {
         void queryClient.invalidateQueries({ queryKey: ["run", runID] });
       } },
-  ], [queryClient, runID]);
+  ], [queryClient, runID, visibleTabs]);
 
   if (!runID) {
     return <EmptyWorkspace icon={<Boxes aria-hidden="true" size={24} />} title="选择一个 Run" />;
@@ -161,7 +167,7 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
         </div>
       </header>
       <nav aria-label="Run 视图" className="workspace-tabs" role="tablist">
-        {tabs.map(({ id, label, icon: Icon }) => (
+        {visibleTabs.map(({ id, label, icon: Icon }) => (
           <button aria-selected={tab === id} className={tab === id ? "active" : ""} key={id} onClick={() => setTab(id)} role="tab" type="button">
             <Icon aria-hidden="true" size={15} />{label}
           </button>
@@ -169,11 +175,15 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
       </nav>
       <div className="workspace-content">
         {tab === "overview" && <RunOverview client={client} detail={detail} />}
+        {tab === "journey" && detail.mode.surface === "code" &&
+          <CodeJourney detail={detail} onNavigate={setTab} />}
         {tab === "actions" && <OperatorActionCenter client={client} runID={runID}
           onNavigate={(destination) => setTab(destination === "approvals" ? "approvals" :
             destination === "diffs" ? "diffs" : "overview")} />}
         {tab === "approvals" && <ApprovalPanel client={client} runID={runID} />}
         {tab === "diffs" && <FileEditPanel client={client} runID={runID} />}
+        {tab === "repository" && <RepositoryStatePanel client={client}
+          workspaceID={detail.mission.workspace_id ?? ""} />}
         {tab === "files" && <WorkspaceExplorer client={client}
           initialPath={fileTarget.runID === runID ? fileTarget.path : "."}
           key={`${detail.mission.workspace_id ?? "unbound"}:${fileTarget.runID === runID ? fileTarget.path : "."}`}

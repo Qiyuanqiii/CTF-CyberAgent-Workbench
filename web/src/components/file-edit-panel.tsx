@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, FileCheck2, FileDiff, History, LoaderCircle, X } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import type { FileEditReviewRequestView, OperationReceiptView } from "../api/types";
-import { formatDate, shortID } from "../lib/format";
+import { formatBytes, formatDate, shortID } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
 import { OperationReceipt } from "./operation-receipt";
 import { FileProposalRecovery } from "./file-proposal-recovery";
@@ -17,12 +17,17 @@ export function FileEditPanel({ client, runID }: { client: CyberAgentClient; run
     queryKey: ["run", runID, "file-edits"],
     queryFn: ({ signal }) => client.fileEditQueue(runID, signal),
   });
+  const changeSetQuery = useQuery({
+    queryKey: ["run", runID, "file-edit-change-set"],
+    queryFn: ({ signal }) => client.fileEditChangeSet(runID, signal),
+  });
   const review = useMutation({
     mutationFn: ({ editID, action }: { editID: string;
       action: FileEditReviewRequestView["action"] }) =>
       client.reviewFileEdit(runID, editID, { version: "file_edit_review.v1", action }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "file-edits"] });
+      void queryClient.invalidateQueries({ queryKey: ["run", runID, "file-edit-change-set"] });
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "events"] });
     },
   });
@@ -40,18 +45,38 @@ export function FileEditPanel({ client, runID }: { client: CyberAgentClient; run
       applyKeys.current.delete(result.edit.id);
       setReceipts((current) => ({ ...current, [result.edit.id]: result.receipt }));
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "file-edits"] });
+      void queryClient.invalidateQueries({ queryKey: ["run", runID, "file-edit-change-set"] });
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "events"] });
     },
   });
-  if (query.isLoading) return <LoadingState label="Loading file edit previews" />;
+  if (query.isLoading || changeSetQuery.isLoading) {
+    return <LoadingState label="Loading file edit previews" />;
+  }
   if (query.isError || !query.data) return <ErrorState error={query.error} />;
+  if (changeSetQuery.isError || !changeSetQuery.data) {
+    return <ErrorState error={changeSetQuery.error} />;
+  }
   if (query.data.items.length === 0) return <EmptyState>No file edit proposals</EmptyState>;
   const operationError = apply.error ?? review.error;
+  const changeSet = changeSetQuery.data;
+  const partial = changeSet.applied_count > 0 &&
+    changeSet.applied_count < changeSet.returned_count;
   return <section className="file-edit-panel" aria-label="File edit previews">
     <header className="projection-heading">
       <div><FileDiff aria-hidden="true" size={17} /><h2>Diff review</h2></div>
       <span>{query.data.items.length}{query.data.truncated ? "+" : ""}</span>
     </header>
+    <div aria-label="Multi-file change set" className="file-change-set-summary">
+      <div><span>Proposed</span><strong>{changeSet.proposed_count}</strong></div>
+      <div><span>Approved</span><strong>{changeSet.approved_count}</strong></div>
+      <div><span>Applied</span><strong>{changeSet.applied_count}</strong></div>
+      <div><span>Denied</span><strong>{changeSet.denied_count}</strong></div>
+      <div><span>Failed</span><strong>{changeSet.failed_count}</strong></div>
+      <div className="file-change-set-policy">
+        {partial && <StatusBadge status="partial" />}
+        <span>{formatBytes(changeSet.total_diff_bytes)} / per-file authority</span>
+      </div>
+    </div>
     <div className="file-edit-list">
       {query.data.items.map((edit) => {
         const active = review.isPending && review.variables?.editID === edit.id;

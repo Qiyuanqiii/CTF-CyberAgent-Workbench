@@ -97,6 +97,24 @@ func TestModelDiffAndWakeHTTPControlsRemainCapabilitySeparated(t *testing.T) {
 		!strings.Contains(list.Body.String(), `"apply_enabled":false`) {
 		t.Fatalf("file edit preview leaked bodies or apply authority: %s", list.Body.String())
 	}
+	changeSet := performSessionMessageRequest(t, api, http.MethodGet,
+		"/api/v1/runs/"+run.ID+"/file-edit-change-set",
+		testAccessToken, "", "", nil)
+	if changeSet.Code != http.StatusOK ||
+		!strings.Contains(changeSet.Body.String(),
+			`"protocol_version":"file_edit_change_set.v1"`) ||
+		!strings.Contains(changeSet.Body.String(), `"proposed_count":1`) ||
+		!strings.Contains(changeSet.Body.String(), `"review_independent":true`) ||
+		!strings.Contains(changeSet.Body.String(), `"apply_independent":true`) ||
+		!strings.Contains(changeSet.Body.String(), `"atomic_apply":false`) ||
+		!strings.Contains(changeSet.Body.String(), `"batch_mutation_supported":false`) ||
+		!strings.Contains(changeSet.Body.String(), `"partial_apply_visible":true`) ||
+		!strings.Contains(changeSet.Body.String(), `"diff_content_included":false`) ||
+		strings.Contains(changeSet.Body.String(), `"diff":`) ||
+		strings.Contains(changeSet.Body.String(), `"original_hash":`) ||
+		strings.Contains(changeSet.Body.String(), `"proposed_hash":`) {
+		t.Fatalf("file edit change set widened batch authority: %s", changeSet.Body.String())
+	}
 	review := performSessionMessageRequest(t, api, http.MethodPost,
 		listPath+"/"+edit.ID+"/review", testControlToken, "", "application/json",
 		strings.NewReader(`{"version":"file_edit_review.v1","action":"approve_intent"}`))

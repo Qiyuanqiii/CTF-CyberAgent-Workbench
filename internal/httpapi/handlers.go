@@ -18,6 +18,7 @@ import (
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/redact"
+	"cyberagent-workbench/internal/repository"
 	"cyberagent-workbench/internal/workspace"
 )
 
@@ -49,6 +50,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
 			"external-skills", "workspaces", "workspace-explorer", "workspace-search", "models",
+			"repository-state",
 			"operation-receipts", "operator-actions", "evidence-inventory",
 			"event-stream", "event-poll", "capabilities", "openapi"}
 		if a.controlEnabled {
@@ -137,6 +139,9 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		if len(segments) == 3 && segments[2] == "search" {
 			return a.workspaceSearch(request, segments[1])
 		}
+		if len(segments) == 3 && segments[2] == "repository-state" {
+			return a.workspaceRepositoryState(request, segments[1])
+		}
 	case "sessions":
 		return a.routeSessions(request, segments)
 	case "work-items":
@@ -153,6 +158,44 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 	}
 	return nil, nil, apperror.New(apperror.CodeNotFound, "HTTP API endpoint was not found")
+}
+
+func (a *API) workspaceRepositoryState(request *http.Request,
+	workspaceID string,
+) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	registered, err := a.store.GetWorkspaceInfo(request.Context(), workspaceID)
+	if err != nil {
+		return nil, nil, apperror.Normalize(err)
+	}
+	if registered.ID != workspaceID {
+		return nil, nil, apperror.New(apperror.CodeInternal,
+			"workspace lookup returned a mismatched identity")
+	}
+	state, err := repository.Inspect(request.Context(), registered.RootPath, registered.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	changes := make([]RepositoryChangeView, len(state.Changes))
+	for index, change := range state.Changes {
+		changes[index] = RepositoryChangeView{Path: change.Path, Staging: change.Staging,
+			Worktree: change.Worktree}
+	}
+	return RepositoryStateView{
+		ProtocolVersion: state.ProtocolVersion, WorkspaceID: state.WorkspaceID,
+		Kind: state.Kind, Available: state.Available, Clean: state.Clean,
+		Detached: state.Detached, Branch: state.Branch, Head: state.Head, Changes: changes,
+		StagedCount: state.StagedCount, WorktreeCount: state.WorktreeCount,
+		UntrackedCount: state.UntrackedCount, ConflictedCount: state.ConflictedCount,
+		RedactionCount: state.RedactionCount, Truncated: state.Truncated,
+		ReadOnly: state.ReadOnly, RootPathExposed: state.RootPathExposed,
+		ContentIncluded:      state.ContentIncluded,
+		RemoteConfigIncluded: state.RemoteConfigIncluded,
+		ProcessStarted:       state.ProcessStarted, NetworkUsed: state.NetworkUsed,
+		HooksExecuted: state.HooksExecuted,
+	}, nil, nil
 }
 
 func (a *API) operationReceiptHistory(request *http.Request) (any, *Page, error) {
@@ -370,6 +413,8 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 			return a.runApprovals(request, segments[1])
 		case "file-edits":
 			return a.runFileEdits(request, segments[1])
+		case "file-edit-change-set":
+			return a.runFileEditChangeSet(request, segments[1])
 		case "file-edit-proposal-source":
 			return a.runFileEditProposalSource(request, segments[1])
 		case "wake-intent":
@@ -391,6 +436,56 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 		}
 	}
 	return nil, nil, apperror.New(apperror.CodeNotFound, "Run HTTP API endpoint was not found")
+}
+
+func (a *API) runFileEditChangeSet(request *http.Request,
+	runID string,
+) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	run, mission, err := a.fileEditRunBinding(request, runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	values, err := a.store.ListFileEditPreviewsPage(request.Context(), fileedit.ListFilter{
+		SessionID: run.SessionID, WorkspaceID: mission.WorkspaceID,
+	}, 0, application.MaxFileEditChangeSetItems+1)
+	if err != nil {
+		return nil, nil, err
+	}
+	truncated := len(values) > application.MaxFileEditChangeSetItems
+	if truncated {
+		values = values[:application.MaxFileEditChangeSetItems]
+	}
+	changeSet, err := application.BuildFileEditChangeSet(run, mission, values)
+	if err != nil {
+		return nil, nil, err
+	}
+	items := make([]FileEditChangeSetItemView, len(changeSet.Items))
+	for index, value := range changeSet.Items {
+		preview := fileEditPreviewView(value, run.Terminal())
+		applyEnabled := a.fileEditApplyEnabled && value.Status == fileedit.StatusApproved &&
+			!run.Terminal()
+		items[index] = FileEditChangeSetItemView{
+			ID: value.ID, Path: value.Path, Status: value.Status,
+			DiffBytes: len([]byte(value.Diff)), SecretsRedacted: value.SecretsRedacted,
+			AllowedActions: preview.AllowedActions, ApplyEnabled: applyEnabled,
+			UpdatedAt: value.UpdatedAt,
+		}
+	}
+	return FileEditChangeSetView{
+		ProtocolVersion: application.FileEditChangeSetProtocolVersion,
+		RunID:           changeSet.RunID, SessionID: changeSet.SessionID,
+		WorkspaceID: changeSet.WorkspaceID, Items: items,
+		ProposedCount: changeSet.Counts.Proposed, ApprovedCount: changeSet.Counts.Approved,
+		AppliedCount: changeSet.Counts.Applied, DeniedCount: changeSet.Counts.Denied,
+		FailedCount: changeSet.Counts.Failed, ReturnedCount: len(items),
+		TotalDiffBytes: changeSet.TotalDiffBytes, Truncated: truncated,
+		ReviewIndependent: true, ApplyIndependent: true, AtomicApply: false,
+		BatchMutationSupported: false, PartialApplyVisible: true,
+		DiffContentIncluded: false,
+	}, nil, nil
 }
 
 func (a *API) runFileEdits(request *http.Request, runID string) (any, *Page, error) {

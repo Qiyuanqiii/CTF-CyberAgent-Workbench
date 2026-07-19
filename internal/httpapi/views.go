@@ -90,6 +90,70 @@ type FileEditQueueView struct {
 	ApplyEnabled    bool                  `json:"apply_enabled"`
 }
 
+type FileEditChangeSetItemView struct {
+	ID              string                             `json:"id"`
+	Path            string                             `json:"path"`
+	Status          string                             `json:"status"`
+	DiffBytes       int                                `json:"diff_bytes"`
+	SecretsRedacted bool                               `json:"secrets_redacted"`
+	AllowedActions  []application.FileEditReviewAction `json:"allowed_actions"`
+	ApplyEnabled    bool                               `json:"apply_enabled"`
+	UpdatedAt       time.Time                          `json:"updated_at"`
+}
+
+type FileEditChangeSetView struct {
+	ProtocolVersion        string                      `json:"protocol_version"`
+	RunID                  string                      `json:"run_id"`
+	SessionID              string                      `json:"session_id"`
+	WorkspaceID            string                      `json:"workspace_id"`
+	Items                  []FileEditChangeSetItemView `json:"items"`
+	ProposedCount          int                         `json:"proposed_count"`
+	ApprovedCount          int                         `json:"approved_count"`
+	AppliedCount           int                         `json:"applied_count"`
+	DeniedCount            int                         `json:"denied_count"`
+	FailedCount            int                         `json:"failed_count"`
+	ReturnedCount          int                         `json:"returned_count"`
+	TotalDiffBytes         int                         `json:"total_diff_bytes"`
+	Truncated              bool                        `json:"truncated"`
+	ReviewIndependent      bool                        `json:"review_independent"`
+	ApplyIndependent       bool                        `json:"apply_independent"`
+	AtomicApply            bool                        `json:"atomic_apply"`
+	BatchMutationSupported bool                        `json:"batch_mutation_supported"`
+	PartialApplyVisible    bool                        `json:"partial_apply_visible"`
+	DiffContentIncluded    bool                        `json:"diff_content_included"`
+}
+
+type RepositoryChangeView struct {
+	Path     string `json:"path"`
+	Staging  string `json:"staging"`
+	Worktree string `json:"worktree"`
+}
+
+type RepositoryStateView struct {
+	ProtocolVersion      string                 `json:"protocol_version"`
+	WorkspaceID          string                 `json:"workspace_id"`
+	Kind                 string                 `json:"kind"`
+	Available            bool                   `json:"available"`
+	Clean                bool                   `json:"clean"`
+	Detached             bool                   `json:"detached"`
+	Branch               string                 `json:"branch"`
+	Head                 string                 `json:"head"`
+	Changes              []RepositoryChangeView `json:"changes"`
+	StagedCount          int                    `json:"staged_count"`
+	WorktreeCount        int                    `json:"worktree_count"`
+	UntrackedCount       int                    `json:"untracked_count"`
+	ConflictedCount      int                    `json:"conflicted_count"`
+	RedactionCount       int                    `json:"redaction_count"`
+	Truncated            bool                   `json:"truncated"`
+	ReadOnly             bool                   `json:"read_only"`
+	RootPathExposed      bool                   `json:"root_path_exposed"`
+	ContentIncluded      bool                   `json:"content_included"`
+	RemoteConfigIncluded bool                   `json:"remote_config_included"`
+	ProcessStarted       bool                   `json:"process_started"`
+	NetworkUsed          bool                   `json:"network_used"`
+	HooksExecuted        bool                   `json:"hooks_executed"`
+}
+
 type FileEditReviewView struct {
 	ProtocolVersion string              `json:"protocol_version"`
 	RunID           string              `json:"run_id"`

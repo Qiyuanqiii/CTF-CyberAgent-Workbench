@@ -592,6 +592,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/file-edit-change-set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect a bounded multi-file change set
+         * @description Returns status and size metadata for at most one hundred Run-bound FileEdits. Every review and apply remains independently authorized through the existing per-file endpoints; no batch mutation or atomic apply authority is introduced, and Diff content is omitted.
+         */
+        get: operations["getRunFileEditChangeSet"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/file-edit-proposal-recovery/{edit_id}": {
         parameters: {
             query?: never;
@@ -1140,6 +1160,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/repository-state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect read-only repository state
+         * @description Returns a bounded status-only projection for a Git repository rooted exactly at the registered Workspace. Go does not discover parent repositories, return file content, patches, remotes or local root paths, start a process, execute hooks, or use the network.
+         */
+        get: operations["getWorkspaceRepositoryState"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/search": {
         parameters: {
             query?: never;
@@ -1597,6 +1637,48 @@ export interface components {
             run_id: string;
             /** @enum {string} */
             status: "applied" | "failed";
+        };
+        FileEditChangeSetItemView: {
+            allowed_actions: string[];
+            apply_enabled: boolean;
+            /** Format: int32 */
+            diff_bytes: number;
+            id: string;
+            path: string;
+            secrets_redacted: boolean;
+            /** @enum {string} */
+            status: "proposed" | "approved" | "applied" | "denied" | "failed";
+            /** Format: date-time */
+            updated_at: string;
+        };
+        FileEditChangeSetView: {
+            /** Format: int32 */
+            applied_count: number;
+            apply_independent: boolean;
+            /** Format: int32 */
+            approved_count: number;
+            atomic_apply: boolean;
+            batch_mutation_supported: boolean;
+            /** Format: int32 */
+            denied_count: number;
+            diff_content_included: boolean;
+            /** Format: int32 */
+            failed_count: number;
+            items: components["schemas"]["FileEditChangeSetItemView"][];
+            partial_apply_visible: boolean;
+            /** Format: int32 */
+            proposed_count: number;
+            /** @enum {string} */
+            protocol_version: "file_edit_change_set.v1";
+            /** Format: int32 */
+            returned_count: number;
+            review_independent: boolean;
+            run_id: string;
+            session_id: string;
+            /** Format: int32 */
+            total_diff_bytes: number;
+            truncated: boolean;
+            workspace_id: string;
         };
         FileEditPreviewView: {
             allowed_actions: string[];
@@ -2144,6 +2226,44 @@ export interface components {
             /** @enum {string} */
             status: "reachable" | "unreachable";
             tool_called: boolean;
+        };
+        RepositoryChangeView: {
+            path: string;
+            /** @enum {string} */
+            staging: "unmodified" | "untracked" | "modified" | "added" | "deleted" | "renamed" | "copied" | "conflicted";
+            /** @enum {string} */
+            worktree: "unmodified" | "untracked" | "modified" | "added" | "deleted" | "renamed" | "copied" | "conflicted";
+        };
+        RepositoryStateView: {
+            available: boolean;
+            branch: string;
+            changes: components["schemas"]["RepositoryChangeView"][];
+            clean: boolean;
+            /** Format: int32 */
+            conflicted_count: number;
+            content_included: boolean;
+            detached: boolean;
+            head: string;
+            hooks_executed: boolean;
+            /** @enum {string} */
+            kind: "none" | "git";
+            network_used: boolean;
+            process_started: boolean;
+            /** @enum {string} */
+            protocol_version: "repository_state.v1";
+            read_only: boolean;
+            /** Format: int32 */
+            redaction_count: number;
+            remote_config_included: boolean;
+            root_path_exposed: boolean;
+            /** Format: int32 */
+            staged_count: number;
+            truncated: boolean;
+            /** Format: int32 */
+            untracked_count: number;
+            workspace_id: string;
+            /** Format: int32 */
+            worktree_count: number;
         };
         RunConfigView: {
             interactive: boolean;
@@ -4043,6 +4163,41 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    getRunFileEditChangeSet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FileEditChangeSetView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     recoverFileEditProposal: {
         parameters: {
             query?: never;
@@ -5238,6 +5393,41 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["WorkspaceExplorerView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getWorkspaceRepositoryState: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace identity */
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RepositoryStateView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";

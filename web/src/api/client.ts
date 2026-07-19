@@ -9,6 +9,7 @@ import type {
   EvidenceInventoryView,
   FileEditApplyRequestView,
   FileEditApplyView,
+  FileEditChangeSetView,
   FileEditProposalRequestView,
   FileEditProposalRecoveryView,
   FileEditProposalSourceView,
@@ -32,6 +33,7 @@ import type {
   ProviderCredentialListView,
   ProviderCredentialRequestView,
   ProviderCredentialStatusView,
+  RepositoryStateView,
   RunCreationControlRequestView,
   RunCreationControlView,
   RunExecutionControlRequestView,
@@ -698,6 +700,71 @@ function parseFileEditQueue(value: unknown, runID: string): FileEditQueueView {
   return { ...value, items } as unknown as FileEditQueueView;
 }
 
+function parseFileEditChangeSet(value: unknown, runID: string): FileEditChangeSetView {
+  const keys = ["applied_count", "apply_independent", "approved_count", "atomic_apply",
+    "batch_mutation_supported", "denied_count", "diff_content_included", "failed_count",
+    "items", "partial_apply_visible", "proposed_count", "protocol_version",
+    "returned_count", "review_independent", "run_id", "session_id", "total_diff_bytes",
+    "truncated", "workspace_id"];
+  if (!hasExactKeys(value, keys) || value.protocol_version !== "file_edit_change_set.v1" ||
+    value.run_id !== runID || !boundedIdentity(value.session_id) ||
+    !boundedIdentity(value.workspace_id) || !Array.isArray(value.items) ||
+    value.items.length > 100 || !safeBoundedCount(value.proposed_count, 100) ||
+    !safeBoundedCount(value.approved_count, 100) ||
+    !safeBoundedCount(value.applied_count, 100) ||
+    !safeBoundedCount(value.denied_count, 100) ||
+    !safeBoundedCount(value.failed_count, 100) ||
+    !safeBoundedCount(value.returned_count, 100) ||
+    !safeBoundedCount(value.total_diff_bytes, 100 * 1_064_960) ||
+    typeof value.truncated !== "boolean" || value.review_independent !== true ||
+    value.apply_independent !== true || value.atomic_apply !== false ||
+    value.batch_mutation_supported !== false || value.partial_apply_visible !== true ||
+    value.diff_content_included !== false) {
+    throw new APIRequestError("File edit change set widened batch mutation authority",
+      "INVALID_RESPONSE", 502);
+  }
+  const items = value.items.map((item) => {
+    if (!hasExactKeys(item, ["allowed_actions", "apply_enabled", "diff_bytes", "id", "path",
+      "secrets_redacted", "status", "updated_at"]) || !boundedIdentity(item.id) ||
+      !validWorkspaceRelativePath(item.path) || item.path === "." ||
+      !["proposed", "approved", "applied", "denied", "failed"].includes(String(item.status)) ||
+      !safeBoundedCount(item.diff_bytes, 1_064_960) ||
+      typeof item.secrets_redacted !== "boolean" || typeof item.apply_enabled !== "boolean" ||
+      !Array.isArray(item.allowed_actions) || item.allowed_actions.length > 2 ||
+      !item.allowed_actions.every((action) => action === "approve_intent" || action === "deny") ||
+      !validDate(item.updated_at) ||
+      (item.status === "proposed" ?
+        !(item.allowed_actions.length === 0 ||
+          (item.allowed_actions.length === 2 &&
+            item.allowed_actions.includes("approve_intent") &&
+            item.allowed_actions.includes("deny"))) : item.allowed_actions.length !== 0) ||
+      (item.apply_enabled && item.status !== "approved")) {
+      throw new APIRequestError("File edit change set item violated per-file authority",
+        "INVALID_RESPONSE", 502);
+    }
+    return item;
+  });
+  const counts = new Map<string, number>([
+    ["proposed", value.proposed_count], ["approved", value.approved_count],
+    ["applied", value.applied_count], ["denied", value.denied_count],
+    ["failed", value.failed_count],
+  ]);
+  if (value.returned_count !== items.length ||
+    [...counts.values()].reduce((sum, count) => sum + count, 0) !== items.length ||
+    items.some((item) => counts.get(String(item.status)) === undefined) ||
+    value.total_diff_bytes !== items.reduce((sum, item) => sum + Number(item.diff_bytes), 0)) {
+    throw new APIRequestError("File edit change set contains inconsistent partial state",
+      "INVALID_RESPONSE", 502);
+  }
+  for (const status of counts.keys()) {
+    if (items.filter((item) => item.status === status).length !== counts.get(status)) {
+      throw new APIRequestError("File edit change set contains inconsistent partial state",
+        "INVALID_RESPONSE", 502);
+    }
+  }
+  return { ...value, items } as unknown as FileEditChangeSetView;
+}
+
 function parseFileEditReview(value: unknown, runID: string, editID: string,
   request: FileEditReviewRequestView): FileEditReviewView {
   if (!hasExactKeys(value, ["action", "edit", "file_written", "protocol_version", "replayed", "run_id"]) ||
@@ -929,6 +996,57 @@ function parseWorkspaceSearch(value: unknown, workspaceID: string): WorkspaceSea
     return item;
   });
   return { ...value, results } as unknown as WorkspaceSearchView;
+}
+
+function parseRepositoryState(value: unknown, workspaceID: string): RepositoryStateView {
+  const keys = ["available", "branch", "changes", "clean", "conflicted_count",
+    "content_included", "detached", "head", "hooks_executed", "kind", "network_used",
+    "process_started", "protocol_version", "read_only", "redaction_count",
+    "remote_config_included", "root_path_exposed", "staged_count", "truncated",
+    "untracked_count", "workspace_id", "worktree_count"];
+  if (!hasExactKeys(value, keys) || value.protocol_version !== "repository_state.v1" ||
+    value.workspace_id !== workspaceID || !["none", "git"].includes(String(value.kind)) ||
+    typeof value.available !== "boolean" || typeof value.clean !== "boolean" ||
+    typeof value.detached !== "boolean" || typeof value.truncated !== "boolean" ||
+    value.read_only !== true || value.root_path_exposed !== false ||
+    value.content_included !== false || value.remote_config_included !== false ||
+    value.process_started !== false || value.network_used !== false ||
+    value.hooks_executed !== false || typeof value.branch !== "string" ||
+    value.branch.length > 255 || /[\u0000-\u001f\u007f]/u.test(value.branch) ||
+    typeof value.head !== "string" || !/^(?:[0-9a-f]{12})?$/u.test(value.head) ||
+    !safeBoundedCount(value.staged_count, 10_000) ||
+    !safeBoundedCount(value.worktree_count, 10_000) ||
+    !safeBoundedCount(value.untracked_count, 10_000) ||
+    !safeBoundedCount(value.conflicted_count, 10_000) ||
+    !safeBoundedCount(value.redaction_count, 10_000) || !Array.isArray(value.changes) ||
+    value.changes.length > 200) {
+    throw new APIRequestError("Repository state violated its read-only bounded contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const changes = value.changes.map((change) => {
+    if (!hasExactKeys(change, ["path", "staging", "worktree"]) ||
+      !validWorkspaceRelativePath(change.path) || change.path === "." ||
+      !["unmodified", "untracked", "modified", "added", "deleted", "renamed", "copied",
+        "conflicted"].includes(String(change.staging)) ||
+      !["unmodified", "untracked", "modified", "added", "deleted", "renamed", "copied",
+        "conflicted"].includes(String(change.worktree)) ||
+      (change.staging === "unmodified" && change.worktree === "unmodified")) {
+      throw new APIRequestError("Repository change widened path or status authority",
+        "INVALID_RESPONSE", 502);
+    }
+    return change;
+  });
+  const total = value.staged_count + value.worktree_count + value.untracked_count;
+  if ((value.available !== (value.kind === "git")) ||
+    (!value.available && (value.clean || value.detached || value.branch !== "" ||
+      value.head !== "" || changes.length !== 0 || total !== 0 ||
+      value.conflicted_count !== 0 || value.redaction_count !== 0 || value.truncated)) ||
+    (value.available && value.clean !== (total === 0)) ||
+    value.conflicted_count > value.staged_count + value.worktree_count) {
+    throw new APIRequestError("Repository state contains inconsistent status facts",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, changes } as unknown as RepositoryStateView;
 }
 
 function parseEvidenceAttachment(value: unknown, runID: string,
@@ -1222,6 +1340,16 @@ export class CyberAgentClient {
     ), workspaceID);
   }
 
+  async repositoryState(workspaceID: string,
+    signal?: AbortSignal): Promise<RepositoryStateView> {
+    if (!boundedIdentity(workspaceID) || workspaceID.trim() !== workspaceID) {
+      throw new Error("A normalized Workspace identity is required");
+    }
+    return parseRepositoryState(await this.get<unknown>(
+      `/workspaces/${encodeURIComponent(workspaceID)}/repository-state`, {}, signal,
+    ), workspaceID);
+  }
+
   async operationReceiptHistory(runID = "",
     signal?: AbortSignal): Promise<OperationReceiptHistoryView> {
     if (runID !== "" && (!boundedIdentity(runID) || runID.trim() !== runID)) {
@@ -1320,6 +1448,16 @@ export class CyberAgentClient {
     }
     return parseFileEditQueue(await this.get<unknown>(
       `/runs/${encodeURIComponent(runID)}/file-edits`, {}, signal,
+    ), runID);
+  }
+
+  async fileEditChangeSet(runID: string,
+    signal?: AbortSignal): Promise<FileEditChangeSetView> {
+    if (!boundedIdentity(runID) || runID.trim() !== runID) {
+      throw new Error("A normalized Run identity is required");
+    }
+    return parseFileEditChangeSet(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/file-edit-change-set`, {}, signal,
     ), runID);
   }
 
