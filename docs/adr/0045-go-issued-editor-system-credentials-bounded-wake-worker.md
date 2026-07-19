@@ -119,6 +119,9 @@ secret-test snapshotting, and Monaco CDN/dependency risk. Desktop and 390x844 mo
 UI smoke pass. No unresolved high- or medium-severity issue is known. No real API key,
 Provider network request, Shell, LocalRunner, or Docker operation was used.
 
+GitHub Actions run `29671519260` passed implementation commit `ee36405`: TypeScript
+42s, Windows Desktop 2m31s, and Go control plane 3m54s.
+
 ## 中文结论
 
 本决策把编辑、密钥和自动唤醒拆成三条互不借权的 Go 边界。Monaco 只能使用

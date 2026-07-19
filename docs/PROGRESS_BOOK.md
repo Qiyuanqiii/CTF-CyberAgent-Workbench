@@ -942,6 +942,8 @@ D1-M3 增加 `provider_credential.v1` 与 Windows Credential Manager system stor
 
 最终普通整合门通过：uncached 全仓 Go 327.6 秒、`go vet`、secure Desktop tag、28 文件 102 项 React、strict TypeScript、确定性 OpenAPI/TypeScript、Vite production build、npm 零漏洞和 Windows 可复现双构建均为绿色；未签名 GUI SHA-256 为 `a0e6aa0a3d15ccc39712f8a0a64d7de06e4a6af426e060b6378b1011c93a1cf6`，`release_ready=false`。审计修复 exact provider normalization、Windows credential 长度、单凭证读取失败导致全局不可用、ControlPlane 关闭后 worker 重启、不确定 FileEdit 保存后的 ID/意图漂移、审批后重试误报内部错误、未配置 Provider 的 `models:null` 契约回归、前端密钥测试快照，以及 Monaco CDN/依赖漏洞风险；桌面和 390x844 移动 UI 冒烟通过。当前无已知未解决高/中风险，没有使用真实 API key、Provider 网络、Shell、LocalRunner 或 Docker，边界见 ADR 0045。
 
+GitHub Actions run `29671519260` 已通过实现提交 `ee36405`：TypeScript 42 秒、Windows Desktop 2 分 31 秒、Go control plane 3 分 54 秒。
+
 双指标更新为架构完成度约 99%（V2 约 99%）、完整产品可用度约 84-87%、通用 Coding Agent 约 82%、Cyber 自动化约 20%。下一批固定为 D1-I2 安全编辑恢复、D1-M4 Provider Registry generation reload、D1-J2 metadata-only browser capability + worker health/drain；它会补齐普通 `api serve` 保守隐藏新控件的低风险 discovery 缺口。该批结束累计六片，执行全仓 ordinary/race/vet/staticcheck/govulncheck/依赖/隐私完整门。Windows 10 人工矩阵、签名/安装包、Rust analyzer、xterm 与 CTF 自动化继续独立后置。
 
 ## 八、仓库同步与恢复约定
