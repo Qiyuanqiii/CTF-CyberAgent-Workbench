@@ -60,6 +60,12 @@ Agent, Sandbox, LocalRunner, Docker, approval, profile, or capability path impor
 constructs them. Cleanup targets only the private Job Object/process group created by
 the current test.
 
+The Unix adapter uses ordered reaping instead of treating signal delivery as proof of
+cleanup. Cooperative stop lets the parent wait for its child; forced stop kills the
+child first and then releases the parent to collect its exit status. Whole-group kill
+is retained only as a bounded failure fallback. This avoids falsely accepting an
+adopted zombie, which Linux still reports through `kill(pid, 0)`.
+
 ## Verification
 
 - Uncached `go test -count=1 ./...`: passed in 380 seconds.
@@ -67,6 +73,8 @@ the current test.
 - Post-audit focused ordinary and race regressions: passed.
 - Windows Job Object conformance: all three lifecycle cases passed; Linux test binary
   cross-compilation passed.
+- The first remote Linux run exposed and rejected a simultaneous-group-kill zombie;
+  ordered Unix reaping replaced that racy implementation before the slice was accepted.
 - `go vet`, zero-warning `staticcheck`, module verify/tidy diff: passed.
 - `govulncheck`: zero reachable vulnerabilities; one required-module advisory remains
   unimported/uncalled.

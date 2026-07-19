@@ -15,6 +15,7 @@ type unixConformanceTree struct {
 	processGroupID int
 	parentPID      int
 	childPID       int
+	stopMarker     string
 }
 
 func startPlatformConformanceTree(ctx context.Context, command *exec.Cmd,
@@ -27,6 +28,7 @@ func startPlatformConformanceTree(ctx context.Context, command *exec.Cmd,
 	controller := &unixConformanceTree{
 		processGroupID: command.Process.Pid,
 		parentPID:      command.Process.Pid,
+		stopMarker:     filepath.Join(directory, "stop"),
 	}
 	cleanup := func() {
 		_ = syscall.Kill(-controller.processGroupID, syscall.SIGKILL)
@@ -45,18 +47,35 @@ func startPlatformConformanceTree(ctx context.Context, command *exec.Cmd,
 	return controller, nil
 }
 
-func (c *unixConformanceTree) Terminate(ctx context.Context, _ string) error {
-	if err := signalUnixProcessGroup(c.processGroupID, syscall.SIGTERM); err != nil {
+func (c *unixConformanceTree) Terminate(ctx context.Context, stopMarker string) error {
+	if stopMarker != c.stopMarker {
+		return errors.New("process-tree conformance stop marker mismatch")
+	}
+	if err := writeConformanceMarker(c.stopMarker); err != nil {
 		return err
 	}
 	return c.waitReaped(ctx)
 }
 
 func (c *unixConformanceTree) Kill(ctx context.Context) error {
-	if err := signalUnixProcessGroup(c.processGroupID, syscall.SIGKILL); err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return c.waitReaped(ctx)
+	// Kill the descendant first, then release the parent so it can wait and
+	// reap that child before exiting. Killing the whole group simultaneously
+	// can leave an adopted zombie that kill(pid, 0) correctly still observes.
+	if err := signalUnixProcess(c.childPID, syscall.SIGKILL); err != nil {
+		return err
+	}
+	if err := writeConformanceMarker(c.stopMarker); err != nil {
+		return errors.Join(err,
+			signalUnixProcessGroup(c.processGroupID, syscall.SIGKILL))
+	}
+	if err := c.waitReaped(ctx); err != nil {
+		return errors.Join(err,
+			signalUnixProcessGroup(c.processGroupID, syscall.SIGKILL))
+	}
+	return nil
 }
 
 func (c *unixConformanceTree) Inspect(ctx context.Context) (TreeState, error) {
@@ -100,6 +119,17 @@ func (c *unixConformanceTree) waitReaped(ctx context.Context) error {
 
 func signalUnixProcessGroup(processGroupID int, signal syscall.Signal) error {
 	err := syscall.Kill(-processGroupID, signal)
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return err
+}
+
+func signalUnixProcess(pid int, signal syscall.Signal) error {
+	if pid <= 0 {
+		return nil
+	}
+	err := syscall.Kill(pid, signal)
 	if errors.Is(err, syscall.ESRCH) {
 		return nil
 	}
