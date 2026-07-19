@@ -1,6 +1,6 @@
 # CyberAgent Workbench 进度书
 
-更新时间：2026-07-19
+更新时间：2026-07-20
 
 ## 一、当前阶段
 
@@ -9,7 +9,7 @@
 从 schema v49 起采用“双指标”，不再使用容易混淆的单一“整体产品愿景”百分比：
 
 - 架构完成度：约 99%；其中 V2 Run-centric 控制平面约 99%。该指标衡量 Go 主控、持久化状态机和模块边界的覆盖程度。
-- 产品可用度：完整 Code + Cyber 产品约 93-95%；其中通用 Coding Agent 工作流约 93%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
+- 产品可用度：完整 Code + Cyber 产品约 94-96%；其中通用 Coding Agent 工作流约 94%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
 - 上述数值是依据已测试任务切片给出的工程估算，不是性能基准，也不代表仍被安全关闭的功能已经可用。
 
 V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、主动取消、有界工具循环和跨进程 execution lease。P3-P5 已落地 Work/Note/Context、最多两个核心 child、独立 1/2/4/6 只读 Fan-out、Tool Gateway、审批/Grant、预算、ScriptProcess 与 Artifact。P9 已推进到 schema v77 / D1-G1/I3/F1：除既有 Run/Session/Plan/审批/Workspace/证据/回执/行动中心外，现有 API/Desktop 还支持安全恢复的 Monaco FileEdit、独立多文件汇总、exact-root 只读 Repository、Code Journey、Provider generation reload 和有界 wake worker。真实 Local/Docker/Shell/Git 进程、安装脚本/钩子和远程 Skill 分发继续关闭。
@@ -1176,10 +1176,26 @@ transitive `GO-2026-5932`。未使用真实 key、Provider、Shell、LocalRunner
 conformance adapters。三者仍不得开放 raw blob、aggregate pass inference 或产品 Local/Docker
 start；人工 Windows 10、签名/安装包、Rust analyzer、xterm 与 CTF 自动化继续独立后置。
 
+本轮插入完成 C1/C2/C3 三个通用上下文硬化切片。C1 将非 ASCII 内容改为按 UTF-8 字节
+保守估算 token，并使用饱和加法；C2 新增完整请求级 `model_context_window.v1`，默认总窗口
+32,768、余量 1,024、默认输出 1,024、输出上限 4,096，root/Specialist 只可裁剪最旧普通
+history，mandatory context 超限时在 Provider 前失败；C3/schema v82 将一次性摘要升级为
+`handoff_memory.v1` 累计链，默认超过 8 条消息压缩并保留 4 条，交接最多 4,000 字符/
+12 条记录，绑定 predecessor、SHA-256、累计计数、单调 ordinal 与 Session 消息 ID 高水位。旧 v0 摘要可读，并在下次
+压缩时以无指令权限证据折叠。
+
+组合审计确认并修复一个原有显著可靠性问题：连续压缩只读取最新摘要但未并入更早摘要，
+导致早期决定消失；同时将交接记录独立固定为 12 条、修复零值 Router map 初始化及 v82
+追加后的 v81 降级夹具顺序、来源引用脱敏/限长、时钟回拨与摘要落库后崩溃重试。README/仓库/工具/模型正文仍是非可信证据，不自动重写或重载
+`AGENTS.md`。uncached 全仓 Go 348.5 秒、changed-package `go vet`、strict TypeScript 与
+37 文件 127 项 Vitest 全绿；当前无已知未解决高/中风险，边界见 ADR 0052。未使用真实
+Provider/key/Shell/LocalRunner/Docker/hook/攻击流量/外部网络。本轮是新六切片周期前三片，
+下一批 D1-G5/D1-V4/R2 后执行完整 race/staticcheck/govulncheck/依赖/隐私/构建门。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0051-exact-commit-verification-association-runner-lifecycle.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0052-conservative-model-context-cumulative-handoff-memory.md`。

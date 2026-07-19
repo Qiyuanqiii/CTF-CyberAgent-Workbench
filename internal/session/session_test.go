@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -28,6 +29,7 @@ type memorySessionStore struct {
 	approvals  map[string]approval.Record
 	workspaces map[string]WorkspaceInfo
 	nextMsgID  int64
+	failMark   bool
 }
 
 type promptCaptureProvider struct {
@@ -122,6 +124,10 @@ func (m *memorySessionStore) ListSessionMessages(ctx context.Context, sessionID 
 }
 
 func (m *memorySessionStore) MarkSessionMessagesCompacted(ctx context.Context, sessionID string, throughID int64) (int64, error) {
+	if m.failMark {
+		m.failMark = false
+		return 0, errors.New("injected compaction mark failure")
+	}
 	var count int64
 	for i := range m.messages {
 		if m.messages[i].SessionID == sessionID && m.messages[i].ID <= throughID && !m.messages[i].Compacted {
@@ -649,5 +655,42 @@ func TestSessionAutoCompactsLongHistory(t *testing.T) {
 	}
 	if len(active) >= 10 {
 		t.Fatalf("expected compacted history to shrink active messages, got %d", len(active))
+	}
+}
+
+func TestSessionCompactionRecoversSummaryBeforeMarkCrashExactlyOnce(t *testing.T) {
+	store := newMemorySessionStore()
+	manager := NewManager(store, llm.NewDefaultRouter(), policy.NewDefaultChecker())
+	ctx := context.Background()
+	sess, err := manager.Create(ctx, "", "demo", "learn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 4; i++ {
+		if _, err := manager.Send(ctx, sess.ID, "message"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store.failMark = true
+	if _, err := manager.Send(ctx, sess.ID, "trigger compaction"); err == nil || !strings.Contains(err.Error(), "injected compaction mark failure") {
+		t.Fatalf("compaction mark failure = %v", err)
+	}
+	if len(store.summaries) != 1 || store.summaries[0].CompactedMessageCount != 6 {
+		t.Fatalf("summary was not durably written before the injected crash: %#v", store.summaries)
+	}
+	result, err := manager.compactActiveMessages(ctx, sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Summary.ID != store.summaries[0].ID || len(store.summaries) != 1 {
+		t.Fatalf("recovery duplicated the persisted summary: result=%#v stored=%#v",
+			result, store.summaries)
+	}
+	active, err := manager.History(ctx, sess.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 4 {
+		t.Fatalf("recovery did not compact the original message range: active=%d", len(active))
 	}
 }

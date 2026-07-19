@@ -446,9 +446,10 @@ func (s *RunSupervisor) stepWithLeaseMode(ctx context.Context, lease domain.RunE
 		return result, failure
 	}
 	contextAudit := supervisorModelContextAudit(memory)
+	messages, contextLayout := supervisorMessagesWithLayout(history, input, memory,
+		skillContext, externalSkillContext, turn.Mode)
 	request := llm.ChatRequest{
-		Messages: supervisorMessages(history, input, memory, skillContext,
-			externalSkillContext, turn.Mode),
+		Messages: messages,
 		Tools:    supervisorStructuredToolSpecs(turn.Mode.Phase),
 		JSONMode: true,
 		Metadata: map[string]string{
@@ -526,10 +527,18 @@ func (s *RunSupervisor) stepWithLeaseMode(ctx context.Context, lease domain.RunE
 
 	for {
 		modelRequest := request
+		modelContextLayout := contextLayout
 		if protocolRepair == 1 {
 			modelRequest = supervisorProtocolRepairRequest(request, repairReason)
+			modelContextLayout = modelContextLayout.shifted(1)
 		}
 		modelRequest, err = supervisorRequestWithinBudget(modelRequest, turn.Run.Budget, turn.Checkpoint)
+		if err != nil {
+			failure := s.recordFailure(ctx, &result, err, 0)
+			return result, failure
+		}
+		modelRequest, _, err = constrainRequestToModelWindow(modelRequest,
+			s.router.ContextWindow(ref), modelContextLayout)
 		if err != nil {
 			failure := s.recordFailure(ctx, &result, err, 0)
 			return result, failure
@@ -1449,6 +1458,15 @@ func supervisorMessages(history []session.Message, input string, memory contextm
 	skillContext skills.ContextAssembly, externalSkillContext skills.ExternalContextAssembly,
 	mode domain.RunModeSnapshot,
 ) []llm.Message {
+	messages, _ := supervisorMessagesWithLayout(history, input, memory, skillContext,
+		externalSkillContext, mode)
+	return messages
+}
+
+func supervisorMessagesWithLayout(history []session.Message, input string,
+	memory contextmgr.Selection, skillContext skills.ContextAssembly,
+	externalSkillContext skills.ExternalContextAssembly, mode domain.RunModeSnapshot,
+) ([]llm.Message, modelContextLayout) {
 	if len(history) > maxSupervisorHistoryMessages {
 		history = history[len(history)-maxSupervisorHistoryMessages:]
 	}
@@ -1469,13 +1487,15 @@ func supervisorMessages(history []session.Message, input string, memory contextm
 	for _, section := range memory.Sections {
 		messages = append(messages, llm.Message{Role: "user", Content: section.Content})
 	}
+	layout := modelContextLayout{HistoryStart: len(messages)}
 	for _, message := range history {
 		projected := session.ProjectContextMessage(message)
 		if projected.Role == "user" || projected.Role == "assistant" || projected.Role == "system" {
 			messages = append(messages, llm.Message{Role: projected.Role, Content: projected.Content})
+			layout.HistoryCount++
 		}
 	}
-	return append(messages, llm.Message{Role: "user", Content: input})
+	return append(messages, llm.Message{Role: "user", Content: input}), layout
 }
 
 type externalSkillGuidanceEnvelope struct {

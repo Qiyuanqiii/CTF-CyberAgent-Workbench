@@ -1,10 +1,10 @@
 # Project Status
 
-Last updated: 2026-07-19
+Last updated: 2026-07-20
 
 ## Resume Context
 
-Current database schema is v77. Schemas v69-v77 establish inert external Skills, controlled Run/Session/lifecycle, wake intent and foreground consumption, separately authorized FileEdit apply, Workspace evidence/search/attachment, and durable receipts. Non-schema D1-O1/C2/K1 adds operator actions, evidence inventory, and a navigation/refresh-only palette. Non-schema D1-I1/M3/J1 now adds a local Monaco proposal/Diff editor over Go-issued source handles, Windows Credential Manager Provider controls with status-only readback, and a default-off wake worker capped at one concurrent one-step handoff. Proposal/review/apply, model/credential, and wake/worker capabilities remain independent. None grants general Shell, LocalRunner, Docker, child scheduling, install hooks, renderer host-path authority, credential readback, document instruction authority, or automatic Skill selection. Selected packages and Workspace text remain user-role untrusted evidence/guidance.
+Current database schema is v82. Schemas v78-v81 add immutable operator verification evidence, livelock recovery, verification plans, and explicit plan-item/evidence associations; schema v82 adds conservative complete-request model-context planning and immutable cumulative handoff memory. Non-schema Code/Desktop work through D1-G4/V3/R1 remains available, while the new C1-C3 batch is shared Go-runtime hardening rather than a new renderer capability. Root and Specialist requests use a 32K conservative fallback with explicit output/safety reservations, repeated compaction preserves a predecessor-bound cumulative handoff chain, and arbitrary repository documents remain untrusted evidence instead of instructions. None grants general Shell, LocalRunner, Docker, child scheduling, install hooks, renderer host-path authority, credential readback, document instruction authority, or automatic Skill selection.
 
 Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No path starts a Runner, container, Shell, or host process. ADR 0024 through ADR 0046 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/recovery/review/apply, Provider credential/generation, inert-install, receipt, Explorer/search, evidence, action-center, command-palette, and portable-build boundaries.
 
@@ -1446,14 +1446,43 @@ hook, attack traffic, or external network was used. Architecture remains about 9
 complete-product usability about 94-96%, generic Coding Agent usability about 94%, and
 Cyber automation about 20%. ADR 0051 records the boundary.
 
+## Schema v82 Conservative Context And Cumulative Handoff Memory Batch
+
+C1 makes token planning conservative for multilingual content. ASCII uses the larger
+word/four-character estimate, non-ASCII counts UTF-8 bytes, and every addition
+saturates. C2 adds `model_context_window.v1` with a 32,768-token fallback, 1,024 safety,
+1,024 default output, and 4,096 output cap. Complete Root/Specialist requests include
+message/tool/schema cost; only oldest ordinary history can be removed. Mandatory
+overflow fails before Provider activity. Exact per-model overrides swap with Router
+generations but have no user-facing configuration surface yet.
+
+C3/schema v82 makes context handoffs cumulative and append-only. Active history still
+compacts above eight messages and keeps four. The 4,000-character handoff retains at
+most 12 prioritized provenance records with an exact predecessor ID, row/record
+digests, cumulative compacted and omitted counts, monotonic ordinal, and Session-message
+ID high-water. SQLite rejects
+mutation, deletion, and stale forks; Go verifies on read. V0 rows are preserved and
+folded once as non-authoritative history. Only provenance-confirmed operator or Go
+control records can retain instruction authority; arbitrary files and model/tool text
+remain untrusted evidence and are not automatically loaded from `AGENTS.md` or README.
+
+The uncached full Go suite passed in 348.5 seconds. Changed-package `go vet`, strict
+TypeScript, and 127 Vitest tests in 37 files passed. The audit fixed the original loss
+of earlier summaries across repeated compaction, separated handoff retention into a
+dedicated 12-record cap, initialized zero-value Router maps, corrected v81 downgrade-fixture ordering, bounded/redacted source references, clamped clock rollback, and added message-high-water crash recovery.
+No unresolved high/medium issue is known. No real Provider, key, Shell, LocalRunner,
+Docker, hook, attack traffic, or external network was used. ADR 0052 records the
+boundary.
+
 ## Recommended Next Batch
 
 Complete D1-G5 bounded redacted exact-commit file preview, D1-V4 verification coverage
 metadata in Code Handoff/export, and R2 platform-specific process-tree conformance
 adapters behind a test-only, non-product build boundary. D1-G5 must not expose raw
 unredacted blobs or mutate Git state; D1-V4 must not infer aggregate pass; R2 must not
-map Local/Docker or any product capability to process start. This is the first half of
-the next six-slice cycle, so it receives the ordinary integrated gate. The manual
+map Local/Docker or any product capability to process start. This is the second half of
+the current six-slice cycle, so it receives both the ordinary integrated gate and the
+full race/staticcheck/govulncheck/dependency/privacy/build robustness gate. The manual
 Windows 10 matrix, signed ZIP/MSIX distribution, real Sandbox release gate, Rust
 analyzers, xterm input, network grants, and CTF solving remain separately gated.
 

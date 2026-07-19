@@ -19,17 +19,19 @@ type ModelRef struct {
 }
 
 type Router struct {
-	mu         sync.RWMutex
-	providers  map[string]Provider
-	routes     map[string]ModelRef
-	defaultRef ModelRef
+	mu             sync.RWMutex
+	providers      map[string]Provider
+	routes         map[string]ModelRef
+	contextWindows map[string]ContextWindow
+	defaultRef     ModelRef
 }
 
 func NewRouter(defaultRef ModelRef) *Router {
 	return &Router{
-		providers:  map[string]Provider{},
-		routes:     map[string]ModelRef{},
-		defaultRef: defaultRef,
+		providers:      map[string]Provider{},
+		routes:         map[string]ModelRef{},
+		contextWindows: map[string]ContextWindow{},
+		defaultRef:     defaultRef,
 	}
 }
 
@@ -72,15 +74,57 @@ func (r *Router) ReplaceConfiguration(next *Router) error {
 	for name, ref := range next.routes {
 		routes[name] = ref
 	}
+	contextWindows := make(map[string]ContextWindow, len(next.contextWindows))
+	for key, window := range next.contextWindows {
+		contextWindows[key] = window
+	}
 	defaultRef := next.defaultRef
 	next.mu.RUnlock()
 
 	r.mu.Lock()
 	r.providers = providers
 	r.routes = routes
+	r.contextWindows = contextWindows
 	r.defaultRef = defaultRef
 	r.mu.Unlock()
 	return nil
+}
+
+func (r *Router) SetContextWindow(ref ModelRef, window ContextWindow) error {
+	if r == nil {
+		return fmt.Errorf("router is required")
+	}
+	key, ok := contextWindowKey(ref)
+	if !ok {
+		return fmt.Errorf("model context-window ref is invalid")
+	}
+	if err := window.Validate(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.contextWindows == nil {
+		r.contextWindows = make(map[string]ContextWindow)
+	}
+	r.contextWindows[key] = window
+	return nil
+}
+
+func (r *Router) ContextWindow(ref ModelRef) ContextWindow {
+	if r == nil {
+		return DefaultContextWindow()
+	}
+	key, ok := contextWindowKey(ref)
+	if !ok {
+		return DefaultContextWindow()
+	}
+	r.mu.RLock()
+	window, found := r.contextWindows[key]
+	r.mu.RUnlock()
+	if !found || window.Validate() != nil {
+		return DefaultContextWindow()
+	}
+	return window
 }
 
 func (r *Router) ProviderNames() []string {

@@ -626,7 +626,7 @@ func removeSchemaV80ForTestStatements() []string {
 }
 
 func removeSchemaV81ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV82ForTestStatements(), []string{
 		`DROP TRIGGER trg_operator_verification_association_delete_immutable`,
 		`DROP TRIGGER trg_operator_verification_association_update_immutable`,
 		`DROP TRIGGER trg_operator_verification_association_insert`,
@@ -634,5 +634,5 @@ func removeSchemaV81ForTestStatements() []string {
 		`DROP INDEX idx_operator_verification_associations_run_created`,
 		`DROP TABLE operator_verification_plan_evidence_associations`,
 		`DELETE FROM schema_migrations WHERE version = 81`,
-	}
+	}...)
 }

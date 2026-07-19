@@ -16,6 +16,7 @@ import (
 	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/llm"
 	"cyberagent-workbench/internal/policy"
+	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/store"
 	"cyberagent-workbench/internal/toolrun"
@@ -78,6 +79,70 @@ func TestRunSupervisorCompletesOneTurnAndEnforcesBudget(t *testing.T) {
 		countEventType(after, events.RunExecutionLeaseAcquiredEvent) != countEventType(before, events.RunExecutionLeaseAcquiredEvent)+1 ||
 		countEventType(after, events.RunExecutionLeaseReleasedEvent) != countEventType(before, events.RunExecutionLeaseReleasedEvent)+1 {
 		t.Fatalf("budget rejection did not record exactly one lease attempt: before=%d after=%d", len(before), len(after))
+	}
+}
+
+func TestRunSupervisorAppliesAggregateContextWindowAndTrimsOldestHistory(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "supervisor-context-window.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	provider := &lifecycleProvider{responses: []string{
+		rootActionResponse(domain.RootActionContinue, "bounded context accepted", "", ""),
+	}}
+	runs := application.NewRunService(st)
+	_, run, err := runs.Create(ctx, application.CreateRunRequest{
+		Goal: "apply aggregate context budget", Profile: "code",
+		ModelRoute: provider.Name() + "/model", Budget: domain.Budget{MaxTurns: 3},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runs.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 20; index++ {
+		role := "user"
+		if index%2 == 1 {
+			role = "assistant"
+		}
+		content := fmt.Sprintf("history-%02d %s", index, strings.Repeat("a", 2000))
+		if _, err := st.SaveSessionMessage(ctx, session.NewMessage(run.SessionID, role, content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ref := llm.ModelRef{Provider: provider.Name(), Model: "model"}
+	router := llm.NewRouter(ref)
+	router.RegisterProvider(provider)
+	if err := router.SetContextWindow(ref, llm.ContextWindow{
+		ProtocolVersion: llm.ContextWindowProtocolVersion, WindowTokens: 8192,
+		SafetyMarginTokens: 256, DefaultOutputTokens: 256, MaxOutputTokens: 512,
+		Source: "integration_test",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := application.NewRunSupervisor(st, router,
+		policy.NewDefaultChecker()).Step(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.requests) != 1 {
+		t.Fatalf("provider calls=%d, want 1", len(provider.requests))
+	}
+	request := provider.requests[0]
+	if request.MaxTokens != 256 || request.Metadata["context_window_source"] != "integration_test" ||
+		request.Metadata["context_history_omitted"] == "" ||
+		request.Metadata["context_history_omitted"] == "0" {
+		t.Fatalf("aggregate context gate was not applied: max=%d metadata=%#v",
+			request.MaxTokens, request.Metadata)
+	}
+	joined := ""
+	for _, message := range request.Messages {
+		joined += message.Content
+	}
+	if strings.Contains(joined, "history-00") || !strings.Contains(joined, "history-19") {
+		t.Fatalf("context gate did not retain newest history deterministically")
 	}
 }
 

@@ -228,13 +228,13 @@ func TestSchemaV81UpgradeFabricatesNoVerificationAssociation(t *testing.T) {
 			OperationKey: "v81-upgrade-plan-operation-0001", AuthoredBy: "operator"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, statement := range []string{
+	for _, statement := range append(removeSchemaV82ForTestStatements(), []string{
 		`DROP TRIGGER trg_operator_verification_association_delete_immutable`,
 		`DROP TRIGGER trg_operator_verification_association_update_immutable`,
 		`DROP TRIGGER trg_operator_verification_association_insert`,
 		`DROP TABLE operator_verification_plan_evidence_associations`,
 		`DELETE FROM schema_migrations WHERE version = 81`,
-	} {
+	}...) {
 		if _, err := state.db.ExecContext(ctx, statement); err != nil {
 			t.Fatal(err)
 		}

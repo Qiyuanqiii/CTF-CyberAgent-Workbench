@@ -56,6 +56,8 @@ func TestSpecialistRunnerExecutesInternalNoToolContinuation(t *testing.T) {
 	if len(provider.requests) != 1 || len(provider.requests[0].Tools) != 0 ||
 		!provider.requests[0].JSONMode ||
 		provider.requests[0].Metadata["response_schema"] != domain.SpecialistLifecycleVersion ||
+		provider.requests[0].Metadata["context_window_source"] != "conservative_default" ||
+		provider.requests[0].Metadata["context_input_estimate"] == "" ||
 		provider.requests[0].MaxTokens != 32 {
 		t.Fatalf("Specialist provider request escaped its no-tool budget: %#v", provider.requests)
 	}

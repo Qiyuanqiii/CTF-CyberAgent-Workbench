@@ -173,6 +173,7 @@ func ProjectContextMessage(message Message) contextmgr.Message {
 		Role:                  message.Role,
 		Content:               redact.String(message.Content),
 		CreatedAt:             message.CreatedAt,
+		SourceMessageID:       message.ID,
 		SourceKind:            provenance.SourceKind,
 		SourceRef:             provenance.SourceRef,
 		ContentSHA256:         provenance.ContentSHA256,

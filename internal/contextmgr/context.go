@@ -2,7 +2,6 @@ package contextmgr
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,6 +15,7 @@ type Message struct {
 	Role                  string
 	Content               string
 	CreatedAt             time.Time
+	SourceMessageID       int64
 	SourceKind            string
 	SourceRef             string
 	ContentSHA256         string
@@ -26,7 +26,11 @@ type Summary struct {
 	ID                    int64
 	TaskID                string
 	WorkspaceID           string
+	ProtocolVersion       string
+	PreviousSummaryID     int64
 	Content               string
+	ContentSHA256         string
+	CompactedMessageCount int
 	SourceMessageCount    int
 	PreservedMessageCount int
 	TokenEstimate         int
@@ -65,7 +69,7 @@ func DefaultConfig() Config {
 	return Config{
 		MaxMessagesBeforeCompact: 8,
 		PreserveRecentMessages:   4,
-		MaxSummaryChars:          4000,
+		MaxSummaryChars:          MaxHandoffMemoryChars,
 		MaxLineChars:             220,
 	}
 }
@@ -78,11 +82,15 @@ func (c Config) withDefaults() Config {
 	if c.PreserveRecentMessages <= 0 {
 		c.PreserveRecentMessages = defaults.PreserveRecentMessages
 	}
-	if c.MaxSummaryChars <= 0 {
+	if c.MaxSummaryChars < 512 {
 		c.MaxSummaryChars = defaults.MaxSummaryChars
+	} else if c.MaxSummaryChars > MaxHandoffMemoryChars {
+		c.MaxSummaryChars = MaxHandoffMemoryChars
 	}
 	if c.MaxLineChars <= 0 {
 		c.MaxLineChars = defaults.MaxLineChars
+	} else if c.MaxLineChars > MaxHandoffRecordChars {
+		c.MaxLineChars = MaxHandoffRecordChars
 	}
 	if c.PreserveRecentMessages > c.MaxMessagesBeforeCompact {
 		c.PreserveRecentMessages = c.MaxMessagesBeforeCompact
@@ -120,12 +128,44 @@ func (m *Manager) Compact(ctx context.Context, taskID string, workspaceID string
 	older := messages[:removeCount]
 	preserved := redactMessages(messages[removeCount:])
 
-	content := m.buildSummary(taskID, workspaceID, older, preserved, len(messages))
+	workspaceID = strings.TrimSpace(workspaceID)
+	var previous Summary
+	var hasPrevious bool
+	var err error
+	if m.store != nil {
+		previous, hasPrevious, err = m.store.LatestContextSummary(ctx, taskID)
+		if err != nil {
+			return Result{}, err
+		}
+		if hasPrevious {
+			if err := ValidateStoredSummary(previous); err != nil {
+				return Result{}, fmt.Errorf("load previous handoff summary: %w", err)
+			}
+			if previous.WorkspaceID != workspaceID {
+				return Result{}, errors.New("previous handoff summary workspace does not match")
+			}
+		}
+	}
+	content, compactedCount, newlyCompacted, err := buildHandoffMemory(taskID, workspaceID, previous,
+		hasPrevious, older, len(preserved), m.config)
+	if err != nil {
+		return Result{}, err
+	}
+	if hasPrevious && newlyCompacted == 0 {
+		return Result{
+			Compacted: true, Summary: previous, Preserved: preserved,
+			RemovedMessages: removeCount,
+		}, nil
+	}
 	summary := Summary{
 		TaskID:                taskID,
 		WorkspaceID:           workspaceID,
+		ProtocolVersion:       HandoffMemoryProtocolVersion,
+		PreviousSummaryID:     previous.ID,
 		Content:               content,
-		SourceMessageCount:    len(messages),
+		ContentSHA256:         handoffContentSHA256(content),
+		CompactedMessageCount: compactedCount,
+		SourceMessageCount:    saturatingTokenAdd(compactedCount, len(preserved)),
 		PreservedMessageCount: len(preserved),
 		TokenEstimate:         EstimateTokens(content),
 		CreatedAt:             time.Now().UTC(),
@@ -174,47 +214,6 @@ func (m *Manager) BuildPrompt(system string, summary Summary, recent []Message) 
 	return out
 }
 
-func (m *Manager) buildSummary(taskID string, workspaceID string, older []Message, preserved []Message, total int) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Context summary for task %s", taskID)
-	if workspaceID != "" {
-		fmt.Fprintf(&b, " in workspace %s", workspaceID)
-	}
-	fmt.Fprintln(&b, ".")
-	fmt.Fprintf(&b, "Source messages: %d. Removed into summary: %d. Recent messages preserved outside summary: %d.\n", total, len(older), len(preserved))
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "Condensed prior conversation as provenance-preserving JSON records:")
-	for i, msg := range older {
-		role := normalizeRole(msg.Role)
-		line := collapseWhitespace(redact.String(msg.Content))
-		if line == "" {
-			continue
-		}
-		sourceKind, instructionAuthorized := summaryMessageAuthority(msg, role)
-		record := struct {
-			Ordinal               int    `json:"ordinal"`
-			Role                  string `json:"role"`
-			SourceKind            string `json:"source_kind"`
-			SourceRef             string `json:"source_ref,omitempty"`
-			ContentSHA256         string `json:"content_sha256,omitempty"`
-			InstructionAuthorized bool   `json:"instruction_authorized"`
-			Content               string `json:"content"`
-		}{
-			Ordinal: i + 1, Role: role, SourceKind: sourceKind,
-			SourceRef: msg.SourceRef, ContentSHA256: msg.ContentSHA256,
-			InstructionAuthorized: instructionAuthorized,
-			Content:               trimRunes(line, m.config.MaxLineChars),
-		}
-		encoded, err := json.Marshal(record)
-		if err != nil {
-			continue
-		}
-		fmt.Fprintf(&b, "- %s\n", encoded)
-	}
-	content := redact.String(b.String())
-	return trimRunes(content, m.config.MaxSummaryChars)
-}
-
 func ParseMessage(raw string) Message {
 	raw = strings.TrimSpace(raw)
 	role := "user"
@@ -234,20 +233,56 @@ func ParseMessage(raw string) Message {
 }
 
 func EstimateTokens(value string) int {
-	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	// ASCII prose is usually close to four characters per token. Unknown model
+	// tokenizers are much less predictable for CJK, emoji, and other Unicode,
+	// so count each non-ASCII UTF-8 byte as one token. This intentionally
+	// overestimates some models instead of allowing multilingual prompts to
+	// overflow a provider context window.
+	tokens := 0
+	for len(value) > 0 {
+		asciiEnd := 0
+		for asciiEnd < len(value) && value[asciiEnd] < utf8.RuneSelf {
+			asciiEnd++
+		}
+		if asciiEnd > 0 {
+			tokens = saturatingTokenAdd(tokens, estimateASCIITokens(value[:asciiEnd]))
+			value = value[asciiEnd:]
+			continue
+		}
+		_, size := utf8.DecodeRuneInString(value)
+		if size <= 0 {
+			size = 1
+		}
+		tokens = saturatingTokenAdd(tokens, size)
+		value = value[size:]
+	}
+	return tokens
+}
+
+func estimateASCIITokens(value string) int {
 	if value == "" {
 		return 0
 	}
 	words := len(strings.Fields(value))
-	chars := utf8.RuneCountInString(value)
-	byChars := chars / 4
-	if chars%4 != 0 {
-		byChars++
-	}
+	byChars := (len(value) + 3) / 4
 	if words > byChars {
 		return words
 	}
 	return byChars
+}
+
+func saturatingTokenAdd(current int, addition int) int {
+	if addition <= 0 {
+		return current
+	}
+	maxInt := int(^uint(0) >> 1)
+	if current > maxInt-addition {
+		return maxInt
+	}
+	return current + addition
 }
 
 func normalizeRole(role string) string {

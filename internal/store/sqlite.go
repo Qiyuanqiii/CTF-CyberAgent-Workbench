@@ -304,6 +304,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 79, Name: "durable Run livelock progress guard", Statements: runProgressGuardStatements},
 		{Version: 80, Name: "immutable operator verification plans", Statements: operatorVerificationPlanStatements},
 		{Version: 81, Name: "immutable verification plan evidence associations", Statements: operatorVerificationPlanEvidenceAssociationStatements},
+		{Version: 82, Name: "immutable cumulative context handoff memory", Statements: cumulativeHandoffMemoryStatements},
 	})
 }
 
@@ -474,19 +475,39 @@ func (s *SQLiteStore) GetProviderSetting(ctx context.Context, key string) (strin
 }
 
 func (s *SQLiteStore) SaveContextSummary(ctx context.Context, summary contextmgr.Summary) (contextmgr.Summary, error) {
-	if strings.TrimSpace(summary.TaskID) == "" {
-		return contextmgr.Summary{}, errors.New("task id is required")
+	summary, err := contextmgr.PrepareSummaryForStorage(summary)
+	if err != nil {
+		return contextmgr.Summary{}, err
 	}
-	summary.Content = redact.String(summary.Content)
-	summary.TokenEstimate = contextmgr.EstimateTokens(summary.Content)
-	if summary.CreatedAt.IsZero() {
-		summary.CreatedAt = time.Now().UTC()
+	var latestID int64
+	var latestCreated string
+	err = s.db.QueryRowContext(ctx, `SELECT id, created_at FROM context_summaries
+		WHERE task_id = ? ORDER BY id DESC LIMIT 1`, summary.TaskID).Scan(&latestID, &latestCreated)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return contextmgr.Summary{}, err
+	}
+	if (errors.Is(err, sql.ErrNoRows) && summary.PreviousSummaryID != 0) ||
+		(err == nil && summary.PreviousSummaryID != latestID) {
+		return contextmgr.Summary{}, errors.New("context handoff previous summary is stale")
+	}
+	if err == nil {
+		previousCreated := parseTS(latestCreated)
+		if !previousCreated.IsZero() && summary.CreatedAt.Before(previousCreated) {
+			summary.CreatedAt = previousCreated
+		}
+	}
+	var previous any
+	if summary.PreviousSummaryID != 0 {
+		previous = summary.PreviousSummaryID
 	}
 	res, err := s.db.ExecContext(ctx, `INSERT INTO context_summaries
-		(task_id, workspace_id, content, source_message_count, preserved_message_count, token_estimate, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		summary.TaskID, summary.WorkspaceID, summary.Content, summary.SourceMessageCount,
-		summary.PreservedMessageCount, summary.TokenEstimate, ts(summary.CreatedAt))
+		(task_id, workspace_id, protocol_version, previous_summary_id, content, content_sha256,
+		 compacted_message_count, source_message_count, preserved_message_count, token_estimate, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		summary.TaskID, summary.WorkspaceID, summary.ProtocolVersion, previous,
+		summary.Content, summary.ContentSHA256, summary.CompactedMessageCount,
+		summary.SourceMessageCount, summary.PreservedMessageCount, summary.TokenEstimate,
+		ts(summary.CreatedAt))
 	if err != nil {
 		return contextmgr.Summary{}, err
 	}
@@ -498,19 +519,26 @@ func (s *SQLiteStore) SaveContextSummary(ctx context.Context, summary contextmgr
 }
 
 func (s *SQLiteStore) LatestContextSummary(ctx context.Context, taskID string) (contextmgr.Summary, bool, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, task_id, workspace_id, content, source_message_count,
-		preserved_message_count, token_estimate, created_at
+	row := s.db.QueryRowContext(ctx, `SELECT id, task_id, workspace_id, protocol_version,
+		coalesce(previous_summary_id, 0), content, content_sha256, compacted_message_count,
+		source_message_count, preserved_message_count, token_estimate, created_at
 		FROM context_summaries WHERE task_id = ? ORDER BY id DESC LIMIT 1`, taskID)
 	var summary contextmgr.Summary
 	var created string
-	if err := row.Scan(&summary.ID, &summary.TaskID, &summary.WorkspaceID, &summary.Content,
-		&summary.SourceMessageCount, &summary.PreservedMessageCount, &summary.TokenEstimate, &created); err != nil {
+	if err := row.Scan(&summary.ID, &summary.TaskID, &summary.WorkspaceID,
+		&summary.ProtocolVersion, &summary.PreviousSummaryID, &summary.Content,
+		&summary.ContentSHA256, &summary.CompactedMessageCount,
+		&summary.SourceMessageCount, &summary.PreservedMessageCount,
+		&summary.TokenEstimate, &created); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return contextmgr.Summary{}, false, nil
 		}
 		return contextmgr.Summary{}, false, err
 	}
 	summary.CreatedAt = parseTS(created)
+	if err := contextmgr.ValidateStoredSummary(summary); err != nil {
+		return contextmgr.Summary{}, false, err
+	}
 	return summary, true, nil
 }
 

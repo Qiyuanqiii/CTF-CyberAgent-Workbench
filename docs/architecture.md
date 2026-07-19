@@ -628,3 +628,13 @@ The Code workbench adds two more facts without merging their authority:
 - `runner_lifecycle_contract.v1` is a non-schema, simulation-only Go contract for wait-graph admission, start/wait/cancel/timeout, TERM/KILL grace, inspection/reaping, partial-start cleanup, and orphan cleanup. No concrete Local/Docker backend or product control path imports it yet.
 
 React consumes the first three through strict Go/OpenAPI contracts. R1 remains internal and non-product until platform process-tree conformance and Sandbox authorization are independently accepted. ADR 0051 records the detailed bounds.
+
+## Schema v82 Model Context And Cumulative Handoff Memory
+
+- `model_context_window.v1` is a conservative Go planning boundary for complete root and Specialist requests. The default is 32K total with explicit safety and output reservations. Only ordinary oldest history is optional; current input, trusted control, memory, Skills, and tool schemas fail closed if they cannot fit.
+- Token estimation deliberately overcounts non-ASCII UTF-8 content so CJK and emoji cannot bypass a character-oriented budget.
+- `handoff_memory.v1` replaces one-shot summaries with a bounded cumulative chain. Each row binds its exact predecessor, cumulative compacted count, monotonic record ordinal, Session-message high-water, content digest, and provenance-labelled records. A crash after summary insertion but before message marking reuses the same summary instead of duplicating memory.
+- Schema v82 preserves old summaries as `handoff_memory.v0`, rejects v1 update/delete/stale forks, and lets the next compaction fold legacy text as non-authoritative evidence.
+- Arbitrary project documents are not automatically loaded as instructions. Selected Skills and persisted memory remain separate Go-owned context sources, and external text keeps user-role untrusted provenance.
+
+ADR 0052 records the limits and migration behavior.

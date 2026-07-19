@@ -7,13 +7,13 @@
 
 项目从 schema v49 起同时使用两项工程指标，避免把“架构已经搭好”误解为“产品已经完整可用”。这些百分比是基于当前任务书和可验证工作流的工程估算，不是性能基准。
 
-- **架构完成度 / Architecture completion：约 99%**。衡量 Go 控制平面、Run/Session、状态恢复、Policy、审批、预算、事件流、Tool Gateway、Agent 协调、Skills、报告、Sandbox 协议及 Go/TypeScript 边界的覆盖程度；其中 V2 Run-centric Runtime 约 99%。schema v80 已覆盖同步等待环检测、工具硬超时、Run 活锁熔断，以及不可变操作者验证计划。
-- **产品可用度 / Product usability：约 93-95%**。衡量普通用户能否依靠当前 CLI、TUI、Web 和 Windows Desktop 完成真实端到端工作。通用 Coding Agent 工作流约 93%，Cyber 自动化工作流约 20%；Run 工作台现已提供安全恢复的 Monaco 提案/Diff 编辑器、只读仓库状态/脱敏 Diff/本地提交历史、多文件独立审阅、分离的验证计划与验证结果、带摘要和事件高水位的 Code Handoff 导出、Code Journey、可热重载的 Windows 系统凭证和有界 wake worker。真实 Sandbox/宿主进程执行、安装时脚本/钩子、Windows 10 人工发布矩阵和 Cyber 工具链仍未开放或完成。
+- **架构完成度 / Architecture completion：约 99%**。衡量 Go 控制平面、Run/Session、状态恢复、Policy、审批、预算、事件流、Tool Gateway、Agent 协调、Skills、报告、Sandbox 协议及 Go/TypeScript 边界的覆盖程度；其中 V2 Run-centric Runtime 约 99%。schema v82 已覆盖同步等待环检测、工具硬超时、Run 活锁熔断、模型总上下文闸门和不可变累计交接记忆。
+- **产品可用度 / Product usability：约 94-96%**。衡量普通用户能否依靠当前 CLI、TUI、Web 和 Windows Desktop 完成真实端到端工作。通用 Coding Agent 工作流约 94%，Cyber 自动化工作流约 20%；Run 工作台现已提供安全恢复的 Monaco 提案/Diff 编辑器、只读仓库状态/脱敏 Diff/本地提交历史、多文件独立审阅、分离的验证计划与验证结果、带摘要和事件高水位的 Code Handoff 导出、Code Journey、可热重载的 Windows 系统凭证和有界 wake worker。真实 Sandbox/宿主进程执行、安装时脚本/钩子、Windows 10 人工发布矩阵和 Cyber 工具链仍未开放或完成。
 
 Starting with schema v49, the project reports two engineering indicators so architectural maturity is not mistaken for end-user completeness. These percentages are roadmap estimates backed by tested workflows, not performance benchmarks.
 
-- **Architecture completion: about 99%.** This covers the Go control plane and its Run/Session recovery, Policy, approval, budget, event, Tool Gateway, Agent coordination, Skills, reporting, Sandbox protocol, and Go/TypeScript boundaries. The V2 run-centric runtime itself is about 99% complete. Schema v80 includes synchronous wait-cycle rejection, hard Tool deadlines, a recoverable Run livelock circuit breaker, and immutable operator verification plans.
-- **Product usability: about 93-95%.** This measures how much real end-to-end work a user can complete through the current CLI, TUI, Web, and Windows Desktop shell. The generic coding-agent workflow is about 93% usable and the Cyber automation workflow about 20%. The Run workbench now includes safely recoverable Monaco proposal/Diff editing, read-only repository state/redacted Diffs/local commit history, independent multi-file review, separate verification plans and outcomes, digest- and event-high-water-bound Code Handoff exports, the Code Journey, hot-reloaded Windows system credentials, and a bounded wake worker. Real Sandbox/host-process execution, install-time scripts/hooks, the manual Windows 10 release matrix, and the Cyber toolchain remain disabled or unfinished.
+- **Architecture completion: about 99%.** This covers the Go control plane and its Run/Session recovery, Policy, approval, budget, event, Tool Gateway, Agent coordination, Skills, reporting, Sandbox protocol, and Go/TypeScript boundaries. The V2 run-centric runtime itself is about 99% complete. Schema v82 includes synchronous wait-cycle rejection, hard Tool deadlines, a recoverable Run livelock circuit breaker, an aggregate model-context gate, and immutable cumulative handoff memory.
+- **Product usability: about 94-96%.** This measures how much real end-to-end work a user can complete through the current CLI, TUI, Web, and Windows Desktop shell. The generic coding-agent workflow is about 94% usable and the Cyber automation workflow about 20%. The Run workbench now includes safely recoverable Monaco proposal/Diff editing, read-only repository state/redacted Diffs/local commit history, independent multi-file review, separate verification plans and outcomes, digest- and event-high-water-bound Code Handoff exports, the Code Journey, hot-reloaded Windows system credentials, and a bounded wake worker. Real Sandbox/host-process execution, install-time scripts/hooks, the manual Windows 10 release matrix, and the Cyber toolchain remain disabled or unfinished.
 
 ## 项目简介 / Project Overview
 
@@ -35,9 +35,9 @@ The current priority is the general-purpose Agent runtime and its controlled mul
 
 ## 开发历程 / Development History
 
-下表是唯一按时间排序的 schema 开发历程，完整保留了早期 `v1`、`v2`、`v3`，并连续列到当前 `v80`。这里的 `vN` 是不可变 SQLite schema/runtime 里程碑，不等同于产品发布版本；后面的架构说明按能力域组织，因此不再承担版本排序职责。
+下表是唯一按时间排序的 schema 开发历程，完整保留了早期 `v1`、`v2`、`v3`，并连续列到当前 `v82`。这里的 `vN` 是不可变 SQLite schema/runtime 里程碑，不等同于产品发布版本；后面的架构说明按能力域组织，因此不再承担版本排序职责。
 
-The table below is the canonical chronological schema history. It includes every immutable SQLite schema/runtime milestone from `v1` through the current `v80`. These schema numbers are not product release versions; the architecture notes that follow are grouped by capability instead of chronology.
+The table below is the canonical chronological schema history. It includes every immutable SQLite schema/runtime milestone from `v1` through the current `v82`. These schema numbers are not product release versions; the architecture notes that follow are grouped by capability instead of chronology.
 
 | Schema | 中文里程碑 | English milestone |
 | --- | --- | --- |
@@ -122,6 +122,21 @@ The table below is the canonical chronological schema history. It includes every
 | v79 | 可恢复的 Run 无进展熔断 | recoverable Run livelock progress guard |
 | v80 | 不可变操作者验证计划与检查清单 | immutable operator verification plans and checklists |
 | v81 | 验证计划项与人工证据的不可变显式关联 | immutable explicit verification plan-item/evidence associations |
+| v82 | 不可变累计上下文交接记忆 | immutable cumulative context handoff memory |
+
+## 上下文窗口与累计记忆 / Context Window And Cumulative Memory
+
+默认模型上下文不是“无限历史”，也不是对远端模型规格的声明。Go 为 root Supervisor 和 Specialist 的每次真实模型请求采用保守的 `model_context_window.v1`：总窗口 32,768 tokens，安全余量 1,024，默认输出 1,024，单次输出上限 4,096。估算覆盖全部消息、ToolCall/ToolResult、工具说明和 JSON Schema；中日韩文字、emoji 等非 ASCII 内容按 UTF-8 字节保守计数。超限时只从最旧的普通 Session history 开始裁剪，系统控制、当前输入、结构化记忆、Skill 和工具 Schema 都不会被静默删除；强制上下文本身仍超限时，会在调用 Provider 前以 `RESOURCE_EXHAUSTED` 失败。Router 支持按精确 Provider/Model 设置窗口，但当前还没有面向用户的 CLI 配置入口。
+
+会话压缩是另一层：活动消息超过 8 条时默认保留最近 4 条，其余内容写入最多 4,000 字符、最多 12 条记录的结构化交接摘要。schema v82 的 `handoff_memory.v1` 通过 previous-summary ID、内容 SHA-256、累计消息计数、单调 ordinal 和 Session 消息 ID 高水位形成 append-only 链；SQLite 拒绝更新、删除和过期分叉，读取时 Go 复核摘要与记录完整性。若进程在“摘要写入”与“消息标记 compacted”之间退出，重试会复用既有摘要并只吸收高水位之后的新消息。旧摘要以 `handoff_memory.v0` 保留，并在下一次压缩时作为无指令权限的历史证据折叠进 v1。
+
+压缩后的用户意图只有在来源明确为 `operator_message` 时才保留 `instruction_authorized=true`；README、仓库文件、工具结果、模型输出和旧摘要仍是 user-role 的非可信证据。当前实现是确定性的提取式交接，不会让模型自动修改或自动重载任意 `AGENTS.md`、README 或项目记忆文件；内置/显式选择的 Skills 和 SQLite 记忆由 Go 每轮重新组装。这样可以恢复工作进度，同时不把文档中的 Prompt Injection 变成控制指令。
+
+The default is a local planning policy, not an unlimited transcript or a claim about a remote model's advertised specification. Each real root-Supervisor and Specialist request uses conservative `model_context_window.v1`: 32,768 total tokens, a 1,024-token safety margin, 1,024 default output tokens, and a 4,096 output cap. The estimate includes messages, tool calls/results, tool descriptions, and JSON schemas; non-ASCII text is conservatively counted by UTF-8 bytes. Only the oldest ordinary Session history may be removed. System control, current input, structured memory, Skills, and tool schemas remain mandatory, and an oversized mandatory request fails before the Provider call. Exact Provider/Model overrides exist in the Router, but there is not yet a user-facing CLI setting.
+
+Conversation compaction is a separate layer. More than eight active messages triggers compaction with the newest four retained. Removed history enters a structured handoff capped at 4,000 characters and 12 retained records. Schema v82 `handoff_memory.v1` forms an append-only chain using the previous-summary ID, content SHA-256, cumulative counts, a monotonic ordinal, and a Session-message ID high-water. A crash between summary insertion and message marking reuses the existing summary and admits only messages beyond that high-water. SQLite rejects update, deletion, and stale forks, while Go verifies content and record integrity on read. Legacy `handoff_memory.v0` rows remain readable and are folded once as non-authoritative historical evidence.
+
+Only provenance-confirmed `operator_message` records may retain `instruction_authorized=true`. Repository files, README text, tool results, model output, and prior summaries remain untrusted user-role evidence. This is deterministic extractive handoff memory; it does not let the model automatically rewrite or reload arbitrary `AGENTS.md`, README, or project-memory files. Go reassembles persisted memory and explicitly selected Skills on every turn without promoting document instructions into control authority.
 
 ## 死锁与活锁保护 / Deadlock And Livelock Protection
 
@@ -1490,11 +1505,56 @@ about 94-96%, generic Coding Agent usability about 94%, and Cyber automation abo
 20%. [ADR 0051](docs/adr/0051-exact-commit-verification-association-runner-lifecycle.md)
 records the boundary.
 
+## 模型上下文与累计交接记忆批次 / Model Context And Cumulative Handoff Batch
+
+本轮三个运行时切片完成 Unicode/CJK 保守 token 估算、root/Specialist 完整请求的模型窗口
+闸门，以及 schema v82 的累计交接记忆。审计确认旧实现连续压缩时只读取最新摘要，却没有把
+更早摘要并入新摘要，早期决策会随第二次压缩丢失；v82 现在以 exact predecessor、SHA-256、
+累计计数和单调 ordinal 构成不可变链。记录超过 12 条时按权限与进度优先级有界保留，省略
+数量仍累计，不会在若干轮后突然保存失败。
+
+默认模型规划窗口为 32K，总输入会计包含工具 Schema，并为输出和安全余量预留空间；只裁掉
+最旧普通 history，强制上下文超限则在 Provider 调用前失败。该数字是本地保守策略，不代表
+MIMO、DeepSeek、Anthropic 或其他模型的官方窗口。没有自动改写/重载任意 `AGENTS.md` 或
+README；项目文件、工具结果和旧摘要仍是非可信证据。
+
+最终 uncached 全仓 Go 测试 348.5 秒通过，`go vet` 通过，TypeScript strict typecheck 与
+37 个文件 127 项 Vitest 全绿。组合审计另修复零值 Router 的窗口 map 初始化、v82 追加后
+v81 降级夹具的迁移顺序，并把交接记录从共享校验上限分离为明确的 12 条契约；来源引用会脱敏/限长，时钟回拨会钳位，摘要写入后的崩溃重试按消息高水位 exactly-once 恢复。当前无已知未解决高/中风险。
+本批是新六切片周期的前三片，因此完整 race/staticcheck/govulncheck/依赖/隐私/构建门在
+下一批三片后执行。未调用真实 Provider、API key、Shell、LocalRunner、Docker、hook、攻击
+流量或外部网络。边界见
+[ADR 0052](docs/adr/0052-conservative-model-context-cumulative-handoff-memory.md)。
+
+This three-slice runtime batch adds conservative Unicode/CJK token estimation, a
+complete-request context gate for root and Specialist calls, and schema-v82 cumulative
+handoff memory. The audit confirmed that repeated legacy compaction loaded only the
+newest summary without incorporating earlier summaries, so early decisions could
+disappear after a second compaction. V82 now forms an immutable chain with an exact
+predecessor, SHA-256, cumulative counters, and monotonic ordinals. Retention is bounded
+to 12 prioritized records while keeping a cumulative omitted count.
+
+The 32K fallback is a local conservative planning policy, not a Provider capability
+claim. Tool schemas are included, only oldest ordinary history may be removed, and
+mandatory overflow fails before a Provider call. Arbitrary `AGENTS.md`, README, tool,
+and model text is not automatically reloaded as control authority.
+
+The uncached full Go suite passed in 348.5 seconds, `go vet` passed, and strict
+TypeScript plus all 127 Vitest tests across 37 files passed. Review also fixed
+zero-value Router initialization, v81 downgrade-fixture ordering after v82, a
+dedicated 12-record handoff cap, redacted/bounded source references, clock rollback
+clamping, and message-high-water crash recovery. No unresolved high/medium issue is known. This is
+the first half of a six-slice cycle, so the full race/staticcheck/govulncheck/
+dependency/privacy/build gate follows the next three slices. No real Provider, key,
+Shell, LocalRunner, Docker, hook, attack traffic, or external network was used.
+[ADR 0052](docs/adr/0052-conservative-model-context-cumulative-handoff-memory.md)
+records the boundary.
+
 ## Project Memory
 
 Read [docs/PROJECT_MEMORY.md](docs/PROJECT_MEMORY.md), [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [docs/PROGRESS_BOOK.md](docs/PROGRESS_BOOK.md), [docs/TASK_BOOK.md](docs/TASK_BOOK.md), [docs/http-api.md](docs/http-api.md), [docs/openapi.json](docs/openapi.json), [web/README.md](web/README.md), [docs/errors.md](docs/errors.md), and the chronological [ADR 0001](docs/adr/0001-go-control-plane.md), [ADR 0002](docs/adr/0002-run-centric-runtime.md), [ADR 0003](docs/adr/0003-run-execution-modes.md), [ADR 0004](docs/adr/0004-plan-delivery-workflow.md), [ADR 0005](docs/adr/0005-operator-steering-queue.md), [ADR 0006](docs/adr/0006-operator-steering-controls.md), [ADR 0007](docs/adr/0007-specialist-skill-context.md), [ADR 0008](docs/adr/0008-sandbox-manifest-boundary.md), [ADR 0009](docs/adr/0009-sandbox-approval-candidate.md), [ADR 0010](docs/adr/0010-disabled-sandbox-lifecycle.md), [ADR 0011](docs/adr/0011-disabled-sandbox-preflight.md), [ADR 0012](docs/adr/0012-simulation-only-sandbox-evidence.md), [ADR 0013](docs/adr/0013-read-only-docker-observation.md), [ADR 0014](docs/adr/0014-deterministic-docker-container-plan.md), [ADR 0015](docs/adr/0015-bounded-docker-write-rehearsal.md), [ADR 0016](docs/adr/0016-recoverable-docker-rehearsal-attempt.md), [ADR 0017](docs/adr/0017-descriptor-sealed-host-input-staging.md), [ADR 0018](docs/adr/0018-durable-pre-stage-host-input-requirement.md), [ADR 0019](docs/adr/0019-daemon-owned-host-input-handoff.md), [ADR 0020](docs/adr/0020-deterministic-runtime-input-projection.md), [ADR 0021](docs/adr/0021-recoverable-runtime-input-application.md), [ADR 0022](docs/adr/0022-retained-runtime-input-resource-lifecycle.md), [ADR 0023](docs/adr/0023-blocked-docker-start-gate-review.md), [ADR 0024](docs/adr/0024-strict-inert-skill-package.md), [ADR 0025](docs/adr/0025-protected-delete-command-guard.md), [ADR 0026](docs/adr/0026-run-execution-profile-selection.md), [ADR 0027](docs/adr/0027-non-authorizing-docker-production-evidence-ledger.md), and [ADR 0028](docs/adr/0028-recoverable-docker-production-evidence-attempts.md) when resuming development after a long conversation. They record current progress, language ownership, run architecture, execution mode, Plan/Delivery and steering invariants, Specialist Skill delivery, Sandbox authority boundaries, API and error contracts, audit notes, verified commands, and the recommended next slice.
 
-The latest decisions are [ADR 0029](docs/adr/0029-bounded-linux-read-only-docker-evidence-harness.md), [ADR 0030](docs/adr/0030-immutable-docker-production-evidence-review.md), [ADR 0031](docs/adr/0031-content-addressed-inert-skill-registry.md), [ADR 0032](docs/adr/0032-external-skill-run-context.md), [ADR 0033](docs/adr/0033-pathless-desktop-skill-preview.md), [ADR 0034](docs/adr/0034-embedded-read-first-wails-shell.md), [ADR 0035](docs/adr/0035-desktop-lifecycle-and-event-resumption.md), [ADR 0036](docs/adr/0036-idempotent-controlled-run-creation.md), [ADR 0037](docs/adr/0037-controlled-session-message-submission.md), [ADR 0038](docs/adr/0038-idempotent-run-control-and-bounded-handoff.md), [ADR 0039](docs/adr/0039-model-plan-and-approval-controls.md), [ADR 0040](docs/adr/0040-provider-diff-wake-controls.md), [ADR 0041](docs/adr/0041-explicit-wake-file-apply-and-inert-skill-install.md), [ADR 0042](docs/adr/0042-receipts-explorer-portable-build.md), [ADR 0043](docs/adr/0043-workspace-search-evidence-attachment-receipt-history.md), [ADR 0044](docs/adr/0044-operator-action-center-evidence-inventory-command-palette.md), [ADR 0045](docs/adr/0045-go-issued-editor-system-credentials-bounded-wake-worker.md), [ADR 0046](docs/adr/0046-safe-editor-recovery-provider-generation-worker-health.md), [ADR 0047](docs/adr/0047-read-only-repository-change-set-code-journey.md), [ADR 0048](docs/adr/0048-bounded-diff-verification-code-handoff.md), [ADR 0049](docs/adr/0049-deadlock-livelock-runtime-guards.md), [ADR 0050](docs/adr/0050-repository-history-verification-plan-handoff-export.md), and [ADR 0051](docs/adr/0051-exact-commit-verification-association-runner-lifecycle.md).
+The latest decisions are [ADR 0029](docs/adr/0029-bounded-linux-read-only-docker-evidence-harness.md), [ADR 0030](docs/adr/0030-immutable-docker-production-evidence-review.md), [ADR 0031](docs/adr/0031-content-addressed-inert-skill-registry.md), [ADR 0032](docs/adr/0032-external-skill-run-context.md), [ADR 0033](docs/adr/0033-pathless-desktop-skill-preview.md), [ADR 0034](docs/adr/0034-embedded-read-first-wails-shell.md), [ADR 0035](docs/adr/0035-desktop-lifecycle-and-event-resumption.md), [ADR 0036](docs/adr/0036-idempotent-controlled-run-creation.md), [ADR 0037](docs/adr/0037-controlled-session-message-submission.md), [ADR 0038](docs/adr/0038-idempotent-run-control-and-bounded-handoff.md), [ADR 0039](docs/adr/0039-model-plan-and-approval-controls.md), [ADR 0040](docs/adr/0040-provider-diff-wake-controls.md), [ADR 0041](docs/adr/0041-explicit-wake-file-apply-and-inert-skill-install.md), [ADR 0042](docs/adr/0042-receipts-explorer-portable-build.md), [ADR 0043](docs/adr/0043-workspace-search-evidence-attachment-receipt-history.md), [ADR 0044](docs/adr/0044-operator-action-center-evidence-inventory-command-palette.md), [ADR 0045](docs/adr/0045-go-issued-editor-system-credentials-bounded-wake-worker.md), [ADR 0046](docs/adr/0046-safe-editor-recovery-provider-generation-worker-health.md), [ADR 0047](docs/adr/0047-read-only-repository-change-set-code-journey.md), [ADR 0048](docs/adr/0048-bounded-diff-verification-code-handoff.md), [ADR 0049](docs/adr/0049-deadlock-livelock-runtime-guards.md), [ADR 0050](docs/adr/0050-repository-history-verification-plan-handoff-export.md), [ADR 0051](docs/adr/0051-exact-commit-verification-association-runner-lifecycle.md), and [ADR 0052](docs/adr/0052-conservative-model-context-cumulative-handoff-memory.md).
 
 Windows Desktop D0-A/D0-B 与 D1-R1 至 D1-G4/V3 加 R1 非产品 Runner contract 自动化核心已实现，但仍是未签名开发/便携测试壳，不是安装版或完整工作台；Windows 10 实机发布矩阵仍待完成。分阶段方案见 [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md)。自定义 Skill 已具备严格 `skill_package.v1` 校验、schema v69 本地惰性 Registry、schema v70 CLI Run 选择/最小上下文、schema v71 三端只读来源投影，以及 HTTP/Desktop 显式确认的惰性安装；签名、远程分发和安装时执行仍未开放。详情见 [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md)。
 

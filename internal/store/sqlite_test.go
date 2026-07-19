@@ -1665,8 +1665,15 @@ func TestSQLiteStoreContextSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok || latest.Content != "summary" || latest.WorkspaceID != "ws-demo" {
+	if !ok || latest.WorkspaceID != "ws-demo" ||
+		latest.ProtocolVersion != contextmgr.HandoffMemoryProtocolVersion ||
+		latest.CompactedMessageCount != 3 || latest.SourceMessageCount != 5 ||
+		latest.PreservedMessageCount != 2 || len(latest.ContentSHA256) != 64 ||
+		!strings.Contains(latest.Content, `"content":"summary"`) {
 		t.Fatalf("unexpected latest summary: %#v", latest)
+	}
+	if err := contextmgr.ValidateStoredSummary(latest); err != nil {
+		t.Fatalf("latest summary failed integrity validation: %v", err)
 	}
 }
 

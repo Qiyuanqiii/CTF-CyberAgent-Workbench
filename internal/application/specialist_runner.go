@@ -367,7 +367,7 @@ func (r *SpecialistRunner) stepReadyWithLease(ctx context.Context,
 	result.ContextOmitted = len(contextSelection.OmittedSources)
 	result.ContextTokens = contextSelection.EstimatedTokens
 	result.ContextTokenBudget = contextSelection.TokenBudget
-	request, err := specialistRequest(history, input, child, skillContext,
+	request, contextLayout, err := specialistRequestWithLayout(history, input, child, skillContext,
 		externalSkillContext)
 	if err != nil {
 		return r.failAttempt(ctx, result, ref, err)
@@ -418,7 +418,12 @@ func (r *SpecialistRunner) stepReadyWithLease(ctx context.Context,
 	var safeAction domain.SpecialistAction
 	var decision policy.Decision
 	for {
-		modelCall, callErr := r.callModelWithRetry(ctx, run, ref, refModel, request,
+		modelRequest, _, contextErr := constrainRequestToModelWindow(request,
+			r.router.ContextWindow(refModel), contextLayout)
+		if contextErr != nil {
+			return r.failAttempt(ctx, result, ref, contextErr)
+		}
+		modelCall, callErr := r.callModelWithRetry(ctx, run, ref, refModel, modelRequest,
 			contextAudit, turnExecutionLimit, protocolRepair, &budgetState)
 		mergeSpecialistModelCallResult(result, modelCall)
 		if callErr != nil {
@@ -830,6 +835,15 @@ func specialistRequest(history []session.Message, input string,
 	child domain.AgentNode, skillContext skills.SpecialistContextAssembly,
 	externalSkillContext skills.ExternalSpecialistContextAssembly,
 ) (llm.ChatRequest, error) {
+	request, _, err := specialistRequestWithLayout(history, input, child, skillContext,
+		externalSkillContext)
+	return request, err
+}
+
+func specialistRequestWithLayout(history []session.Message, input string,
+	child domain.AgentNode, skillContext skills.SpecialistContextAssembly,
+	externalSkillContext skills.ExternalSpecialistContextAssembly,
+) (llm.ChatRequest, modelContextLayout, error) {
 	if len(history) > maxSpecialistHistoryMessages {
 		history = history[len(history)-maxSpecialistHistoryMessages:]
 	}
@@ -872,6 +886,7 @@ func specialistRequest(history []session.Message, input string,
 	for _, item := range externalSkillContext.Items {
 		messages = append(messages, externalSkillGuidanceMessage(item, "specialist"))
 	}
+	layout := modelContextLayout{HistoryStart: len(messages), HistoryCount: len(historyMessages)}
 	messages = append(messages, historyMessages...)
 	messages = append(messages, llm.Message{Role: "user", Content: input})
 	return llm.ChatRequest{
@@ -879,7 +894,7 @@ func specialistRequest(history []session.Message, input string,
 			"run_id": child.RunID, "session_id": child.SessionID, "agent_id": child.ID,
 			"response_schema": domain.SpecialistLifecycleVersion,
 		},
-	}, nil
+	}, layout, nil
 }
 
 func specialistProtocolRepairRequest(primary llm.ChatRequest) llm.ChatRequest {
