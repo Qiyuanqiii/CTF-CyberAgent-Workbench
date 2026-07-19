@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FileCode2, FileDiff, GitCommitHorizontal, RefreshCw } from "lucide-react";
+import { FileClock, FileCode2, FileDiff, GitCommitHorizontal, RefreshCw } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import { formatDate } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
@@ -11,9 +11,12 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
 }) {
   const [selection, setSelection] = useState({ workspaceID: "", objectID: "" });
   const [fileSelection, setFileSelection] = useState({ workspaceID: "", objectID: "", path: "" });
+  const [historySelection, setHistorySelection] = useState({ workspaceID: "", path: "" });
   const selectedObjectID = selection.workspaceID === workspaceID ? selection.objectID : "";
   const selectedFilePath = fileSelection.workspaceID === workspaceID &&
     fileSelection.objectID === selectedObjectID ? fileSelection.path : "";
+  const selectedHistoryPath = historySelection.workspaceID === workspaceID ?
+    historySelection.path : "";
   const query = useQuery({
     queryKey: ["workspace", workspaceID, "repository-history"],
     queryFn: ({ signal }) => client.repositoryHistory(workspaceID, signal),
@@ -30,6 +33,11 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
     queryFn: ({ signal }) => client.repositoryCommitFilePreview(workspaceID,
       selectedObjectID, selectedFilePath, signal),
     enabled: Boolean(workspaceID && selectedObjectID && selectedFilePath),
+  });
+  const fileHistoryQuery = useQuery({
+    queryKey: ["workspace", workspaceID, "repository-file-history", selectedHistoryPath],
+    queryFn: ({ signal }) => client.repositoryFileHistory(workspaceID, selectedHistoryPath, signal),
+    enabled: Boolean(workspaceID && selectedHistoryPath),
   });
   if (!workspaceID) return null;
   return <section aria-label="Repository history" className="repository-history-panel">
@@ -85,6 +93,14 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
               <code title={change.path}>{change.path}</code>
               <span>{change.previous_kind || "none"} to {change.current_kind || "none"}</span>
               <span>{change.content_changed ? "content" : "mode only"}</span>
+              <button aria-label={`Inspect history for ${change.path}`}
+                aria-pressed={selectedHistoryPath === change.path} className="icon-button"
+                onClick={() => setHistorySelection((current) =>
+                  current.workspaceID === workspaceID && current.path === change.path ?
+                    { workspaceID: "", path: "" } : { workspaceID, path: change.path })}
+                title="Inspect file history" type="button">
+                <FileClock aria-hidden="true" size={14} />
+              </button>
               {["regular", "executable"].includes(change.current_kind) ?
                 <button aria-label={`Preview ${change.path} at ${detailQuery.data.hash}`}
                   aria-pressed={selectedFilePath === change.path} className="icon-button"
@@ -109,6 +125,23 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
             <pre>{fileQuery.data.content}</pre>
           </>}
         </section>}
+      </>}
+    </section>}
+    {selectedHistoryPath && <section aria-label="Exact file history"
+      className="repository-file-history">
+      {fileHistoryQuery.isLoading && <LoadingState label="Loading exact file history" />}
+      {fileHistoryQuery.isError && <ErrorState error={fileHistoryQuery.error} />}
+      {fileHistoryQuery.data && <>
+        <header><code title={fileHistoryQuery.data.path}>{fileHistoryQuery.data.path}</code>
+          <span><StatusBadge status={`${fileHistoryQuery.data.returned_entry_count} changes`} />
+            {fileHistoryQuery.data.truncated && <StatusBadge status="truncated" />}</span></header>
+        {!fileHistoryQuery.data.observed ? <EmptyState>No changes found in the bounded history</EmptyState> :
+          <div className="repository-file-history-list">{fileHistoryQuery.data.entries.map((entry) =>
+            <div key={entry.object_id}><StatusBadge status={entry.change} />
+              <code>{entry.hash}</code><span>{entry.subject}</span>
+              <time dateTime={entry.committed_at}>{formatDate(entry.committed_at)}</time>
+              <span>{entry.previous_kind || "none"} to {entry.current_kind || "none"}</span>
+              {entry.redacted && <StatusBadge status="redacted" />}</div>)}</div>}
       </>}
     </section>}
   </section>;

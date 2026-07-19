@@ -202,6 +202,51 @@ type RepositoryHistoryCommitView struct {
 	SubjectBounded bool      `json:"subject_bounded"`
 }
 
+type RepositoryFileHistoryEntryView struct {
+	ObjectID       string    `json:"object_id"`
+	Hash           string    `json:"hash"`
+	Subject        string    `json:"subject"`
+	CommittedAt    time.Time `json:"committed_at"`
+	Change         string    `json:"change"`
+	PreviousKind   string    `json:"previous_kind"`
+	CurrentKind    string    `json:"current_kind"`
+	ContentChanged bool      `json:"content_changed"`
+	ModeChanged    bool      `json:"mode_changed"`
+	Redacted       bool      `json:"redacted"`
+	SubjectBounded bool      `json:"subject_bounded"`
+}
+
+type RepositoryFileHistoryView struct {
+	ProtocolVersion        string                           `json:"protocol_version"`
+	WorkspaceID            string                           `json:"workspace_id"`
+	Kind                   string                           `json:"kind"`
+	Available              bool                             `json:"available"`
+	Head                   string                           `json:"head"`
+	Path                   string                           `json:"path"`
+	Entries                []RepositoryFileHistoryEntryView `json:"entries"`
+	ScannedCommitCount     int                              `json:"scanned_commit_count"`
+	ReturnedEntryCount     int                              `json:"returned_entry_count"`
+	RedactionCount         int                              `json:"redaction_count"`
+	Observed               bool                             `json:"observed"`
+	Truncated              bool                             `json:"truncated"`
+	FirstParentOnly        bool                             `json:"first_parent_only"`
+	RenameInferred         bool                             `json:"rename_inferred"`
+	MetadataOnly           bool                             `json:"metadata_only"`
+	ReadOnly               bool                             `json:"read_only"`
+	AuthorityGranted       bool                             `json:"authority_granted"`
+	RootPathExposed        bool                             `json:"root_path_exposed"`
+	AuthorIdentityIncluded bool                             `json:"author_identity_included"`
+	CommitBodyIncluded     bool                             `json:"commit_body_included"`
+	FileContentIncluded    bool                             `json:"file_content_included"`
+	PatchIncluded          bool                             `json:"patch_included"`
+	RemoteConfigIncluded   bool                             `json:"remote_config_included"`
+	CheckoutPerformed      bool                             `json:"checkout_performed"`
+	ReferenceUpdated       bool                             `json:"reference_updated"`
+	ProcessStarted         bool                             `json:"process_started"`
+	NetworkUsed            bool                             `json:"network_used"`
+	HooksExecuted          bool                             `json:"hooks_executed"`
+}
+
 type RepositoryCommitFileChangeView struct {
 	Path           string `json:"path"`
 	Change         string `json:"change"`

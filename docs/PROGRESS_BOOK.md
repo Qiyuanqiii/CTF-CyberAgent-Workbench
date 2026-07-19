@@ -1231,10 +1231,52 @@ OpenAPI 为 69/75/167；最终 GUI SHA-256 为
 drill-down、R3 bounded output/exit-evidence contract。它们仍不得开放 raw Git content、结果推断
 或产品 process start；Windows 10 人工矩阵、签名安装、Rust analyzer、xterm 与 CTF 继续后置。
 
+## D1-G6/V5/R3 批次：精确文件历史、验证下钻与退出证据
+
+任务 ID：`P9-File-History-Verification-Drilldown-Runner-Exit-Evidence-v82`。本轮不新增
+SQLite migration，schema 保持 v82。
+
+D1-G6 完成纯 Go `repository_file_history.v1`：对一个已注册 Workspace root 和 canonical
+relative path，从当前 HEAD 沿 first-parent 最多扫描 512 个 commit，返回最多 50 条真实变化。
+响应只含 object/time、已脱敏有界 subject、added/modified/deleted、前后 mode 与 content/mode
+change；不读 raw blob/patch/author/body/remote/root，不推断 rename，也不 checkout、改 ref、启动
+进程、访问网络或 hook。React 的 changed-path 列表可打开精确文件历史，删除项同样可查看。
+
+D1-V5 完成 `operator_verification_plan_item_coverage.v1`：对精确 Run + plan + ordinal 返回
+item digest/count 和最多 100 条 association metadata。仅显示显式 pass/fail/unknown、opaque
+evidence ID、事件序号与时间；plan/evidence body、操作者身份、整体结论、命令/模型/审批/权限
+全部缺席。Store/Application/HTTP/TypeScript 共同复核绑定、摘要、总数、严格降序、唯一性和
+截断计数。
+
+R3 在内部 `NonProductOnly` lifecycle 增加 `runner_exit_evidence.v1`。进程树确认 reaped 后，
+测试边界才可记录 exit code，以及 stdout/stderr 各自最多 64 MiB observed bytes、64 KiB captured
+prefix byte count/SHA-256 和 truncated；raw output 固定不返回。产品 CLI/HTTP/Desktop/Agent/
+Sandbox/Local/Docker 没有 starter 或接线。
+
+普通三切片门通过：uncached 全仓 Go 373.3 秒、受影响包 race、`go vet`、受影响包
+staticcheck、module verify/tidy、37 文件 127 项 Web 测试、strict TypeScript、确定性
+OpenAPI/TypeScript、Vite、npm 零漏洞、Desktop tag、Linux runner-test 交叉编译和 Windows
+可复现双构建。OpenAPI 为 71/77/170，SHA-256
+`C78A701600F8535A9C2398C12B3AAA7A695A93AD58913010D8904ADEED121625`；TypeScript schema
+SHA-256 `977B8EEE7E9A268040453E0ADFB6FFB4C58489D4B90B94177473DC4B882E4740`；最终未签名 GUI
+SHA-256 `c96047d7f3ea0afbe3b2f54f1c4ded197a861b29d644cb2edb449c8b3e46b031`，保持
+`release_ready=false`。
+
+组合审计修复 Git first-parent 顺序被错误要求 commit clock 单调下降，以及验证 count row 和
+截断 association 的重复/不一致校验缺口；当前启用路径无已知未解决高/中权限风险。用户测试
+Key 未进入仓库，未调用真实 Provider/Shell/LocalRunner/Docker/hook/攻击流量/外部网络。
+双指标保持架构约 99%、完整产品可用度约 95-97%；通用 Coding Agent 约 95%，Cyber 自动化
+约 20%。边界见 ADR 0054。
+
+下一批建议 D1-G7 history-to-exact-commit 导航、D1-V6 精确检查项 evidence metadata 的
+opaque 有界分页、R4 非产品 stdin/descriptor/resource evidence。该批完成后累计六片，执行
+full race/vet/staticcheck/govulncheck/依赖/隐私/构建健壮性门；真实进程、Windows 10 人工
+矩阵、签名安装、Rust analyzer、xterm 与 CTF 继续后置。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0053-commit-preview-handoff-coverage-process-conformance.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0054-file-history-verification-drilldown-runner-exit-evidence.md`。

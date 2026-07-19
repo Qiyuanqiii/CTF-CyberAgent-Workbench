@@ -454,6 +454,8 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		"{approval_id}":  approvalRecord.ID,
 		"{edit_id}":      fileEditRecord.ID,
 		"{object_id}":    strings.Repeat("a", 40),
+		"{plan_id}":      verificationPlan.Plan.ID,
+		"{ordinal}":      "1",
 		"{route}":        "code",
 		"{provider}":     "mimo",
 	}
@@ -485,6 +487,8 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		}
 		if spec.OperationID == "searchWorkspace" {
 			requestPath += "?query=README"
+		} else if spec.OperationID == "getWorkspaceRepositoryFileHistory" {
+			requestPath += "?path=README.md"
 		} else if spec.OperationID == "getWorkspaceRepositoryCommitFilePreview" {
 			requestPath += "?path=README.md"
 		} else if spec.OperationID == "issueFileEditProposalSource" {

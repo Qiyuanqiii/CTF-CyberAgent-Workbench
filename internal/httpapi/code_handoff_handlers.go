@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 
 	"cyberagent-workbench/internal/apperror"
@@ -11,15 +12,16 @@ import (
 )
 
 const (
-	VerificationEvidencePathTemplate    = "/api/v1/runs/{run_id}/verification-evidence"
-	VerificationPlanPathTemplate        = "/api/v1/runs/{run_id}/verification-plan"
-	VerificationAssociationPathTemplate = "/api/v1/runs/{run_id}/verification-plan-associations"
-	VerificationCoveragePathTemplate    = "/api/v1/runs/{run_id}/verification-plan-coverage"
-	CodeHandoffPathTemplate             = "/api/v1/runs/{run_id}/code-handoff"
-	CodeHandoffExportPathTemplate       = "/api/v1/runs/{run_id}/code-handoff/export"
-	MaxVerificationEvidenceBodyBytes    = 16 * 1024
-	MaxVerificationPlanBodyBytes        = 64 * 1024
-	MaxVerificationAssociationBodyBytes = 8 * 1024
+	VerificationEvidencePathTemplate       = "/api/v1/runs/{run_id}/verification-evidence"
+	VerificationPlanPathTemplate           = "/api/v1/runs/{run_id}/verification-plan"
+	VerificationAssociationPathTemplate    = "/api/v1/runs/{run_id}/verification-plan-associations"
+	VerificationCoveragePathTemplate       = "/api/v1/runs/{run_id}/verification-plan-coverage"
+	VerificationCoverageDetailPathTemplate = "/api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}"
+	CodeHandoffPathTemplate                = "/api/v1/runs/{run_id}/code-handoff"
+	CodeHandoffExportPathTemplate          = "/api/v1/runs/{run_id}/code-handoff/export"
+	MaxVerificationEvidenceBodyBytes       = 16 * 1024
+	MaxVerificationPlanBodyBytes           = 64 * 1024
+	MaxVerificationAssociationBodyBytes    = 8 * 1024
 )
 
 func (a *API) workspaceRepositoryDiff(request *http.Request,
@@ -115,6 +117,64 @@ func (a *API) workspaceRepositoryHistory(request *http.Request,
 		AuthorIdentityIncluded: projection.AuthorIdentityIncluded,
 		CommitBodyIncluded:     projection.CommitBodyIncluded,
 		RemoteConfigIncluded:   projection.RemoteConfigIncluded,
+		ProcessStarted:         projection.ProcessStarted, NetworkUsed: projection.NetworkUsed,
+		HooksExecuted: projection.HooksExecuted,
+	}, nil, nil
+}
+
+func (a *API) workspaceRepositoryFileHistory(request *http.Request,
+	workspaceID string,
+) (any, *Page, error) {
+	values := request.URL.Query()
+	if err := validateSingleQueryValues(values, "path"); err != nil {
+		return nil, nil, err
+	}
+	paths, present := values["path"]
+	if !present || len(paths) != 1 || paths[0] == "" {
+		return nil, nil, apperror.New(apperror.CodeInvalidArgument,
+			"repository file history path must appear exactly once")
+	}
+	registered, err := a.store.GetWorkspaceInfo(request.Context(), workspaceID)
+	if err != nil {
+		return nil, nil, apperror.Normalize(err)
+	}
+	if registered.ID != workspaceID {
+		return nil, nil, apperror.New(apperror.CodeInternal,
+			"workspace lookup returned a mismatched identity")
+	}
+	projection, err := repository.InspectFileHistory(request.Context(), registered.RootPath,
+		registered.ID, paths[0])
+	if err != nil {
+		return nil, nil, err
+	}
+	entries := make([]RepositoryFileHistoryEntryView, len(projection.Entries))
+	for index, entry := range projection.Entries {
+		entries[index] = RepositoryFileHistoryEntryView{
+			ObjectID: entry.ObjectID, Hash: entry.Hash, Subject: entry.Subject,
+			CommittedAt: entry.CommittedAt, Change: entry.Change,
+			PreviousKind: entry.PreviousKind, CurrentKind: entry.CurrentKind,
+			ContentChanged: entry.ContentChanged, ModeChanged: entry.ModeChanged,
+			Redacted: entry.Redacted, SubjectBounded: entry.SubjectBounded,
+		}
+	}
+	return RepositoryFileHistoryView{
+		ProtocolVersion: projection.ProtocolVersion, WorkspaceID: projection.WorkspaceID,
+		Kind: projection.Kind, Available: projection.Available, Head: projection.Head,
+		Path: projection.Path, Entries: entries,
+		ScannedCommitCount: projection.ScannedCommitCount,
+		ReturnedEntryCount: projection.ReturnedEntryCount,
+		RedactionCount:     projection.RedactionCount, Observed: projection.Observed,
+		Truncated: projection.Truncated, FirstParentOnly: projection.FirstParentOnly,
+		RenameInferred: projection.RenameInferred, MetadataOnly: projection.MetadataOnly,
+		ReadOnly: projection.ReadOnly, AuthorityGranted: projection.AuthorityGranted,
+		RootPathExposed:        projection.RootPathExposed,
+		AuthorIdentityIncluded: projection.AuthorIdentityIncluded,
+		CommitBodyIncluded:     projection.CommitBodyIncluded,
+		FileContentIncluded:    projection.FileContentIncluded,
+		PatchIncluded:          projection.PatchIncluded,
+		RemoteConfigIncluded:   projection.RemoteConfigIncluded,
+		CheckoutPerformed:      projection.CheckoutPerformed,
+		ReferenceUpdated:       projection.ReferenceUpdated,
 		ProcessStarted:         projection.ProcessStarted, NetworkUsed: projection.NetworkUsed,
 		HooksExecuted: projection.HooksExecuted,
 	}, nil, nil
@@ -317,6 +377,54 @@ func (a *API) runVerificationPlanCoverage(request *http.Request,
 		ResultInferred: inventory.ResultInferred, CommandExecuted: inventory.CommandExecuted,
 		ModelAssertion: inventory.ModelAssertion, RecordRewritten: inventory.RecordRewritten,
 		Approval: inventory.Approval, AuthorityGranted: inventory.AuthorityGranted,
+	}, nil, nil
+}
+
+func (a *API) runVerificationPlanItemCoverage(request *http.Request, runID string,
+	planID string, ordinalText string,
+) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	ordinal, err := strconv.Atoi(ordinalText)
+	if err != nil {
+		return nil, nil, apperror.New(apperror.CodeInvalidArgument,
+			"verification coverage item ordinal is invalid")
+	}
+	detail, err := application.NewVerificationCoverageDetailService(a.store).Detail(
+		request.Context(), runID, planID, ordinal)
+	if err != nil {
+		return nil, nil, err
+	}
+	associations := make([]VerificationAssociationReferenceView, len(detail.Associations))
+	for index, association := range detail.Associations {
+		associations[index] = VerificationAssociationReferenceView{
+			ID: association.ID, PlanID: association.PlanID,
+			PlanItemOrdinal: association.PlanItemOrdinal,
+			PlanItemSHA256:  association.PlanItemSHA256, EvidenceID: association.EvidenceID,
+			EvidenceOutcome:          string(association.EvidenceOutcome),
+			EvidenceEventSequence:    association.EvidenceEventSequence,
+			AssociationEventSequence: association.AssociationSequence,
+			AssociatedAt:             association.CreatedAt,
+		}
+	}
+	return VerificationPlanItemCoverageDetailView{
+		ProtocolVersion: detail.ProtocolVersion, RunID: detail.RunID,
+		SessionID: detail.SessionID, WorkspaceID: detail.WorkspaceID,
+		PlanID: detail.PlanID, PlanSHA256: detail.PlanSHA256,
+		PlanItemOrdinal: detail.PlanItemOrdinal, PlanItemSHA256: detail.PlanItemSHA256,
+		AssociatedEvidenceCount: detail.AssociatedEvidenceCount,
+		PassCount:               detail.PassCount, FailCount: detail.FailCount,
+		UnknownCount:                   detail.UnknownCount,
+		LatestAssociationEventSequence: detail.LatestAssociationEventSequence,
+		Associations:                   associations, AssociationsTruncated: detail.AssociationsTruncated,
+		MetadataOnly: detail.MetadataOnly, ReadOnly: detail.ReadOnly,
+		PrivatePlanBodyIncluded:       detail.PrivatePlanBodyIncluded,
+		PrivateEvidenceBodiesIncluded: detail.PrivateEvidenceBodiesIncluded,
+		OperatorIdentityIncluded:      detail.OperatorIdentityIncluded,
+		ResultInferred:                detail.ResultInferred, CommandExecuted: detail.CommandExecuted,
+		ModelAssertion: detail.ModelAssertion, RecordRewritten: detail.RecordRewritten,
+		Approval: detail.Approval, AuthorityGranted: detail.AuthorityGranted,
 	}, nil, nil
 }
 

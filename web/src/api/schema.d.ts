@@ -1040,6 +1040,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect evidence associations for one verification plan item
+         * @description Returns exact metadata-only evidence references and explicit pass, fail, and unknown counts for one immutable plan item. Private plan guidance, evidence bodies, operator identity, aggregate result inference, mutation, approval, commands, models, and authority are excluded.
+         */
+        get: operations["getRunVerificationPlanItemCoverage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/wake-intent": {
         parameters: {
             query?: never;
@@ -1340,6 +1360,26 @@ export interface paths {
          * @description Returns secret-redacted bounded UTF-8 patches for a Git repository rooted exactly at the registered Workspace. Go follows no links, discovers no parent repository, starts no process, executes no hooks, uses no network, and grants no mutation authority.
          */
         get: operations["getWorkspaceRepositoryDiff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{workspace_id}/repository-file-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect bounded history for one exact file path
+         * @description Follows at most 512 first-parent commits and returns at most fifty metadata-only changes for one canonical repository-relative path. It does not infer renames or expose blob/patch content, identities, remotes, host roots, checkout, reference mutation, processes, hooks, network, or authority.
+         */
+        get: operations["getWorkspaceRepositoryFileHistory"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2781,6 +2821,58 @@ export interface components {
             truncated: boolean;
             workspace_id: string;
         };
+        RepositoryFileHistoryEntryView: {
+            /** @enum {string} */
+            change: "added" | "modified" | "deleted";
+            /** Format: date-time */
+            committed_at: string;
+            content_changed: boolean;
+            /** @enum {string} */
+            current_kind: "" | "regular" | "executable" | "symlink" | "submodule";
+            hash: string;
+            mode_changed: boolean;
+            object_id: string;
+            /** @enum {string} */
+            previous_kind: "" | "regular" | "executable" | "symlink" | "submodule";
+            redacted: boolean;
+            subject: string;
+            subject_bounded: boolean;
+        };
+        RepositoryFileHistoryView: {
+            author_identity_included: boolean;
+            authority_granted: boolean;
+            available: boolean;
+            checkout_performed: boolean;
+            commit_body_included: boolean;
+            entries: components["schemas"]["RepositoryFileHistoryEntryView"][];
+            file_content_included: boolean;
+            first_parent_only: boolean;
+            head: string;
+            hooks_executed: boolean;
+            /** @enum {string} */
+            kind: "none" | "git";
+            metadata_only: boolean;
+            network_used: boolean;
+            observed: boolean;
+            patch_included: boolean;
+            path: string;
+            process_started: boolean;
+            /** @enum {string} */
+            protocol_version: "repository_file_history.v1";
+            read_only: boolean;
+            /** Format: int32 */
+            redaction_count: number;
+            reference_updated: boolean;
+            remote_config_included: boolean;
+            rename_inferred: boolean;
+            /** Format: int32 */
+            returned_entry_count: number;
+            root_path_exposed: boolean;
+            /** Format: int32 */
+            scanned_commit_count: number;
+            truncated: boolean;
+            workspace_id: string;
+        };
         RepositoryHistoryBranchView: {
             current: boolean;
             head: string;
@@ -3399,7 +3491,8 @@ export interface components {
             /** Format: int64 */
             evidence_event_sequence: number;
             evidence_id: string;
-            evidence_outcome: string;
+            /** @enum {string} */
+            evidence_outcome: "pass" | "fail" | "unknown";
             id: string;
             plan_id: string;
             /** Format: int32 */
@@ -3549,6 +3642,41 @@ export interface components {
             run_id: string;
             session_id: string;
             truncated: boolean;
+            workspace_id: string;
+        };
+        VerificationPlanItemCoverageDetailView: {
+            approval: boolean;
+            /** Format: int32 */
+            associated_evidence_count: number;
+            associations: components["schemas"]["VerificationAssociationReferenceView"][];
+            associations_truncated: boolean;
+            authority_granted: boolean;
+            command_executed: boolean;
+            /** Format: int32 */
+            fail_count: number;
+            /** Format: int64 */
+            latest_association_event_sequence: number;
+            metadata_only: boolean;
+            model_assertion: boolean;
+            operator_identity_included: boolean;
+            /** Format: int32 */
+            pass_count: number;
+            plan_id: string;
+            /** Format: int32 */
+            plan_item_ordinal: number;
+            plan_item_sha256: string;
+            plan_sha256: string;
+            private_evidence_bodies_included: boolean;
+            private_plan_body_included: boolean;
+            /** @enum {string} */
+            protocol_version: "operator_verification_plan_item_coverage.v1";
+            read_only: boolean;
+            record_rewritten: boolean;
+            result_inferred: boolean;
+            run_id: string;
+            session_id: string;
+            /** Format: int32 */
+            unknown_count: number;
             workspace_id: string;
         };
         VerificationPlanItemCoverageView: {
@@ -5984,6 +6112,45 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    getRunVerificationPlanItemCoverage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+                /** @description Verification plan identity */
+                plan_id: string;
+                /** @description Verification plan item ordinal */
+                ordinal: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["VerificationPlanItemCoverageDetailView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     getRunWakeIntent: {
         parameters: {
             query?: never;
@@ -6659,6 +6826,44 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["RepositoryDiffView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getWorkspaceRepositoryFileHistory: {
+        parameters: {
+            query: {
+                /** @description Canonical repository-relative file path */
+                path: string;
+            };
+            header?: never;
+            path: {
+                /** @description Workspace identity */
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RepositoryFileHistoryView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";

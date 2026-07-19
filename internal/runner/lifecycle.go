@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -13,12 +14,17 @@ import (
 )
 
 const (
-	LifecycleProtocolVersion = "runner_lifecycle_contract.v1"
-	DefaultRunTimeout        = 30 * time.Second
-	MaxRunTimeout            = 5 * time.Minute
-	DefaultTerminationGrace  = 2 * time.Second
-	DefaultKillGrace         = 2 * time.Second
-	MaxControlGrace          = 10 * time.Second
+	LifecycleProtocolVersion    = "runner_lifecycle_contract.v1"
+	ExitEvidenceProtocolVersion = "runner_exit_evidence.v1"
+	DefaultRunTimeout           = 30 * time.Second
+	MaxRunTimeout               = 5 * time.Minute
+	DefaultTerminationGrace     = 2 * time.Second
+	DefaultKillGrace            = 2 * time.Second
+	MaxControlGrace             = 10 * time.Second
+	MaxOutputCaptureBytes       = 64 * 1024
+	MaxOutputObservedBytes      = 64 * 1024 * 1024
+	EmptyOutputSHA256           = "e3b0c44298fc1c149afbf4c8996fb924" +
+		"27ae41e4649b934ca495991b7852b855"
 )
 
 var (
@@ -28,6 +34,7 @@ var (
 	ErrTerminateFailed = errors.New("runner process-tree termination failed")
 	ErrKillFailed      = errors.New("runner process-tree kill failed")
 	ErrOrphanedProcess = errors.New("runner process tree was not fully reaped")
+	ErrExitEvidence    = errors.New("runner exit evidence is invalid")
 )
 
 type StopReason string
@@ -40,6 +47,7 @@ const (
 	StopOrphanAfterExit   StopReason = "orphan_after_exit"
 	StopStartFailed       StopReason = "start_failed"
 	StopDependencyRefused StopReason = "dependency_refused"
+	StopEvidenceFailed    StopReason = "evidence_failed"
 )
 
 type Request struct {
@@ -78,6 +86,57 @@ type ExitStatus struct {
 	Reaped   bool
 }
 
+type OutputEvidence struct {
+	ObservedBytes        int64
+	CapturedBytes        int
+	CapturedPrefixSHA256 string
+	Truncated            bool
+	RawOutputIncluded    bool
+}
+
+func (e OutputEvidence) validate() error {
+	if e.ObservedBytes < 0 || e.ObservedBytes > MaxOutputObservedBytes ||
+		e.CapturedBytes < 0 || e.CapturedBytes > MaxOutputCaptureBytes ||
+		int64(e.CapturedBytes) > e.ObservedBytes || e.RawOutputIncluded ||
+		!validSHA256(e.CapturedPrefixSHA256) {
+		return errors.New("runner output evidence is invalid")
+	}
+	expectedCaptured := e.ObservedBytes
+	if expectedCaptured > MaxOutputCaptureBytes {
+		expectedCaptured = MaxOutputCaptureBytes
+	}
+	if int64(e.CapturedBytes) != expectedCaptured ||
+		e.Truncated != (e.ObservedBytes > MaxOutputCaptureBytes) ||
+		(e.CapturedBytes == 0 && e.CapturedPrefixSHA256 != EmptyOutputSHA256) {
+		return errors.New("runner output evidence is inconsistent")
+	}
+	return nil
+}
+
+type ExitEvidence struct {
+	ProtocolVersion         string
+	Exited                  bool
+	ExitCode                int
+	Reaped                  bool
+	Stdout                  OutputEvidence
+	Stderr                  OutputEvidence
+	MetadataOnly            bool
+	RawOutputIncluded       bool
+	ProductExecutionEnabled bool
+}
+
+func (e ExitEvidence) validate(status ExitStatus) error {
+	if e.ProtocolVersion != ExitEvidenceProtocolVersion || !e.Exited ||
+		e.ExitCode != status.ExitCode || e.Reaped != status.Reaped ||
+		!e.MetadataOnly || e.RawOutputIncluded || e.ProductExecutionEnabled {
+		return errors.New("runner exit evidence binding is invalid")
+	}
+	if err := e.Stdout.validate(); err != nil {
+		return err
+	}
+	return e.Stderr.validate()
+}
+
 func (s ExitStatus) validate() error {
 	if !s.Exited {
 		return errors.New("runner wait returned without an exited process")
@@ -104,6 +163,7 @@ func (s TreeState) validate() error {
 type Process interface {
 	Identity() string
 	Wait(context.Context) (ExitStatus, error)
+	ExitEvidence(context.Context) (ExitEvidence, error)
 	TerminateTree(context.Context) error
 	KillTree(context.Context) error
 	InspectTree(context.Context) (TreeState, error)
@@ -133,6 +193,10 @@ type Result struct {
 	KillFailed              bool
 	OrphanDetected          bool
 	TreeReaped              bool
+	ExitEvidenceAvailable   bool
+	ExitEvidence            ExitEvidence
+	OutputTruncated         bool
+	RawOutputIncluded       bool
 	ProductExecutionEnabled bool
 }
 
@@ -235,6 +299,11 @@ func (h *Harness) Run(ctx context.Context, request Request) (Result, error) {
 			result.ExitCode = exit.ExitCode
 			safe, inspectErr := h.inspectReaped(ctx, process, normalized.KillGrace, &result)
 			if inspectErr == nil && safe && exit.Reaped {
+				if evidenceErr := h.collectExitEvidence(ctx, process, exit,
+					normalized.KillGrace, &result); evidenceErr != nil {
+					result.StopReason = StopEvidenceFailed
+					return result, evidenceErr
+				}
 				result.StopReason = StopExited
 				return result, nil
 			}
@@ -289,6 +358,10 @@ func (h *Harness) cleanup(parent context.Context, process Process, request Reque
 	if waitErr == nil && exit.validate() == nil {
 		result.ExitCode = exit.ExitCode
 		if safe, inspectErr := h.inspectReaped(base, process, request.KillGrace, result); inspectErr == nil && safe && exit.Reaped {
+			if evidenceErr := h.collectExitEvidence(base, process, exit,
+				request.KillGrace, result); evidenceErr != nil {
+				return evidenceErr
+			}
 			if terminateErr != nil {
 				return fmt.Errorf("%w: backend returned an error after reaping", ErrTerminateFailed)
 			}
@@ -314,12 +387,38 @@ func (h *Harness) cleanup(parent context.Context, process Process, request Reque
 		}
 		return ErrOrphanedProcess
 	}
+	if evidenceErr := h.collectExitEvidence(base, process, exit,
+		request.KillGrace, result); evidenceErr != nil {
+		return evidenceErr
+	}
 	if terminateErr != nil {
 		return fmt.Errorf("%w: backend returned an error before successful kill", ErrTerminateFailed)
 	}
 	if killErr != nil {
 		return fmt.Errorf("%w: backend returned an error after reaping", ErrKillFailed)
 	}
+	return nil
+}
+
+func (h *Harness) collectExitEvidence(parent context.Context, process Process,
+	status ExitStatus, timeout time.Duration, result *Result,
+) error {
+	evidenceCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
+	defer cancel()
+	evidence, err := process.ExitEvidence(evidenceCtx)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrExitEvidence, stableContextError(err))
+	}
+	if err := evidence.validate(status); err != nil {
+		return fmt.Errorf("%w: contract mismatch", ErrExitEvidence)
+	}
+	if result.ExitEvidenceAvailable && result.ExitEvidence != evidence {
+		return fmt.Errorf("%w: evidence changed after collection", ErrExitEvidence)
+	}
+	result.ExitEvidence = evidence
+	result.ExitEvidenceAvailable = true
+	result.OutputTruncated = evidence.Stdout.Truncated || evidence.Stderr.Truncated
+	result.RawOutputIncluded = false
 	return nil
 }
 
@@ -348,6 +447,14 @@ func stableContextError(err error) error {
 		return context.DeadlineExceeded
 	}
 	return errors.New("backend lifecycle operation failed")
+}
+
+func validSHA256(value string) bool {
+	if len(value) != 64 || value != strings.ToLower(value) {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == 32
 }
 
 func validIdentity(value string) bool {

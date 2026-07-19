@@ -38,6 +38,7 @@ import type {
   RepositoryStateView,
   RepositoryDiffView,
   RepositoryHistoryView,
+  RepositoryFileHistoryView,
   RepositoryCommitDetailView,
   RepositoryCommitFilePreviewView,
   RunCreationControlRequestView,
@@ -73,6 +74,7 @@ import type {
   VerificationAssociationRequestView,
   VerificationAssociationControlView,
   VerificationPlanCoverageInventoryView,
+  VerificationPlanItemCoverageDetailView,
 } from "./types";
 
 export type QueryValue = boolean | number | string | undefined;
@@ -1202,6 +1204,79 @@ function parseRepositoryHistory(value: unknown, workspaceID: string): Repository
   return { ...value, commits, branches } as unknown as RepositoryHistoryView;
 }
 
+function parseRepositoryFileHistory(value: unknown, workspaceID: string,
+  path: string): RepositoryFileHistoryView {
+  const keys = ["author_identity_included", "authority_granted", "available",
+    "checkout_performed", "commit_body_included", "entries", "file_content_included",
+    "first_parent_only", "head", "hooks_executed", "kind", "metadata_only", "network_used",
+    "observed", "patch_included", "path", "process_started", "protocol_version", "read_only",
+    "redaction_count", "reference_updated", "remote_config_included", "rename_inferred",
+    "returned_entry_count", "root_path_exposed", "scanned_commit_count", "truncated",
+    "workspace_id"];
+  if (!hasExactKeys(value, keys) || value.protocol_version !== "repository_file_history.v1" ||
+    value.workspace_id !== workspaceID || value.path !== path ||
+    !validWorkspaceRelativePath(value.path) || value.path === "." ||
+    !["none", "git"].includes(String(value.kind)) ||
+    typeof value.available !== "boolean" || value.available !== (value.kind === "git") ||
+    typeof value.head !== "string" || !/^(?:[0-9a-f]{12})?$/u.test(value.head) ||
+    !Array.isArray(value.entries) || value.entries.length > 50 ||
+    !safeBoundedCount(value.scanned_commit_count, 512) ||
+    !safeBoundedCount(value.returned_entry_count, 50) ||
+    value.returned_entry_count !== value.entries.length ||
+    !safeBoundedCount(value.redaction_count, 512 * 240) ||
+    typeof value.observed !== "boolean" || value.observed !== (value.entries.length > 0) ||
+    typeof value.truncated !== "boolean" || value.first_parent_only !== true ||
+    value.rename_inferred !== false || value.metadata_only !== true || value.read_only !== true ||
+    value.authority_granted !== false || value.root_path_exposed !== false ||
+    value.author_identity_included !== false || value.commit_body_included !== false ||
+    value.file_content_included !== false || value.patch_included !== false ||
+    value.remote_config_included !== false || value.checkout_performed !== false ||
+    value.reference_updated !== false || value.process_started !== false ||
+    value.network_used !== false || value.hooks_executed !== false) {
+    throw new APIRequestError("Repository file history violated its exact metadata contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const objectIDs = new Set<string>();
+  const kinds = ["", "regular", "executable", "symlink", "submodule"];
+  let redactedEntries = 0;
+  const entries = value.entries.map((entry) => {
+    if (!hasExactKeys(entry, ["change", "committed_at", "content_changed", "current_kind",
+      "hash", "mode_changed", "object_id", "previous_kind", "redacted", "subject",
+      "subject_bounded"]) || typeof entry.object_id !== "string" ||
+      !/^[0-9a-f]{40}$/u.test(entry.object_id) || objectIDs.has(entry.object_id) ||
+      typeof entry.hash !== "string" || !/^[0-9a-f]{12}$/u.test(entry.hash) ||
+      !entry.object_id.startsWith(entry.hash) || typeof entry.subject !== "string" ||
+      entry.subject.length === 0 || [...entry.subject].length > 512 ||
+      /[\u0000-\u001f\u007f]/u.test(entry.subject) || !validDate(entry.committed_at) ||
+      !["added", "modified", "deleted"].includes(String(entry.change)) ||
+      !kinds.includes(String(entry.previous_kind)) || !kinds.includes(String(entry.current_kind)) ||
+      typeof entry.content_changed !== "boolean" || typeof entry.mode_changed !== "boolean" ||
+      (!entry.content_changed && !entry.mode_changed) || typeof entry.redacted !== "boolean" ||
+      typeof entry.subject_bounded !== "boolean" ||
+      (entry.change === "added" && (entry.previous_kind !== "" || entry.current_kind === "" ||
+        !entry.content_changed || !entry.mode_changed)) ||
+      (entry.change === "deleted" && (entry.previous_kind === "" || entry.current_kind !== "" ||
+        !entry.content_changed || !entry.mode_changed)) ||
+      (entry.change === "modified" &&
+        (entry.previous_kind === "" || entry.current_kind === ""))) {
+      throw new APIRequestError("Repository file history entry widened content authority",
+        "INVALID_RESPONSE", 502);
+    }
+    objectIDs.add(entry.object_id);
+    redactedEntries += entry.redacted ? 1 : 0;
+    return entry;
+  });
+  if (redactedEntries > value.redaction_count ||
+    (!value.available && (value.head !== "" || value.scanned_commit_count !== 0 ||
+      entries.length !== 0 || value.redaction_count !== 0 || value.observed || value.truncated)) ||
+    (value.head === "" && (value.scanned_commit_count !== 0 || entries.length !== 0)) ||
+    (entries.length > value.scanned_commit_count)) {
+    throw new APIRequestError("Repository file history contains inconsistent bounded facts",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, entries } as unknown as RepositoryFileHistoryView;
+}
+
 function parseRepositoryCommitDetail(value: unknown, workspaceID: string,
   objectID: string): RepositoryCommitDetailView {
   const keys = ["author_identity_included", "available", "changed_file_count", "changes",
@@ -1597,6 +1672,86 @@ function parseVerificationPlanCoverage(value: unknown,
       "INVALID_RESPONSE", 502);
   }
   return { ...value, plans, associations } as unknown as VerificationPlanCoverageInventoryView;
+}
+
+function parseVerificationPlanItemCoverage(value: unknown, runID: string, planID: string,
+  ordinal: number): VerificationPlanItemCoverageDetailView {
+  const keys = ["approval", "associated_evidence_count", "associations",
+    "associations_truncated", "authority_granted", "command_executed", "fail_count",
+    "latest_association_event_sequence", "metadata_only", "model_assertion",
+    "operator_identity_included", "pass_count", "plan_id", "plan_item_ordinal",
+    "plan_item_sha256", "plan_sha256", "private_evidence_bodies_included",
+    "private_plan_body_included", "protocol_version", "read_only", "record_rewritten",
+    "result_inferred", "run_id", "session_id", "unknown_count", "workspace_id"];
+  if (!hasExactKeys(value, keys) ||
+    value.protocol_version !== "operator_verification_plan_item_coverage.v1" ||
+    value.run_id !== runID || value.plan_id !== planID || value.plan_item_ordinal !== ordinal ||
+    !boundedIdentity(value.session_id) || !boundedIdentity(value.workspace_id) ||
+    !isSHA256(value.plan_sha256) || !isSHA256(value.plan_item_sha256) ||
+    !safeBoundedCount(value.associated_evidence_count, 1_000_000_000) ||
+    !safeBoundedCount(value.pass_count, 1_000_000_000) ||
+    !safeBoundedCount(value.fail_count, 1_000_000_000) ||
+    !safeBoundedCount(value.unknown_count, 1_000_000_000) ||
+    value.pass_count + value.fail_count + value.unknown_count !==
+      value.associated_evidence_count ||
+    !safeBoundedCount(value.latest_association_event_sequence, Number.MAX_SAFE_INTEGER) ||
+    ((value.associated_evidence_count === 0) !==
+      (value.latest_association_event_sequence === 0)) ||
+    !Array.isArray(value.associations) || value.associations.length > 100 ||
+    typeof value.associations_truncated !== "boolean" || value.metadata_only !== true ||
+    value.read_only !== true || value.private_plan_body_included !== false ||
+    value.private_evidence_bodies_included !== false ||
+    value.operator_identity_included !== false || value.result_inferred !== false ||
+    value.command_executed !== false || value.model_assertion !== false ||
+    value.record_rewritten !== false || value.approval !== false ||
+    value.authority_granted !== false) {
+    throw new APIRequestError("Verification item coverage widened its read-only boundary",
+      "INVALID_RESPONSE", 502);
+  }
+  const associationIDs = new Set<string>();
+  const evidenceIDs = new Set<string>();
+  let previousSequence = Number.MAX_SAFE_INTEGER;
+  let returnedPass = 0;
+  let returnedFail = 0;
+  let returnedUnknown = 0;
+  const associations = value.associations.map((association, index) => {
+    if (!hasExactKeys(association, ["associated_at", "association_event_sequence",
+      "evidence_event_sequence", "evidence_id", "evidence_outcome", "id", "plan_id",
+      "plan_item_ordinal", "plan_item_sha256"]) || !boundedIdentity(association.id) ||
+      associationIDs.has(String(association.id)) || association.plan_id !== planID ||
+      association.plan_item_ordinal !== ordinal ||
+      association.plan_item_sha256 !== value.plan_item_sha256 ||
+      !boundedIdentity(association.evidence_id) || evidenceIDs.has(String(association.evidence_id)) ||
+      !["pass", "fail", "unknown"].includes(String(association.evidence_outcome)) ||
+      !safePositiveInteger(association.evidence_event_sequence) ||
+      !safePositiveInteger(association.association_event_sequence) ||
+      association.association_event_sequence <= association.evidence_event_sequence ||
+      (index > 0 && association.association_event_sequence >= previousSequence) ||
+      !validDate(association.associated_at)) {
+      throw new APIRequestError("Verification item association escaped its exact binding",
+        "INVALID_RESPONSE", 502);
+    }
+    associationIDs.add(String(association.id));
+    evidenceIDs.add(String(association.evidence_id));
+    previousSequence = Number(association.association_event_sequence);
+    if (association.evidence_outcome === "pass") returnedPass += 1;
+    if (association.evidence_outcome === "fail") returnedFail += 1;
+    if (association.evidence_outcome === "unknown") returnedUnknown += 1;
+    return association;
+  });
+  if ((associations.length > 0 && associations[0]?.association_event_sequence !==
+      value.latest_association_event_sequence) ||
+    (value.associations_truncated && (associations.length !== 100 ||
+      value.associated_evidence_count <= 100)) ||
+    (!value.associations_truncated && (associations.length !== value.associated_evidence_count ||
+      returnedPass !== value.pass_count || returnedFail !== value.fail_count ||
+      returnedUnknown !== value.unknown_count)) ||
+    (value.associations_truncated && (returnedPass > value.pass_count ||
+      returnedFail > value.fail_count || returnedUnknown > value.unknown_count))) {
+    throw new APIRequestError("Verification item coverage counts are inconsistent",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, associations } as unknown as VerificationPlanItemCoverageDetailView;
 }
 
 function parseCodeHandoff(value: unknown, runID: string): CodeHandoffView {
@@ -2215,6 +2370,17 @@ export class CyberAgentClient {
     ), workspaceID, objectID);
   }
 
+  async repositoryFileHistory(workspaceID: string, path: string,
+    signal?: AbortSignal): Promise<RepositoryFileHistoryView> {
+    if (!boundedIdentity(workspaceID) || workspaceID.trim() !== workspaceID ||
+      !validWorkspaceRelativePath(path) || path === ".") {
+      throw new Error("A normalized Workspace identity and canonical file path are required");
+    }
+    return parseRepositoryFileHistory(await this.get<unknown>(
+      `/workspaces/${encodeURIComponent(workspaceID)}/repository-file-history`, { path }, signal,
+    ), workspaceID, path);
+  }
+
   async repositoryCommitFilePreview(workspaceID: string, objectID: string, path: string,
     signal?: AbortSignal): Promise<RepositoryCommitFilePreviewView> {
     if (!boundedIdentity(workspaceID) || workspaceID.trim() !== workspaceID ||
@@ -2315,6 +2481,18 @@ export class CyberAgentClient {
     return parseVerificationPlanCoverage(await this.get<unknown>(
       `/runs/${encodeURIComponent(runID)}/verification-plan-coverage`, {}, signal,
     ), runID);
+  }
+
+  async verificationPlanItemCoverage(runID: string, planID: string, ordinal: number,
+    signal?: AbortSignal): Promise<VerificationPlanItemCoverageDetailView> {
+    if (!boundedIdentity(runID) || runID.trim() !== runID || !boundedIdentity(planID) ||
+      planID.trim() !== planID || !safePositiveInteger(ordinal) || ordinal > 32) {
+      throw new Error("Normalized Run, plan, and item identities are required");
+    }
+    return parseVerificationPlanItemCoverage(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/verification-plan-coverage/` +
+        `${encodeURIComponent(planID)}/items/${ordinal}`, {}, signal,
+    ), runID, planID, ordinal);
   }
 
   async associateVerificationEvidence(runID: string, body: VerificationAssociationRequestView,

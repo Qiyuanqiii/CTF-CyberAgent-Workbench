@@ -4,9 +4,9 @@ Last updated: 2026-07-20
 
 ## Resume Context
 
-Current database schema is v82. Schemas v78-v81 add immutable operator verification evidence, livelock recovery, verification plans, and explicit plan-item/evidence associations; schema v82 adds conservative complete-request model-context planning and immutable cumulative handoff memory. Non-schema Code/Desktop work now reaches D1-G5/V4, while R2 adds OS-specific process-tree conformance adapters only to the Go test boundary. Root and Specialist requests use a 32K conservative fallback with explicit output/safety reservations, repeated compaction preserves a predecessor-bound cumulative handoff chain, arbitrary repository documents remain untrusted evidence instead of instructions, exact-commit preview is bounded and redacted, and Code Handoff exposes verification coverage without inventing an aggregate verdict. None grants general Shell, LocalRunner, Docker, child scheduling, install hooks, renderer host-path authority, credential readback, document instruction authority, automatic Skill selection, or product process execution.
+Current database schema is v82. Schemas v78-v81 add immutable operator verification evidence, livelock recovery, verification plans, and explicit plan-item/evidence associations; schema v82 adds conservative complete-request model-context planning and immutable cumulative handoff memory. Non-schema Code/Desktop work now reaches D1-G6/V5, while R3 adds bounded output/exit evidence only behind the internal `NonProductOnly` Runner boundary. Root and Specialist requests use a 32K conservative fallback with explicit output/safety reservations, repeated compaction preserves a predecessor-bound cumulative handoff chain, arbitrary repository documents remain untrusted evidence instead of instructions, exact-file history is bounded metadata, and one verification item can be inspected without exposing bodies or inventing an aggregate verdict. None grants general Shell, LocalRunner, Docker, child scheduling, install hooks, renderer host-path authority, credential readback, document instruction authority, automatic Skill selection, or product process execution.
 
-Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No product path starts a Runner, container, Shell, or host process. ADR 0024 through ADR 0053 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/recovery/review/apply, Provider credential/generation, inert-install, receipt, Explorer/search, Repository, Verification, Handoff, process-conformance, and portable-build boundaries.
+Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No product path starts a Runner, container, Shell, or host process. ADR 0024 through ADR 0054 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/recovery/review/apply, Provider credential/generation, inert-install, receipt, Explorer/search, Repository, Verification, Handoff, process-conformance, and portable-build boundaries.
 
 CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The CLI-first implementation has resumable Runs, a durable root Agent Coordinator, bounded review-gated Specialist delegation, a separate read-only 1/2/4/6 Fan-out pool, persisted sessions and model calls, context compaction, WorkItems/Notes/Artifacts, a unified Tool Gateway, embedded and inert user Skills, Finding/Evidence/Report lifecycles with SARIF/CI output, loopback HTTP/SSE/OpenAPI, a Run-first TUI, a React/Vite console, and a Windows Wails shell with independently gated Run/Session/Plan/approval, FileEdit proposal/review/apply, Provider credentials, foreground/bounded wake, inert Skills, actions/evidence, and navigation. Core delegation remains capped at two children and only the original application operator can schedule it; models, ordinary tools, HTTP, and the Desktop native bridge cannot autonomously spawn or schedule children.
 
@@ -1520,17 +1520,58 @@ was used. Architecture is about 99%, complete-product usability about 95-97%, ge
 Coding Agent usability about 95%, and Cyber automation about 20%. ADR 0053 is
 authoritative.
 
+## D1-G6/V5/R3 Exact File History, Verification Drilldown, And Exit Evidence
+
+D1-G6 adds pure-Go `repository_file_history.v1`: one exact canonical path at one exact
+registered root, current HEAD and first-parent history, at most 512 scanned commits and
+50 returned changes. The projection contains bounded redacted subjects, object/time,
+change status, and mode metadata only. It exposes no raw blob, patch, identity/body,
+remote/root, rename inference, checkout/ref mutation, subprocess, network, or hook.
+
+D1-V5 adds `operator_verification_plan_item_coverage.v1`: one exact Run/plan/ordinal may
+read at most 100 exact immutable association records and explicit outcomes. Plans,
+evidence, and results remain separate; private bodies, operator identity, aggregate
+verdicts, command/model execution, approval, and authority are absent. Store,
+application, HTTP, and strict TypeScript validate exact ownership, digests, counts,
+ordering, uniqueness, truncation, and false-authority fields.
+
+R3 adds `runner_exit_evidence.v1` only to the internal `NonProductOnly` lifecycle. After
+the process tree is proven reaped, tests may record exit code and per-stream observed
+bytes, a bounded 64 KiB prefix digest/count, and truncation. Raw output is not returned,
+and there is no product process starter or CLI/HTTP/Desktop/Agent/Local/Docker wiring.
+
+The ordinary three-slice gate passed uncached Go in 373.3 seconds, focused race, vet,
+affected-package staticcheck, module verify/tidy, 37 files/127 Web tests, strict
+TypeScript, deterministic OpenAPI/TypeScript, Vite, zero npm vulnerabilities,
+Desktop-tag tests, Linux test-binary cross-compilation, and reproducible Windows builds.
+OpenAPI is 71/77/170 with SHA-256
+`C78A701600F8535A9C2398C12B3AAA7A695A93AD58913010D8904ADEED121625`;
+the TypeScript schema SHA-256 is
+`977B8EEE7E9A268040453E0ADFB6FFB4C58489D4B90B94177473DC4B882E4740`;
+the unsigned GUI SHA-256 is
+`c96047d7f3ea0afbe3b2f54f1c4ded197a861b29d644cb2edb449c8b3e46b031` and remains
+`release_ready=false`.
+
+The audit corrected rejection of valid non-monotonic Git commit clocks and closed two
+verification-validation gaps around duplicate count rows and inconsistent/duplicate
+truncated associations. No enabled path has a known unresolved high/medium authority
+issue. No real Provider/key, Shell, LocalRunner, Docker, hook, attack traffic, or
+external network was used. Architecture is about 99%, complete-product usability about
+95-97%, generic Coding Agent usability about 95%, and Cyber automation about 20%.
+ADR 0054 is authoritative.
+
 ## Recommended Next Batch
 
-Complete D1-G6 bounded exact-file history, D1-V5 read-only verification coverage
-drill-down, and R3 bounded output/exit-evidence contract. The repository slice must
-remain exact-root and process-free; the verification slice must keep plans, evidence,
-and results separate; R3 must remain non-product and must not map profiles, approvals,
-Local, Docker, CLI, HTTP, Desktop, or Agent paths to process start. This is the first
-half of a new six-slice cycle and receives the ordinary integrated gate. The manual
-Windows 10 matrix, signed ZIP/MSIX distribution, real Sandbox release gate, Rust
-analyzers, xterm input, network grants, and CTF solving remain separately gated.
+Complete D1-G7 history-to-exact-commit navigation, D1-V6 opaque bounded pagination for
+one exact plan item's evidence metadata, and R4 non-product stdin/descriptor/resource
+evidence. These slices must reuse existing exact commit/preview boundaries, preserve
+private verification bodies and non-verdict semantics, and add no process starter or
+product wiring. This is the second half of the current six-slice cycle, so its closeout
+must run the full race/vet/staticcheck/govulncheck/dependency/privacy/build robustness
+gate. The manual Windows 10 matrix, signed ZIP/MSIX distribution, real Sandbox release
+gate, Rust analyzers, xterm input, network grants, and CTF solving remain separately
+gated.
 
-Keep the Local profile disabled until a real OS sandbox makes protected host roots unavailable or read-only; never map it to unrestricted `os/exec`. Product Docker start/wait/TERM/KILL/orphan behavior still requires a later independent release gate; R2 test-binary conformance is not production evidence. Broader HTTP/Desktop mutations, Rust analyzers, network/secret support, end-user process execution, and CTF solving remain deferred.
+Keep the Local profile disabled until a real OS sandbox makes protected host roots unavailable or read-only; never map it to unrestricted `os/exec`. Product Docker start/wait/TERM/KILL/orphan behavior still requires a later independent release gate; R2/R3 test-binary conformance and post-reap metadata are not production evidence. Broader HTTP/Desktop mutations, Rust analyzers, network/secret support, end-user process execution, and CTF solving remain deferred.
 
 Real Local/container-process execution remains disabled until every v51 check has independently verified and independently accepted production evidence and Sandbox retained-resource cleanup, resource/network, cancellation, running-orphan, and atomic Artifact-export paths pass separate audits. Schema v52 simulation, v53 metadata observation, v54 compilation/fake writes, v55-v56 non-started daemon rehearsals, v57 sealing, v58 durable capture requirements, v59 never-started handoff evidence, v60 projection plans, v61 never-started volume application, v62 cleanup, v63 design review, v64 profile selection, v65 non-authorizing capture receipts, v66 recoverable capture ownership, v67 read-only daemon metadata, and v68 receipt acceptance do not satisfy that requirement. TypeScript, future Rust analyzers, and model providers remain unable to bypass the Go Tool Gateway or Policy boundary.

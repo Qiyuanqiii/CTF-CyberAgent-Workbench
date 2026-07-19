@@ -659,3 +659,27 @@ React consumes the first two through strict Go/OpenAPI and TypeScript revalidati
 No CLI, HTTP, Desktop, Agent, Sandbox, LocalRunner, Docker, approval, profile, or
 capability path can construct the OS conformance adapters. ADR 0053 records the full
 boundary and evidence.
+
+## Exact File History, Verification Drilldown, And Exit Evidence
+
+- `repository_file_history.v1` binds one exact canonical path to one exact registered
+  Workspace root and walks current HEAD first-parent history. It scans at most 512
+  commits and returns at most 50 actual changes with bounded redacted subject,
+  object/time, status, and previous/current mode metadata. It has no raw blob, patch,
+  identity/body, remote/root, rename inference, checkout/ref mutation, process,
+  network, or hook surface.
+- `operator_verification_plan_item_coverage.v1` binds one exact Run, plan, and ordinal.
+  It returns the item digest/counts plus at most 100 exact immutable association
+  records with explicit outcomes. Guidance/evidence bodies, operator identity,
+  aggregate verdicts, mutation, commands, model calls, approval, and authority are
+  absent. SQLite, Go application logic, HTTP, and TypeScript each validate ownership,
+  digests, counts, strict event order, uniqueness, and truncation.
+- `runner_exit_evidence.v1` extends only the internal `NonProductOnly` lifecycle. Once
+  the process tree is proven reaped, it may report exit code and per-stream observed
+  bytes, a maximum 64 KiB captured-prefix count/SHA-256, and truncation. Raw output is
+  never included; malformed evidence fails separately from orphan classification.
+
+React uses the two read-only Code projections through strict Go/OpenAPI contracts.
+R3 has no product process starter and is unreachable from CLI, HTTP, Desktop, Agent,
+Sandbox profiles, approvals, LocalRunner, or Docker. ADR 0054 records the complete
+limits and verification evidence.

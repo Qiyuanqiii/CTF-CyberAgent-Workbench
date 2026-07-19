@@ -1,7 +1,10 @@
 package runner
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"sync"
 	"testing"
@@ -53,11 +56,16 @@ type simulationProcess struct {
 	waitCount       int
 	inspectCount    int
 	identity        string
+	stdoutEvidence  OutputEvidence
+	stderrEvidence  OutputEvidence
+	evidenceErr     error
 }
 
 func newSimulationProcess() *simulationProcess {
 	return &simulationProcess{done: make(chan struct{}), running: true,
-		exitOnKill: true, exitCode: 137}
+		exitOnKill: true, exitCode: 137,
+		stdoutEvidence: testOutputEvidence(nil, 0),
+		stderrEvidence: testOutputEvidence(nil, 0)}
 }
 
 func (p *simulationProcess) Identity() string {
@@ -80,6 +88,21 @@ func (p *simulationProcess) Wait(ctx context.Context) (ExitStatus, error) {
 	case <-ctx.Done():
 		return ExitStatus{}, ctx.Err()
 	}
+}
+
+func (p *simulationProcess) ExitEvidence(ctx context.Context) (ExitEvidence, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return ExitEvidence{}, err
+	}
+	if p.running || !p.reaped {
+		return ExitEvidence{}, errors.New("simulated process tree is not reaped")
+	}
+	if p.evidenceErr != nil {
+		return ExitEvidence{}, p.evidenceErr
+	}
+	return testExitEvidence(p.exitCode, p.reaped, p.stdoutEvidence, p.stderrEvidence), nil
 }
 
 func (p *simulationProcess) TerminateTree(ctx context.Context) error {
@@ -141,6 +164,21 @@ func (p *simulationProcess) finishLocked(exitCode int, reaped bool) {
 	p.doneOnce.Do(func() { close(p.done) })
 }
 
+func testOutputEvidence(captured []byte, observed int64) OutputEvidence {
+	digest := sha256.Sum256(captured)
+	return OutputEvidence{ObservedBytes: observed, CapturedBytes: len(captured),
+		CapturedPrefixSHA256: hex.EncodeToString(digest[:]),
+		Truncated:            observed > int64(len(captured)), RawOutputIncluded: false}
+}
+
+func testExitEvidence(exitCode int, reaped bool, stdout OutputEvidence,
+	stderr OutputEvidence,
+) ExitEvidence {
+	return ExitEvidence{ProtocolVersion: ExitEvidenceProtocolVersion, Exited: true,
+		ExitCode: exitCode, Reaped: reaped, Stdout: stdout, Stderr: stderr,
+		MetadataOnly: true, RawOutputIncluded: false, ProductExecutionEnabled: false}
+}
+
 func TestLifecycleHarnessNormalExitRequiresReapedTree(t *testing.T) {
 	process := newSimulationProcess()
 	process.finish(0, true)
@@ -152,8 +190,46 @@ func TestLifecycleHarnessNormalExitRequiresReapedTree(t *testing.T) {
 	result, err := harness.WithWaitGraph(waitgraph.New()).Run(t.Context(), Request{ID: "normal-exit"})
 	if err != nil || !result.Started || result.StopReason != StopExited || result.ExitCode != 0 ||
 		!result.TreeReaped || result.TerminateRequested || result.KillRequested ||
+		!result.ExitEvidenceAvailable || result.RawOutputIncluded ||
 		result.ProductExecutionEnabled {
 		t.Fatalf("normal lifecycle result=%#v err=%v", result, err)
+	}
+}
+
+func TestLifecycleHarnessBoundsOutputAndRejectsInvalidExitEvidence(t *testing.T) {
+	process := newSimulationProcess()
+	prefix := bytes.Repeat([]byte("x"), MaxOutputCaptureBytes)
+	process.stdoutEvidence = testOutputEvidence(prefix, MaxOutputCaptureBytes+17)
+	process.stderrEvidence = testOutputEvidence([]byte("bounded stderr\n"), 15)
+	process.finish(17, true)
+	harness, err := NewHarness(&simulationBackend{process: process, nonProductOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := harness.WithWaitGraph(waitgraph.New()).Run(t.Context(),
+		Request{ID: "bounded-output-evidence"})
+	if err != nil || !result.ExitEvidenceAvailable || !result.OutputTruncated ||
+		result.RawOutputIncluded || result.ExitEvidence.ExitCode != 17 ||
+		result.ExitEvidence.Stdout.ObservedBytes != MaxOutputCaptureBytes+17 ||
+		result.ExitEvidence.Stdout.CapturedBytes != MaxOutputCaptureBytes ||
+		!result.ExitEvidence.Stdout.Truncated ||
+		result.ExitEvidence.Stdout.CapturedPrefixSHA256 == EmptyOutputSHA256 {
+		t.Fatalf("bounded output evidence result=%#v err=%v", result, err)
+	}
+
+	invalid := newSimulationProcess()
+	invalid.stdoutEvidence.RawOutputIncluded = true
+	invalid.finish(0, true)
+	harness, err = NewHarness(&simulationBackend{process: invalid, nonProductOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err = harness.WithWaitGraph(waitgraph.New()).Run(t.Context(),
+		Request{ID: "invalid-output-evidence"})
+	if !errors.Is(err, ErrExitEvidence) || result.StopReason != StopEvidenceFailed ||
+		!result.TreeReaped || result.OrphanDetected || result.TerminateRequested ||
+		result.KillRequested || result.ExitEvidenceAvailable || result.RawOutputIncluded {
+		t.Fatalf("invalid output evidence result=%#v err=%v", result, err)
 	}
 }
 

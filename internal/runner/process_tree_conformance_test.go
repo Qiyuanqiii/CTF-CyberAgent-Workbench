@@ -43,6 +43,39 @@ type conformanceBackend struct {
 	ignoreTerminate bool
 }
 
+type conformanceOutputCollector struct {
+	mu       sync.Mutex
+	observed int64
+	captured []byte
+}
+
+func (c *conformanceOutputCollector) Write(value []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	written := len(value)
+	if c.observed <= MaxOutputObservedBytes {
+		if int64(written) > MaxOutputObservedBytes-c.observed {
+			c.observed = MaxOutputObservedBytes + 1
+		} else {
+			c.observed += int64(written)
+		}
+	}
+	remaining := MaxOutputCaptureBytes - len(c.captured)
+	if remaining > 0 {
+		if len(value) > remaining {
+			value = value[:remaining]
+		}
+		c.captured = append(c.captured, value...)
+	}
+	return written, nil
+}
+
+func (c *conformanceOutputCollector) Evidence() OutputEvidence {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return testOutputEvidence(append([]byte(nil), c.captured...), c.observed)
+}
+
 func newPlatformConformanceBackend(t *testing.T, mode string,
 	ignoreTerminate bool,
 ) Backend {
@@ -62,8 +95,10 @@ func (b *conformanceBackend) Start(ctx context.Context, request Request) (Proces
 	command := exec.Command(os.Args[0], "-test.run=^TestProcessTreeConformanceHelper$")
 	command.Env = conformanceEnvironment(directory, conformanceRoleParent, b.mode)
 	command.Stdin = nil
-	command.Stdout = io.Discard
-	command.Stderr = io.Discard
+	stdout := &conformanceOutputCollector{}
+	stderr := &conformanceOutputCollector{}
+	command.Stdout = stdout
+	command.Stderr = stderr
 	controller, err := startPlatformConformanceTree(ctx, command, directory)
 	if err != nil {
 		return nil, err
@@ -71,7 +106,7 @@ func (b *conformanceBackend) Start(ctx context.Context, request Request) (Proces
 	process := &conformanceProcess{
 		identity: request.ID + "-process-tree", command: command, controller: controller,
 		stopMarker: filepath.Join(directory, "stop"), ignoreTerminate: b.ignoreTerminate,
-		done: make(chan struct{}),
+		stdout: stdout, stderr: stderr, done: make(chan struct{}),
 	}
 	go process.reap()
 	b.testing.Cleanup(process.forceCleanup)
@@ -84,6 +119,8 @@ type conformanceProcess struct {
 	controller      conformanceTreeController
 	stopMarker      string
 	ignoreTerminate bool
+	stdout          *conformanceOutputCollector
+	stderr          *conformanceOutputCollector
 	done            chan struct{}
 	closeOnce       sync.Once
 
@@ -123,6 +160,26 @@ func (p *conformanceProcess) Wait(ctx context.Context) (ExitStatus, error) {
 	case <-ctx.Done():
 		return ExitStatus{}, ctx.Err()
 	}
+}
+
+func (p *conformanceProcess) ExitEvidence(ctx context.Context) (ExitEvidence, error) {
+	select {
+	case <-p.done:
+	case <-ctx.Done():
+		return ExitEvidence{}, ctx.Err()
+	}
+	p.mu.Lock()
+	exitCode, waitErr := p.exitCode, p.waitErr
+	p.mu.Unlock()
+	if waitErr != nil {
+		return ExitEvidence{}, waitErr
+	}
+	state, err := p.controller.Inspect(ctx)
+	if err != nil {
+		return ExitEvidence{}, err
+	}
+	return testExitEvidence(exitCode, state.Reaped, p.stdout.Evidence(),
+		p.stderr.Evidence()), nil
 }
 
 func (p *conformanceProcess) TerminateTree(ctx context.Context) error {
@@ -166,6 +223,12 @@ func TestProcessTreeConformanceHelper(t *testing.T) {
 		waitForConformanceMarker(t, filepath.Join(directory, "stop"))
 	case conformanceRoleParent:
 		waitForConformanceMarker(t, filepath.Join(directory, "assigned"))
+		if _, err := fmt.Fprint(os.Stdout, "runner-conformance-stdout\n"); err != nil {
+			t.Fatalf("write conformance stdout: %v", err)
+		}
+		if _, err := fmt.Fprint(os.Stderr, "runner-conformance-stderr\n"); err != nil {
+			t.Fatalf("write conformance stderr: %v", err)
+		}
 		child := exec.Command(os.Args[0], "-test.run=^TestProcessTreeConformanceHelper$")
 		child.Env = conformanceEnvironment(directory, conformanceRoleChild, mode)
 		child.Stdin = nil
@@ -206,6 +269,7 @@ func TestProcessTreeConformanceGracefulTerminationReapsDescendants(t *testing.T)
 		result.OrphanDetected || !result.TreeReaped || result.ProductExecutionEnabled {
 		t.Fatalf("graceful process-tree result=%#v err=%v", result, err)
 	}
+	assertConformanceExitEvidence(t, result)
 }
 
 func TestProcessTreeConformanceForcedKillReapsDescendants(t *testing.T) {
@@ -222,6 +286,7 @@ func TestProcessTreeConformanceForcedKillReapsDescendants(t *testing.T) {
 		result.OrphanDetected || !result.TreeReaped || result.ProductExecutionEnabled {
 		t.Fatalf("forced process-tree result=%#v err=%v", result, err)
 	}
+	assertConformanceExitEvidence(t, result)
 }
 
 func TestProcessTreeConformanceCleansChildAfterParentExit(t *testing.T) {
@@ -238,6 +303,21 @@ func TestProcessTreeConformanceCleansChildAfterParentExit(t *testing.T) {
 		result.TerminateFailed || result.KillFailed || !result.TreeReaped ||
 		result.ProductExecutionEnabled {
 		t.Fatalf("orphan process-tree result=%#v err=%v", result, err)
+	}
+	assertConformanceExitEvidence(t, result)
+}
+
+func assertConformanceExitEvidence(t *testing.T, result Result) {
+	t.Helper()
+	if !result.ExitEvidenceAvailable || result.RawOutputIncluded || result.OutputTruncated ||
+		result.ExitEvidence.ProtocolVersion != ExitEvidenceProtocolVersion ||
+		!result.ExitEvidence.MetadataOnly || result.ExitEvidence.RawOutputIncluded ||
+		result.ExitEvidence.ProductExecutionEnabled ||
+		result.ExitEvidence.Stdout.ObservedBytes == 0 ||
+		result.ExitEvidence.Stderr.ObservedBytes == 0 ||
+		result.ExitEvidence.Stdout.CapturedBytes != int(result.ExitEvidence.Stdout.ObservedBytes) ||
+		result.ExitEvidence.Stderr.CapturedBytes != int(result.ExitEvidence.Stderr.ObservedBytes) {
+		t.Fatalf("process-tree output evidence widened or was incomplete: %#v", result)
 	}
 }
 

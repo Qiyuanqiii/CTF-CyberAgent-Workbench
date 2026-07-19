@@ -1083,6 +1083,22 @@ describe("CyberAgentClient", () => {
       file_content_included: false, patch_included: false, remote_config_included: false,
       checkout_performed: false, reference_updated: false, process_started: false,
       network_used: false, hooks_executed: false };
+    const fileHistory = { protocol_version: "repository_file_history.v1",
+      workspace_id: "workspace-1", kind: "git", available: true, head: objectID.slice(0, 12),
+      path: "internal/check.go", entries: [{ object_id: objectID, hash: objectID.slice(0, 12),
+        subject: "bounded commit", committed_at: "2026-07-19T10:00:00Z", change: "modified",
+        previous_kind: "regular", current_kind: "regular", content_changed: true,
+        mode_changed: false, redacted: false, subject_bounded: false },
+      { object_id: "abcdef1234567890abcdef1234567890abcdef12", hash: "abcdef123456",
+        subject: "ancestor with a later clock", committed_at: "2026-07-19T11:00:00Z",
+        change: "added", previous_kind: "", current_kind: "regular", content_changed: true,
+        mode_changed: true, redacted: false, subject_bounded: false }], scanned_commit_count: 2,
+      returned_entry_count: 2, redaction_count: 0, observed: true, truncated: false,
+      first_parent_only: true, rename_inferred: false, metadata_only: true, read_only: true,
+      authority_granted: false, root_path_exposed: false, author_identity_included: false,
+      commit_body_included: false, file_content_included: false, patch_included: false,
+      remote_config_included: false, checkout_performed: false, reference_updated: false,
+      process_started: false, network_used: false, hooks_executed: false };
     const previewContent = "SESSION_SECRET=[REDACTED:secret]\nsafe preview\n";
     const previewDigest = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256",
       new TextEncoder().encode(previewContent)));
@@ -1118,6 +1134,18 @@ describe("CyberAgentClient", () => {
       read_only: true, result_inferred: false, command_executed: false,
       model_assertion: false, record_rewritten: false, approval: false,
       authority_granted: false };
+    const coverageDetail = {
+      protocol_version: "operator_verification_plan_item_coverage.v1", run_id: "run-1",
+      session_id: "session-1", workspace_id: "workspace-1",
+      plan_id: "verification-plan-1", plan_sha256: "c".repeat(64), plan_item_ordinal: 1,
+      plan_item_sha256: itemSHA, associated_evidence_count: 1, pass_count: 1,
+      fail_count: 0, unknown_count: 0, latest_association_event_sequence: 13,
+      associations: coverage.associations, associations_truncated: false, metadata_only: true,
+      read_only: true, private_plan_body_included: false,
+      private_evidence_bodies_included: false, operator_identity_included: false,
+      result_inferred: false, command_executed: false, model_assertion: false,
+      record_rewritten: false, approval: false, authority_granted: false,
+    };
     const associated = { protocol_version: "operator_verification_plan_evidence_association.v1",
       id: "verification-association-2", run_id: "run-1", session_id: "session-1",
       workspace_id: "workspace-1", plan_id: "verification-plan-1", plan_item_ordinal: 1,
@@ -1132,18 +1160,26 @@ describe("CyberAgentClient", () => {
     }), { status, headers: { "Content-Type": "application/json" } });
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(envelope(commit))
+      .mockResolvedValueOnce(envelope(fileHistory))
       .mockResolvedValueOnce(envelope(preview))
       .mockResolvedValueOnce(envelope(coverage))
+      .mockResolvedValueOnce(envelope(coverageDetail))
       .mockResolvedValueOnce(envelope(associated, 202))
-      .mockResolvedValueOnce(envelope({ ...coverage, result_inferred: true }));
+      .mockResolvedValueOnce(envelope({ ...coverage, result_inferred: true }))
+      .mockResolvedValueOnce(envelope({ ...fileHistory, authority_granted: true }))
+      .mockResolvedValueOnce(envelope({ ...coverageDetail, operator_identity_included: true }));
     vi.stubGlobal("fetch", fetchMock);
     const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
       verificationEvidenceEnabled: true,
     });
     await expect(client.repositoryCommit("workspace-1", objectID)).resolves.toEqual(commit);
+    await expect(client.repositoryFileHistory("workspace-1", "internal/check.go"))
+      .resolves.toEqual(fileHistory);
     await expect(client.repositoryCommitFilePreview("workspace-1", objectID,
       "internal/check.go")).resolves.toEqual(preview);
     await expect(client.verificationPlanCoverage("run-1")).resolves.toEqual(coverage);
+    await expect(client.verificationPlanItemCoverage("run-1", "verification-plan-1", 1))
+      .resolves.toEqual(coverageDetail);
     await expect(client.associateVerificationEvidence("run-1", {
       version: "operator_verification_plan_evidence_association.v1",
       plan_id: "verification-plan-1", plan_item_ordinal: 1, evidence_id: "verification-2",
@@ -1151,13 +1187,21 @@ describe("CyberAgentClient", () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       `/api/v1/workspaces/workspace-1/repository-commits/${objectID}`);
     expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      "/api/v1/workspaces/workspace-1/repository-file-history?path=internal%2Fcheck.go");
+    expect(String(fetchMock.mock.calls[2]?.[0])).toBe(
       `/api/v1/workspaces/workspace-1/repository-commits/${objectID}/file-preview?path=internal%2Fcheck.go`);
-    const [associationURL, associationInit] = fetchMock.mock.calls[3] as [string, RequestInit];
+    expect(String(fetchMock.mock.calls[4]?.[0])).toBe(
+      "/api/v1/runs/run-1/verification-plan-coverage/verification-plan-1/items/1");
+    const [associationURL, associationInit] = fetchMock.mock.calls[5] as [string, RequestInit];
     expect(associationURL).toBe("/api/v1/runs/run-1/verification-plan-associations");
     expect(associationInit.headers).toMatchObject({ Authorization: "Bearer control-secret",
       "Idempotency-Key": "web-verification-association-operation-0001" });
     await expect(client.verificationPlanCoverage("run-1"))
       .rejects.toThrow("metadata-only authority");
+    await expect(client.repositoryFileHistory("workspace-1", "internal/check.go"))
+      .rejects.toThrow("exact metadata contract");
+    await expect(client.verificationPlanItemCoverage("run-1", "verification-plan-1", 1))
+      .rejects.toThrow("read-only boundary");
   });
 
   it("validates Workspace search, evidence attachment, and metadata-only receipt history", async () => {

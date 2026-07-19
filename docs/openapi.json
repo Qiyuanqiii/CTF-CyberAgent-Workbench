@@ -5393,6 +5393,107 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}": {
+      "get": {
+        "operationId": "getRunVerificationPlanItemCoverage",
+        "summary": "Inspect evidence associations for one verification plan item",
+        "description": "Returns exact metadata-only evidence references and explicit pass, fail, and unknown counts for one immutable plan item. Private plan guidance, evidence bodies, operator identity, aggregate result inference, mutation, approval, commands, models, and authority are excluded.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "plan_id",
+            "in": "path",
+            "description": "Verification plan identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "ordinal",
+            "in": "path",
+            "description": "Verification plan item ordinal",
+            "required": true,
+            "schema": {
+              "maximum": 32,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/VerificationPlanItemCoverageDetailView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
     "/api/v1/runs/{run_id}/wake-intent": {
       "get": {
         "operationId": "getRunWakeIntent",
@@ -7067,6 +7168,95 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/RepositoryDiffView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/repository-file-history": {
+      "get": {
+        "operationId": "getWorkspaceRepositoryFileHistory",
+        "summary": "Inspect bounded history for one exact file path",
+        "description": "Follows at most 512 first-parent commits and returns at most fifty metadata-only changes for one canonical repository-relative path. It does not infer renames or expose blob/patch content, identities, remotes, host roots, checkout, reference mutation, processes, hooks, network, or authority.",
+        "tags": [
+          "Workspaces"
+        ],
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "Workspace identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Canonical repository-relative file path",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RepositoryFileHistoryView"
                     },
                     "request_id": {
                       "maxLength": 256,
@@ -12727,6 +12917,225 @@
         ],
         "type": "object"
       },
+      "RepositoryFileHistoryEntryView": {
+        "additionalProperties": false,
+        "properties": {
+          "change": {
+            "enum": [
+              "added",
+              "modified",
+              "deleted"
+            ],
+            "type": "string"
+          },
+          "committed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "content_changed": {
+            "type": "boolean"
+          },
+          "current_kind": {
+            "enum": [
+              "",
+              "regular",
+              "executable",
+              "symlink",
+              "submodule"
+            ],
+            "type": "string"
+          },
+          "hash": {
+            "maxLength": 12,
+            "type": "string"
+          },
+          "mode_changed": {
+            "type": "boolean"
+          },
+          "object_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "previous_kind": {
+            "enum": [
+              "",
+              "regular",
+              "executable",
+              "symlink",
+              "submodule"
+            ],
+            "type": "string"
+          },
+          "redacted": {
+            "type": "boolean"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "subject_bounded": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_id",
+          "hash",
+          "subject",
+          "committed_at",
+          "change",
+          "previous_kind",
+          "current_kind",
+          "content_changed",
+          "mode_changed",
+          "redacted",
+          "subject_bounded"
+        ],
+        "type": "object"
+      },
+      "RepositoryFileHistoryView": {
+        "additionalProperties": false,
+        "properties": {
+          "author_identity_included": {
+            "type": "boolean"
+          },
+          "authority_granted": {
+            "type": "boolean"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "checkout_performed": {
+            "type": "boolean"
+          },
+          "commit_body_included": {
+            "type": "boolean"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/RepositoryFileHistoryEntryView"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "file_content_included": {
+            "type": "boolean"
+          },
+          "first_parent_only": {
+            "type": "boolean"
+          },
+          "head": {
+            "maxLength": 12,
+            "type": "string"
+          },
+          "hooks_executed": {
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "none",
+              "git"
+            ],
+            "type": "string"
+          },
+          "metadata_only": {
+            "type": "boolean"
+          },
+          "network_used": {
+            "type": "boolean"
+          },
+          "observed": {
+            "type": "boolean"
+          },
+          "patch_included": {
+            "type": "boolean"
+          },
+          "path": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "process_started": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "repository_file_history.v1"
+            ],
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "redaction_count": {
+            "format": "int32",
+            "maximum": 122880,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reference_updated": {
+            "type": "boolean"
+          },
+          "remote_config_included": {
+            "type": "boolean"
+          },
+          "rename_inferred": {
+            "type": "boolean"
+          },
+          "returned_entry_count": {
+            "format": "int32",
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "root_path_exposed": {
+            "type": "boolean"
+          },
+          "scanned_commit_count": {
+            "format": "int32",
+            "maximum": 512,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "workspace_id",
+          "kind",
+          "available",
+          "head",
+          "path",
+          "entries",
+          "scanned_commit_count",
+          "returned_entry_count",
+          "redaction_count",
+          "observed",
+          "truncated",
+          "first_parent_only",
+          "rename_inferred",
+          "metadata_only",
+          "read_only",
+          "authority_granted",
+          "root_path_exposed",
+          "author_identity_included",
+          "commit_body_included",
+          "file_content_included",
+          "patch_included",
+          "remote_config_included",
+          "checkout_performed",
+          "reference_updated",
+          "process_started",
+          "network_used",
+          "hooks_executed"
+        ],
+        "type": "object"
+      },
       "RepositoryHistoryBranchView": {
         "additionalProperties": false,
         "properties": {
@@ -15070,10 +15479,12 @@
           },
           "association_event_sequence": {
             "format": "int64",
+            "minimum": 1,
             "type": "integer"
           },
           "evidence_event_sequence": {
             "format": "int64",
+            "minimum": 1,
             "type": "integer"
           },
           "evidence_id": {
@@ -15082,6 +15493,11 @@
             "type": "string"
           },
           "evidence_outcome": {
+            "enum": [
+              "pass",
+              "fail",
+              "unknown"
+            ],
             "type": "string"
           },
           "id": {
@@ -15096,9 +15512,12 @@
           },
           "plan_item_ordinal": {
             "format": "int32",
+            "maximum": 32,
+            "minimum": 1,
             "type": "integer"
           },
           "plan_item_sha256": {
+            "maxLength": 64,
             "type": "string"
           }
         },
@@ -15561,6 +15980,7 @@
             "items": {
               "$ref": "#/components/schemas/VerificationAssociationReferenceView"
             },
+            "maxItems": 100,
             "type": "array"
           },
           "associations_truncated": {
@@ -15594,6 +16014,7 @@
             "items": {
               "$ref": "#/components/schemas/VerificationPlanCoverageView"
             },
+            "maxItems": 50,
             "type": "array"
           },
           "plans_truncated": {
@@ -15666,6 +16087,7 @@
             "items": {
               "$ref": "#/components/schemas/VerificationPlanItemCoverageView"
             },
+            "maxItems": 32,
             "type": "array"
           },
           "observed_item_count": {
@@ -15729,6 +16151,152 @@
           "workspace_id",
           "items",
           "truncated"
+        ],
+        "type": "object"
+      },
+      "VerificationPlanItemCoverageDetailView": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "type": "boolean"
+          },
+          "associated_evidence_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "associations": {
+            "items": {
+              "$ref": "#/components/schemas/VerificationAssociationReferenceView"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "associations_truncated": {
+            "type": "boolean"
+          },
+          "authority_granted": {
+            "type": "boolean"
+          },
+          "command_executed": {
+            "type": "boolean"
+          },
+          "fail_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "latest_association_event_sequence": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "metadata_only": {
+            "type": "boolean"
+          },
+          "model_assertion": {
+            "type": "boolean"
+          },
+          "operator_identity_included": {
+            "type": "boolean"
+          },
+          "pass_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "plan_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_item_ordinal": {
+            "format": "int32",
+            "maximum": 32,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "plan_item_sha256": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "plan_sha256": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "private_evidence_bodies_included": {
+            "type": "boolean"
+          },
+          "private_plan_body_included": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "operator_verification_plan_item_coverage.v1"
+            ],
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "record_rewritten": {
+            "type": "boolean"
+          },
+          "result_inferred": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "unknown_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "session_id",
+          "workspace_id",
+          "plan_id",
+          "plan_sha256",
+          "plan_item_ordinal",
+          "plan_item_sha256",
+          "associated_evidence_count",
+          "pass_count",
+          "fail_count",
+          "unknown_count",
+          "latest_association_event_sequence",
+          "associations",
+          "associations_truncated",
+          "metadata_only",
+          "read_only",
+          "private_plan_body_included",
+          "private_evidence_bodies_included",
+          "operator_identity_included",
+          "result_inferred",
+          "command_executed",
+          "model_assertion",
+          "record_rewritten",
+          "approval",
+          "authority_granted"
         ],
         "type": "object"
       },

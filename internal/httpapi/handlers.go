@@ -50,7 +50,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
 			"external-skills", "workspaces", "workspace-explorer", "workspace-search", "models",
-			"repository-state", "repository-diff", "repository-history", "repository-commit-detail", "repository-commit-file-preview", "verification-evidence", "verification-plan", "verification-plan-coverage", "code-handoff", "code-handoff-export",
+			"repository-state", "repository-diff", "repository-history", "repository-file-history", "repository-commit-detail", "repository-commit-file-preview", "verification-evidence", "verification-plan", "verification-plan-coverage", "code-handoff", "code-handoff-export",
 			"operation-receipts", "operator-actions", "evidence-inventory",
 			"event-stream", "event-poll", "capabilities", "openapi"}
 		if a.controlEnabled {
@@ -150,6 +150,9 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 		if len(segments) == 3 && segments[2] == "repository-history" {
 			return a.workspaceRepositoryHistory(request, segments[1])
+		}
+		if len(segments) == 3 && segments[2] == "repository-file-history" {
+			return a.workspaceRepositoryFileHistory(request, segments[1])
 		}
 		if len(segments) == 4 && segments[2] == "repository-commits" {
 			return a.workspaceRepositoryCommit(request, segments[1], segments[3])
@@ -460,6 +463,10 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 		}
 		if segments[2] == "file-edit-proposal-recovery" {
 			return a.runFileEditProposalRecovery(request, segments[1], segments[3])
+		}
+	case 6:
+		if segments[2] == "verification-plan-coverage" && segments[4] == "items" {
+			return a.runVerificationPlanItemCoverage(request, segments[1], segments[3], segments[5])
 		}
 	}
 	return nil, nil, apperror.New(apperror.CodeNotFound, "Run HTTP API endpoint was not found")

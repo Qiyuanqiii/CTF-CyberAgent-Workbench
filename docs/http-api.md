@@ -471,6 +471,22 @@ items with explicit pass/fail/unknown counts and contradiction totals. They omit
 and evidence bodies and never infer an aggregate result. The React client recomputes
 the export digest before creating a local download.
 
+`GET /api/v1/workspaces/{workspace_id}/repository-file-history?path=...` requires
+exactly one canonical relative `path`. The pure-Go projection starts at current HEAD,
+walks first-parent history, scans at most 512 commits, and returns at most 50 commits
+where that exact path changed. Each item contains only object/time, a bounded redacted
+subject, added/modified/deleted status, previous/current kind, and content/mode-change
+flags. It returns no raw blob, patch, identity/body, remote/root, rename inference, or
+authority, and performs no checkout, ref mutation, process, network, or hook action.
+
+`GET /api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}` returns
+`operator_verification_plan_item_coverage.v1` for one exact Run, immutable plan, and
+1-based item ordinal. It returns the item digest/counts and at most 100 exact
+association records in descending evidence-event order. Associations contain only
+opaque evidence/association IDs, explicit pass/fail/unknown outcome, event sequence,
+and time. Private plan/evidence bodies, operator identity, aggregate verdicts,
+mutation, command/model execution, approval, and authority remain absent.
+
 ## Envelopes
 
 Except for the raw OpenAPI document and SSE frames, successful responses use one versioned envelope:
@@ -517,4 +533,4 @@ Pagination is a bounded live SQLite projection, not a multi-request snapshot. Ap
 - No Artifact content route. Use the authenticated local CLI `artifact read` when content is explicitly required.
 - No real Shell, LocalSandbox, or Docker process execution. Schema v64 profile selection records intent only; HTTP exposes no runner start, Sandbox execution, approval, output-export, or Artifact-commit route. Existing approvals still resolve to audited dry-run results.
 - No per-resource authorization below the process token. Future remote or multi-user use requires a separate identity and authorization design.
-- Repository history, exact commit detail, and redacted commit-file preview have no checkout/fetch/push/ref-update or raw-blob endpoint. Verification plans, associations, and Handoff coverage do not run checks or imply aggregate outcomes. Handoff exports have no import/resume endpoint.
+- Repository history, exact-file history, exact commit detail, and redacted commit-file preview have no checkout/fetch/push/ref-update or raw-blob endpoint. Verification plans, associations, exact-item drilldown, and Handoff coverage do not run checks or imply aggregate outcomes. Handoff exports have no import/resume endpoint.

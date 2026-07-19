@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, LoaderCircle, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ClipboardList, ListTree, LoaderCircle, Plus, RefreshCw, Trash2 } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import type { VerificationPlanRequestView } from "../api/types";
 import { formatDate } from "../lib/format";
@@ -19,6 +19,10 @@ export function VerificationPlan({ client, runID }: {
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [items, setItems] = useState<DraftItem[]>([emptyItem()]);
+  const [coverageSelection, setCoverageSelection] = useState<{
+    planID: string;
+    ordinal: number;
+  } | null>(null);
   const query = useQuery({
     queryKey: ["run", runID, "verification-plan"],
     queryFn: ({ signal }) => client.verificationPlans(runID, signal),
@@ -28,6 +32,16 @@ export function VerificationPlan({ client, runID }: {
     queryKey: ["run", runID, "verification-plan-coverage"],
     queryFn: ({ signal }) => client.verificationPlanCoverage(runID, signal),
     enabled: Boolean(runID),
+  });
+  const coverageDetailQuery = useQuery({
+    queryKey: ["run", runID, "verification-plan-coverage", coverageSelection?.planID,
+      coverageSelection?.ordinal],
+    queryFn: ({ signal }) => {
+      if (!coverageSelection) throw new Error("A verification plan item is required");
+      return client.verificationPlanItemCoverage(runID, coverageSelection.planID,
+        coverageSelection.ordinal, signal);
+    },
+    enabled: Boolean(runID && coverageSelection),
   });
   const record = useMutation({
     mutationFn: (body: VerificationPlanRequestView) => {
@@ -70,12 +84,15 @@ export function VerificationPlan({ client, runID }: {
         {coverageQuery.data && <StatusBadge
           status={`${coverageQuery.data.observed_plan_item_count}/${coverageQuery.data.plan_item_count} observed`} />}
         <button aria-label="Refresh verification plans" className="icon-button"
-          disabled={query.isFetching || coverageQuery.isFetching} onClick={() => {
+          disabled={query.isFetching || coverageQuery.isFetching || coverageDetailQuery.isFetching}
+          onClick={() => {
             void query.refetch();
             void coverageQuery.refetch();
+            if (coverageSelection) void coverageDetailQuery.refetch();
           }}
           title="Refresh" type="button"><RefreshCw aria-hidden="true"
-            className={query.isFetching || coverageQuery.isFetching ? "spin" : ""} size={15} /></button></div>
+            className={query.isFetching || coverageQuery.isFetching ||
+              coverageDetailQuery.isFetching ? "spin" : ""} size={15} /></button></div>
     </header>
     {client.hasVerificationEvidence && <form className="verification-plan-form" onSubmit={submit}>
       <label>Title<input disabled={record.isPending} maxLength={160} required value={title}
@@ -120,13 +137,43 @@ export function VerificationPlan({ client, runID }: {
         <p>{plan.summary}</p><ol>{plan.items.map((item) => {
           const coverage = coverageQuery.data?.plans.find((entry) => entry.plan_id === plan.id)
             ?.items.find((entry) => entry.ordinal === item.ordinal);
+          const selected = coverageSelection?.planID === plan.id &&
+            coverageSelection.ordinal === item.ordinal;
           return <li key={item.ordinal}>
             <strong>{item.title}</strong><span>{item.expected_observation}</span>
-            {coverage && <div className="verification-coverage-badges">
-              {coverage.associated_evidence_count === 0 ? <StatusBadge status="unobserved" /> : <>
-                {coverage.pass_count > 0 && <StatusBadge status={`${coverage.pass_count} pass`} />}
-                {coverage.fail_count > 0 && <StatusBadge status={`${coverage.fail_count} fail`} />}
-                {coverage.unknown_count > 0 && <StatusBadge status={`${coverage.unknown_count} unknown`} />}
+            <div className="verification-coverage-row">
+              {coverage && <div className="verification-coverage-badges">
+                {coverage.associated_evidence_count === 0 ? <StatusBadge status="unobserved" /> : <>
+                  {coverage.pass_count > 0 && <StatusBadge status={`${coverage.pass_count} pass`} />}
+                  {coverage.fail_count > 0 && <StatusBadge status={`${coverage.fail_count} fail`} />}
+                  {coverage.unknown_count > 0 && <StatusBadge status={`${coverage.unknown_count} unknown`} />}
+                </>}
+              </div>}
+              <button aria-expanded={selected} aria-label={`Inspect evidence for check ${item.ordinal}`}
+                className="icon-button" onClick={() => setCoverageSelection((current) =>
+                  current?.planID === plan.id && current.ordinal === item.ordinal ? null :
+                    { planID: plan.id, ordinal: item.ordinal })}
+                title="Inspect evidence references" type="button">
+                <ListTree aria-hidden="true" size={14} />
+              </button>
+            </div>
+            {selected && <div aria-label={`Evidence references for check ${item.ordinal}`}
+              className="verification-coverage-detail">
+              {coverageDetailQuery.isLoading && <LoadingState label="Loading evidence references" />}
+              {coverageDetailQuery.isError && <ErrorState error={coverageDetailQuery.error} />}
+              {coverageDetailQuery.data && <>
+                <header><strong>Evidence references</strong>
+                  <span>{coverageDetailQuery.data.associations.length} of {coverageDetailQuery.data.associated_evidence_count}</span>
+                  {coverageDetailQuery.data.associations_truncated && <StatusBadge status="truncated" />}
+                </header>
+                {coverageDetailQuery.data.associations.length === 0 ?
+                  <span className="verification-coverage-empty">No explicit evidence associated</span> :
+                  <ul>{coverageDetailQuery.data.associations.map((association) =>
+                    <li key={association.id}><StatusBadge status={association.evidence_outcome} />
+                      <code title={association.evidence_id}>{association.evidence_id}</code>
+                      <span>events {association.evidence_event_sequence} / {association.association_event_sequence}</span>
+                      <time dateTime={association.associated_at}>{formatDate(association.associated_at)}</time>
+                    </li>)}</ul>}
               </>}
             </div>}
           </li>;

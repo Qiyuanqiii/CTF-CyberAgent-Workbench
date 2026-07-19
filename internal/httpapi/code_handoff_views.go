@@ -229,6 +229,35 @@ type VerificationPlanCoverageInventoryView struct {
 	AuthorityGranted        bool                                   `json:"authority_granted"`
 }
 
+type VerificationPlanItemCoverageDetailView struct {
+	ProtocolVersion                string                                 `json:"protocol_version"`
+	RunID                          string                                 `json:"run_id"`
+	SessionID                      string                                 `json:"session_id"`
+	WorkspaceID                    string                                 `json:"workspace_id"`
+	PlanID                         string                                 `json:"plan_id"`
+	PlanSHA256                     string                                 `json:"plan_sha256"`
+	PlanItemOrdinal                int                                    `json:"plan_item_ordinal"`
+	PlanItemSHA256                 string                                 `json:"plan_item_sha256"`
+	AssociatedEvidenceCount        int                                    `json:"associated_evidence_count"`
+	PassCount                      int                                    `json:"pass_count"`
+	FailCount                      int                                    `json:"fail_count"`
+	UnknownCount                   int                                    `json:"unknown_count"`
+	LatestAssociationEventSequence int64                                  `json:"latest_association_event_sequence"`
+	Associations                   []VerificationAssociationReferenceView `json:"associations"`
+	AssociationsTruncated          bool                                   `json:"associations_truncated"`
+	MetadataOnly                   bool                                   `json:"metadata_only"`
+	ReadOnly                       bool                                   `json:"read_only"`
+	PrivatePlanBodyIncluded        bool                                   `json:"private_plan_body_included"`
+	PrivateEvidenceBodiesIncluded  bool                                   `json:"private_evidence_bodies_included"`
+	OperatorIdentityIncluded       bool                                   `json:"operator_identity_included"`
+	ResultInferred                 bool                                   `json:"result_inferred"`
+	CommandExecuted                bool                                   `json:"command_executed"`
+	ModelAssertion                 bool                                   `json:"model_assertion"`
+	RecordRewritten                bool                                   `json:"record_rewritten"`
+	Approval                       bool                                   `json:"approval"`
+	AuthorityGranted               bool                                   `json:"authority_granted"`
+}
+
 type CodeHandoffPlanView struct {
 	State             string `json:"state"`
 	ProposalID        string `json:"proposal_id"`

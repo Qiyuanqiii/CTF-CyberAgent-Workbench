@@ -8,6 +8,7 @@ import (
 const (
 	PlanEvidenceAssociationProtocolVersion = "operator_verification_plan_evidence_association.v1"
 	PlanCoverageProtocolVersion            = "operator_verification_plan_coverage.v1"
+	PlanItemCoverageProtocolVersion        = "operator_verification_plan_item_coverage.v1"
 	MaxCoverageAssociations                = 100
 	MaxSafeCoverageCount                   = 1_000_000_000
 )

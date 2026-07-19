@@ -144,6 +144,8 @@ type Store interface {
 		verification.PlanEvidenceAssociation, bool, error)
 	ListVerificationPlanEvidenceAssociations(context.Context, string, int) (
 		[]verification.PlanEvidenceAssociation, error)
+	ListVerificationPlanItemEvidenceAssociations(context.Context, string, string, int, int) (
+		[]verification.PlanEvidenceAssociation, error)
 	ListVerificationPlanCoverageCounts(context.Context, string, []string) (
 		[]verification.PlanItemCoverageCount, error)
 	RecordVerificationPlanEvidenceAssociation(context.Context,

@@ -357,6 +357,48 @@ func TestVerificationAssociationHTTPPreservesExplicitCausalityAndMetadataOnlyCov
 		strings.Contains(coverage.Body.String(), "Observed a passing suite") {
 		t.Fatalf("coverage inferred or exposed private text: %#v", projected)
 	}
+	detailPath := strings.ReplaceAll(VerificationCoverageDetailPathTemplate, "{run_id}", run.ID)
+	detailPath = strings.ReplaceAll(detailPath, "{plan_id}", planResult.Plan.ID)
+	detailPath = strings.ReplaceAll(detailPath, "{ordinal}", "1")
+	detailResponse := performSessionMessageRequest(t, api, http.MethodGet, detailPath,
+		testAccessToken, "", "", nil)
+	if detailResponse.Code != http.StatusOK {
+		t.Fatalf("coverage detail status=%d body=%s", detailResponse.Code,
+			detailResponse.Body.String())
+	}
+	var detailEnvelope struct {
+		Data VerificationPlanItemCoverageDetailView `json:"data"`
+	}
+	if err := json.Unmarshal(detailResponse.Body.Bytes(), &detailEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	detail := detailEnvelope.Data
+	if detail.ProtocolVersion != verification.PlanItemCoverageProtocolVersion ||
+		detail.RunID != run.ID || detail.SessionID != run.SessionID ||
+		detail.WorkspaceID != workspace.ID || detail.PlanID != planResult.Plan.ID ||
+		detail.PlanSHA256 != planResult.Plan.PlanSHA256 || detail.PlanItemOrdinal != 1 ||
+		detail.PlanItemSHA256 != planResult.Plan.Items[0].ItemSHA256 ||
+		detail.AssociatedEvidenceCount != 1 || detail.PassCount != 1 || detail.FailCount != 0 ||
+		detail.UnknownCount != 0 || len(detail.Associations) != 1 ||
+		detail.Associations[0].EvidenceID != evidenceResult.Evidence.ID ||
+		detail.Associations[0].AssociationEventSequence != value.AssociationEventSequence ||
+		detail.AssociationsTruncated || !detail.MetadataOnly || !detail.ReadOnly ||
+		detail.PrivatePlanBodyIncluded || detail.PrivateEvidenceBodiesIncluded ||
+		detail.OperatorIdentityIncluded || detail.ResultInferred || detail.CommandExecuted ||
+		detail.ModelAssertion || detail.RecordRewritten || detail.Approval || detail.AuthorityGranted ||
+		strings.Contains(detailResponse.Body.String(), "Release checks") ||
+		strings.Contains(detailResponse.Body.String(), "Observed a passing suite") ||
+		strings.Contains(detailResponse.Body.String(), "associated_by") ||
+		strings.Contains(detailResponse.Body.String(), "authored_by") ||
+		strings.Contains(detailResponse.Body.String(), "recorded_by") {
+		t.Fatalf("coverage detail widened private data or authority: %#v", detail)
+	}
+	invalidDetail := performSessionMessageRequest(t, api, http.MethodGet,
+		strings.TrimSuffix(detailPath, "1")+"0", testAccessToken, "", "", nil)
+	assertAPIError(t, invalidDetail, http.StatusBadRequest, "INVALID_ARGUMENT")
+	detailQuery := performSessionMessageRequest(t, api, http.MethodGet, detailPath+"?full=true",
+		testAccessToken, "", "", nil)
+	assertAPIError(t, detailQuery, http.StatusBadRequest, "INVALID_ARGUMENT")
 	handoffPath := strings.ReplaceAll(CodeHandoffPathTemplate, "{run_id}", run.ID)
 	handoff := performSessionMessageRequest(t, api, http.MethodGet, handoffPath,
 		testAccessToken, "", "", nil)

@@ -170,6 +170,32 @@ func TestWorkspaceRepositoryStateHTTPIsReadOnlyAndRootBound(t *testing.T) {
 		historyPath+"?refresh=true", testAccessToken, "", "", nil)
 	assertAPIError(t, historyQuery, http.StatusBadRequest, "INVALID_ARGUMENT")
 
+	fileHistoryPath := "/api/v1/workspaces/" + registered.ID +
+		"/repository-file-history?path=tracked.txt"
+	fileHistory := performSessionMessageRequest(t, api, http.MethodGet, fileHistoryPath,
+		testAccessToken, "", "", nil)
+	fileHistoryBody := fileHistory.Body.String()
+	if fileHistory.Code != http.StatusOK ||
+		!strings.Contains(fileHistoryBody, `"protocol_version":"repository_file_history.v1"`) ||
+		!strings.Contains(fileHistoryBody, `"path":"tracked.txt"`) ||
+		!strings.Contains(fileHistoryBody, `"change":"added"`) ||
+		!strings.Contains(fileHistoryBody, `"metadata_only":true`) ||
+		!strings.Contains(fileHistoryBody, `"first_parent_only":true`) ||
+		!strings.Contains(fileHistoryBody, `"rename_inferred":false`) ||
+		!strings.Contains(fileHistoryBody, `"file_content_included":false`) ||
+		!strings.Contains(fileHistoryBody, `"authority_granted":false`) ||
+		strings.Contains(fileHistoryBody, "workspace-secret-value") ||
+		strings.Contains(fileHistoryBody, "initial") || strings.Contains(fileHistoryBody, root) {
+		t.Fatalf("repository file history status=%d body=%s", fileHistory.Code, fileHistoryBody)
+	}
+	duplicateFileHistory := performSessionMessageRequest(t, api, http.MethodGet,
+		fileHistoryPath+"&path=tracked.txt", testAccessToken, "", "", nil)
+	assertAPIError(t, duplicateFileHistory, http.StatusBadRequest, "INVALID_ARGUMENT")
+	escapeFileHistory := performSessionMessageRequest(t, api, http.MethodGet,
+		strings.TrimSuffix(fileHistoryPath, "tracked.txt")+"../outside",
+		testAccessToken, "", "", nil)
+	assertAPIError(t, escapeFileHistory, http.StatusBadRequest, "INVALID_ARGUMENT")
+
 	commitPath := "/api/v1/workspaces/" + registered.ID + "/repository-commits/" +
 		commitID.String()
 	commit := performSessionMessageRequest(t, api, http.MethodGet, commitPath,

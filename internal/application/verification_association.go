@@ -39,6 +39,17 @@ type VerificationAssociationStore interface {
 		verification.PlanEvidenceAssociation) (verification.PlanEvidenceAssociation, bool, error)
 }
 
+type VerificationCoverageDetailStore interface {
+	VerificationCoverageStore
+	GetVerificationPlan(context.Context, string) (verification.Plan, error)
+	ListVerificationPlanItemEvidenceAssociations(context.Context, string, string, int, int) (
+		[]verification.PlanEvidenceAssociation, error)
+}
+
+type VerificationCoverageDetailService struct {
+	store VerificationCoverageDetailStore
+}
+
 type VerificationAssociationService struct {
 	store VerificationAssociationStore
 	now   func() time.Time
@@ -101,9 +112,183 @@ type VerificationPlanCoverageInventory struct {
 	AuthorityGranted        bool
 }
 
+type VerificationPlanItemCoverageDetail struct {
+	ProtocolVersion                string
+	RunID                          string
+	SessionID                      string
+	WorkspaceID                    string
+	PlanID                         string
+	PlanSHA256                     string
+	PlanItemOrdinal                int
+	PlanItemSHA256                 string
+	AssociatedEvidenceCount        int
+	PassCount                      int
+	FailCount                      int
+	UnknownCount                   int
+	LatestAssociationEventSequence int64
+	Associations                   []verification.PlanEvidenceAssociationReference
+	AssociationsTruncated          bool
+	MetadataOnly                   bool
+	ReadOnly                       bool
+	PrivatePlanBodyIncluded        bool
+	PrivateEvidenceBodiesIncluded  bool
+	OperatorIdentityIncluded       bool
+	ResultInferred                 bool
+	CommandExecuted                bool
+	ModelAssertion                 bool
+	RecordRewritten                bool
+	Approval                       bool
+	AuthorityGranted               bool
+}
+
 func NewVerificationAssociationService(store VerificationAssociationStore) *VerificationAssociationService {
 	return &VerificationAssociationService{store: store,
 		now: func() time.Time { return time.Now().UTC() }}
+}
+
+func NewVerificationCoverageDetailService(
+	store VerificationCoverageDetailStore,
+) *VerificationCoverageDetailService {
+	return &VerificationCoverageDetailService{store: store}
+}
+
+func (s *VerificationCoverageDetailService) Detail(ctx context.Context, runID string,
+	planID string, ordinal int,
+) (VerificationPlanItemCoverageDetail, error) {
+	if s == nil || s.store == nil {
+		return VerificationPlanItemCoverageDetail{}, apperror.New(
+			apperror.CodeFailedPrecondition, "verification coverage detail store is required")
+	}
+	if planID != strings.TrimSpace(planID) || !domain.ValidAgentID(planID) ||
+		ordinal < 1 || ordinal > verification.MaxPlanItems {
+		return VerificationPlanItemCoverageDetail{}, apperror.New(
+			apperror.CodeInvalidArgument, "verification coverage detail binding is invalid")
+	}
+	run, mission, linkedSession, _, err := loadVerificationCoverageBinding(ctx, s.store, runID)
+	if err != nil {
+		return VerificationPlanItemCoverageDetail{}, err
+	}
+	plan, err := s.store.GetVerificationPlan(ctx, planID)
+	if err != nil {
+		return VerificationPlanItemCoverageDetail{}, apperror.Normalize(err)
+	}
+	if err := plan.Validate(); err != nil || plan.RunID != run.ID ||
+		plan.SessionID != linkedSession.ID || plan.WorkspaceID != mission.WorkspaceID ||
+		ordinal > len(plan.Items) {
+		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+			"verification coverage detail escaped its exact plan binding")
+	}
+	item := plan.Items[ordinal-1]
+	if item.Ordinal != ordinal {
+		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+			"verification coverage detail plan ordinal is inconsistent")
+	}
+	result := VerificationPlanItemCoverageDetail{
+		ProtocolVersion: verification.PlanItemCoverageProtocolVersion,
+		RunID:           run.ID, SessionID: linkedSession.ID, WorkspaceID: mission.WorkspaceID,
+		PlanID: plan.ID, PlanSHA256: plan.PlanSHA256, PlanItemOrdinal: item.Ordinal,
+		PlanItemSHA256: item.ItemSHA256, Associations: []verification.PlanEvidenceAssociationReference{},
+		MetadataOnly: true, ReadOnly: true,
+	}
+	counts, err := s.store.ListVerificationPlanCoverageCounts(ctx, run.ID, []string{plan.ID})
+	if err != nil {
+		return VerificationPlanItemCoverageDetail{}, apperror.Normalize(err)
+	}
+	countFound := false
+	seenCounts := make(map[int]struct{}, len(counts))
+	for _, count := range counts {
+		if err := count.Validate(); err != nil || count.PlanID != plan.ID ||
+			count.PlanItemOrdinal < 1 || count.PlanItemOrdinal > len(plan.Items) ||
+			plan.Items[count.PlanItemOrdinal-1].ItemSHA256 != count.PlanItemSHA256 {
+			return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+				"verification coverage detail count is invalid")
+		}
+		if _, duplicated := seenCounts[count.PlanItemOrdinal]; duplicated {
+			return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+				"verification coverage detail count is duplicated")
+		}
+		seenCounts[count.PlanItemOrdinal] = struct{}{}
+		if count.PlanItemOrdinal != ordinal {
+			continue
+		}
+		countFound = true
+		result.AssociatedEvidenceCount = count.AssociatedEvidenceCount
+		result.PassCount = count.PassCount
+		result.FailCount = count.FailCount
+		result.UnknownCount = count.UnknownCount
+		result.LatestAssociationEventSequence = count.LatestAssociationEventSequence
+	}
+	associations, err := s.store.ListVerificationPlanItemEvidenceAssociations(ctx, run.ID,
+		plan.ID, ordinal, verification.MaxCoverageAssociations+1)
+	if err != nil {
+		return VerificationPlanItemCoverageDetail{}, apperror.Normalize(err)
+	}
+	result.AssociationsTruncated = len(associations) > verification.MaxCoverageAssociations
+	if result.AssociationsTruncated {
+		associations = associations[:verification.MaxCoverageAssociations]
+	}
+	if (!countFound && len(associations) != 0) ||
+		(countFound && result.AssociatedEvidenceCount <= verification.MaxCoverageAssociations &&
+			len(associations) != result.AssociatedEvidenceCount) ||
+		(countFound && result.AssociatedEvidenceCount > verification.MaxCoverageAssociations &&
+			!result.AssociationsTruncated) {
+		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+			"verification coverage detail association count is inconsistent")
+	}
+	result.Associations = make([]verification.PlanEvidenceAssociationReference, len(associations))
+	seenAssociations := make(map[string]struct{}, len(associations))
+	seenEvidence := make(map[string]struct{}, len(associations))
+	previousSequence := int64(^uint64(0) >> 1)
+	returnedPass, returnedFail, returnedUnknown := 0, 0, 0
+	for index, association := range associations {
+		if err := association.Validate(); err != nil || association.RunID != run.ID ||
+			association.SessionID != linkedSession.ID || association.WorkspaceID != mission.WorkspaceID ||
+			association.PlanID != plan.ID || association.PlanItemOrdinal != ordinal ||
+			association.PlanItemSHA256 != item.ItemSHA256 ||
+			(index > 0 && association.EventSequence >= previousSequence) {
+			return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+				"verification coverage detail association is invalid")
+		}
+		if _, duplicated := seenAssociations[association.ID]; duplicated {
+			return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+				"verification coverage detail association is duplicated")
+		}
+		if _, duplicated := seenEvidence[association.EvidenceID]; duplicated {
+			return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+				"verification coverage detail evidence is duplicated")
+		}
+		seenAssociations[association.ID] = struct{}{}
+		seenEvidence[association.EvidenceID] = struct{}{}
+		previousSequence = association.EventSequence
+		switch association.EvidenceOutcome {
+		case verification.OutcomePass:
+			returnedPass++
+		case verification.OutcomeFail:
+			returnedFail++
+		case verification.OutcomeUnknown:
+			returnedUnknown++
+		}
+		result.Associations[index] = verification.PlanEvidenceAssociationReference{
+			ID: association.ID, PlanID: association.PlanID,
+			PlanItemOrdinal: association.PlanItemOrdinal, PlanItemSHA256: association.PlanItemSHA256,
+			EvidenceID: association.EvidenceID, EvidenceOutcome: association.EvidenceOutcome,
+			EvidenceEventSequence: association.EvidenceEventSequence,
+			AssociationSequence:   association.EventSequence, CreatedAt: association.CreatedAt,
+		}
+	}
+	if countFound && len(associations) > 0 &&
+		associations[0].EventSequence != result.LatestAssociationEventSequence {
+		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+			"verification coverage detail latest sequence is inconsistent")
+	}
+	if returnedPass > result.PassCount || returnedFail > result.FailCount ||
+		returnedUnknown > result.UnknownCount ||
+		(!result.AssociationsTruncated && (returnedPass != result.PassCount ||
+			returnedFail != result.FailCount || returnedUnknown != result.UnknownCount)) {
+		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+			"verification coverage detail outcomes are inconsistent")
+	}
+	return result, nil
 }
 
 func (s *VerificationAssociationService) Record(ctx context.Context,

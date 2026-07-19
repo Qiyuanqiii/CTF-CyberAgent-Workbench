@@ -64,6 +64,37 @@ func (s *SQLiteStore) ListVerificationPlanEvidenceAssociations(ctx context.Conte
 	return values, rows.Err()
 }
 
+func (s *SQLiteStore) ListVerificationPlanItemEvidenceAssociations(ctx context.Context,
+	runID string, planID string, ordinal int, limit int,
+) ([]verification.PlanEvidenceAssociation, error) {
+	if runID != strings.TrimSpace(runID) || !domain.ValidAgentID(runID) ||
+		planID != strings.TrimSpace(planID) || !domain.ValidAgentID(planID) ||
+		ordinal < 1 || ordinal > verification.MaxPlanItems {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"verification plan item association binding is invalid")
+	}
+	if limit < 1 || limit > verification.MaxCoverageAssociations+1 {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"verification plan item association limit is invalid")
+	}
+	rows, err := s.db.QueryContext(ctx, verificationAssociationSelect+
+		` WHERE run_id = ? AND plan_id = ? AND plan_item_ordinal = ?
+		 ORDER BY event_sequence DESC, id DESC LIMIT ?`, runID, planID, ordinal, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]verification.PlanEvidenceAssociation, 0, limit)
+	for rows.Next() {
+		value, err := scanVerificationAssociation(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 func (s *SQLiteStore) ListVerificationPlanCoverageCounts(ctx context.Context,
 	runID string, planIDs []string,
 ) ([]verification.PlanItemCoverageCount, error) {
