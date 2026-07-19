@@ -1,6 +1,6 @@
 # CyberAgent Workbench Desktop Plan
 
-状态：Desktop D0-A、D0-B 与 D1-R1 至 schema-v77 D1-G1/I3/F1 自动化核心已完成。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill、受控 Run/Session/Plan/审批、安全恢复的 Monaco FileEdit、只读 Repository、多文件独立审阅、Code Journey、generation-safe Windows Credential Manager Provider reload，以及默认关闭的有界 wake worker 已经落地；Windows 10 实机矩阵、xterm、安装包、签名正式发行、注册表、自启动、更新和高权限执行仍未实现。
+状态：Desktop D0-A、D0-B 与 D1-R1 至 schema-v78 D1-G2/V1/F2 自动化核心已完成。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill、受控 Run/Session/Plan/审批、安全恢复的 Monaco FileEdit、只读 Repository/脱敏 Diff、多文件独立审阅、不可变操作者验证、可恢复 Code Handoff、Code Journey、generation-safe Windows Credential Manager Provider reload，以及默认关闭的有界 wake worker 已经落地；Windows 10 实机矩阵、xterm、安装包、签名正式发行、注册表、自启动、更新和高权限执行仍未实现。
 
 ## 目标
 
@@ -33,7 +33,7 @@
 - `desktop_skill_package_preview.v1` 只返回有界风险元数据，排除路径、文件名、正文、Manifest description/content path/content digest，并固定安装、命令、网络、Provider、工具和能力授权为 false。
 - D0-A 已把该边界接入 Wails 原生对话框和 React 只读预览；D1-B1 再允许渲染层提交一次性确认句柄，由 Go 重新消费同一已验证包并写入惰性 Registry。渲染层仍不能提交路径或文件字节，安装不会执行包内容、选择 Run 或授予能力；ADR 0033、ADR 0034 与 ADR 0041 记录这些边界。
 
-## D0-A 至 D1-G1/I3/F1 当前实现
+## D0-A 至 D1-G2/V1/F2 当前实现
 
 - `cmd/cyberagent-desktop` 只在 Windows `desktop,wv2runtime.error` build tags 下编译，production 构建再增加 `production`；默认 read-only。既有十五项 capability 加上 `--enable-file-edit-proposals`、`--enable-provider-credentials` 和 `--enable-wake-worker` 共十八项独立 Go gate，单项启用不能访问 sibling route。模型可用性、Workspace search、receipt history、operator actions、evidence inventory 和凭证配置状态只使用 read token；`Ctrl+K` 只在客户端导航或刷新这些读取。
 - `web/dist` 以 compile-time embed 进入二进制；Go 在启动前验证 index、内容哈希资源、类型、数量、单项/总大小并复制为不可变内存快照。
@@ -150,7 +150,7 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D0-B 增加精确 renderer origin、规范 `RequestURI`、外部 navigation/form/popup 阻断、secure build-tag 门禁、Windows CI 和 Windows 11 实机恢复记录；仍不增加业务 mutation。
 - [ ] 在正式便携或签名发行前补齐 Windows 10 x64 实机启动、第二实例、强制结束/重开和 WebView2 缺失路径矩阵。
 
-### D1：日常工作台（产品可用度约 89-92%）
+### D1：日常工作台（产品可用度约 92-94%）
 
 - [x] D1-R1 / schema v72：Go API 受控创建 Mission/Run/Session，严格注册 Workspace、Scope、默认预算、幂等 operation、事务事件和关闭 execution profile；React 可选择 Workspace/Profile/Surface/Phase 并在成功后刷新、选中新 Run。
 - [x] D1-R1 capability 与 `--enable-profile-control` 独立；creation-only token 不能访问旧控制 route，Wails native bridge 不增加方法。
@@ -198,7 +198,12 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D1-I3：`file_edit_change_set.v1` 已完成；最多 100 项 metadata-only 汇总，每个 FileEdit 保留独立 review/apply，partial 状态不伪装成 atomic。
 - [x] D1-F1：Code-only Journey 已完成；五阶段只导航既有 Go 能力，不创建 renderer 复合 mutation，Cyber surface 不自动继承。
 - [x] D1-G1/I3/F1 后累计六片完整门通过：ordinary/final-code race 321.7/490.4 秒、vet/staticcheck/govulncheck/module、114 React、strict TypeScript、确定性契约、Vite/npm、真实浏览器和 Windows 可复现双构建全部为绿色；OpenAPI 59/63/129，GUI SHA-256 `145757cb1a8bbafc9080fdc29f4ada69d34b850ca64f702310ea44578ca677a9`，边界见 ADR 0047。
-- [ ] 下一批候选 D1-G2 有界脱敏 repository Diff、D1-V1 操作者 verification evidence 与 D1-F2 Go-owned resumable Code handoff summary。
+- [x] D1-G2：`repository_diff.v1` 已完成；exact-root pure-Go、50 项/64 KiB/512 KiB、双侧脱敏、无进程/网络/remote/hook 或 host root。
+- [x] D1-V1 / schema v78：不可变操作者 verification evidence 已完成；独立 capability、active Session 事务复核、闭集 outcome，command/model/approval/authority 全为 false。
+- [x] D1-F2：Code-only resumable Handoff 已完成；有界 durable-source 汇总、event high-water 一致性、无 private body、resume/execute/composite mutation。
+- [x] D1-G2/V1/F2 普通功能门通过：Go 308.1 秒、Desktop tag、vet/定向 staticcheck/module、120 React、strict TypeScript、确定性契约、Vite/npm、真实浏览器、隐私扫描和 Windows 可复现双构建均为绿色；OpenAPI 62/67/143，GUI SHA-256 `2ab74a47794287bac71877172136f02631b5cc9a44febd930e8ee7b1913ba93f`，边界见 ADR 0048。
+- [x] 远端 CI `29682547524` 已通过实现提交 `cff7489`：TypeScript 42 秒、Windows Desktop 2 分 34 秒、含 vet/govulncheck 的 Go 3 分 33 秒。
+- [ ] 下一批候选 D1-G3 有界 recent commit/branch history、D1-V2 verification plan/checklist 与 D1-F3 带 high-water/digest 的 Markdown/JSON Handoff export；累计六片后执行完整 robustness gate。
 - [ ] 所有状态 mutation 使用独立 control capability、Origin/Host 校验、稳定 operation key 和 typed errors；显式 Provider 诊断每次只允许一次有界无正文请求。CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。
 

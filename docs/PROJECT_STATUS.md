@@ -214,12 +214,12 @@ Use these files first when resuming:
 ## Progress Review
 
 - Architecture completion: about 99%; the V2 run-centric control plane is about 99% complete.
-- Product usability: about 89-92% for the complete Code + Cyber product.
-- Generic coding-agent workflow usability: about 88%.
+- Product usability: about 92-94% for the complete Code + Cyber product.
+- Generic coding-agent workflow usability: about 92%.
 - Cyber autonomous-workflow usability: about 20%.
 - These values are engineering estimates derived from tested roadmap slices, not performance benchmarks. The retired single-axis "overall product vision" percentage must not be used for current status.
 
-Latest implemented batch: non-schema D1-G1/I3/F1. It adds exact-root read-only Repository state, independent bounded multi-file summaries, and a Code-only Journey over existing Go capabilities. The cumulative six-slice robustness gate is green and no unresolved high/medium issue is known. ADR 0047 is authoritative.
+Latest implemented batch: schema v78 D1-G2/V1/F2. It adds exact-root secret-redacted Repository Diffs, immutable operator verification evidence, and a resumable Code Handoff over durable Go-owned sources. The ordinary three-slice integrated gate and remote CI are green with no unresolved high/medium issue known. ADR 0048 is authoritative.
 
 Completed:
 
@@ -1268,15 +1268,61 @@ ADR 0047 records the boundary.
 GitHub Actions run `29678257802` passed implementation commit `d69a812`: TypeScript
 console 43s, Go control plane 5m32s, and Windows Desktop shell 5m29s.
 
+## Schema v78 D1-G2/V1/F2 Repository Diff, Verification, And Handoff Batch
+
+D1-G2 adds `repository_diff.v1`, a pure-Go exact-root read projection. It returns at
+most 50 secret-redacted patches, 64 KiB per item and 512 KiB aggregate, with closed
+states for binary, oversized, linked, or unavailable content. Parent discovery,
+redirected/nested metadata links, subprocesses, network, remotes, hooks, host roots,
+and raw unredacted bodies remain absent.
+
+Schema v78 D1-V1 adds a separate verification capability and immutable
+`operator_verification_evidence.v1`. Go redacts and exact-binds one normalized
+`pass|fail|unknown` operator observation to the Run/Mission/active Session/registered
+Workspace. Transactional Store and SQLite checks bind one metadata event and keep
+command/model/approval/authority facts false. Listing is capped at 100 and v77 upgrade
+creates no synthetic evidence.
+
+D1-F2 adds read-only Code-only `code_handoff.v1`. It compacts durable Plan, WorkItem,
+steering queue, FileEdit change-set, verification, operator-action, and Finding-report
+references without private bodies or composite authority. A before/after event
+sequence check retries four times and returns conflict rather than a torn snapshot.
+
+The ordinary gate passed full uncached Go in 308.1s, Desktop-tag tests, vet, targeted
+zero-warning staticcheck, module verification/tidy, deterministic OpenAPI/TypeScript,
+strict TypeScript, 120 React tests across 35 files, Vite production build,
+zero-vulnerability npm audit, repository hygiene scans, and a reproducible Windows
+double build. OpenAPI is 62 paths/67 operations/143 schemas with SHA-256
+`652707A6D9CA72EBBD86B6FD407A382DFBE85B094927C82AFC3765D2648332B3`.
+The unsigned GUI SHA-256 is
+`2ab74a47794287bac71877172136f02631b5cc9a44febd930e8ee7b1913ba93f` and remains
+`release_ready=false`.
+
+Production browser verification exercised record/list/Handoff refresh and Repository
+empty state at desktop/mobile widths with no page overflow or console error. The audit
+fixed active-Session transactional revalidation, Handoff snapshot consistency, Diff
+truncation propagation, strict-client reference/action/truncation checks, CR parity,
+and React capability wiring. No unresolved high/medium issue is known. No real key,
+Provider, Shell, LocalRunner, Docker, hook, attack traffic, installer, registry,
+startup task, or external network was used. Current estimates are architecture about
+99% (V2 about 99%), complete-product usability about 92-94%, generic Coding Agent
+about 92%, and Cyber automation about 20%. ADR 0048 records the boundary.
+
+GitHub Actions run `29682547524` passed implementation commit `cff7489`: TypeScript
+console 42s, Windows Desktop shell 2m34s, and Go control plane including vet and
+govulncheck 3m33s.
+
 ## Recommended Next Batch
 
-Complete D1-G2 bounded secret-redacted repository Diff projection, D1-V1 immutable
-operator-supplied verification evidence, and D1-F2 one Go-owned resumable Code handoff
-summary. These slices must remain read-only or independently controlled, must not run
-verification commands, and must not let model/repository text become approval or a
-composite mutation. The manual Windows 10 matrix, signed ZIP/MSIX distribution, Local
-OS sandboxing, Docker process lifecycle, Rust analyzers, xterm, network grants, and CTF
-solving remain separately gated work.
+Complete D1-G3 bounded exact-root recent commit/branch history, D1-V2 an
+operator-authored verification plan/checklist distinct from results, and D1-F3 bounded
+Markdown/JSON handoff export with source high-water/digest. All remain pure-Go-backed
+read or independently controlled surfaces: no checkout/fetch/push, no automatic
+verification command, no inferred pass, and no resume/apply/composite mutation. This
+batch reaches six slices and therefore owns the full ordinary/race/vet/staticcheck/
+govulncheck/dependency/privacy/build robustness gate. The manual Windows 10 matrix,
+signed ZIP/MSIX distribution, Local OS sandboxing, Docker process lifecycle, Rust
+analyzers, xterm, network grants, and CTF solving remain separately gated work.
 
 Keep the Local profile disabled until a real OS sandbox makes protected host roots unavailable or read-only; never map it to unrestricted `os/exec`. Runtime verification and the Docker start/wait/TERM/KILL/orphan lifecycle still require a later independent release gate. Broader HTTP/Desktop mutations, Rust analyzers, network/secret support, end-user process execution, and CTF solving remain deferred.
 

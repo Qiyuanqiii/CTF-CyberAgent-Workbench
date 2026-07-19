@@ -1004,10 +1004,58 @@ Go 5 分 32 秒、Windows Desktop 5 分 29 秒。
 与 D1-F2 Go-owned resumable Code handoff summary。Windows 10 人工矩阵、签名/安装包、
 真实进程、Rust analyzer、xterm 与 CTF 自动化继续独立后置。
 
+schema v78 / D1-G2、D1-V1、D1-F2 三切片批次已完成，任务 ID 为
+`P9-Repository-Diff-Verification-Code-Handoff-v78`。D1-G2 增加纯 Go
+`repository_diff.v1`：只读取 exact registered Workspace root，最多 50 项、单项
+64 KiB patch、总计 512 KiB；HEAD 与工作区正文先脱敏，binary/oversized/linked/
+unavailable 使用闭集状态。该路径不启动 `git` 或其他进程，不访问网络、remote/hook，
+不返回宿主 root 或原始未脱敏正文，所有 instruction/mutation/authority 位保持 false。
+
+D1-V1 通过独立 capability 增加不可变 `operator_verification_evidence.v1`。操作者只提交
+闭集 `pass|fail|unknown`、规范化 title/summary 和内存幂等 key；Go 脱敏并精确绑定
+Run/Mission/active Session/registered Workspace。Store 在写事务内再次确认 Session active，
+同一事务提交 metadata-only `verification.evidence_recorded` 与 evidence；schema v78 trigger
+再次要求事件绑定并把 command/model assertion/approval/authority 固定为 false。inventory
+最多 100 项；v77 原地升级不伪造 evidence、operation 或事件。
+
+D1-F2 增加 Code-only `code_handoff.v1`，从持久化 Plan/WorkItem、steering queue、FileEdit
+change set、verification、operator actions 与 Finding report references 生成可重建有界摘要。
+它不复制消息、验证摘要、Diff、文件/报告正文、operation/requester/lease，也不创建
+resume、apply 或复合 mutation。Go 在组装前后读取 Run event high-water，最多四次重试；
+持续变化时返回 conflict，绝不返回撕裂快照。
+
+最终 ordinary 整合门全绿：uncached 全仓 Go 308.1 秒（Store 299.8 秒）、Desktop tag、
+`go vet`、定向零告警 staticcheck、module verify/tidy、35 文件 120 项 React、strict
+TypeScript、确定性 OpenAPI/TypeScript、Vite production build、npm 零漏洞、隐私/UTF-8/
+产物/新切片进程网络入口扫描和 Windows 可复现双构建均通过。OpenAPI 为 62 path、67
+operation、143 schema，SHA-256
+`652707A6D9CA72EBBD86B6FD407A382DFBE85B094927C82AFC3765D2648332B3`；未签名 GUI
+SHA-256 `2ab74a47794287bac71877172136f02631b5cc9a44febd930e8ee7b1913ba93f`，自动兼容检查
+通过但 `release_ready=false`。
+
+production bundle 浏览器测试在隔离 schema-v78 home 中录入一条 pass evidence，Handoff
+随即显示 `1 pass`，非 Git Workspace 的 Repository/Diff 空状态正确；桌面/390px 移动
+宽度无页面级横向溢出，console 零错误。组合审计修复两项中风险一致性问题：Session
+可能在 Application 预检后、Store 写入前被归档，以及 Handoff 多来源查询可能跨事件变化
+产生撕裂；另修复顶层 Diff truncation 少报、TS action/reference/truncation 严格校验、CR
+规范化差异和 Verify capability 从 connection 到 API client 的漏传。当前无已知未解决
+高/中风险；未使用真实 key、Provider、Shell、LocalRunner、Docker、hook、攻击流量、
+安装器、注册表、自启动或外部网络，边界见 ADR 0048。
+
+双指标更新为架构完成度约 99%（V2 约 99%）、完整产品可用度约 92-94%、通用 Coding
+Agent 约 92%、Cyber 自动化约 20%。本批是新组六切片的前三片；下一批建议 D1-G3
+有界 recent commit/branch history、D1-V2 独立 verification plan/checklist 与 D1-F3
+带 high-water/digest 的 Markdown/JSON handoff export。下一批结束执行 ordinary/race/vet/
+staticcheck/govulncheck/依赖/隐私/构建完整健壮性门。
+
+远端 GitHub Actions run `29682547524` 已通过实现提交 `cff7489`：TypeScript console
+42 秒、Windows Desktop shell 2 分 34 秒、含 vet 与 govulncheck 的 Go control plane
+3 分 33 秒。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0047-read-only-repository-change-set-code-journey.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0048-bounded-diff-verification-code-handoff.md`。

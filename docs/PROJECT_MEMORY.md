@@ -66,14 +66,14 @@ Read in this order after a long context break:
 ## Current Baseline
 
 - Architecture completion: about 99%; the V2 run-centric control plane is about 99% complete.
-- Product usability: about 89-92% for the complete Code + Cyber product.
-- Generic coding-agent workflow usability: about 88%.
+- Product usability: about 92-94% for the complete Code + Cyber product.
+- Generic coding-agent workflow usability: about 92%.
 - Cyber autonomous-workflow usability: about 20%.
 - These are engineering estimates based on tested roadmap slices, not performance benchmarks. Do not reuse the retired single-axis "overall product vision" percentage.
-- Database schema: v77.
-- `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v77` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
+- Database schema: v78.
+- `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v78` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
 - Main languages: Go control plane, TypeScript React/Vite local console; Rust has not started.
-- Desktop status: D0-A/D0-B and D1-R1 through D1-G1/I3/F1 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, read-only Repository state, independent multi-file review, a Code-only Journey, generation-safe Windows Credential Manager Provider controls, and a default-off one-concurrent/one-step wake worker. Capability-only launches cannot reach sibling routes. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, terminal, real Shell/Local/Docker process execution, or install-time Skill execution. See ADR 0033 through ADR 0047 and `docs/DESKTOP_PLAN.md`.
+- Desktop status: D0-A/D0-B and D1-R1 through D1-G2/V1/F2 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, read-only Repository state and redacted Diff, independent multi-file review, immutable operator verification, a resumable Code Handoff, a Code-only Journey, generation-safe Windows Credential Manager Provider controls, and a default-off one-concurrent/one-step wake worker. Capability-only launches cannot reach sibling routes. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, terminal, real Shell/Local/Docker process execution, or install-time Skill execution. See ADR 0033 through ADR 0048 and `docs/DESKTOP_PLAN.md`.
 - Custom Skill status: the five embedded `skill.v1` guides and explicitly selected external packages are Run-loadable through separate protocols. Schema v69 adds persistent content-addressed import/history; schema v70 adds a second explicitly confirmed exact Run selection and redacted user-role root/Specialist context; schema v71 adds bounded read-only provenance across HTTP/TUI/Web. D1-A adds a pathless, one-time-handle preview boundary; D1-B1 adds explicit HTTP/Desktop registration through the same inert Registry. External packages remain untrusted and grant no declared tools. Installation executes no content and still does not select a package for a Run. See ADR 0024, ADR 0031 through ADR 0033, ADR 0041, and `docs/SKILL_PACKAGE_PLAN.md`.
 - Protected-delete status: explicit recursive, absolute/traversing/wildcard, environment-derived, command-substituted, current-home, PowerShell/`cmd`, and common interpreter deletion intents are permanently denied before approval across Shell, ScriptProcess, and Sandbox Policy. This is defense in depth; Local/container process execution remains disabled and a future executor still requires OS/container isolation. See ADR 0025.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
@@ -799,18 +799,69 @@ network operation was used. Current estimates are architecture about 99% (V2 abo
 GitHub Actions run `29678257802` passed implementation commit `d69a812`: TypeScript
 console 43s, Go control plane 5m32s, and Windows Desktop shell 5m29s.
 
+## Completed Repository Diff, Verification Evidence, And Code Handoff (D1-G2/V1/F2)
+
+D1-G2 adds pure-Go `repository_diff.v1` over the exact registered Workspace root. It
+uses the existing no-parent/no-link repository and Explorer boundaries, starts no
+process, accesses no remote/network/hook, and returns no host root or raw unredacted
+body. At most 50 changes are projected, with 64 KiB per patch and 512 KiB aggregate.
+HEAD and Workspace text are secret-redacted before the unified patch is built;
+binary, oversized, linked, and unavailable states remain closed metadata.
+
+Schema v78 D1-V1 adds immutable `operator_verification_evidence.v1`. A distinct
+control capability accepts one `pass|fail|unknown` observation and a memory-held
+idempotency key, then Go redacts and exact-binds Run/Mission/active Session/Workspace.
+The Store rechecks active Session status inside the same transaction that appends the
+metadata event and immutable row. SQLite independently binds the event and fixes
+command execution, model assertion, approval, and authority to false. Inventory is
+bounded to 100; migration from v77 fabricates no evidence.
+
+D1-F2 adds Code-only `code_handoff.v1`. It regenerates bounded Plan/WorkItem, steering
+queue, FileEdit change-set, verification, pending action, and Finding-report reference
+summaries from durable sources. Private messages, verification summaries, Diffs,
+content, operations, requesters, and leases stay internal. An event high-water mark is
+checked before and after assembly with four bounded retries, so a changing Run returns
+conflict instead of a torn handoff. The response cannot mutate, resume, or execute.
+
+The ordinary integrated gate passed the final uncached Go suite in 308.1s, including
+Store in 299.8s. Desktop-tag tests, vet, targeted zero-warning staticcheck, module
+verification/tidy, deterministic OpenAPI/TypeScript, strict TypeScript, 120 React
+tests across 35 files, Vite production build, zero-vulnerability npm audit, repository
+privacy/UTF-8/artifact/process-network scans, and a reproducible Windows double build
+are green. OpenAPI has 62 paths, 67 operations, and 143 schemas with SHA-256
+`652707A6D9CA72EBBD86B6FD407A382DFBE85B094927C82AFC3765D2648332B3`.
+The unsigned Desktop SHA-256 is
+`2ab74a47794287bac71877172136f02631b5cc9a44febd930e8ee7b1913ba93f` and remains
+`release_ready=false`.
+
+Production-bundle browser checks recorded one isolated pass observation, confirmed
+the Handoff refresh and non-Git Repository empty state, found no page-level horizontal
+overflow at desktop/mobile widths, and produced no console error. The combined audit
+fixed an active-Session transaction race, a torn multi-source Handoff snapshot,
+top-level Diff truncation under-reporting, strict-client reference/action/truncation
+gaps, CR normalization drift, and missing React verification-capability propagation.
+No unresolved high/medium issue is known. No real key, Provider, Shell, LocalRunner,
+Docker, hook, attack traffic, installer, registry mutation, startup task, or external
+network was used. Current estimates are architecture about 99% (V2 about 99%),
+complete-product usability about 92-94%, generic Coding Agent usability about 92%,
+and Cyber automation about 20%. ADR 0048 is authoritative.
+
+GitHub Actions run `29682547524` passed implementation commit `cff7489`: TypeScript
+console 42s, Windows Desktop shell 2m34s, and Go control plane including vet and
+govulncheck 3m33s.
+
 ## Next Slice
 
-The recommended next three-slice batch keeps the general Coding Agent ahead of CTF:
+The recommended next three-slice batch keeps the generic Coding Agent ahead of CTF:
 
-1. D1-G2: add a bounded, secret-redacted repository Diff projection over the exact registered root. It remains read-only/non-authorizing, follows no links, returns no host roots, and does not execute `git` or expose remote/hook authority.
-2. D1-V1: persist operator-supplied verification evidence and closed pass/fail/unknown results without running a command. Evidence must bind one Run/Session/Workspace and remain distinct from model claims, approvals, or execution authority.
-3. D1-F2: add a Go-owned resumable Code handoff summary that compacts current Plan, queue, change-set, verification, pending actions, and terminal report references without copying private bodies or creating a composite mutation.
-4. Run the ordinary three-slice functional gate, browser desktop/mobile checks, and combined audit. The following batch owns the next six-slice robustness gate. The manual Windows 10 matrix, signed/package distribution, real Sandbox/host processes, Rust analyzers, xterm, and CTF solving remain separate work requiring dedicated gates and, where noted, operator hardware/signing input.
+1. D1-G3: add a bounded read-only recent-commit/branch history projection at the exact registered repository root. It must use pure Go, expose no remote credentials or host root, and provide no checkout/fetch/push/hook authority.
+2. D1-V2: persist an operator-authored verification plan/checklist separately from v78 results. Requirements remain evidence guidance, run no command, and cannot convert model claims or document text into a pass.
+3. D1-F3: export the current Code handoff as bounded Markdown/JSON with a source high-water mark and digest. Export remains a download/read projection, not a resume, apply, report-acceptance, or batch mutation endpoint.
+4. Because that batch completes the next six slices, run the full ordinary/race/vet/staticcheck/govulncheck/dependency/privacy/build robustness gate plus browser desktop/mobile checks. The manual Windows 10 matrix, signed/package distribution, real Sandbox/host processes, Rust analyzers, xterm, and CTF solving remain separate work requiring dedicated gates and, where noted, operator hardware/signing input.
 
 ## Local Machine Note
 
-The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v77 and D1-Q2 through D1-G1/I3/F1 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the OS temporary root.
+The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v78 and D1-Q2 through D1-G2/V1/F2 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the repository's ignored build root or the OS temporary root.
 
 ## Delivery Loop
 
