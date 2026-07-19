@@ -895,6 +895,10 @@ A timeout cannot forcibly kill an arbitrary third-party goroutine that ignores i
 context, and real process-tree deadlocks remain for the independent Runner lifecycle
 gate because process execution is still disabled. ADR 0049 is authoritative.
 
+GitHub Actions run `29688544340` passed implementation commit `2012bfa`: TypeScript
+console 42s, Windows Desktop shell 3m13s, and Go control plane including vet and
+govulncheck 3m54s.
+
 中文交接：本批把工具永久阻塞、同步依赖成环和“模型每轮都返回但一直无进展”分成三层
 处理。内置 Tool 已可取消且不读特殊文件；root、child 与 Tool 的同步等待可在阻塞前拒绝
 环路；v79 会把重复三轮或停滞六轮的 Run 原子暂停并要求操作者显式恢复。没有开放任何

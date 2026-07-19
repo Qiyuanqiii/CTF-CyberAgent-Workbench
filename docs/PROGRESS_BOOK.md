@@ -1090,6 +1090,10 @@ goroutine；真实进程的句柄/端口/进程树死锁仍属于后续 Runner s
 orphan 独立门禁，因为真实执行继续关闭。双指标保持架构约 99%（V2 约 99%）、完整产品
 可用度约 92-94%、通用 Coding Agent 约 92%、Cyber 自动化约 20%，边界见 ADR 0049。
 
+远端 GitHub Actions run `29688544340` 已通过实现提交 `2012bfa`：TypeScript console
+42 秒、Windows Desktop shell 3 分 13 秒、含 vet 与 govulncheck 的 Go control plane
+3 分 54 秒。
+
 下一批回到产品切片 D1-G3 recent commit/branch history、D1-V2 verification plan/checklist
 和 D1-F3 Markdown/JSON handoff export。它是新六切片周期的前三片，批末执行普通整合门；
 再下一批累计六片时执行完整健壮性门。
