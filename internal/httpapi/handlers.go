@@ -50,7 +50,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
 			"external-skills", "workspaces", "workspace-explorer", "workspace-search", "models",
 			"operation-receipts", "operator-actions", "evidence-inventory",
-			"event-stream", "event-poll", "openapi"}
+			"event-stream", "event-poll", "capabilities", "openapi"}
 		if a.controlEnabled {
 			resources = append(resources, "model-cancellation-control",
 				"specialist-model-cancellation-control", "execution-profile-control")
@@ -103,6 +103,8 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 			return nil, nil, err
 		}
 		return a.health(request)
+	case "/api/v1/capabilities":
+		return a.runtimeCapabilities(request)
 	case "/api/v1/operation-receipts":
 		return a.operationReceiptHistory(request)
 	}
@@ -310,7 +312,7 @@ func (a *API) modelAvailability(request *http.Request) (any, *Page, error) {
 		}
 	}
 	return ModelAvailabilityView{ProtocolVersion: snapshot.ProtocolVersion,
-		Providers: providers, Routes: routes}, nil, nil
+		Generation: snapshot.Generation, Providers: providers, Routes: routes}, nil, nil
 }
 
 func (a *API) workspaces(request *http.Request) (any, *Page, error) {
@@ -383,6 +385,9 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 		}
 		if segments[2] == "file-edits" {
 			return a.runFileEdit(request, segments[1], segments[3])
+		}
+		if segments[2] == "file-edit-proposal-recovery" {
+			return a.runFileEditProposalRecovery(request, segments[1], segments[3])
 		}
 	}
 	return nil, nil, apperror.New(apperror.CodeNotFound, "Run HTTP API endpoint was not found")

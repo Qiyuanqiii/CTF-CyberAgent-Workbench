@@ -16,6 +16,7 @@ export function ModelAvailabilityDialog({ client, open, onClose }: {
   const [credentialBusy, setCredentialBusy] = useState("");
   const [credentialError, setCredentialError] = useState("");
   const [credentialRestart, setCredentialRestart] = useState(false);
+  const [credentialGeneration, setCredentialGeneration] = useState<number | null>(null);
   const credentialInputs = useRef(new Map<string, HTMLInputElement>());
   const query = useQuery({
     queryKey: ["models", "availability"],
@@ -62,6 +63,7 @@ export function ModelAvailabilityDialog({ client, open, onClose }: {
     try {
       const status = await client.changeProviderCredential(provider, body);
       setCredentialRestart(status.restart_required);
+      setCredentialGeneration(status.registry_reloaded ? status.registry_generation : null);
       await Promise.all([credentialQuery.refetch(),
         queryClient.invalidateQueries({ queryKey: ["models", "availability"] })]);
     } catch (caught) {
@@ -164,6 +166,10 @@ export function ModelAvailabilityDialog({ client, open, onClose }: {
                 {credentialRestart && <div className="model-diagnostic-result" role="status">
                   <Check aria-hidden="true" size={14} />Credential status updated
                   <span>Restart required to load the Provider</span>
+                </div>}
+                {credentialGeneration !== null && <div className="model-diagnostic-result" role="status">
+                  <Check aria-hidden="true" size={14} />Credential status updated
+                  <span>Registry generation {credentialGeneration} active</span>
                 </div>}
                 {credentialError && <div className="inline-warning" role="alert">
                   {credentialError}

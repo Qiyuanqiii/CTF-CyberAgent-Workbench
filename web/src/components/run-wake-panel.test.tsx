@@ -66,6 +66,18 @@ describe("RunWakePanel", () => {
     expect((await screen.findAllByText("completed")).length).toBeGreaterThan(0);
     expect(screen.getByText("run wake consume / durable")).toBeInTheDocument();
   });
+
+  it("projects process-local worker health without an enable control", async () => {
+    const client = {
+      ...wakeClient(vi.fn()), hasRunWakeWorker: true,
+      runtimeCapabilities: vi.fn().mockResolvedValue({
+        wake_worker: { enabled: true, state: "draining", active: true },
+      }),
+    } as unknown as CyberAgentClient;
+    renderPanel(client, runDetail(1, 0));
+    expect(await screen.findByText("draining / active")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /enable worker/i })).not.toBeInTheDocument();
+  });
 });
 
 function wakeClient(scheduleRunWake: ReturnType<typeof vi.fn>): CyberAgentClient {

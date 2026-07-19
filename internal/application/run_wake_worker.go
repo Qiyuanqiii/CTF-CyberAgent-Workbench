@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"cyberagent-workbench/internal/apperror"
@@ -11,13 +12,32 @@ import (
 )
 
 const (
-	RunWakeWorkerProtocolVersion = "run_wake_worker.v1"
-	MinRunWakeWorkerPollInterval = 250 * time.Millisecond
-	MaxRunWakeWorkerPollInterval = 60 * time.Second
-	DefaultRunWakeWorkerInterval = 2 * time.Second
-	RunWakeWorkerConcurrency     = 1
-	RunWakeWorkerMaxSteps        = 1
+	RunWakeWorkerProtocolVersion       = "run_wake_worker.v1"
+	MinRunWakeWorkerPollInterval       = 250 * time.Millisecond
+	MaxRunWakeWorkerPollInterval       = 60 * time.Second
+	DefaultRunWakeWorkerInterval       = 2 * time.Second
+	RunWakeWorkerConcurrency           = 1
+	RunWakeWorkerMaxSteps              = 1
+	RunWakeWorkerHealthProtocolVersion = "run_wake_worker_health.v1"
 )
+
+type RunWakeWorkerState string
+
+const (
+	RunWakeWorkerReady    RunWakeWorkerState = "ready"
+	RunWakeWorkerRunning  RunWakeWorkerState = "running"
+	RunWakeWorkerDraining RunWakeWorkerState = "draining"
+	RunWakeWorkerStopped  RunWakeWorkerState = "stopped"
+)
+
+type RunWakeWorkerHealth struct {
+	ProtocolVersion    string
+	State              RunWakeWorkerState
+	Active             bool
+	PollIntervalMillis int64
+	Concurrency        int
+	MaxSteps           int
+}
 
 type RunWakeDueSource interface {
 	Due(context.Context, int) ([]domain.RunWakeIntent, error)
@@ -44,6 +64,11 @@ type RunWakeWorker struct {
 	pollInterval time.Duration
 	ownerID      string
 	onError      func(error)
+	healthMu     sync.RWMutex
+	runMu        sync.Mutex
+	state        RunWakeWorkerState
+	active       bool
+	started      bool
 }
 
 func NewRunWakeWorker(due RunWakeDueSource, consumer RunWakeIntentConsumer,
@@ -70,7 +95,7 @@ func NewRunWakeWorker(due RunWakeDueSource, consumer RunWakeIntentConsumer,
 			"Run wake worker owner identity is invalid")
 	}
 	return &RunWakeWorker{due: due, consumer: consumer, pollInterval: interval,
-		ownerID: ownerID, onError: config.OnError}, nil
+		ownerID: ownerID, onError: config.OnError, state: RunWakeWorkerReady}, nil
 }
 
 func (w *RunWakeWorker) Run(ctx context.Context) error {
@@ -82,6 +107,30 @@ func (w *RunWakeWorker) Run(ctx context.Context) error {
 		return apperror.New(apperror.CodeInvalidArgument,
 			"Run wake worker context is required")
 	}
+	w.healthMu.Lock()
+	if w.started {
+		w.healthMu.Unlock()
+		return apperror.New(apperror.CodeFailedPrecondition,
+			"Run wake worker cannot be restarted")
+	}
+	w.started = true
+	w.state = RunWakeWorkerRunning
+	w.healthMu.Unlock()
+	watchDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			w.markDraining()
+		case <-watchDone:
+		}
+	}()
+	defer func() {
+		close(watchDone)
+		w.healthMu.Lock()
+		w.active = false
+		w.state = RunWakeWorkerStopped
+		w.healthMu.Unlock()
+	}()
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
@@ -103,6 +152,12 @@ func (w *RunWakeWorker) RunOnce(ctx context.Context) (bool, error) {
 		return false, apperror.New(apperror.CodeFailedPrecondition,
 			"Run wake worker is unavailable")
 	}
+	if ctx == nil {
+		return false, apperror.New(apperror.CodeInvalidArgument,
+			"Run wake worker context is required")
+	}
+	w.runMu.Lock()
+	defer w.runMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
@@ -117,9 +172,39 @@ func (w *RunWakeWorker) RunOnce(ctx context.Context) (bool, error) {
 		return false, apperror.New(apperror.CodeInternal,
 			"Run wake worker due projection violated its hard concurrency bound")
 	}
+	w.healthMu.Lock()
+	w.active = true
+	w.healthMu.Unlock()
+	defer func() {
+		w.healthMu.Lock()
+		w.active = false
+		w.healthMu.Unlock()
+	}()
 	_, err = w.consumer.Consume(ctx, ConsumeRunWakeRequest{
 		Version: domain.RunWakeConsumerProtocolVersion, RunID: due[0].RunID,
 		OwnerID: w.ownerID, MaxSteps: RunWakeWorkerMaxSteps,
 	})
 	return true, err
+}
+
+func (w *RunWakeWorker) Health() RunWakeWorkerHealth {
+	if w == nil {
+		return RunWakeWorkerHealth{ProtocolVersion: RunWakeWorkerHealthProtocolVersion,
+			State: RunWakeWorkerStopped, Concurrency: RunWakeWorkerConcurrency,
+			MaxSteps: RunWakeWorkerMaxSteps}
+	}
+	w.healthMu.RLock()
+	state, active := w.state, w.active
+	w.healthMu.RUnlock()
+	return RunWakeWorkerHealth{ProtocolVersion: RunWakeWorkerHealthProtocolVersion,
+		State: state, Active: active, PollIntervalMillis: w.pollInterval.Milliseconds(),
+		Concurrency: RunWakeWorkerConcurrency, MaxSteps: RunWakeWorkerMaxSteps}
+}
+
+func (w *RunWakeWorker) markDraining() {
+	w.healthMu.Lock()
+	if w.state == RunWakeWorkerRunning {
+		w.state = RunWakeWorkerDraining
+	}
+	w.healthMu.Unlock()
 }

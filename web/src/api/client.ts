@@ -10,6 +10,7 @@ import type {
   FileEditApplyRequestView,
   FileEditApplyView,
   FileEditProposalRequestView,
+  FileEditProposalRecoveryView,
   FileEditProposalSourceView,
   FileEditProposalView,
   FileEditQueueView,
@@ -43,6 +44,7 @@ import type {
   RunWakeStateView,
   RunWakeExecutionRequestView,
   RunWakeExecutionView,
+  RuntimeCapabilitiesView,
   SkillPackageInstallRequestView,
   SkillPackageInstallView,
   RunEventPollView,
@@ -342,8 +344,9 @@ function parseRunExecutionControl(value: unknown, expectedRunID: string,
 }
 
 function parseModelAvailability(value: unknown): ModelAvailabilityView {
-  if (!hasExactKeys(value, ["protocol_version", "providers", "routes"]) ||
+  if (!hasExactKeys(value, ["generation", "protocol_version", "providers", "routes"]) ||
     value.protocol_version !== "model_availability.v1" || !Array.isArray(value.providers) ||
+    !safeBoundedCount(value.generation, Number.MAX_SAFE_INTEGER) || value.generation < 1 ||
     !Array.isArray(value.routes) || value.providers.length > 64 || value.routes.length > 64) {
     throw new APIRequestError("Model availability response is invalid", "INVALID_RESPONSE", 502);
   }
@@ -506,13 +509,16 @@ function parseProviderDiagnostic(value: unknown, request: ProviderDiagnosticRequ
 function parseProviderCredentialStatus(value: unknown,
   expectedProvider = ""): ProviderCredentialStatusView {
   if (!hasExactKeys(value, ["configured", "plaintext_returned", "protocol_version",
-    "provider", "restart_required", "store_available", "store_kind"]) ||
+    "provider", "registry_generation", "registry_reloaded", "restart_required",
+    "store_available", "store_kind"]) ||
     value.protocol_version !== "provider_credential.v1" ||
     !["anthropic", "deepseek", "mimo"].includes(String(value.provider)) ||
     (expectedProvider !== "" && value.provider !== expectedProvider) ||
     typeof value.configured !== "boolean" || typeof value.store_available !== "boolean" ||
     !boundedText(value.store_kind, 128) || value.plaintext_returned !== false ||
-    typeof value.restart_required !== "boolean") {
+    typeof value.restart_required !== "boolean" || typeof value.registry_reloaded !== "boolean" ||
+    !safeBoundedCount(value.registry_generation, Number.MAX_SAFE_INTEGER) ||
+    (value.registry_reloaded && (value.restart_required || value.registry_generation < 1))) {
     throw new APIRequestError("Provider credential status violated its plaintext-free contract",
       "INVALID_RESPONSE", 502);
   }
@@ -527,11 +533,74 @@ function parseProviderCredentialList(value: unknown): ProviderCredentialListView
   }
   const items = value.items.map((item) => parseProviderCredentialStatus(item));
   if (new Set(items.map((item) => item.provider)).size !== items.length ||
-    items.some((item) => item.restart_required)) {
+    items.some((item) => item.restart_required || item.registry_reloaded) ||
+    new Set(items.map((item) => item.registry_generation)).size !== 1) {
     throw new APIRequestError("Provider credential list widened status authority",
       "INVALID_RESPONSE", 502);
   }
   return { ...value, items } as unknown as ProviderCredentialListView;
+}
+
+function parseRuntimeCapabilities(value: unknown): RuntimeCapabilitiesView {
+  const capabilityKeys = ["approval_control_enabled", "docker_execution_enabled",
+    "evidence_attachment_enabled", "file_edit_apply_enabled", "file_edit_proposal_enabled",
+    "file_edit_review_enabled", "model_control_enabled", "plan_delivery_control_enabled",
+    "process_execution_enabled", "provider_credential_enabled", "protocol_version",
+    "run_control_enabled", "run_creation_enabled", "run_execution_enabled",
+    "run_lifecycle_enabled", "run_wake_control_enabled", "run_wake_execution_enabled",
+    "run_wake_worker_enabled", "session_message_enabled",
+    "session_steering_control_enabled", "shell_execution_enabled",
+    "skill_installation_enabled", "wake_worker"];
+  if (!hasExactKeys(value, capabilityKeys) || value.protocol_version !== "runtime_capabilities.v1") {
+    throw new APIRequestError("Runtime capability response is invalid", "INVALID_RESPONSE", 502);
+  }
+  for (const key of capabilityKeys) {
+    if (key !== "protocol_version" && key !== "wake_worker" && typeof value[key] !== "boolean") {
+      throw new APIRequestError("Runtime capability flag is invalid", "INVALID_RESPONSE", 502);
+    }
+  }
+  const worker = value.wake_worker;
+  if (!hasExactKeys(worker, ["active", "concurrency", "enabled", "max_steps",
+    "persistent_service", "poll_interval_ms", "protocol_version",
+    "runtime_enable_supported", "state"]) ||
+    worker.protocol_version !== "run_wake_worker_health.v1" ||
+    typeof worker.enabled !== "boolean" || typeof worker.active !== "boolean" ||
+    worker.concurrency !== 1 || worker.max_steps !== 1 ||
+    worker.runtime_enable_supported !== false || worker.persistent_service !== false ||
+    value.run_wake_worker_enabled !== worker.enabled ||
+    (worker.enabled && (!["ready", "running", "draining", "stopped"].includes(String(worker.state)) ||
+      !safeBoundedCount(worker.poll_interval_ms, 60_000) || worker.poll_interval_ms < 250)) ||
+    ((worker.state === "ready" || worker.state === "stopped") && worker.active) ||
+    (!worker.enabled && (worker.state !== "disabled" || worker.active || worker.poll_interval_ms !== 0)) ||
+    value.process_execution_enabled !== false || value.shell_execution_enabled !== false ||
+    value.docker_execution_enabled !== false) {
+    throw new APIRequestError("Run wake worker capability response is invalid",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as RuntimeCapabilitiesView;
+}
+
+export function clientCapabilitiesFromRuntime(value: RuntimeCapabilitiesView): ClientCapabilities {
+  return {
+    runControlEnabled: value.run_control_enabled,
+    runCreationEnabled: value.run_creation_enabled,
+    sessionMessageEnabled: value.session_message_enabled,
+    sessionSteeringControlEnabled: value.session_steering_control_enabled,
+    runLifecycleEnabled: value.run_lifecycle_enabled,
+    runExecutionEnabled: value.run_execution_enabled,
+    planDeliveryControlEnabled: value.plan_delivery_control_enabled,
+    approvalControlEnabled: value.approval_control_enabled,
+    modelControlEnabled: value.model_control_enabled,
+    providerCredentialEnabled: value.provider_credential_enabled,
+    fileEditReviewEnabled: value.file_edit_review_enabled,
+    fileEditProposalEnabled: value.file_edit_proposal_enabled,
+    fileEditApplyEnabled: value.file_edit_apply_enabled,
+    runWakeControlEnabled: value.run_wake_control_enabled,
+    runWakeExecutionEnabled: value.run_wake_execution_enabled,
+    runWakeWorkerEnabled: value.run_wake_worker_enabled,
+    skillInstallationEnabled: value.skill_installation_enabled,
+    evidenceAttachmentEnabled: value.evidence_attachment_enabled,
+  };
 }
 
 function parseFileEditProposalSource(value: unknown, runID: string,
@@ -567,6 +636,30 @@ function parseFileEditProposal(value: unknown, runID: string): FileEditProposalV
       "INVALID_RESPONSE", 502);
   }
   return { ...value, edit } as unknown as FileEditProposalView;
+}
+
+function parseFileEditProposalRecovery(value: unknown, runID: string,
+  editID: string): FileEditProposalRecoveryView {
+  if (!hasExactKeys(value, ["current_content_sha256", "edit_id", "editable", "file_write",
+    "original_content", "original_sha256", "path", "proposed_content", "proposed_sha256",
+    "protocol_version", "review_required", "run_id", "stale", "status", "workspace_id"]) ||
+    value.protocol_version !== "file_edit_proposal_recovery.v1" || value.run_id !== runID ||
+    value.edit_id !== editID || !boundedIdentity(value.workspace_id) ||
+    !validWorkspaceRelativePath(value.path) || typeof value.original_content !== "string" ||
+    typeof value.proposed_content !== "string" ||
+    new TextEncoder().encode(value.original_content).length > 256 * 1024 ||
+    new TextEncoder().encode(value.proposed_content).length > 256 * 1024 ||
+    !(isSHA256(value.original_sha256) ||
+      (value.original_sha256 === "missing" && value.original_content === "")) ||
+    !isSHA256(value.proposed_sha256) ||
+    !(isSHA256(value.current_content_sha256) || value.current_content_sha256 === "missing") ||
+    value.status !== "proposed" || value.stale !==
+      (value.current_content_sha256 !== value.original_sha256) ||
+    value.review_required !== true || value.editable !== false || value.file_write !== false) {
+    throw new APIRequestError("File edit proposal recovery widened authority",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as FileEditProposalRecoveryView;
 }
 
 function parseFileEditPreview(value: unknown): FileEditQueueView["items"][number] {
@@ -1099,6 +1192,10 @@ export class CyberAgentClient {
     return this.get<HealthView>("/health", {}, signal);
   }
 
+  async runtimeCapabilities(signal?: AbortSignal): Promise<RuntimeCapabilitiesView> {
+    return parseRuntimeCapabilities(await this.get<unknown>("/capabilities", {}, signal));
+  }
+
   async modelAvailability(signal?: AbortSignal): Promise<ModelAvailabilityView> {
     const value = await this.get<unknown>("/models", {}, signal);
     return parseModelAvailability(value);
@@ -1207,7 +1304,10 @@ export class CyberAgentClient {
       `/models/credentials/${encodeURIComponent(provider)}`, body, signal,
     );
     const status = parseProviderCredentialStatus(result, provider);
-    if (status.configured !== (body.action === "set") || status.restart_required !== true) {
+    const applied = status.registry_reloaded && !status.restart_required &&
+      status.registry_generation > 0;
+    const deferred = !status.registry_reloaded && status.restart_required;
+    if (status.configured !== (body.action === "set") || (!applied && !deferred)) {
       throw new APIRequestError("Provider credential change returned the wrong status",
         "INVALID_RESPONSE", 502);
     }
@@ -1232,6 +1332,29 @@ export class CyberAgentClient {
     return parseFileEditProposalSource(await this.get<unknown>(
       `/runs/${encodeURIComponent(runID)}/file-edit-proposal-source`, { path }, signal,
     ), runID, path);
+  }
+
+  async reissueFileEditProposalSource(runID: string, path: string, expectedSHA256: string,
+    signal?: AbortSignal): Promise<FileEditProposalSourceView> {
+    if (!this.hasFileEditProposals || !boundedIdentity(runID) ||
+      !validWorkspaceRelativePath(path) || !isSHA256(expectedSHA256)) {
+      throw new Error("An exact previously issued file digest is required");
+    }
+    return parseFileEditProposalSource(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/file-edit-proposal-source`,
+      { path, expected_sha256: expectedSHA256 }, signal,
+    ), runID, path);
+  }
+
+  async recoverFileEditProposal(runID: string, editID: string,
+    signal?: AbortSignal): Promise<FileEditProposalRecoveryView> {
+    if (!this.hasFileEditProposals || !boundedIdentity(runID) || !boundedIdentity(editID)) {
+      throw new Error("File edit recovery requires exact Run and proposal identities");
+    }
+    return parseFileEditProposalRecovery(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/file-edit-proposal-recovery/${encodeURIComponent(editID)}`,
+      {}, signal,
+    ), runID, editID);
   }
 
   async createFileEditProposal(runID: string, body: FileEditProposalRequestView,

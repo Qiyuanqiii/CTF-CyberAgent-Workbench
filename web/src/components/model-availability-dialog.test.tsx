@@ -7,7 +7,7 @@ import { ModelAvailabilityDialog } from "./model-availability-dialog";
 describe("ModelAvailabilityDialog", () => {
   it("renders redacted provider and route status without configuration secrets", async () => {
     const client = { modelAvailability: vi.fn().mockResolvedValue({
-      protocol_version: "model_availability.v1",
+      protocol_version: "model_availability.v1", generation: 1,
       providers: [{ name: "mock", kind: "local", status: "available", models: ["mock-code"],
         credential_source: "none", network_required: false, configuration_error: false }],
       routes: [{ name: "code", provider: "mock", model: "mock-code", available: true }],
@@ -36,7 +36,7 @@ describe("ModelAvailabilityDialog", () => {
     const client = {
       hasModelControl: true, diagnoseProvider, selectModelRoute,
       modelAvailability: vi.fn().mockResolvedValue({
-        protocol_version: "model_availability.v1",
+        protocol_version: "model_availability.v1", generation: 1,
         providers: [{ name: "mock", kind: "local", status: "available",
           models: ["mock-code", "mock-fast"], credential_source: "none",
           network_required: false, configuration_error: false }],
@@ -69,19 +69,21 @@ describe("ModelAvailabilityDialog", () => {
         protocol_version: "provider_credential.v1", provider, configured: false,
         store_kind: "windows_credential_manager", store_available: true,
         plaintext_returned: false, restart_required: false,
+        registry_reloaded: false, registry_generation: 1,
       })) };
     let submittedCredential: unknown;
     const changeProviderCredential = vi.fn().mockImplementation((provider, body) => {
       submittedCredential = { provider, body: { ...body } };
       return Promise.resolve({
-        ...statuses.items[2], configured: true, restart_required: true,
+        ...statuses.items[2], configured: true, registry_reloaded: true,
+        registry_generation: 2,
       });
     });
     const client = { hasModelControl: false, hasProviderCredentials: true,
       providerCredentialStatuses: vi.fn().mockResolvedValue(statuses),
       changeProviderCredential,
       modelAvailability: vi.fn().mockResolvedValue({
-        protocol_version: "model_availability.v1",
+        protocol_version: "model_availability.v1", generation: 1,
         providers: [{ name: "mock", kind: "local", status: "available",
           models: ["mock-code"], credential_source: "none", network_required: false,
           configuration_error: false }],
@@ -101,6 +103,7 @@ describe("ModelAvailabilityDialog", () => {
     } }));
     expect(input).toHaveValue("");
     expect(await screen.findByText("Credential status updated")).toBeInTheDocument();
+    expect(screen.getByText("Registry generation 2 active")).toBeInTheDocument();
     expect(container.textContent).not.toContain(secret);
   });
 });

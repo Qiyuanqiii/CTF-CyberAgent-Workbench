@@ -205,3 +205,105 @@ func TestFileEditProposalReplayRejectsAnAdvancedReviewAsConflict(t *testing.T) {
 		t.Fatalf("advanced proposal replay saved %d edits, want 1", store.saves)
 	}
 }
+
+func TestFileEditProposalReissuesOnlyAnUnchangedGoProjection(t *testing.T) {
+	store, service, path := newFileEditProposalFixture(t)
+	source, err := service.IssueSource(t.Context(), store.run.ID, "README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reissued, err := service.ReissueSource(t.Context(), store.run.ID, source.Path,
+		source.ContentSHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reissued.Handle == source.Handle || reissued.Content != source.Content ||
+		reissued.ContentSHA256 != source.ContentSHA256 {
+		t.Fatalf("source handle was not safely rotated: old=%#v new=%#v", source, reissued)
+	}
+	if err := os.WriteFile(path, []byte("changed after editor opened\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ReissueSource(t.Context(), store.run.ID, source.Path,
+		source.ContentSHA256); err == nil || apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("stale editor source reissue error=%v, want conflict", err)
+	}
+	if _, err := service.ReissueSource(t.Context(), store.run.ID, source.Path,
+		"not-a-digest"); err == nil || apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("invalid reissue digest error=%v", err)
+	}
+}
+
+func TestFileEditProposalRecoversDurablePendingReviewWithoutAuthority(t *testing.T) {
+	store, service, path := newFileEditProposalFixture(t)
+	source, err := service.IssueSource(t.Context(), store.run.ID, "README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.Propose(t.Context(), CreateFileEditProposalRequest{
+		Version: FileEditProposalProtocolVersion, RunID: store.run.ID,
+		SourceHandle: source.Handle, ProposedText: "after restart\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A fresh service has no renderer source grants and models a process restart.
+	restarted := NewFileEditProposalService(store, policy.NewDefaultChecker())
+	recovery, err := restarted.Recover(t.Context(), store.run.ID, created.Edit.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovery.ProtocolVersion != FileEditRecoveryProtocolVersion ||
+		recovery.EditID != created.Edit.ID || recovery.OriginalContent != "before\n" ||
+		recovery.ProposedContent != "after restart\n" || recovery.Stale ||
+		!recovery.ReviewRequired || recovery.Editable {
+		t.Fatalf("durable proposal recovery widened authority: %#v", recovery)
+	}
+	if err := os.WriteFile(path, []byte("changed before review\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := restarted.Recover(t.Context(), store.run.ID, created.Edit.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stale.Stale || stale.CurrentContentHash == stale.OriginalSHA256 || stale.Editable {
+		t.Fatalf("stale durable proposal was not surfaced safely: %#v", stale)
+	}
+	store.mu.Lock()
+	advanced := store.edits[created.Edit.ID]
+	advanced.Status = fileedit.StatusApproved
+	store.edits[created.Edit.ID] = advanced
+	store.mu.Unlock()
+	if _, err := restarted.Recover(t.Context(), store.run.ID, created.Edit.ID); err == nil ||
+		apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("advanced proposal recovery error=%v, want conflict", err)
+	}
+}
+
+func TestFileEditProposalRecoversPendingNewFileWithoutCreatingIt(t *testing.T) {
+	store, service, _ := newFileEditProposalFixture(t)
+	if err := os.MkdirAll(filepath.Join(store.workspace.RootPath, "outputs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	proposed := "new file\n"
+	edit := fileedit.Edit{ID: "edit-missing-source", SessionID: store.session.ID,
+		WorkspaceID: store.workspace.ID, Path: "outputs/new.txt", Status: fileedit.StatusProposed,
+		OriginalText: "", ProposedText: proposed, OriginalHash: "missing",
+		ProposedHash: fileedit.HashText(proposed), CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC()}
+	store.mu.Lock()
+	store.edits[edit.ID] = edit
+	store.mu.Unlock()
+
+	recovery, err := service.Recover(t.Context(), store.run.ID, edit.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovery.OriginalSHA256 != "missing" || recovery.OriginalContent != "" ||
+		recovery.CurrentContentHash != "missing" || recovery.Stale || recovery.Editable {
+		t.Fatalf("missing-file recovery widened authority: %#v", recovery)
+	}
+	if _, err := os.Stat(filepath.Join(store.workspace.RootPath, "outputs", "new.txt")); !os.IsNotExist(err) {
+		t.Fatalf("recovery created the proposed file: %v", err)
+	}
+}

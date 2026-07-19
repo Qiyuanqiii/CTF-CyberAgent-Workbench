@@ -15,11 +15,15 @@ describe("ConnectionGate", () => {
   });
 
   it("validates the token through health and does not render it as text", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
       version: "api.v1",
       request_id: "req-health",
       data: { status: "ok", api_version: "api.v1", app_version: "test", schema_version: 37 },
-    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "api.v1",
+        request_id: "req-capabilities", data: runtimeCapabilities() }),
+      { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     render(<QueryClientProvider client={new QueryClient()}><ConnectionGate /></QueryClientProvider>);
 
@@ -32,10 +36,11 @@ describe("ConnectionGate", () => {
     expect(screen.queryByText("ephemeral-token")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "连接" }));
 
-    expect(useConnectionStore.getState().token).toBe("ephemeral-token");
+    await waitFor(() => expect(useConnectionStore.getState().token).toBe("ephemeral-token"));
     expect(useConnectionStore.getState().controlToken).toBe("ephemeral-control-token");
     expect(input).toHaveValue("");
     expect(controlInput).toHaveValue("");
+    expect(useConnectionStore.getState().fileEditProposalEnabled).toBe(true);
   });
 
   it("auto-connects a closed-authority Desktop bootstrap without rendering its token", async () => {
@@ -91,3 +96,22 @@ describe("ConnectionGate", () => {
     expect(bootstrap).toHaveBeenCalledTimes(1);
   });
 });
+
+function runtimeCapabilities() {
+  return {
+    protocol_version: "runtime_capabilities.v1",
+    run_control_enabled: true, run_creation_enabled: true, session_message_enabled: true,
+    session_steering_control_enabled: true, run_lifecycle_enabled: true,
+    run_execution_enabled: true, plan_delivery_control_enabled: true,
+    approval_control_enabled: true, model_control_enabled: true,
+    provider_credential_enabled: true, file_edit_review_enabled: true,
+    file_edit_proposal_enabled: true, file_edit_apply_enabled: true,
+    run_wake_control_enabled: true, run_wake_execution_enabled: true,
+    run_wake_worker_enabled: false, skill_installation_enabled: true,
+    evidence_attachment_enabled: true, process_execution_enabled: false,
+    shell_execution_enabled: false, docker_execution_enabled: false,
+    wake_worker: { protocol_version: "run_wake_worker_health.v1", enabled: false,
+      state: "disabled", active: false, poll_interval_ms: 0, concurrency: 1,
+      max_steps: 1, runtime_enable_supported: false, persistent_service: false },
+  };
+}

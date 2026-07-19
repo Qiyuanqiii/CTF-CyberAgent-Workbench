@@ -1,4 +1,4 @@
-import { CyberAgentClient } from "./client";
+import { CyberAgentClient, clientCapabilitiesFromRuntime } from "./client";
 import type { RunEventStreamView, RunLifecycleControlView } from "./types";
 
 const healthEnvelope = {
@@ -101,6 +101,35 @@ describe("CyberAgentClient", () => {
       .toThrow("current browser origin");
     expect(() => new CyberAgentClient("read-secret", "/api/v10"))
       .toThrow("must be /api/v1");
+  });
+
+  it("discovers bounded process capabilities without runtime enable authority", async () => {
+    const data = {
+      protocol_version: "runtime_capabilities.v1",
+      run_control_enabled: true, run_creation_enabled: true,
+      session_message_enabled: true, session_steering_control_enabled: true,
+      run_lifecycle_enabled: true, run_execution_enabled: true,
+      plan_delivery_control_enabled: true, approval_control_enabled: true,
+      model_control_enabled: true, provider_credential_enabled: true,
+      file_edit_review_enabled: true, file_edit_proposal_enabled: true,
+      file_edit_apply_enabled: true, run_wake_control_enabled: true,
+      run_wake_execution_enabled: true, run_wake_worker_enabled: true,
+      skill_installation_enabled: true, evidence_attachment_enabled: true,
+      process_execution_enabled: false, shell_execution_enabled: false,
+      docker_execution_enabled: false,
+      wake_worker: { protocol_version: "run_wake_worker_health.v1", enabled: true,
+        state: "running", active: false, poll_interval_ms: 2000, concurrency: 1,
+        max_steps: 1, runtime_enable_supported: false, persistent_service: false },
+    } as const;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-capabilities", data,
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const view = await new CyberAgentClient("read-secret").runtimeCapabilities();
+    expect(view).toEqual(data);
+    expect(clientCapabilitiesFromRuntime(view)).toMatchObject({
+      fileEditProposalEnabled: true, providerCredentialEnabled: true,
+      runWakeWorkerEnabled: true,
+    });
   });
 
   it("rejects paths that escape the API base", async () => {
@@ -498,7 +527,7 @@ describe("CyberAgentClient", () => {
 
   it("validates redacted model availability without probing through the client", async () => {
     const data = {
-      protocol_version: "model_availability.v1",
+      protocol_version: "model_availability.v1", generation: 1,
       providers: [{ name: "mock", kind: "local", status: "available", models: ["mock-code"],
         credential_source: "none", network_required: false, configuration_error: false }],
       routes: [{ name: "code", provider: "mock", model: "mock-code", available: true }],
@@ -1056,6 +1085,7 @@ describe("CyberAgentClient", () => {
       protocol_version: "provider_credential.v1", provider, configured: false,
       store_kind: "windows_credential_manager", store_available: true,
       plaintext_returned: false, restart_required: false,
+      registry_reloaded: false, registry_generation: 1,
     }));
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ version: "api.v1",
@@ -1064,7 +1094,7 @@ describe("CyberAgentClient", () => {
         } }), { status: 200, headers: { "Content-Type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ version: "api.v1",
         request_id: "req-credential-set", data: { ...items[2], configured: true,
-          restart_required: true } }), { status: 202,
+          registry_reloaded: true, registry_generation: 2 } }), { status: 202,
         headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret",
@@ -1074,7 +1104,8 @@ describe("CyberAgentClient", () => {
     await expect(client.changeProviderCredential("mimo", {
       version: "provider_credential.v1", action: "set", secret, confirm: true,
     })).resolves.toMatchObject({ provider: "mimo", configured: true,
-      plaintext_returned: false });
+      plaintext_returned: false, restart_required: false, registry_reloaded: true,
+      registry_generation: 2 });
     const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
     expect(url).toBe("/api/v1/models/credentials/mimo");
     expect(url).not.toContain(secret);
@@ -1088,6 +1119,7 @@ describe("CyberAgentClient", () => {
       workspace_id: "workspace-1", path: "README.md", content: "before\n",
       content_sha256: "a".repeat(64), source_handle: "B".repeat(43),
       expires_at: "2099-07-18T00:05:00Z", editable: true, file_write: false };
+    const reissued = { ...source, source_handle: "C".repeat(43) };
     const edit = { id: "edit-1", session_id: "session-1", workspace_id: "workspace-1",
       path: "README.md", status: "proposed", diff: "--- a/README.md\n+++ b/README.md\n",
       original_hash: "a".repeat(64), proposed_hash: "b".repeat(64),
@@ -1099,6 +1131,18 @@ describe("CyberAgentClient", () => {
         request_id: "req-source", data: source }), { status: 200,
         headers: { "Content-Type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ version: "api.v1",
+        request_id: "req-reissue", data: reissued }), { status: 200,
+        headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "api.v1",
+        request_id: "req-recovery", data: {
+          protocol_version: "file_edit_proposal_recovery.v1", run_id: "run-1",
+          workspace_id: "workspace-1", edit_id: "edit-1", path: "README.md",
+          original_content: "before\n", proposed_content: "after\n",
+          original_sha256: "a".repeat(64), proposed_sha256: "b".repeat(64),
+          current_content_sha256: "a".repeat(64), status: "proposed", stale: false,
+          review_required: true, editable: false, file_write: false,
+        } }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "api.v1",
         request_id: "req-proposal", data: { protocol_version: "file_edit_proposal.v1",
           run_id: "run-1", edit, replayed: false, approval_required: true,
           file_written: false } }), { status: 202,
@@ -1108,16 +1152,36 @@ describe("CyberAgentClient", () => {
       { fileEditProposalEnabled: true });
     await expect(client.issueFileEditProposalSource("run-1", "README.md"))
       .resolves.toEqual(source);
+    await expect(client.reissueFileEditProposalSource("run-1", "README.md",
+      source.content_sha256)).resolves.toEqual(reissued);
+    await expect(client.recoverFileEditProposal("run-1", "edit-1"))
+      .resolves.toMatchObject({ edit_id: "edit-1", stale: false, editable: false });
     await expect(client.createFileEditProposal("run-1", {
-      version: "file_edit_proposal.v1", source_handle: source.source_handle,
+      version: "file_edit_proposal.v1", source_handle: reissued.source_handle,
       proposed_text: "after\n",
     })).resolves.toMatchObject({ approval_required: true, file_written: false,
       edit: { status: "proposed" } });
-    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[3] as [string, RequestInit];
     expect(url).toBe("/api/v1/runs/run-1/file-edit-proposals");
     expect(JSON.parse(String(init.body))).toEqual({ version: "file_edit_proposal.v1",
-      source_handle: source.source_handle, proposed_text: "after\n" });
+      source_handle: reissued.source_handle, proposed_text: "after\n" });
     expect(String(init.body)).not.toContain("README.md");
+  });
+
+  it("accepts a read-only recovery for a still-missing proposed file", async () => {
+    const recovery = { protocol_version: "file_edit_proposal_recovery.v1", run_id: "run-1",
+      workspace_id: "workspace-1", edit_id: "edit-new", path: "outputs/new.txt",
+      original_content: "", proposed_content: "new file\n", original_sha256: "missing",
+      proposed_sha256: "b".repeat(64), current_content_sha256: "missing",
+      status: "proposed", stale: false, review_required: true, editable: false,
+      file_write: false };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-new-file-recovery", data: recovery,
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret",
+      { fileEditProposalEnabled: true });
+    await expect(client.recoverFileEditProposal("run-1", "edit-new"))
+      .resolves.toEqual(recovery);
   });
 });
 

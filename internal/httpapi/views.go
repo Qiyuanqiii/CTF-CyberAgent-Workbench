@@ -46,6 +46,7 @@ type ModelRouteAvailabilityView struct {
 
 type ModelAvailabilityView struct {
 	ProtocolVersion string                       `json:"protocol_version"`
+	Generation      uint64                       `json:"generation"`
 	Providers       []ProviderAvailabilityView   `json:"providers"`
 	Routes          []ModelRouteAvailabilityView `json:"routes"`
 }

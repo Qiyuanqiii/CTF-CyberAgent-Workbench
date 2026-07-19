@@ -106,7 +106,7 @@ func TestRegistryBuildsRedactedEnvironmentAvailabilityAndRoutes(t *testing.T) {
 func TestRegistryBootstrapsSystemCredentialWithoutProjectingIt(t *testing.T) {
 	secret := "system-provider-key-0123456789"
 	registry, err := newRegistry(func(string) (string, bool) { return "", false },
-		func(provider string) (string, bool, error) {
+		func(_ context.Context, provider string) (string, bool, error) {
 			if provider == "mimo" {
 				return secret, true, nil
 			}
@@ -131,7 +131,7 @@ func TestRegistryBootstrapsSystemCredentialWithoutProjectingIt(t *testing.T) {
 
 func TestRegistryContainsSystemCredentialReadFailureToOneProvider(t *testing.T) {
 	registry, err := newRegistry(func(string) (string, bool) { return "", false },
-		func(provider string) (string, bool, error) {
+		func(_ context.Context, provider string) (string, bool, error) {
 			if provider == "mimo" {
 				return "", false, errors.New("credential store unavailable")
 			}
@@ -150,6 +150,108 @@ func TestRegistryContainsSystemCredentialReadFailureToOneProvider(t *testing.T) 
 	}
 	if !contains(registry.Router().ProviderNames(), "mock") {
 		t.Fatal("system credential failure disabled the local Provider")
+	}
+}
+
+func TestRegistryReloadAtomicallyAdvancesGenerationAndContainsProviders(t *testing.T) {
+	var mu sync.RWMutex
+	credentials := map[string]string{}
+	registry, err := newRegistry(func(string) (string, bool) { return "", false },
+		func(ctx context.Context, provider string) (string, bool, error) {
+			if err := ctx.Err(); err != nil {
+				return "", false, err
+			}
+			mu.RLock()
+			value, found := credentials[provider]
+			mu.RUnlock()
+			return value, found, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registry.Generation() != 1 || registry.Snapshot().Generation != 1 {
+		t.Fatalf("initial registry generation=%d", registry.Generation())
+	}
+	mu.Lock()
+	credentials["mimo"] = "reload-provider-key-0123456789"
+	mu.Unlock()
+	result, err := registry.Reload(t.Context(), routeSettings{
+		"route.code": "mimo/" + DefaultMimoModel,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := registry.Snapshot()
+	if result.ProtocolVersion != ReloadProtocolVersion || !result.Reloaded ||
+		result.Generation != 2 || snapshot.Generation != 2 ||
+		registry.Router().Resolve("code").Provider != "mimo" ||
+		!contains(registry.Router().ProviderNames(), "mock") ||
+		!contains(registry.Router().ProviderNames(), "mimo") {
+		t.Fatalf("registry reload did not install one generation: result=%#v snapshot=%#v",
+			result, snapshot)
+	}
+	mu.Lock()
+	delete(credentials, "mimo")
+	mu.Unlock()
+	result, err = registry.Reload(t.Context(), routeSettings{
+		"route.code": "mimo/" + DefaultMimoModel,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot = registry.Snapshot()
+	if result.Generation != 3 || snapshot.Generation != 3 ||
+		contains(registry.Router().ProviderNames(), "mimo") ||
+		!contains(registry.Router().ProviderNames(), "mock") {
+		t.Fatalf("registry removal widened or disabled unrelated Providers: %#v", snapshot)
+	}
+	for _, route := range snapshot.Routes {
+		if route.Name == "code" && route.Available {
+			t.Fatalf("route remained available after its Provider was removed: %#v", route)
+		}
+	}
+}
+
+func TestRegistryReloadFailureLeavesCurrentGenerationUntouched(t *testing.T) {
+	registry := New(nil)
+	before := registry.Snapshot()
+	if _, err := registry.Reload(t.Context(), failingRouteSettings{}); err == nil {
+		t.Fatal("failed route reload was reported as success")
+	}
+	after := registry.Snapshot()
+	if after.Generation != before.Generation ||
+		registry.Router().Resolve("code") != (llm.ModelRef{Provider: "mock", Model: "mock-code"}) ||
+		len(after.Providers) != len(before.Providers) {
+		t.Fatalf("failed reload changed the active generation: before=%#v after=%#v",
+			before, after)
+	}
+}
+
+func TestRegistryReloadCredentialReadFailureKeepsCurrentGeneration(t *testing.T) {
+	fail := false
+	registry, err := newRegistry(func(string) (string, bool) { return "", false },
+		func(_ context.Context, provider string) (string, bool, error) {
+			if fail && provider == "mimo" {
+				return "", false, errors.New("credential manager unavailable")
+			}
+			if provider == "mimo" {
+				return "credential-key-0123456789", true, nil
+			}
+			return "", false, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := registry.Snapshot()
+	fail = true
+	if _, err := registry.Reload(t.Context(), routeSettings{}); err == nil {
+		t.Fatal("credential read failure was installed as a new generation")
+	}
+	after := registry.Snapshot()
+	if after.Generation != before.Generation ||
+		!contains(registry.Router().ProviderNames(), "mimo") {
+		t.Fatalf("credential read failure replaced active generation: before=%#v after=%#v",
+			before, after)
 	}
 }
 

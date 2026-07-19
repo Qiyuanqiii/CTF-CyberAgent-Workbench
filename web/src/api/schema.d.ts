@@ -44,6 +44,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect process-local runtime capabilities
+         * @description Returns bounded enablement metadata and Run wake worker health without bearer tokens, owner or lease identities, private errors, runtime enable controls, or persistent-service authority.
+         */
+        get: operations["getRuntimeCapabilities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -115,7 +135,7 @@ export interface paths {
         put?: never;
         /**
          * Set or delete an OS-owned Provider credential
-         * @description Accepts one transient secret for direct storage in the OS credential manager, or deletes one exact Provider credential. Plaintext is never returned, persisted in SQLite, logged, or placed in an event.
+         * @description Accepts one transient secret for direct storage in the OS credential manager, or deletes one exact Provider credential, then atomically reloads a Go-owned Provider Registry generation. Active calls retain their captured Provider and plaintext is never returned, persisted in SQLite, logged, or placed in an event.
          */
         post: operations["changeProviderCredential"];
         delete?: never;
@@ -564,6 +584,26 @@ export interface paths {
          * @description Returns bounded plan metadata and the latest shard execution summary without file manifests or model report JSON.
          */
         get: operations["listRunFanoutPlans"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/file-edit-proposal-recovery/{edit_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Recover one durable pending FileEdit proposal
+         * @description Returns integrity-checked original and proposed bodies for one exact pending Run-bound proposal, plus a stale-file flag. It issues no source handle and cannot mutate, approve, or apply the proposal.
+         */
+        get: operations["recoverFileEditProposal"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1577,6 +1617,25 @@ export interface components {
             updated_at: string;
             workspace_id: string;
         };
+        FileEditProposalRecoveryView: {
+            current_content_sha256: string;
+            edit_id: string;
+            editable: boolean;
+            file_write: boolean;
+            original_content: string;
+            original_sha256: string;
+            path: string;
+            proposed_content: string;
+            proposed_sha256: string;
+            /** @enum {string} */
+            protocol_version: "file_edit_proposal_recovery.v1";
+            review_required: boolean;
+            run_id: string;
+            stale: boolean;
+            /** @enum {string} */
+            status: "proposed";
+            workspace_id: string;
+        };
         FileEditProposalRequestView: {
             proposed_text: string;
             source_handle: string;
@@ -1772,6 +1831,8 @@ export interface components {
             workspace_id?: string;
         };
         ModelAvailabilityView: {
+            /** Format: int64 */
+            generation: number;
             /** @enum {string} */
             protocol_version: "model_availability.v1";
             providers: components["schemas"]["ProviderAvailabilityView"][];
@@ -2053,6 +2114,9 @@ export interface components {
             /** @enum {string} */
             protocol_version: "provider_credential.v1";
             provider: string;
+            /** Format: int64 */
+            registry_generation: number;
+            registry_reloaded: boolean;
             restart_required: boolean;
             store_available: boolean;
             store_kind: string;
@@ -2378,6 +2442,48 @@ export interface components {
             /** @enum {string} */
             protocol_version: "run_wake_intent.v1";
             run_id: string;
+        };
+        RunWakeWorkerHealthView: {
+            active: boolean;
+            /** Format: int32 */
+            concurrency: number;
+            enabled: boolean;
+            /** Format: int32 */
+            max_steps: number;
+            persistent_service: boolean;
+            /** Format: int64 */
+            poll_interval_ms: number;
+            /** @enum {string} */
+            protocol_version: "run_wake_worker_health.v1";
+            runtime_enable_supported: boolean;
+            /** @enum {string} */
+            state: "disabled" | "ready" | "running" | "draining" | "stopped";
+        };
+        RuntimeCapabilitiesView: {
+            approval_control_enabled: boolean;
+            docker_execution_enabled: boolean;
+            evidence_attachment_enabled: boolean;
+            file_edit_apply_enabled: boolean;
+            file_edit_proposal_enabled: boolean;
+            file_edit_review_enabled: boolean;
+            model_control_enabled: boolean;
+            plan_delivery_control_enabled: boolean;
+            process_execution_enabled: boolean;
+            /** @enum {string} */
+            protocol_version: "runtime_capabilities.v1";
+            provider_credential_enabled: boolean;
+            run_control_enabled: boolean;
+            run_creation_enabled: boolean;
+            run_execution_enabled: boolean;
+            run_lifecycle_enabled: boolean;
+            run_wake_control_enabled: boolean;
+            run_wake_execution_enabled: boolean;
+            run_wake_worker_enabled: boolean;
+            session_message_enabled: boolean;
+            session_steering_control_enabled: boolean;
+            shell_execution_enabled: boolean;
+            skill_installation_enabled: boolean;
+            wake_worker: components["schemas"]["RunWakeWorkerHealthView"];
         };
         ScopeView: {
             allowed_targets?: string[];
@@ -2804,6 +2910,37 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getRuntimeCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RuntimeCapabilitiesView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             414: components["responses"]["RequestTooLarge"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];
@@ -3906,11 +4043,50 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    recoverFileEditProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+                /** @description File edit identity */
+                edit_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FileEditProposalRecoveryView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     issueFileEditProposalSource: {
         parameters: {
             query: {
                 /** @description Canonical Go-projected Workspace-relative file path */
                 path: string;
+                /** @description Optional previously issued SHA-256 required when rotating an expired source handle */
+                expected_sha256?: string;
             };
             header?: never;
             path: {

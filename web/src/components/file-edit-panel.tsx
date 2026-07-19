@@ -1,15 +1,17 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, FileCheck2, FileDiff, LoaderCircle, X } from "lucide-react";
+import { Check, FileCheck2, FileDiff, History, LoaderCircle, X } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import type { FileEditReviewRequestView, OperationReceiptView } from "../api/types";
 import { formatDate, shortID } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
 import { OperationReceipt } from "./operation-receipt";
+import { FileProposalRecovery } from "./file-proposal-recovery";
 
 export function FileEditPanel({ client, runID }: { client: CyberAgentClient; runID: string }) {
   const queryClient = useQueryClient();
   const [receipts, setReceipts] = useState<Record<string, OperationReceiptView>>({});
+  const [recoveryEditID, setRecoveryEditID] = useState("");
   const applyKeys = useRef(new Map<string, string>());
   const query = useQuery({
     queryKey: ["run", runID, "file-edits"],
@@ -67,6 +69,13 @@ export function FileEditPanel({ client, runID }: { client: CyberAgentClient; run
             <footer>
               <time dateTime={edit.updated_at}>{formatDate(edit.updated_at)}</time>
               <span>Apply authority: {edit.apply_enabled ? "ready" : "disabled"}</span>
+              {client.hasFileEditProposals && edit.status === "proposed" &&
+                <button aria-label={`Recover ${edit.path}`} className="icon-button"
+                  disabled={review.isPending || apply.isPending}
+                  onClick={() => setRecoveryEditID(edit.id)}
+                  title="Recover durable pending proposal" type="button">
+                  <History aria-hidden="true" size={15} />
+                </button>}
               {client.hasFileEditApply && query.data.apply_enabled && edit.apply_enabled &&
                 <button aria-label={`Apply ${edit.path}`} className="icon-button"
                   disabled={apply.isPending || review.isPending}
@@ -100,6 +109,8 @@ export function FileEditPanel({ client, runID }: { client: CyberAgentClient; run
         </details>;
       })}
     </div>
+    {recoveryEditID && <FileProposalRecovery client={client} editID={recoveryEditID}
+      onClose={() => setRecoveryEditID("")} runID={runID} />}
     {(review.isError || apply.isError) && <div className="inline-warning" role="alert">
       {operationError instanceof Error ? operationError.message : "File edit operation failed"}
     </div>}

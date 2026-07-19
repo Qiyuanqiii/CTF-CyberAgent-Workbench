@@ -234,6 +234,10 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 		{Path: "/api/v1/health", OperationID: "getHealth", Summary: "Inspect local API health",
 			Description: "Reads the current SQLite schema version without mutating state.", Tag: "System",
 			DataType: reflect.TypeOf(HealthView{})},
+		{Path: "/api/v1/capabilities", OperationID: "getRuntimeCapabilities",
+			Summary: "Inspect process-local runtime capabilities", Tag: "System",
+			Description: "Returns bounded enablement metadata and Run wake worker health without bearer tokens, owner or lease identities, private errors, runtime enable controls, or persistent-service authority.",
+			DataType:    reflect.TypeOf(RuntimeCapabilitiesView{})},
 		{Path: "/api/v1/models", OperationID: "getModelAvailability",
 			Summary: "Inspect redacted model availability", Tag: "Models",
 			Description: "Returns deterministic Provider registration and route metadata without API keys, base URLs, environment variable names, network probes, or model calls.",
@@ -258,7 +262,7 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 		{Path: ProviderCredentialPathTemplate, Method: http.MethodPost,
 			OperationID: "changeProviderCredential", Summary: "Set or delete an OS-owned Provider credential",
 			Tag:         "Control",
-			Description: "Accepts one transient secret for direct storage in the OS credential manager, or deletes one exact Provider credential. Plaintext is never returned, persisted in SQLite, logged, or placed in an event.",
+			Description: "Accepts one transient secret for direct storage in the OS credential manager, or deletes one exact Provider credential, then atomically reloads a Go-owned Provider Registry generation. Active calls retain their captured Provider and plaintext is never returned, persisted in SQLite, logged, or placed in an event.",
 			DataType:    reflect.TypeOf(ProviderCredentialStatusView{}),
 			RequestType: reflect.TypeOf(ProviderCredentialRequestView{}), Control: true,
 			Parameters: []openAPIParameter{providerName}},
@@ -498,7 +502,15 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 			Parameters: []openAPIParameter{runID,
 				{Name: "path", In: "query", Description: "Canonical Go-projected Workspace-relative file path",
 					Required: true, Schema: map[string]any{"type": "string", "minLength": 1,
-						"maxLength": workspace.MaxExplorerPathRunes}}}},
+						"maxLength": workspace.MaxExplorerPathRunes}},
+				{Name: "expected_sha256", In: "query", Description: "Optional previously issued SHA-256 required when rotating an expired source handle",
+					Schema: map[string]any{"type": "string", "pattern": `^[0-9a-f]{64}$`}}}},
+		{Path: FileEditProposalRecoveryPathTemplate,
+			OperationID: "recoverFileEditProposal", Summary: "Recover one durable pending FileEdit proposal",
+			Tag:         "Runs",
+			Description: "Returns integrity-checked original and proposed bodies for one exact pending Run-bound proposal, plus a stale-file flag. It issues no source handle and cannot mutate, approve, or apply the proposal.",
+			DataType:    reflect.TypeOf(FileEditProposalRecoveryView{}), NotFound: true,
+			Parameters: []openAPIParameter{runID, editID}},
 		{Path: FileEditProposalPathTemplate, Method: http.MethodPost,
 			OperationID: "createFileEditProposal", Summary: "Create a pending FileEdit from a Go-issued source",
 			Tag:         "Control",
@@ -1000,6 +1012,31 @@ func applyOpenAPIFieldMetadata(typeName string, fieldName string, schema map[str
 		schema["maxLength"] = 43
 		schema["pattern"] = "^[A-Za-z0-9_-]{43}$"
 	}
+	if typeName == "FileEditProposalRecoveryView" &&
+		(fieldName == "original_content" || fieldName == "proposed_content") {
+		schema["maxLength"] = fileedit.MaxContentBytes
+	}
+	if typeName == "FileEditProposalRecoveryView" &&
+		(fieldName == "original_sha256" || fieldName == "proposed_sha256") {
+		schema["pattern"] = "^[0-9a-f]{64}$"
+	}
+	if typeName == "FileEditProposalRecoveryView" && fieldName == "original_sha256" {
+		schema["pattern"] = "^([0-9a-f]{64}|missing)$"
+	}
+	if typeName == "FileEditProposalRecoveryView" && fieldName == "current_content_sha256" {
+		schema["pattern"] = "^([0-9a-f]{64}|missing)$"
+	}
+	if typeName == "ModelAvailabilityView" && fieldName == "generation" {
+		schema["minimum"] = 1
+	}
+	if typeName == "RunWakeWorkerHealthView" && fieldName == "concurrency" {
+		schema["minimum"] = application.RunWakeWorkerConcurrency
+		schema["maximum"] = application.RunWakeWorkerConcurrency
+	}
+	if typeName == "RunWakeWorkerHealthView" && fieldName == "max_steps" {
+		schema["minimum"] = application.RunWakeWorkerMaxSteps
+		schema["maximum"] = application.RunWakeWorkerMaxSteps
+	}
 }
 
 var openAPIFieldEnums = map[string][]string{
@@ -1007,6 +1044,9 @@ var openAPIFieldEnums = map[string][]string{
 	"IndexView.api_version":                             {Version},
 	"HealthView.status":                                 {"ok"},
 	"HealthView.api_version":                            {Version},
+	"RuntimeCapabilitiesView.protocol_version":          {RuntimeCapabilitiesProtocolVersion},
+	"RunWakeWorkerHealthView.protocol_version":          {application.RunWakeWorkerHealthProtocolVersion},
+	"RunWakeWorkerHealthView.state":                     {"disabled", string(application.RunWakeWorkerReady), string(application.RunWakeWorkerRunning), string(application.RunWakeWorkerDraining), string(application.RunWakeWorkerStopped)},
 	"ModelAvailabilityView.protocol_version":            {modelregistry.ProtocolVersion},
 	"ProviderDiagnosticRequestView.version":             {modelregistry.DiagnosticProtocolVersion},
 	"ProviderDiagnosticView.protocol_version":           {modelregistry.DiagnosticProtocolVersion},
@@ -1020,6 +1060,8 @@ var openAPIFieldEnums = map[string][]string{
 	"FileEditProposalSourceView.protocol_version":       {application.FileEditProposalProtocolVersion},
 	"FileEditProposalRequestView.version":               {application.FileEditProposalProtocolVersion},
 	"FileEditProposalView.protocol_version":             {application.FileEditProposalProtocolVersion},
+	"FileEditProposalRecoveryView.protocol_version":     {application.FileEditRecoveryProtocolVersion},
+	"FileEditProposalRecoveryView.status":               {fileedit.StatusProposed},
 	"FileEditQueueView.protocol_version":                {application.FileEditReviewProtocolVersion},
 	"FileEditReviewRequestView.version":                 {application.FileEditReviewProtocolVersion},
 	"FileEditReviewRequestView.action":                  {string(application.FileEditApproveIntent), string(application.FileEditDeny)},

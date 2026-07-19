@@ -9,10 +9,10 @@
 从 schema v49 起采用“双指标”，不再使用容易混淆的单一“整体产品愿景”百分比：
 
 - 架构完成度：约 99%；其中 V2 Run-centric 控制平面约 99%。该指标衡量 Go 主控、持久化状态机和模块边界的覆盖程度。
-- 产品可用度：完整 Code + Cyber 产品约 84-87%；其中通用 Coding Agent 工作流约 82%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
+- 产品可用度：完整 Code + Cyber 产品约 87-90%；其中通用 Coding Agent 工作流约 84%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
 - 上述数值是依据已测试任务切片给出的工程估算，不是性能基准，也不代表仍被安全关闭的功能已经可用。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、主动取消、有界工具循环和跨进程 execution lease。P3-P5 已落地 Work/Note/Context、最多两个核心 child、独立 1/2/4/6 只读 Fan-out、Tool Gateway、审批/Grant、预算、ScriptProcess 与 Artifact。P9 已推进到 schema v77 / D1-I1/M3/J1：除既有 Run/Session/Plan/审批/Workspace/证据/回执/行动中心外，现有 API/Desktop 还支持 Go-issued 本地 Monaco FileEdit 提案、Windows Credential Manager Provider 设置，以及默认关闭、单并发、单步的 wake worker。真实 Local/Docker/Shell 进程、安装脚本/钩子和远程 Skill 分发继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、主动取消、有界工具循环和跨进程 execution lease。P3-P5 已落地 Work/Note/Context、最多两个核心 child、独立 1/2/4/6 只读 Fan-out、Tool Gateway、审批/Grant、预算、ScriptProcess 与 Artifact。P9 已推进到 schema v77 / D1-I2/M4/J2：除既有 Run/Session/Plan/审批/Workspace/证据/回执/行动中心外，现有 API/Desktop 还支持安全恢复的 Go-issued Monaco FileEdit、Windows Credential Manager Provider generation reload，以及默认关闭、单并发、单步、可观测 health/drain 的 wake worker；普通浏览器也能读取同一 Go capability。真实 Local/Docker/Shell 进程、安装脚本/钩子和远程 Skill 分发继续关闭。
 
 P8 已推进到 schema v37 及其只读 CI 投影：v35 把完成的 Fan-out execution 投影为通用 `draft` Finding、不可变 `model_assertion` Evidence 和可重建的 Markdown/JSON Report；v36 增加同 Run 冻结 Artifact Evidence、一次性 operator `validated/rejected` 决定与完整复核；v37 以独立不可变事实完成 `validated -> accepted -> fixed`，并强制修复 Evidence 来自接受后新建且未用于验证的同 Run Artifact。验证、接受和修复始终分离；SARIF、通用 CI gate 与 GitHub Actions annotations 均为同一持久化事实上的 Go 只读投影。
 
@@ -946,10 +946,40 @@ GitHub Actions run `29671519260` 已通过实现提交 `ee36405`：TypeScript 42
 
 双指标更新为架构完成度约 99%（V2 约 99%）、完整产品可用度约 84-87%、通用 Coding Agent 约 82%、Cyber 自动化约 20%。下一批固定为 D1-I2 安全编辑恢复、D1-M4 Provider Registry generation reload、D1-J2 metadata-only browser capability + worker health/drain；它会补齐普通 `api serve` 保守隐藏新控件的低风险 discovery 缺口。该批结束累计六片，执行全仓 ordinary/race/vet/staticcheck/govulncheck/依赖/隐私完整门。Windows 10 人工矩阵、签名/安装包、Rust analyzer、xterm 与 CTF 自动化继续独立后置。
 
+非 schema D1-I2/D1-M4/D1-J2 三切片批次已完成，任务 ID 为
+`P9-Safe-Editor-Recovery-Provider-Generation-Worker-Health-D1IMJ2`，SQLite schema
+保持 v77。D1-I2 增加 hash-bound source handle 换发和
+`file_edit_proposal_recovery.v1`：旧 SHA-256 不匹配时拒绝换发，持久化 pending
+proposal 只恢复为无句柄、不可编辑、需要独立 review 的 Diff，stale/missing 不会
+自动 rebase。D1-M4 增加完整候选 Provider Registry generation 构建和原子切换；
+route 或 credential 读取失败保留旧 generation，活跃调用继续使用已捕获 Provider，
+成功无需重启且任何响应不返回明文。D1-J2 增加只读 `runtime_capabilities.v1` 与
+`run_wake_worker_health.v1`；普通浏览器/Desktop 共用精确 Go capability，worker
+固定 1 x 1，只显示 `disabled|ready|running|draining|stopped`，不能运行时启用或安装服务。
+
+累计六切片完整健壮性门全绿：最终 uncached 全仓 ordinary/race 322.9/352.8 秒；
+`go vet`、零告警 staticcheck、零可达漏洞 govulncheck、module verify/tidy、secure
+Desktop tags、29 个文件 108 项 React 测试、strict TypeScript、确定性
+OpenAPI/TypeScript、Vite production build、npm 零漏洞和 Windows 可复现双构建均通过。
+OpenAPI 为 57 个 path、61 个 operation、125 个 schema；未签名 GUI SHA-256 为
+`30a3d9d19e02f32f8ea976fc071bc6942ed06fba3e7cad937310a78e46e74dfc`，自动检查通过
+但 `release_ready=false`。真实浏览器桌面/移动冒烟无横向溢出或 console 错误。
+
+组合审计修复 route 与 Provider 混合 generation、候选凭证读取失败误替换当前 Registry、
+并发 reload 误报与列表 generation 不一致、worker 无 control token 构造、并发
+`RunOnce`、nil context、missing-file proposal 恢复和恢复对话框失败态。当前无已知未
+解决高/中风险；未使用真实 API key、Provider 请求、Shell、LocalRunner、Docker、
+攻击流量或外部网络。双指标更新为架构完成度约 99%（V2 约 99%）、完整产品可用度
+约 87-90%、通用 Coding Agent 约 84%、Cyber 自动化约 20%，边界见 ADR 0046。
+
+下一批建议为 D1-G1 Go-owned 只读 repository-state projection、D1-I3 bounded
+multi-file change-set review 与 D1-F1 Code-mode 端到端旅程。Windows 10 人工矩阵、
+签名/安装包、真实进程、Rust analyzer、xterm 与 CTF 自动化继续独立后置。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0045-go-issued-editor-system-credentials-bounded-wake-worker.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0046-safe-editor-recovery-provider-generation-worker-health.md`。

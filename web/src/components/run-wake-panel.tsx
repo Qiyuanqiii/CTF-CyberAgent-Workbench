@@ -27,6 +27,12 @@ export function RunWakePanel({ client, detail }: {
     queryFn: ({ signal }) => client.runWakeState(runID, signal),
     enabled: client.hasRunWakeControl || client.hasRunWakeExecution,
   });
+  const runtime = useQuery({
+    queryKey: ["runtime-capabilities"],
+    queryFn: ({ signal }) => client.runtimeCapabilities(signal),
+    enabled: client.hasRunWakeWorker,
+    refetchInterval: 2_000,
+  });
   const schedule = useMutation({
     mutationFn: () => client.scheduleRunWake(runID, {
       version: "run_wake_control.v1", max_attempts: 3, initial_delay_seconds: 0,
@@ -86,21 +92,25 @@ export function RunWakePanel({ client, detail }: {
   const canConsume = Boolean(due) && detail.run.status === "running" &&
     !detail.execution_lease?.active && !schedule.isPending && !cancel.isPending &&
     !consume.isPending && client.hasRunWakeExecution;
-  const error = consume.error ?? schedule.error ?? cancel.error;
+  const error = runtime.error ?? consume.error ?? schedule.error ?? cancel.error;
+  const worker = runtime.data?.wake_worker;
   return <section className="detail-section run-wake-section">
     <div className="section-heading">
       <h2><BellRing aria-hidden="true" size={15} />Wake intent</h2>
       <StatusBadge status={intent?.status ?? "idle"} />
     </div>
-    {intent && <dl className="detail-grid compact">
-      <KeyValue label="Intent" value={shortID(intent.id)} />
-      <KeyValue label="Attempts" value={`${formatNumber(intent.attempt_count)} / ${formatNumber(intent.max_attempts)}`} />
-      <KeyValue label="Next wake" value={formatDate(intent.next_wake_at)} />
-      <KeyValue label="Deadline" value={formatDate(intent.deadline_at)} />
+    <dl className="detail-grid compact">
+      {intent && <>
+        <KeyValue label="Intent" value={shortID(intent.id)} />
+        <KeyValue label="Attempts" value={`${formatNumber(intent.attempt_count)} / ${formatNumber(intent.max_attempts)}`} />
+        <KeyValue label="Next wake" value={formatDate(intent.next_wake_at)} />
+        <KeyValue label="Deadline" value={formatDate(intent.deadline_at)} />
+      </>}
       <KeyValue label="Execution" value={client.hasRunWakeWorker ? "bounded worker (1 x 1 step)" :
         client.hasRunWakeExecution ? "foreground" : "disabled"} />
-      <KeyValue label="Background loop" value="disabled" />
-    </dl>}
+      <KeyValue label="Worker" value={worker?.enabled ?
+        `${worker.state}${worker.active ? " / active" : ""}` : "disabled"} />
+    </dl>
     <div className="run-control-row">
       <button className="command-button" disabled={!canSchedule}
         onClick={() => schedule.mutate()} type="button">

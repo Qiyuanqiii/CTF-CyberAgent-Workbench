@@ -207,6 +207,67 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/capabilities": {
+      "get": {
+        "operationId": "getRuntimeCapabilities",
+        "summary": "Inspect process-local runtime capabilities",
+        "description": "Returns bounded enablement metadata and Run wake worker health without bearer tokens, owner or lease identities, private errors, runtime enable controls, or persistent-service authority.",
+        "tags": [
+          "System"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RuntimeCapabilitiesView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
     "/api/v1/health": {
       "get": {
         "operationId": "getHealth",
@@ -394,7 +455,7 @@
       "post": {
         "operationId": "changeProviderCredential",
         "summary": "Set or delete an OS-owned Provider credential",
-        "description": "Accepts one transient secret for direct storage in the OS credential manager, or deletes one exact Provider credential. Plaintext is never returned, persisted in SQLite, logged, or placed in an event.",
+        "description": "Accepts one transient secret for direct storage in the OS credential manager, or deletes one exact Provider credential, then atomically reloads a Go-owned Provider Registry generation. Active calls retain their captured Provider and plaintext is never returned, persisted in SQLite, logged, or placed in an event.",
         "tags": [
           "Control"
         ],
@@ -2848,6 +2909,96 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/runs/{run_id}/file-edit-proposal-recovery/{edit_id}": {
+      "get": {
+        "operationId": "recoverFileEditProposal",
+        "summary": "Recover one durable pending FileEdit proposal",
+        "description": "Returns integrity-checked original and proposed bodies for one exact pending Run-bound proposal, plus a stale-file flag. It issues no source handle and cannot mutate, approve, or apply the proposal.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "edit_id",
+            "in": "path",
+            "description": "File edit identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FileEditProposalRecoveryView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
     "/api/v1/runs/{run_id}/file-edit-proposal-source": {
       "get": {
         "operationId": "issueFileEditProposalSource",
@@ -2877,6 +3028,15 @@
             "schema": {
               "maxLength": 512,
               "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "name": "expected_sha256",
+            "in": "query",
+            "description": "Optional previously issued SHA-256 required when rotating an expired source handle",
+            "schema": {
+              "pattern": "^[0-9a-f]{64}$",
               "type": "string"
             }
           }
@@ -7654,6 +7814,91 @@
         ],
         "type": "object"
       },
+      "FileEditProposalRecoveryView": {
+        "additionalProperties": false,
+        "properties": {
+          "current_content_sha256": {
+            "pattern": "^([0-9a-f]{64}|missing)$",
+            "type": "string"
+          },
+          "edit_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "editable": {
+            "type": "boolean"
+          },
+          "file_write": {
+            "type": "boolean"
+          },
+          "original_content": {
+            "maxLength": 262144,
+            "type": "string"
+          },
+          "original_sha256": {
+            "pattern": "^([0-9a-f]{64}|missing)$",
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "proposed_content": {
+            "maxLength": 262144,
+            "type": "string"
+          },
+          "proposed_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "protocol_version": {
+            "enum": [
+              "file_edit_proposal_recovery.v1"
+            ],
+            "type": "string"
+          },
+          "review_required": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "stale": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "proposed"
+            ],
+            "type": "string"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "workspace_id",
+          "edit_id",
+          "path",
+          "original_content",
+          "proposed_content",
+          "original_sha256",
+          "proposed_sha256",
+          "current_content_sha256",
+          "status",
+          "stale",
+          "review_required",
+          "editable",
+          "file_write"
+        ],
+        "type": "object"
+      },
       "FileEditProposalRequestView": {
         "additionalProperties": false,
         "properties": {
@@ -8411,6 +8656,11 @@
       "ModelAvailabilityView": {
         "additionalProperties": false,
         "properties": {
+          "generation": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
           "protocol_version": {
             "enum": [
               "model_availability.v1"
@@ -8432,6 +8682,7 @@
         },
         "required": [
           "protocol_version",
+          "generation",
           "providers",
           "routes"
         ],
@@ -9547,6 +9798,13 @@
           "provider": {
             "type": "string"
           },
+          "registry_generation": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "registry_reloaded": {
+            "type": "boolean"
+          },
           "restart_required": {
             "type": "boolean"
           },
@@ -9564,7 +9822,9 @@
           "store_kind",
           "store_available",
           "plaintext_returned",
-          "restart_required"
+          "restart_required",
+          "registry_reloaded",
+          "registry_generation"
         ],
         "type": "object"
       },
@@ -10793,6 +11053,170 @@
           "protocol_version",
           "run_id",
           "found"
+        ],
+        "type": "object"
+      },
+      "RunWakeWorkerHealthView": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "concurrency": {
+            "format": "int32",
+            "maximum": 1,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "max_steps": {
+            "format": "int32",
+            "maximum": 1,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "persistent_service": {
+            "type": "boolean"
+          },
+          "poll_interval_ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "protocol_version": {
+            "enum": [
+              "run_wake_worker_health.v1"
+            ],
+            "type": "string"
+          },
+          "runtime_enable_supported": {
+            "type": "boolean"
+          },
+          "state": {
+            "enum": [
+              "disabled",
+              "ready",
+              "running",
+              "draining",
+              "stopped"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "enabled",
+          "state",
+          "active",
+          "poll_interval_ms",
+          "concurrency",
+          "max_steps",
+          "runtime_enable_supported",
+          "persistent_service"
+        ],
+        "type": "object"
+      },
+      "RuntimeCapabilitiesView": {
+        "additionalProperties": false,
+        "properties": {
+          "approval_control_enabled": {
+            "type": "boolean"
+          },
+          "docker_execution_enabled": {
+            "type": "boolean"
+          },
+          "evidence_attachment_enabled": {
+            "type": "boolean"
+          },
+          "file_edit_apply_enabled": {
+            "type": "boolean"
+          },
+          "file_edit_proposal_enabled": {
+            "type": "boolean"
+          },
+          "file_edit_review_enabled": {
+            "type": "boolean"
+          },
+          "model_control_enabled": {
+            "type": "boolean"
+          },
+          "plan_delivery_control_enabled": {
+            "type": "boolean"
+          },
+          "process_execution_enabled": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "runtime_capabilities.v1"
+            ],
+            "type": "string"
+          },
+          "provider_credential_enabled": {
+            "type": "boolean"
+          },
+          "run_control_enabled": {
+            "type": "boolean"
+          },
+          "run_creation_enabled": {
+            "type": "boolean"
+          },
+          "run_execution_enabled": {
+            "type": "boolean"
+          },
+          "run_lifecycle_enabled": {
+            "type": "boolean"
+          },
+          "run_wake_control_enabled": {
+            "type": "boolean"
+          },
+          "run_wake_execution_enabled": {
+            "type": "boolean"
+          },
+          "run_wake_worker_enabled": {
+            "type": "boolean"
+          },
+          "session_message_enabled": {
+            "type": "boolean"
+          },
+          "session_steering_control_enabled": {
+            "type": "boolean"
+          },
+          "shell_execution_enabled": {
+            "type": "boolean"
+          },
+          "skill_installation_enabled": {
+            "type": "boolean"
+          },
+          "wake_worker": {
+            "$ref": "#/components/schemas/RunWakeWorkerHealthView"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_control_enabled",
+          "run_creation_enabled",
+          "session_message_enabled",
+          "session_steering_control_enabled",
+          "run_lifecycle_enabled",
+          "run_execution_enabled",
+          "plan_delivery_control_enabled",
+          "approval_control_enabled",
+          "model_control_enabled",
+          "provider_credential_enabled",
+          "file_edit_review_enabled",
+          "file_edit_proposal_enabled",
+          "file_edit_apply_enabled",
+          "run_wake_control_enabled",
+          "run_wake_execution_enabled",
+          "run_wake_worker_enabled",
+          "skill_installation_enabled",
+          "evidence_attachment_enabled",
+          "process_execution_enabled",
+          "shell_execution_enabled",
+          "docker_execution_enabled",
+          "wake_worker"
         ],
         "type": "object"
       },

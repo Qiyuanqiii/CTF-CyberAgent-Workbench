@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, LoaderCircle, ShieldCheck } from "lucide-react";
-import { CyberAgentClient } from "../api/client";
+import { CyberAgentClient, clientCapabilitiesFromRuntime } from "../api/client";
 import { desktopBridgeAvailable, desktopErrorMessage, loadDesktopBootstrap } from "../lib/desktop-bridge";
 import { useConnectionStore } from "../state/connection";
 
@@ -75,9 +75,11 @@ export function ConnectionGate() {
     setError("");
     try {
       const client = new CyberAgentClient(candidate);
-      const health = await client.health();
+      const [health, capabilities] = await Promise.all([
+        client.health(), client.runtimeCapabilities(),
+      ]);
       queryClient.clear();
-      connect(candidate, health, controlToken.trim());
+      connect(candidate, health, controlToken.trim(), clientCapabilitiesFromRuntime(capabilities));
       setToken("");
       setControlToken("");
     } catch (caught) {

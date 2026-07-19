@@ -44,4 +44,38 @@ describe("FileProposalEditor", () => {
     expect(await screen.findByText(/Pending review/)).toBeInTheDocument();
     expect(createFileEditProposal.mock.calls[0]?.[1]).not.toHaveProperty("path");
   });
+
+  it("rotates an expired Go source without sending or discarding the renderer draft", async () => {
+    const source: FileEditProposalSourceView = {
+      protocol_version: "file_edit_proposal.v1", run_id: "run-1",
+      workspace_id: "workspace-1", path: "README.md", content: "before\n",
+      content_sha256: "a".repeat(64), source_handle: "B".repeat(43),
+      expires_at: "2020-01-01T00:00:00Z", editable: true, file_write: false,
+    };
+    const renewed = { ...source, source_handle: "C".repeat(43),
+      expires_at: "2099-07-18T00:05:00Z" };
+    const reissueFileEditProposalSource = vi.fn().mockResolvedValue(renewed);
+    const createFileEditProposal = vi.fn().mockResolvedValue({
+      protocol_version: "file_edit_proposal.v1", run_id: "run-1", replayed: false,
+      approval_required: true, file_written: false,
+      edit: { id: "edit-2", status: "proposed", path: "README.md" },
+    });
+    const client = { createFileEditProposal,
+      reissueFileEditProposalSource } as unknown as CyberAgentClient;
+    const user = userEvent.setup();
+    render(<QueryClientProvider client={new QueryClient()}>
+      <FileProposalEditor client={client} onClose={vi.fn()} runID="run-1" source={source} />
+    </QueryClientProvider>);
+    const editor = await screen.findByLabelText("Monaco proposal editor");
+    await user.clear(editor);
+    await user.type(editor, "retained draft");
+    await user.click(screen.getByRole("button", { name: "Refresh source" }));
+    await waitFor(() => expect(reissueFileEditProposalSource)
+      .toHaveBeenCalledWith("run-1", "README.md", "a".repeat(64)));
+    await user.click(screen.getByRole("button", { name: "Create proposal" }));
+    await waitFor(() => expect(createFileEditProposal).toHaveBeenCalledWith("run-1", {
+      version: "file_edit_proposal.v1", source_handle: renewed.source_handle,
+      proposed_text: "retained draft",
+    }));
+  });
 });

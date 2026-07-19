@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/domain"
 )
 
@@ -28,11 +29,12 @@ func (f *wakeWorkerDueFake) Due(_ context.Context, limit int) ([]domain.RunWakeI
 }
 
 type wakeWorkerConsumerFake struct {
-	mu       sync.Mutex
-	requests []ConsumeRunWakeRequest
-	active   int
-	maximum  int
-	block    chan struct{}
+	mu           sync.Mutex
+	requests     []ConsumeRunWakeRequest
+	active       int
+	maximum      int
+	block        chan struct{}
+	ignoreCancel bool
 }
 
 func (f *wakeWorkerConsumerFake) Consume(ctx context.Context,
@@ -46,9 +48,13 @@ func (f *wakeWorkerConsumerFake) Consume(ctx context.Context,
 	}
 	f.mu.Unlock()
 	if f.block != nil {
-		select {
-		case <-ctx.Done():
-		case <-f.block:
+		if f.ignoreCancel {
+			<-f.block
+		} else {
+			select {
+			case <-ctx.Done():
+			case <-f.block:
+			}
 		}
 	}
 	f.mu.Lock()
@@ -114,5 +120,111 @@ func TestRunWakeWorkerCancellationStopsSerialLoop(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("worker did not stop after cancellation")
+	}
+}
+
+func TestRunWakeWorkerRunOnceRejectsNilContextAndSerializesCallers(t *testing.T) {
+	due := &wakeWorkerDueFake{values: []domain.RunWakeIntent{{RunID: "run-worker-serial"}}}
+	consumer := &wakeWorkerConsumerFake{block: make(chan struct{})}
+	worker, err := NewRunWakeWorker(due, consumer, RunWakeWorkerConfig{
+		OwnerID: "wake-worker-serial",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	//lint:ignore SA1012 Verifies the public boundary rejects a nil context.
+	if _, err := worker.RunOnce(nil); err == nil ||
+		apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("nil RunOnce context error=%v", err)
+	}
+	done := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, runErr := worker.RunOnce(t.Context())
+			done <- runErr
+		}()
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		consumer.mu.Lock()
+		active := consumer.active
+		consumer.mu.Unlock()
+		if active == 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("RunOnce caller did not become active")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	close(consumer.block)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	consumer.mu.Lock()
+	maximum := consumer.maximum
+	consumer.mu.Unlock()
+	if maximum != RunWakeWorkerConcurrency {
+		t.Fatalf("RunOnce maximum concurrency=%d", maximum)
+	}
+}
+
+func TestRunWakeWorkerProjectsBoundedDrainHealthAndCannotRestart(t *testing.T) {
+	due := &wakeWorkerDueFake{values: []domain.RunWakeIntent{{RunID: "run-worker-health"}}}
+	consumer := &wakeWorkerConsumerFake{block: make(chan struct{}), ignoreCancel: true}
+	worker, err := NewRunWakeWorker(due, consumer, RunWakeWorkerConfig{
+		PollInterval: MinRunWakeWorkerPollInterval, OwnerID: "wake-worker-health",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready := worker.Health()
+	if ready.ProtocolVersion != RunWakeWorkerHealthProtocolVersion ||
+		ready.State != RunWakeWorkerReady || ready.Active ||
+		ready.Concurrency != 1 || ready.MaxSteps != 1 ||
+		ready.PollIntervalMillis != MinRunWakeWorkerPollInterval.Milliseconds() {
+		t.Fatalf("unexpected ready health: %#v", ready)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- worker.Run(ctx) }()
+	deadline := time.After(2 * time.Second)
+	for {
+		health := worker.Health()
+		if health.State == RunWakeWorkerRunning && health.Active {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("worker did not become active: %#v", health)
+		case <-time.After(time.Millisecond):
+		}
+	}
+	cancel()
+	deadline = time.After(2 * time.Second)
+	for {
+		health := worker.Health()
+		if health.State == RunWakeWorkerDraining && health.Active {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("worker did not project drain state: %#v", health)
+		case <-time.After(time.Millisecond):
+		}
+	}
+	close(consumer.block)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	stopped := worker.Health()
+	if stopped.State != RunWakeWorkerStopped || stopped.Active {
+		t.Fatalf("worker did not reach stopped health: %#v", stopped)
+	}
+	if err := worker.Run(context.Background()); err == nil {
+		t.Fatal("stopped worker was restarted")
 	}
 }

@@ -25,6 +25,7 @@ import (
 
 const (
 	FileEditProposalProtocolVersion = "file_edit_proposal.v1"
+	FileEditRecoveryProtocolVersion = "file_edit_proposal_recovery.v1"
 	fileEditSourceTTL               = 5 * time.Minute
 	maxFileEditSources              = 128
 )
@@ -59,6 +60,26 @@ type CreateFileEditProposalRequest struct {
 type CreateFileEditProposalResult struct {
 	Edit     fileedit.Edit
 	Replayed bool
+}
+
+// FileEditProposalRecovery is a read-only projection of one durable pending
+// proposal. It intentionally carries no source handle: recovery can restore
+// review context, but it cannot mutate, approve, or apply the stored proposal.
+type FileEditProposalRecovery struct {
+	ProtocolVersion    string
+	RunID              string
+	WorkspaceID        string
+	EditID             string
+	Path               string
+	OriginalContent    string
+	ProposedContent    string
+	OriginalSHA256     string
+	ProposedSHA256     string
+	CurrentContentHash string
+	Status             string
+	Stale              bool
+	ReviewRequired     bool
+	Editable           bool
 }
 
 type fileEditSourceGrant struct {
@@ -99,6 +120,25 @@ func NewFileEditProposalService(store FileEditProposalStore,
 func (s *FileEditProposalService) IssueSource(ctx context.Context, runID string,
 	path string,
 ) (FileEditProposalSource, error) {
+	return s.issueSource(ctx, runID, path, "")
+}
+
+// ReissueSource rotates an expired renderer handle only when the Workspace
+// file still matches the digest previously issued by Go. The renderer draft
+// is deliberately absent from this request.
+func (s *FileEditProposalService) ReissueSource(ctx context.Context, runID string,
+	path string, expectedSHA256 string,
+) (FileEditProposalSource, error) {
+	if !validSHA256Digest(expectedSHA256) {
+		return FileEditProposalSource{}, apperror.New(apperror.CodeInvalidArgument,
+			"file edit proposal reissue digest is invalid")
+	}
+	return s.issueSource(ctx, runID, path, expectedSHA256)
+}
+
+func (s *FileEditProposalService) issueSource(ctx context.Context, runID string,
+	path string, expectedSHA256 string,
+) (FileEditProposalSource, error) {
 	if s == nil || s.store == nil || s.manager == nil || s.checker == nil ||
 		s.now == nil || s.random == nil {
 		return FileEditProposalSource{}, apperror.New(apperror.CodeFailedPrecondition,
@@ -130,6 +170,10 @@ func (s *FileEditProposalService) IssueSource(ctx context.Context, runID string,
 		return FileEditProposalSource{}, apperror.New(apperror.CodeConflict,
 			"workspace file changed while the proposal source was issued")
 	}
+	if expectedSHA256 != "" && currentHash != expectedSHA256 {
+		return FileEditProposalSource{}, apperror.New(apperror.CodeConflict,
+			"workspace file changed since the editor source was issued")
+	}
 	raw := make([]byte, 32)
 	if err := s.random(raw); err != nil {
 		return FileEditProposalSource{}, apperror.Wrap(apperror.CodeInternal,
@@ -156,6 +200,57 @@ func (s *FileEditProposalService) IssueSource(ctx context.Context, runID string,
 		RunID: binding.run.ID, WorkspaceID: binding.workspace.ID, Path: snapshot.Path,
 		Content: snapshot.Content, ContentSHA256: currentHash, Handle: handle,
 		ExpiresAt: expiresAt, Editable: true}, nil
+}
+
+// Recover returns the exact persisted bodies for one pending proposal after
+// checking their integrity and current Workspace binding. It never reopens the
+// proposal for mutation and reports a changed or missing target as stale.
+func (s *FileEditProposalService) Recover(ctx context.Context, runID string,
+	editID string,
+) (FileEditProposalRecovery, error) {
+	if s == nil || s.store == nil || s.manager == nil || s.checker == nil {
+		return FileEditProposalRecovery{}, apperror.New(
+			apperror.CodeFailedPrecondition, "file edit proposal dependencies are required")
+	}
+	if !validControlIdentity(runID) || !validControlIdentity(editID) {
+		return FileEditProposalRecovery{}, apperror.New(apperror.CodeInvalidArgument,
+			"file edit proposal recovery identity is invalid")
+	}
+	binding, err := s.loadBinding(ctx, runID)
+	if err != nil {
+		return FileEditProposalRecovery{}, err
+	}
+	edit, err := s.store.GetFileEdit(ctx, editID)
+	if err != nil {
+		return FileEditProposalRecovery{}, apperror.Normalize(err)
+	}
+	if edit.SessionID != binding.session.ID || edit.WorkspaceID != binding.workspace.ID {
+		return FileEditProposalRecovery{}, apperror.New(apperror.CodeNotFound,
+			"file edit proposal does not belong to the requested Run")
+	}
+	if edit.Status != fileedit.StatusProposed {
+		return FileEditProposalRecovery{}, apperror.New(apperror.CodeConflict,
+			"only a pending file edit proposal can be recovered")
+	}
+	if edit.SecretsRedacted || !validPersistedOriginal(edit.OriginalHash, edit.OriginalText) ||
+		!validSHA256Digest(edit.ProposedHash) ||
+		fileedit.HashText(edit.ProposedText) != edit.ProposedHash {
+		return FileEditProposalRecovery{}, apperror.New(apperror.CodeFailedPrecondition,
+			"file edit proposal bodies cannot be recovered safely")
+	}
+	currentHash, err := fileedit.CurrentHash(binding.workspace.RootPath, edit.Path)
+	if err != nil {
+		return FileEditProposalRecovery{}, apperror.Normalize(err)
+	}
+	return FileEditProposalRecovery{
+		ProtocolVersion: FileEditRecoveryProtocolVersion,
+		RunID:           runID, WorkspaceID: edit.WorkspaceID, EditID: edit.ID,
+		Path: edit.Path, OriginalContent: edit.OriginalText,
+		ProposedContent: edit.ProposedText, OriginalSHA256: edit.OriginalHash,
+		ProposedSHA256: edit.ProposedHash, CurrentContentHash: currentHash,
+		Status: edit.Status, Stale: currentHash != edit.OriginalHash,
+		ReviewRequired: true, Editable: false,
+	}, nil
 }
 
 func (s *FileEditProposalService) Propose(ctx context.Context,
@@ -351,4 +446,19 @@ func sourceHandleDigest(value string) string {
 
 func textDigest(value string) string {
 	return fileedit.HashText(value)
+}
+
+func validSHA256Digest(value string) bool {
+	if len(value) != sha256.Size*2 || value != strings.ToLower(value) {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == sha256.Size
+}
+
+func validPersistedOriginal(hash string, content string) bool {
+	if hash == "missing" {
+		return content == ""
+	}
+	return validSHA256Digest(hash) && fileedit.HashText(content) == hash
 }

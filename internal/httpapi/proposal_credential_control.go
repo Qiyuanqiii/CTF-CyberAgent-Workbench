@@ -12,15 +12,20 @@ import (
 )
 
 const (
-	FileEditProposalSourcePathTemplate = "/api/v1/runs/{run_id}/file-edit-proposal-source"
-	FileEditProposalPathTemplate       = "/api/v1/runs/{run_id}/file-edit-proposals"
-	ProviderCredentialsPath            = "/api/v1/models/credentials"
-	ProviderCredentialPathTemplate     = "/api/v1/models/credentials/{provider}"
+	FileEditProposalSourcePathTemplate   = "/api/v1/runs/{run_id}/file-edit-proposal-source"
+	FileEditProposalRecoveryPathTemplate = "/api/v1/runs/{run_id}/file-edit-proposal-recovery/{edit_id}"
+	FileEditProposalPathTemplate         = "/api/v1/runs/{run_id}/file-edit-proposals"
+	ProviderCredentialsPath              = "/api/v1/models/credentials"
+	ProviderCredentialPathTemplate       = "/api/v1/models/credentials/{provider}"
 )
 
 type FileEditProposalController interface {
 	IssueSource(context.Context, string, string) (
 		application.FileEditProposalSource, error)
+	ReissueSource(context.Context, string, string, string) (
+		application.FileEditProposalSource, error)
+	Recover(context.Context, string, string) (
+		application.FileEditProposalRecovery, error)
 	Propose(context.Context, application.CreateFileEditProposalRequest) (
 		application.CreateFileEditProposalResult, error)
 }
@@ -59,6 +64,24 @@ type FileEditProposalView struct {
 	FileWritten      bool                `json:"file_written"`
 }
 
+type FileEditProposalRecoveryView struct {
+	ProtocolVersion      string `json:"protocol_version"`
+	RunID                string `json:"run_id"`
+	WorkspaceID          string `json:"workspace_id"`
+	EditID               string `json:"edit_id"`
+	Path                 string `json:"path"`
+	OriginalContent      string `json:"original_content"`
+	ProposedContent      string `json:"proposed_content"`
+	OriginalSHA256       string `json:"original_sha256"`
+	ProposedSHA256       string `json:"proposed_sha256"`
+	CurrentContentSHA256 string `json:"current_content_sha256"`
+	Status               string `json:"status"`
+	Stale                bool   `json:"stale"`
+	ReviewRequired       bool   `json:"review_required"`
+	Editable             bool   `json:"editable"`
+	FileWrite            bool   `json:"file_write"`
+}
+
 type ProviderCredentialRequestView struct {
 	Version string                               `json:"version"`
 	Action  application.ProviderCredentialAction `json:"action"`
@@ -67,13 +90,15 @@ type ProviderCredentialRequestView struct {
 }
 
 type ProviderCredentialStatusView struct {
-	ProtocolVersion   string `json:"protocol_version"`
-	Provider          string `json:"provider"`
-	Configured        bool   `json:"configured"`
-	StoreKind         string `json:"store_kind"`
-	StoreAvailable    bool   `json:"store_available"`
-	PlaintextReturned bool   `json:"plaintext_returned"`
-	RestartRequired   bool   `json:"restart_required"`
+	ProtocolVersion    string `json:"protocol_version"`
+	Provider           string `json:"provider"`
+	Configured         bool   `json:"configured"`
+	StoreKind          string `json:"store_kind"`
+	StoreAvailable     bool   `json:"store_available"`
+	PlaintextReturned  bool   `json:"plaintext_returned"`
+	RestartRequired    bool   `json:"restart_required"`
+	RegistryReloaded   bool   `json:"registry_reloaded"`
+	RegistryGeneration uint64 `json:"registry_generation"`
 }
 
 type ProviderCredentialListView struct {
@@ -182,7 +207,7 @@ func (a *API) runFileEditProposalSource(request *http.Request,
 			"file edit proposal source is unavailable")
 	}
 	values := request.URL.Query()
-	if err := validateSingleQueryValues(values, "path"); err != nil {
+	if err := validateSingleQueryValues(values, "path", "expected_sha256"); err != nil {
 		return nil, nil, err
 	}
 	paths, found := values["path"]
@@ -190,8 +215,16 @@ func (a *API) runFileEditProposalSource(request *http.Request,
 		return nil, nil, apperror.New(apperror.CodeInvalidArgument,
 			"file edit proposal source path is required")
 	}
-	source, err := a.fileEditProposalController.IssueSource(request.Context(),
-		runID, paths[0])
+	var source application.FileEditProposalSource
+	var err error
+	expected, reissue := singleQueryValue(values, "expected_sha256")
+	if reissue {
+		source, err = a.fileEditProposalController.ReissueSource(request.Context(),
+			runID, paths[0], expected)
+	} else {
+		source, err = a.fileEditProposalController.IssueSource(request.Context(),
+			runID, paths[0])
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -200,6 +233,31 @@ func (a *API) runFileEditProposalSource(request *http.Request,
 		Content: source.Content, ContentSHA256: source.ContentSHA256,
 		SourceHandle: source.Handle, ExpiresAt: source.ExpiresAt,
 		Editable: source.Editable, FileWrite: false}, nil, nil
+}
+
+func (a *API) runFileEditProposalRecovery(request *http.Request, runID string,
+	editID string,
+) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	if !a.fileEditProposalEnabled || a.fileEditProposalController == nil {
+		return nil, nil, apperror.New(apperror.CodeNotFound,
+			"file edit proposal recovery is unavailable")
+	}
+	recovery, err := a.fileEditProposalController.Recover(request.Context(), runID, editID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return FileEditProposalRecoveryView{
+		ProtocolVersion: recovery.ProtocolVersion, RunID: recovery.RunID,
+		WorkspaceID: recovery.WorkspaceID, EditID: recovery.EditID, Path: recovery.Path,
+		OriginalContent: recovery.OriginalContent, ProposedContent: recovery.ProposedContent,
+		OriginalSHA256: recovery.OriginalSHA256, ProposedSHA256: recovery.ProposedSHA256,
+		CurrentContentSHA256: recovery.CurrentContentHash, Status: recovery.Status,
+		Stale: recovery.Stale, ReviewRequired: recovery.ReviewRequired,
+		Editable: recovery.Editable, FileWrite: false,
+	}, nil, nil
 }
 
 func (a *API) providerCredentialStatuses(request *http.Request) (any, *Page, error) {
@@ -227,5 +285,6 @@ func providerCredentialStatusView(value application.ProviderCredentialStatus) Pr
 		Provider: value.Provider, Configured: value.Configured,
 		StoreKind: value.StoreKind, StoreAvailable: value.StoreAvailable,
 		PlaintextReturned: value.PlaintextReturned,
-		RestartRequired:   value.RestartRequired}
+		RestartRequired:   value.RestartRequired, RegistryReloaded: value.RegistryReloaded,
+		RegistryGeneration: value.RegistryGeneration}
 }

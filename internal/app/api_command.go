@@ -84,13 +84,30 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 	approvalControl := application.NewApprovalControlService(a.store,
 		a.newToolGateway(), a.checker)
 	modelControl := application.NewModelControlService(a.models, a.store)
-	providerCredentialControl := application.NewProviderCredentialService(a.credentials)
+	providerCredentialControl := application.NewProviderCredentialService(a.credentials).
+		WithRegistryReload(a.models, a.store)
 	fileEditReview := application.NewFileEditReviewService(a.store)
 	fileEditProposal := application.NewFileEditProposalService(a.store, a.checker)
 	fileEditApply := application.NewFileEditApplyService(a.store, a.checker)
 	runWakeControl := application.NewRunWakeControlService(a.store)
 	runWakeExecution := application.NewForegroundRunWakeConsumer(a.store,
 		executionControl)
+	var worker *application.RunWakeWorker
+	if *wakeWorker {
+		createdWorker, workerErr := application.NewRunWakeWorker(
+			application.NewRunWakeCoordinator(a.store), runWakeExecution,
+			application.RunWakeWorkerConfig{OnError: func(runErr error) {
+				fmt.Fprintln(a.errOut, "wake-worker:", runErr)
+			}})
+		if workerErr != nil {
+			return workerErr
+		}
+		worker = createdWorker
+	}
+	var workerHealth httpapi.RunWakeWorkerHealthSource
+	if worker != nil {
+		workerHealth = worker
+	}
 	builtinSkills, err := skills.BuiltinRegistry()
 	if err != nil {
 		return err
@@ -117,6 +134,7 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 		RunWakeControlEnabled:         controlToken != "",
 		FileEditApplyEnabled:          controlToken != "",
 		RunWakeExecutionEnabled:       controlToken != "",
+		RunWakeWorkerEnabled:          *wakeWorker,
 		SkillInstallationEnabled:      controlToken != "",
 		EvidenceAttachmentEnabled:     controlToken != "",
 		RunLifecycleController:        lifecycleControl,
@@ -130,6 +148,7 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 		RunWakeController:             runWakeControl,
 		FileEditApplyController:       fileEditApply,
 		RunWakeExecutionController:    runWakeExecution,
+		RunWakeWorkerHealthSource:     workerHealth,
 		SkillInstallationController:   skillInstallation,
 		ModelRegistry:                 a.models,
 		AppVersion:                    Version,
@@ -165,16 +184,7 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 	}
 	var workerCancel context.CancelFunc
 	var workerDone chan struct{}
-	if *wakeWorker {
-		worker, workerErr := application.NewRunWakeWorker(
-			application.NewRunWakeCoordinator(a.store), runWakeExecution,
-			application.RunWakeWorkerConfig{OnError: func(runErr error) {
-				fmt.Fprintln(a.errOut, "wake-worker:", runErr)
-			}})
-		if workerErr != nil {
-			_ = listener.Close()
-			return workerErr
-		}
+	if worker != nil {
 		workerCtx, cancel := context.WithCancel(ctx)
 		workerCancel = cancel
 		workerDone = make(chan struct{})

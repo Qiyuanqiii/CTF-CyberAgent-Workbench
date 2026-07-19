@@ -395,6 +395,19 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	recoverySource, err := fileEditProposalController.IssueSource(t.Context(),
+		fixture.run.ID, "README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	recoveryProposal, err := fileEditProposalController.Propose(t.Context(),
+		application.CreateFileEditProposalRequest{
+			Version: application.FileEditProposalProtocolVersion, RunID: fixture.run.ID,
+			SourceHandle: recoverySource.Handle, ProposedText: "OpenAPI recovery proposal\n",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
 	replacements := map[string]string{
 		"{run_id}":       fixture.run.ID,
 		"{workspace_id}": fixture.workspace.ID,
@@ -432,6 +445,9 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", wakeRun.ID)
 		} else if spec.Path == RunWakeExecutionPathTemplate {
 			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", wakeExecutionRun.ID)
+		} else if spec.Path == FileEditProposalRecoveryPathTemplate {
+			requestPath = strings.ReplaceAll(spec.Path, "{run_id}", fixture.run.ID)
+			requestPath = strings.ReplaceAll(requestPath, "{edit_id}", recoveryProposal.Edit.ID)
 		}
 		if spec.OperationID == "searchWorkspace" {
 			requestPath += "?query=README"

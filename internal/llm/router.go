@@ -53,6 +53,36 @@ func (r *Router) RegisterProvider(provider Provider) {
 	r.providers[provider.Name()] = provider
 }
 
+// ReplaceConfiguration atomically installs a complete Router generation.
+// Calls that already captured a Provider continue on that immutable Provider
+// value; calls entering after the swap observe only the new generation.
+func (r *Router) ReplaceConfiguration(next *Router) error {
+	if r == nil || next == nil {
+		return fmt.Errorf("router generations are required")
+	}
+	if r == next {
+		return nil
+	}
+	next.mu.RLock()
+	providers := make(map[string]Provider, len(next.providers))
+	for name, provider := range next.providers {
+		providers[name] = provider
+	}
+	routes := make(map[string]ModelRef, len(next.routes))
+	for name, ref := range next.routes {
+		routes[name] = ref
+	}
+	defaultRef := next.defaultRef
+	next.mu.RUnlock()
+
+	r.mu.Lock()
+	r.providers = providers
+	r.routes = routes
+	r.defaultRef = defaultRef
+	r.mu.Unlock()
+	return nil
+}
+
 func (r *Router) ProviderNames() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -97,15 +127,27 @@ func (r *Router) SupportsJSONMode(ref ModelRef) bool {
 }
 
 func (r *Router) Chat(ctx context.Context, route string, req ChatRequest) (*ChatResponse, error) {
-	ref := r.Resolve(route)
-	return r.ChatModelRef(ctx, ref, req)
+	r.mu.RLock()
+	ref, routed := r.routes[route]
+	if !routed {
+		ref = r.defaultRef
+	}
+	provider, registered := r.providers[ref.Provider]
+	r.mu.RUnlock()
+	return chatWithProvider(ctx, ref, provider, registered, req)
 }
 
 func (r *Router) ChatModelRef(ctx context.Context, ref ModelRef, req ChatRequest) (*ChatResponse, error) {
 	r.mu.RLock()
 	provider, ok := r.providers[ref.Provider]
 	r.mu.RUnlock()
-	if !ok {
+	return chatWithProvider(ctx, ref, provider, ok, req)
+}
+
+func chatWithProvider(ctx context.Context, ref ModelRef, provider Provider, registered bool,
+	req ChatRequest,
+) (*ChatResponse, error) {
+	if !registered {
 		return nil, NewProviderError(OutcomePermanent, ref.Provider, fmt.Sprintf("provider %q is not registered", ref.Provider), nil)
 	}
 	if req.Model == "" {
@@ -123,14 +165,27 @@ func (r *Router) ChatModelRef(ctx context.Context, ref ModelRef, req ChatRequest
 }
 
 func (r *Router) StreamChat(ctx context.Context, route string, req ChatRequest) (<-chan ChatChunk, error) {
-	return r.StreamChatModelRef(ctx, r.Resolve(route), req)
+	r.mu.RLock()
+	ref, routed := r.routes[route]
+	if !routed {
+		ref = r.defaultRef
+	}
+	provider, registered := r.providers[ref.Provider]
+	r.mu.RUnlock()
+	return streamWithProvider(ctx, ref, provider, registered, req)
 }
 
 func (r *Router) StreamChatModelRef(ctx context.Context, ref ModelRef, req ChatRequest) (<-chan ChatChunk, error) {
 	r.mu.RLock()
 	provider, ok := r.providers[ref.Provider]
 	r.mu.RUnlock()
-	if !ok {
+	return streamWithProvider(ctx, ref, provider, ok, req)
+}
+
+func streamWithProvider(ctx context.Context, ref ModelRef, provider Provider, registered bool,
+	req ChatRequest,
+) (<-chan ChatChunk, error) {
+	if !registered {
 		return nil, NewProviderError(OutcomePermanent, ref.Provider, fmt.Sprintf("provider %q is not registered", ref.Provider), nil)
 	}
 	if req.Model == "" {

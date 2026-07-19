@@ -18,6 +18,8 @@ import (
 
 const ProtocolVersion = "model_availability.v1"
 
+const ReloadProtocolVersion = "provider_registry_reload.v1"
+
 const (
 	DiagnosticProtocolVersion   = "provider_diagnostic.v1"
 	RouteControlProtocolVersion = "model_route_control.v1"
@@ -75,8 +77,15 @@ type RouteAvailability struct {
 
 type Snapshot struct {
 	ProtocolVersion string
+	Generation      uint64
 	Providers       []ProviderAvailability
 	Routes          []RouteAvailability
+}
+
+type ReloadResult struct {
+	ProtocolVersion string
+	Generation      uint64
+	Reloaded        bool
 }
 
 // DiagnosticResult is intentionally content-free. A diagnostic may make one
@@ -111,11 +120,14 @@ type CredentialReader interface {
 }
 
 type Registry struct {
-	mu        sync.RWMutex
-	routeMu   sync.Mutex
-	router    *llm.Router
-	providers []ProviderAvailability
-	available map[string]struct{}
+	mu          sync.RWMutex
+	routeMu     sync.Mutex
+	router      *llm.Router
+	providers   []ProviderAvailability
+	available   map[string]struct{}
+	lookup      EnvironmentLookup
+	credentials credentialLookup
+	generation  uint64
 }
 
 type anthropicEnvironment struct {
@@ -135,11 +147,11 @@ func NewFromEnvironment() *Registry {
 // while allowing the Go control plane to bootstrap secrets from an OS-owned
 // credential store. No credential is copied into Registry snapshots.
 func NewFromEnvironmentWithCredentials(reader CredentialReader) (*Registry, error) {
-	return newRegistry(os.LookupEnv, func(provider string) (string, bool, error) {
+	return newRegistry(os.LookupEnv, func(ctx context.Context, provider string) (string, bool, error) {
 		if reader == nil {
 			return "", false, nil
 		}
-		return reader.Get(context.Background(), provider)
+		return reader.Get(ctx, provider)
 	})
 }
 
@@ -148,13 +160,22 @@ func New(lookup EnvironmentLookup) *Registry {
 	return registry
 }
 
-type credentialLookup func(string) (string, bool, error)
+type credentialLookup func(context.Context, string) (string, bool, error)
 
 func newRegistry(lookup EnvironmentLookup,
 	credentials credentialLookup,
 ) (*Registry, error) {
+	return buildRegistry(context.Background(), lookup, credentials, false)
+}
+
+func buildRegistry(ctx context.Context, lookup EnvironmentLookup,
+	credentials credentialLookup, strictCredentialReads bool,
+) (*Registry, error) {
 	if lookup == nil {
 		lookup = func(string) (string, bool) { return "", false }
+	}
+	if ctx == nil {
+		return nil, errors.New("model registry context is required")
 	}
 	router := llm.NewDefaultRouter()
 	registry := &Registry{
@@ -164,7 +185,8 @@ func newRegistry(lookup EnvironmentLookup,
 			Models:           []string{"mock-code", "mock-cyber-agent", "mock-fast"},
 			CredentialSource: "none", NetworkRequired: false,
 		}},
-		available: map[string]struct{}{"mock": {}},
+		available: map[string]struct{}{"mock": {}}, lookup: lookup,
+		credentials: credentials, generation: 1,
 	}
 	configs := []anthropicEnvironment{
 		{name: "mimo", apiKeyEnv: "MIMO_API_KEY", baseURLEnv: "MIMO_BASE_URL",
@@ -178,8 +200,8 @@ func newRegistry(lookup EnvironmentLookup,
 			defaultBaseURL: defaultAnthropicURL, defaultModel: DefaultAnthropicModel},
 	}
 	for _, config := range configs {
-		if err := registry.registerAnthropicEnvironment(config, lookup,
-			credentials); err != nil {
+		if err := registry.registerAnthropicEnvironment(ctx, config, lookup,
+			credentials, strictCredentialReads); err != nil {
 			return nil, err
 		}
 	}
@@ -187,6 +209,64 @@ func newRegistry(lookup EnvironmentLookup,
 		return registry.providers[i].Name < registry.providers[j].Name
 	})
 	return registry, nil
+}
+
+// Reload builds a complete candidate generation before taking the public
+// snapshot lock. The final Router replacement is atomic; Provider values
+// already captured by active calls remain valid and are never cancelled.
+func (r *Registry) Reload(ctx context.Context, reader RouteSettingReader) (ReloadResult, error) {
+	if r == nil || r.router == nil {
+		return ReloadResult{}, errors.New("model registry is unavailable")
+	}
+	if ctx == nil || reader == nil {
+		return ReloadResult{}, errors.New("model registry reload dependencies are required")
+	}
+	if err := ctx.Err(); err != nil {
+		return ReloadResult{}, err
+	}
+	r.routeMu.Lock()
+	defer r.routeMu.Unlock()
+	candidate, err := buildRegistry(ctx, r.lookup, r.credentials, true)
+	if err != nil {
+		return ReloadResult{}, err
+	}
+	if err := candidate.LoadRouteSettings(ctx, reader); err != nil {
+		return ReloadResult{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return ReloadResult{}, err
+	}
+
+	providers := make([]ProviderAvailability, len(candidate.providers))
+	copy(providers, candidate.providers)
+	for index := range providers {
+		providers[index].Models = append([]string(nil), candidate.providers[index].Models...)
+	}
+	available := make(map[string]struct{}, len(candidate.available))
+	for name := range candidate.available {
+		available[name] = struct{}{}
+	}
+	r.mu.Lock()
+	if err := r.router.ReplaceConfiguration(candidate.router); err != nil {
+		r.mu.Unlock()
+		return ReloadResult{}, err
+	}
+	r.providers = providers
+	r.available = available
+	r.generation++
+	generation := r.generation
+	r.mu.Unlock()
+	return ReloadResult{ProtocolVersion: ReloadProtocolVersion,
+		Generation: generation, Reloaded: true}, nil
+}
+
+func (r *Registry) Generation() uint64 {
+	if r == nil {
+		return 0
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.generation
 }
 
 func (r *Registry) Router() *llm.Router {
@@ -318,6 +398,7 @@ func (r *Registry) Snapshot() Snapshot {
 			Routes: []RouteAvailability{}}
 	}
 	r.mu.RLock()
+	defer r.mu.RUnlock()
 	providers := make([]ProviderAvailability, len(r.providers))
 	for index, provider := range r.providers {
 		providers[index] = provider
@@ -331,7 +412,6 @@ func (r *Registry) Snapshot() Snapshot {
 	for name := range r.available {
 		available[name] = struct{}{}
 	}
-	r.mu.RUnlock()
 	routes := r.router.Routes()
 	outRoutes := make([]RouteAvailability, 0, len(routeNames))
 	for _, name := range routeNames {
@@ -344,7 +424,8 @@ func (r *Registry) Snapshot() Snapshot {
 			Available: registered && provider == ref.Provider && model == ref.Model,
 		})
 	}
-	return Snapshot{ProtocolVersion: ProtocolVersion, Providers: providers, Routes: outRoutes}
+	return Snapshot{ProtocolVersion: ProtocolVersion, Generation: r.generation,
+		Providers: providers, Routes: outRoutes}
 }
 
 func (r *Registry) providerModelAvailable(provider string, model string) bool {
@@ -386,8 +467,8 @@ func containsRoute(route string) bool {
 	return false
 }
 
-func (r *Registry) registerAnthropicEnvironment(config anthropicEnvironment,
-	lookup EnvironmentLookup, credentials credentialLookup,
+func (r *Registry) registerAnthropicEnvironment(ctx context.Context, config anthropicEnvironment,
+	lookup EnvironmentLookup, credentials credentialLookup, strictCredentialReads bool,
 ) error {
 	key, present := lookup(config.apiKeyEnv)
 	credentialSource := "none"
@@ -396,8 +477,11 @@ func (r *Registry) registerAnthropicEnvironment(config anthropicEnvironment,
 	}
 	if !present && credentials != nil {
 		var err error
-		key, present, err = credentials(config.name)
+		key, present, err = credentials(ctx, config.name)
 		if err != nil {
+			if strictCredentialReads {
+				return fmt.Errorf("read system credential for %s: %w", config.name, err)
+			}
 			r.providers = append(r.providers, ProviderAvailability{
 				Name: config.name, Kind: ProviderKindAnthropicCompatible,
 				Status: ProviderInvalidConfiguration, Models: []string{},

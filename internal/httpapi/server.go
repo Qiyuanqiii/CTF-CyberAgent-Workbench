@@ -155,6 +155,7 @@ type Config struct {
 	RunWakeControlEnabled         bool
 	FileEditApplyEnabled          bool
 	RunWakeExecutionEnabled       bool
+	RunWakeWorkerEnabled          bool
 	SkillInstallationEnabled      bool
 	EvidenceAttachmentEnabled     bool
 	RunLifecycleController        RunLifecycleController
@@ -168,6 +169,7 @@ type Config struct {
 	RunWakeController             RunWakeController
 	FileEditApplyController       FileEditApplyController
 	RunWakeExecutionController    RunWakeExecutionController
+	RunWakeWorkerHealthSource     RunWakeWorkerHealthSource
 	SkillInstallationController   SkillInstallationController
 	ModelRegistry                 *modelregistry.Registry
 	AppVersion                    string
@@ -194,6 +196,7 @@ type API struct {
 	runWakeControlEnabled         bool
 	fileEditApplyEnabled          bool
 	runWakeExecutionEnabled       bool
+	runWakeWorkerEnabled          bool
 	skillInstallationEnabled      bool
 	evidenceAttachmentEnabled     bool
 	runLifecycleController        RunLifecycleController
@@ -207,6 +210,7 @@ type API struct {
 	runWakeController             RunWakeController
 	fileEditApplyController       FileEditApplyController
 	runWakeExecutionController    RunWakeExecutionController
+	runWakeWorkerHealthSource     RunWakeWorkerHealthSource
 	skillInstallationController   SkillInstallationController
 	modelRegistry                 *modelregistry.Registry
 	appVersion                    string
@@ -246,6 +250,7 @@ func New(store Store, config Config) (*API, error) {
 		config.FileEditReviewEnabled || config.FileEditProposalEnabled ||
 		config.RunWakeControlEnabled ||
 		config.FileEditApplyEnabled || config.RunWakeExecutionEnabled ||
+		config.RunWakeWorkerEnabled ||
 		config.SkillInstallationEnabled || config.EvidenceAttachmentEnabled) &&
 		!controlTokenPresent {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
@@ -295,6 +300,10 @@ func New(store Store, config Config) (*API, error) {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"HTTP API foreground Run wake controller is required when enabled")
 	}
+	if config.RunWakeWorkerEnabled != (config.RunWakeWorkerHealthSource != nil) {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API Run wake worker health source must exactly match enablement")
+	}
 	if config.SkillInstallationEnabled && config.SkillInstallationController == nil {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"HTTP API Skill installation controller is required when enabled")
@@ -332,6 +341,7 @@ func New(store Store, config Config) (*API, error) {
 		runWakeControlEnabled:         controlTokenPresent && config.RunWakeControlEnabled,
 		fileEditApplyEnabled:          controlTokenPresent && config.FileEditApplyEnabled,
 		runWakeExecutionEnabled:       controlTokenPresent && config.RunWakeExecutionEnabled,
+		runWakeWorkerEnabled:          controlTokenPresent && config.RunWakeWorkerEnabled,
 		skillInstallationEnabled:      controlTokenPresent && config.SkillInstallationEnabled,
 		evidenceAttachmentEnabled:     controlTokenPresent && config.EvidenceAttachmentEnabled,
 		runLifecycleController:        config.RunLifecycleController,
@@ -345,6 +355,7 @@ func New(store Store, config Config) (*API, error) {
 		runWakeController:             config.RunWakeController,
 		fileEditApplyController:       config.FileEditApplyController,
 		runWakeExecutionController:    config.RunWakeExecutionController,
+		runWakeWorkerHealthSource:     config.RunWakeWorkerHealthSource,
 		skillInstallationController:   config.SkillInstallationController,
 		modelRegistry:                 modelRegistry,
 		openAPI:                       document, eventStream: eventStream,

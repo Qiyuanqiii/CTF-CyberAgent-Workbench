@@ -6,7 +6,7 @@ Last updated: 2026-07-19
 
 Current database schema is v77. Schemas v69-v77 establish inert external Skills, controlled Run/Session/lifecycle, wake intent and foreground consumption, separately authorized FileEdit apply, Workspace evidence/search/attachment, and durable receipts. Non-schema D1-O1/C2/K1 adds operator actions, evidence inventory, and a navigation/refresh-only palette. Non-schema D1-I1/M3/J1 now adds a local Monaco proposal/Diff editor over Go-issued source handles, Windows Credential Manager Provider controls with status-only readback, and a default-off wake worker capped at one concurrent one-step handoff. Proposal/review/apply, model/credential, and wake/worker capabilities remain independent. None grants general Shell, LocalRunner, Docker, child scheduling, install hooks, renderer host-path authority, credential readback, document instruction authority, or automatic Skill selection. Selected packages and Workspace text remain user-role untrusted evidence/guidance.
 
-Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No path starts a Runner, container, Shell, or host process. ADR 0024 through ADR 0045 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/review/apply, system-credential, inert-install, receipt, Explorer/search, evidence, action-center, command-palette, and portable-build boundaries.
+Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No path starts a Runner, container, Shell, or host process. ADR 0024 through ADR 0046 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/recovery/review/apply, Provider credential/generation, inert-install, receipt, Explorer/search, evidence, action-center, command-palette, and portable-build boundaries.
 
 CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The CLI-first implementation has resumable Runs, a durable root Agent Coordinator, bounded review-gated Specialist delegation, a separate read-only 1/2/4/6 Fan-out pool, persisted sessions and model calls, context compaction, WorkItems/Notes/Artifacts, a unified Tool Gateway, embedded and inert user Skills, Finding/Evidence/Report lifecycles with SARIF/CI output, loopback HTTP/SSE/OpenAPI, a Run-first TUI, a React/Vite console, and a Windows Wails shell with independently gated Run/Session/Plan/approval, FileEdit proposal/review/apply, Provider credentials, foreground/bounded wake, inert Skills, actions/evidence, and navigation. Core delegation remains capped at two children and only the original application operator can schedule it; models, ordinary tools, HTTP, and the Desktop native bridge cannot autonomously spawn or schedule children.
 
@@ -214,12 +214,12 @@ Use these files first when resuming:
 ## Progress Review
 
 - Architecture completion: about 99%; the V2 run-centric control plane is about 99% complete.
-- Product usability: about 84-87% for the complete Code + Cyber product.
-- Generic coding-agent workflow usability: about 82%.
+- Product usability: about 87-90% for the complete Code + Cyber product.
+- Generic coding-agent workflow usability: about 84%.
 - Cyber autonomous-workflow usability: about 20%.
 - These values are engineering estimates derived from tested roadmap slices, not performance benchmarks. The retired single-axis "overall product vision" percentage must not be used for current status.
 
-Latest implemented batch: non-schema D1-I1/M3/J1. It adds a Go-issued local Monaco FileEdit proposal editor, Windows Credential Manager Provider controls with no plaintext readback, and a default-off 1 x 1-step wake worker through the existing Supervisor. The ordinary integrated gate is green and no unresolved high/medium issue is known. ADR 0045 is authoritative.
+Latest implemented batch: non-schema D1-I2/M4/J2. It adds hash-bound source rotation and read-only durable FileEdit recovery, generation-safe Provider Registry reload, and authenticated metadata-only capabilities plus wake-worker health/drain. The cumulative six-slice robustness gate is green and no unresolved high/medium issue is known. ADR 0046 is authoritative.
 
 Completed:
 
@@ -228,7 +228,7 @@ Completed:
 - Go CLI entrypoint and command dispatch.
 - Schema v19-v38 Agent Coordinator with stable root identity, idempotent inbox operations, strict wake/dependency semantics, explicit internal-only Specialist admission, validated same-Run Agent ownership for WorkItems/Notes, exact-attempt CompletionReports, a default-disabled Specialist Attempt Runtime, two-phase exactly-once root and Specialist instruction context, internal no-tool Specialist model turns, one isolated child lifecycle repair, durable schedule start/stop summaries, exact cross-process child-call cancellation, review-gated root delegation proposals, immutable operator review facts, recoverable operator application, and explicit operator schedule requests. A policy permits at most two depth-one children with parent-Skill subsets, dedicated Sessions, reserved budgets, lease-fenced turns, cumulative exactly-once usage accounting, redacted crash notifications, takeover recovery, lifecycle interruption, SHA-256-backed recovery snapshots, and atomic Supervisor/Run integration. The scheduler runs at most two ready children per round under one lease, fans cancellation out to siblings, reconciles root plus child token/model-time usage from SQLite before and after every round, and converges orphaned schedules to `abandoned/worker_lost` on takeover. Schema v26 atomically records child model terminal state, usage, Policy, and allowed redacted Session messages. Schema v27 selects strict direct-parent instructions plus active child-owned WorkItems/Notes and preserves pending instructions across crash, interruption, and takeover. Schema v28 separates global model sequence from primary/repair transport counters, charges both valid usage reports cumulatively, excludes raw invalid output from prompts/history/events, and aborts unresolved repair before Attempt termination. Schema v29 keeps schedule/cancellation events free of model text and fencing identities. Schema v30 verifies the active root, lease, scope, parent-Skill subset, remaining child capacity, and suggested budget before persisting an immutable proposal. Schema v31 records one redacted approved/rejected decision with digest-only replay. Schema v32 rechecks Policy and live invariants, then correlates each existing admission/message operation with a recoverable assignment transition; it creates ready children but no Attempt or schedule. Schema v38 requires a same-operator immutable request before those children may execute. Public/model approval, application, spawn, and autonomous scheduling remain unavailable; ordinary tools and HTTP cannot schedule.
 - Authenticated loopback-only `api.v1` read plane with stable envelopes, typed errors, bounded cursor pagination, graceful shutdown, and Run/Session/Event/WorkItem/Note/Artifact/ToolRound plus token-free execution-lease inspection.
-- Go DTO/OpenAPI-first Workspace explore/search, model availability/diagnostics/routes, Run creation/lifecycle/bounded execution/wake intent/foreground consume, controlled Session queue/cancellation/evidence attachment/inventory, operator action center, Plan/Deliver, approvals, Diff review/apply, inert Skill install, terminal receipt history, Agent graph, delegation, read-only Fan-out, Finding/Report, execution-profile, external-Skill provenance, SSE, and high-water event-poll projections with bounded Store queries and generated React/Vite views. The current contract has 51 paths, 55 operations, and 116 schemas. Ordinary DTOs expose no Workspace root, Provider key/Base URL/environment name, submitted Session or file body, model/tool output, approval command/path/content, private lifecycle narrative, private identity, operation key, lease owner, or fencing identity; the sole archive-bearing install request is strict, bounded, and pathless.
+- Go DTO/OpenAPI-first Workspace explore/search, model availability/diagnostics/routes/generation, runtime capabilities/worker health, Run creation/lifecycle/bounded execution/wake intent/foreground consume, controlled Session queue/cancellation/evidence attachment/inventory, operator action center, Plan/Deliver, approvals, FileEdit proposal/read-only recovery/review/apply, inert Skill install, terminal receipt history, Agent graph, delegation, read-only Fan-out, Finding/Report, execution-profile, external-Skill provenance, SSE, and high-water event-poll projections with bounded Store queries and generated React/Vite views. The current contract has 57 paths, 61 operations, and 125 schemas. Ordinary DTOs expose no Workspace root, Provider key/Base URL/environment name, submitted Session body, model/tool output, approval command/path/content, private lifecycle narrative, private identity, operation key, lease owner, or fencing identity; FileEdit recovery is the narrow read-only exception that returns integrity-checked stored bodies for one exact pending proposal, while the sole archive-bearing install request remains strict, bounded, and pathless.
 - Schema v18 root and schema v29 Specialist cross-process active-call cancellation with a distinct optional control token, exact Run/Agent/attempt/model preconditions, one-to-one hashed idempotency, audit-first request/observation, worker-owned context signalling, atomic terminal resolution, and stale-attempt/worker-loss cleanup. Read and control capabilities are not interchangeable, and clients never receive or submit fencing tokens.
 - Deterministic OpenAPI 3.1 generation from Go DTOs and an explicit route catalog, with `api openapi` stdout/file export, a protected raw `/api/v1/openapi.json` endpoint, a committed golden document, live-handler contract tests, capability separation, and forbidden-internal-field checks.
 - Bounded read-only `/api/v1/runs/{run_id}/events/stream` SSE backed by durable SQLite sequences, with Run-bound opaque cursors, `Last-Event-ID` resume, heartbeats, cross-connection polling, per-frame write deadlines, event/time/batch bounds, process-wide connection slots, and server-shutdown cancellation. Go/OpenAPI/TypeScript share the literal envelope version `v1`; the client cancels the response body before reconnect after any parse/transport failure so malformed streams cannot exhaust browser connection slots.
@@ -1185,19 +1185,57 @@ used.
 GitHub Actions run `29671519260` passed implementation commit `ee36405`: TypeScript
 42s, Windows Desktop 2m31s, and Go control plane 3m54s.
 
+## Completed Safe Recovery, Provider Generations, And Worker Health
+
+Non-schema D1-I2/M4/J2 leaves SQLite at v77. D1-I2 rotates an expired source handle
+only while the current Workspace file still matches the previously issued SHA-256;
+renderer draft text is not part of reissue. A durable pending proposal is recovered
+only as an integrity-checked, handle-free, non-editable Diff. Stale and missing targets
+cannot be silently rebased, approved, applied, or reopened by recovery.
+
+D1-M4 builds a complete candidate Provider Registry, validates persisted routes, and
+completes credential reads before atomically advancing a generation. Any failure keeps
+the old generation active. Router calls capture route and immutable Provider together,
+so active calls finish on the old Provider and later calls use the new one. Responses
+remain status-only; a successful reload sets restart false.
+
+D1-J2 exposes authenticated read-only `runtime_capabilities.v1` and bounded
+`run_wake_worker_health.v1` to ordinary Web and Desktop. Worker state is a closed
+`disabled|ready|running|draining|stopped` set with concurrency/max steps fixed at one.
+No token, owner, lease, Run, operation, or private error is exposed, and runtime enable,
+persistent service, process, Shell, and Docker authority remain false. Public
+`RunOnce` callers serialize, reject nil context, and drain before stop.
+
+The cumulative six-slice gate passed final ordinary/race Go in 322.9s/352.8s, vet,
+zero-warning staticcheck, zero-finding govulncheck, module verification/tidy, secure
+Desktop tags, strict TypeScript, 108 React tests across 29 files, deterministic
+OpenAPI/TypeScript, Vite build, zero-vulnerability npm audit, and a reproducible
+Windows double build. OpenAPI has 57 paths, 61 operations, and 125 schemas. The
+unsigned GUI SHA-256 is
+`30a3d9d19e02f32f8ea976fc071bc6942ed06fba3e7cad937310a78e46e74dfc` and remains
+`release_ready=false`. Desktop/mobile browser smoke found no horizontal overflow or
+console error.
+
+The combined audit fixed mixed Registry generations, candidate credential-read
+failure replacing the serving Registry, concurrent reload false failure, inconsistent
+list generations, worker construction without a control token, concurrent `RunOnce`,
+nil context, missing-file proposal recovery, and recovery-dialog failure behavior. No
+unresolved high/medium issue is known. No real key, Provider request, Shell,
+LocalRunner, Docker, attack traffic, or external network was used. Current estimates
+are architecture about 99% (V2 about 99%), complete-product usability about 87-90%,
+generic Coding Agent workflow about 84%, and Cyber automation about 20%. ADR 0046 is
+authoritative.
+
 ## Recommended Next Batch
 
-Complete D1-I2 safe editor recovery, D1-M4 generation-safe Provider Registry reload,
-and D1-J2 metadata-only browser capability plus wake-worker health/drain. Recovery must reissue current Go
-source and preserve stale-file conflicts; Registry reload must not race active model
-calls or leak old/new credentials; health must expose no private owner/lease/error and
-must not become a runtime enable endpoint or persistent service. The projection also
-closes the low-risk ordinary-browser discovery gap without trusting TypeScript. This batch reaches
-six slices and therefore requires the complete ordinary/race/vet/staticcheck/
-govulncheck/dependency/privacy gate plus Desktop/browser recovery checks. The manual
-Windows 10 matrix, signed ZIP/MSIX distribution, Local OS sandboxing, Docker process
-lifecycle, Rust analyzers, xterm, network grants, and CTF solving remain separately
-gated work.
+Complete D1-G1 Go-owned read-only repository-state projection, D1-I3 bounded multi-file
+change-set review, and D1-F1 one tested Code-mode journey across New Run, Session input,
+Plan/Delivery, explicit bounded execution, recovery, actions, and terminal reporting.
+These slices must not introduce renderer/model shell execution, expose host roots or
+hooks, merge per-file review/apply authority, or add a composite mutation endpoint.
+The manual Windows 10 matrix, signed ZIP/MSIX distribution, Local OS sandboxing,
+Docker process lifecycle, Rust analyzers, xterm, network grants, and CTF solving remain
+separately gated work.
 
 Keep the Local profile disabled until a real OS sandbox makes protected host roots unavailable or read-only; never map it to unrestricted `os/exec`. Runtime verification and the Docker start/wait/TERM/KILL/orphan lifecycle still require a later independent release gate. Broader HTTP/Desktop mutations, Rust analyzers, network/secret support, end-user process execution, and CTF solving remain deferred.
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import Editor, { DiffEditor } from "@monaco-editor/react";
-import { Check, FileDiff, LoaderCircle, Pencil, X } from "lucide-react";
+import { Check, FileDiff, LoaderCircle, Pencil, RefreshCw, X } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import type { FileEditProposalSourceView } from "../api/types";
 import { ErrorState, StatusBadge } from "./common";
@@ -13,7 +13,9 @@ export function FileProposalEditor({ client, runID, source, onClose }: {
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const [activeSource, setActiveSource] = useState(source);
   const [draft, setDraft] = useState(source.content);
+  const [expired, setExpired] = useState(Date.parse(source.expires_at) <= Date.now());
   const [mode, setMode] = useState<"edit" | "diff">("edit");
   const [editorState, setEditorState] = useState<"loading" | "ready" | "failed">("loading");
   useEffect(() => {
@@ -26,10 +28,22 @@ export function FileProposalEditor({ client, runID, source, onClose }: {
     });
     return () => { active = false; };
   }, []);
+  useEffect(() => {
+    setActiveSource(source);
+    setDraft(source.content);
+  }, [source]);
+  useEffect(() => {
+    const remaining = Date.parse(activeSource.expires_at) - Date.now();
+    setExpired(remaining <= 0);
+    if (remaining <= 0) return;
+    const timer = window.setTimeout(() => setExpired(true),
+      Math.min(remaining, 2_147_483_647));
+    return () => window.clearTimeout(timer);
+  }, [activeSource.expires_at]);
   const mutation = useMutation({
     mutationFn: () => client.createFileEditProposal(runID, {
       version: "file_edit_proposal.v1",
-      source_handle: source.source_handle,
+      source_handle: activeSource.source_handle,
       proposed_text: draft,
     }),
     onSuccess: () => {
@@ -37,13 +51,22 @@ export function FileProposalEditor({ client, runID, source, onClose }: {
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "approvals"] });
     },
   });
+  const refresh = useMutation({
+    mutationFn: () => client.reissueFileEditProposalSource(runID, activeSource.path,
+      activeSource.content_sha256),
+    onSuccess: (renewed) => {
+      setActiveSource(renewed);
+      mutation.reset();
+    },
+  });
   const bytes = new TextEncoder().encode(draft).length;
-  const invalid = editorState !== "ready" || bytes > 256 * 1024 || draft === source.content;
-  const language = languageForPath(source.path);
+  const invalid = editorState !== "ready" || bytes > 256 * 1024 ||
+    draft === activeSource.content || expired;
+  const language = languageForPath(activeSource.path);
 
-  return <section className="file-proposal-editor" aria-label={`Edit proposal for ${source.path}`}>
+  return <section className="file-proposal-editor" aria-label={`Edit proposal for ${activeSource.path}`}>
     <header>
-      <div><Pencil aria-hidden="true" size={16} /><strong>{source.path}</strong>
+      <div><Pencil aria-hidden="true" size={16} /><strong>{activeSource.path}</strong>
         <StatusBadge status="proposal only" /></div>
       <div className="segmented-control" aria-label="Editor mode">
         <button aria-pressed={mode === "edit"} onClick={() => setMode("edit")} type="button">
@@ -69,16 +92,23 @@ export function FileProposalEditor({ client, runID, source, onClose }: {
         <Editor height="100%" language={language} onChange={(value) => setDraft(value ?? "")}
         options={{ automaticLayout: true, fontSize: 13, letterSpacing: 0, minimap: { enabled: false },
           renderWhitespace: "selection", scrollBeyondLastLine: false, tabSize: 2, wordWrap: "off" }}
-        path={`proposal://${runID}/${source.content_sha256}/${source.path}`}
+        path={`proposal://${runID}/${activeSource.content_sha256}/${activeSource.path}`}
         theme="vs" value={draft} /> :
-        <DiffEditor height="100%" language={language} modified={draft} original={source.content}
+        <DiffEditor height="100%" language={language} modified={draft} original={activeSource.content}
           options={{ automaticLayout: true, fontSize: 13, letterSpacing: 0, minimap: { enabled: false },
             readOnly: true, renderSideBySide: true, scrollBeyondLastLine: false }}
           theme="vs" />)}
     </div>
     <footer>
       <span>{bytes.toLocaleString()} / {(256 * 1024).toLocaleString()} bytes</span>
-      <span>Source {source.content_sha256.slice(0, 12)}</span>
+      <span>Source {activeSource.content_sha256.slice(0, 12)}</span>
+      {!mutation.data && (expired || mutation.isError) &&
+        <button className="compact-command" disabled={refresh.isPending}
+          onClick={() => refresh.mutate()} type="button">
+          {refresh.isPending ? <LoaderCircle aria-hidden="true" className="spin" size={14} />
+            : <RefreshCw aria-hidden="true" size={14} />}
+          Refresh source
+        </button>}
       {mutation.data ? <span className="proposal-created-status" role="status">
         <Check aria-hidden="true" size={14} />Pending review {mutation.data.edit.id.slice(0, 12)}
       </span> : <button className="compact-command" disabled={invalid || mutation.isPending}
@@ -92,6 +122,7 @@ export function FileProposalEditor({ client, runID, source, onClose }: {
       Proposal exceeds the 256 KiB Go boundary
     </div>}
     {mutation.isError && <ErrorState error={mutation.error} />}
+    {refresh.isError && <ErrorState error={refresh.error} />}
   </section>;
 }
 

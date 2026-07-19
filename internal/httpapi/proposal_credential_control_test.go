@@ -19,6 +19,9 @@ func TestProposalAndCredentialHTTPControlsAreDefaultOff(t *testing.T) {
 		"/file-edit-proposal-source?path=README.md"
 	assertAPIError(t, performSessionMessageRequest(t, fixture.api, http.MethodGet,
 		sourcePath, testAccessToken, "", "", nil), http.StatusNotFound, "NOT_FOUND")
+	assertAPIError(t, performSessionMessageRequest(t, fixture.api, http.MethodGet,
+		"/api/v1/runs/"+fixture.run.ID+"/file-edit-proposal-recovery/edit-missing",
+		testAccessToken, "", "", nil), http.StatusNotFound, "NOT_FOUND")
 	assertAPIError(t, performSessionMessageRequest(t, fixture.api, http.MethodPost,
 		"/api/v1/runs/"+fixture.run.ID+"/file-edit-proposals", testControlToken,
 		"", "application/json", strings.NewReader(`{}`)), http.StatusNotFound, "NOT_FOUND")
@@ -57,9 +60,18 @@ func TestFileEditProposalHTTPRequiresGoSourceAndNeverWritesFile(t *testing.T) {
 		source.FileWrite || source.Path != relativePath {
 		t.Fatalf("unsafe or incomplete proposal source: %#v", source)
 	}
+	reissuePath := sourcePath + "&expected_sha256=" + source.ContentSHA256
+	reissueResponse := performSessionMessageRequest(t, api, http.MethodGet, reissuePath,
+		testAccessToken, "", "", nil)
+	var reissued FileEditProposalSourceView
+	decodeDataStatus(t, reissueResponse, http.StatusOK, &reissued)
+	if reissued.SourceHandle == source.SourceHandle ||
+		reissued.ContentSHA256 != source.ContentSHA256 || reissued.Content != source.Content {
+		t.Fatalf("proposal source was not safely reissued: %#v", reissued)
+	}
 
 	body := `{"version":"file_edit_proposal.v1","source_handle":"` +
-		source.SourceHandle + `","proposed_text":"operator-proposed content\n"}`
+		reissued.SourceHandle + `","proposed_text":"operator-proposed content\n"}`
 	proposalPath := "/api/v1/runs/" + fixture.run.ID + "/file-edit-proposals"
 	readToken := performSessionMessageRequest(t, api, http.MethodPost, proposalPath,
 		testAccessToken, "", "application/json", strings.NewReader(body))
@@ -77,6 +89,29 @@ func TestFileEditProposalHTTPRequiresGoSourceAndNeverWritesFile(t *testing.T) {
 	if err != nil || string(current) != original || string(current) == proposed {
 		t.Fatalf("proposal changed the Workspace file: content=%q err=%v", current, err)
 	}
+	recoveryPath := "/api/v1/runs/" + fixture.run.ID +
+		"/file-edit-proposal-recovery/" + result.Edit.ID
+	recoveryResponse := performSessionMessageRequest(t, api, http.MethodGet,
+		recoveryPath, testAccessToken, "", "", nil)
+	var recovery FileEditProposalRecoveryView
+	decodeDataStatus(t, recoveryResponse, http.StatusOK, &recovery)
+	if recovery.EditID != result.Edit.ID || recovery.OriginalContent != original ||
+		recovery.ProposedContent != proposed || recovery.Stale || recovery.Editable ||
+		!recovery.ReviewRequired || recovery.FileWrite {
+		t.Fatalf("durable proposal recovery widened authority: %#v", recovery)
+	}
+	if err := os.WriteFile(absolutePath, []byte("changed outside editor\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	staleResponse := performSessionMessageRequest(t, api, http.MethodGet,
+		recoveryPath, testAccessToken, "", "", nil)
+	decodeDataStatus(t, staleResponse, http.StatusOK, &recovery)
+	if !recovery.Stale || recovery.CurrentContentSHA256 == recovery.OriginalSHA256 {
+		t.Fatalf("stale proposal recovery was not projected: %#v", recovery)
+	}
+	staleReissue := performSessionMessageRequest(t, api, http.MethodGet,
+		reissuePath, testAccessToken, "", "", nil)
+	assertAPIError(t, staleReissue, http.StatusConflict, "CONFLICT")
 }
 
 func TestProviderCredentialHTTPNeverReturnsPlaintext(t *testing.T) {

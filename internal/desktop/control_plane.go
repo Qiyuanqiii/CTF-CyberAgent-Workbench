@@ -98,7 +98,8 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 	approvalControl := application.NewApprovalControlService(stateStore,
 		toolgateway.New(stateStore, checker), checker)
 	modelControl := application.NewModelControlService(models, stateStore)
-	providerCredentialControl := application.NewProviderCredentialService(credentialStore)
+	providerCredentialControl := application.NewProviderCredentialService(credentialStore).
+		WithRegistryReload(models, stateStore)
 	fileEditReview := application.NewFileEditReviewService(stateStore)
 	fileEditProposal := application.NewFileEditProposalService(stateStore, checker)
 	fileEditApply := application.NewFileEditApplyService(stateStore, checker)
@@ -114,6 +115,10 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 			_ = stateStore.Close()
 			return nil, err
 		}
+	}
+	var workerHealth httpapi.RunWakeWorkerHealthSource
+	if wakeWorker != nil {
+		workerHealth = wakeWorker
 	}
 	var skillInstaller *application.SkillPackageRegistryService
 	if config.SkillInstallationEnabled {
@@ -151,6 +156,7 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 		RunWakeControlEnabled:         config.RunWakeControlEnabled,
 		FileEditApplyEnabled:          config.FileEditApplyEnabled,
 		RunWakeExecutionEnabled:       config.RunWakeExecutionEnabled,
+		RunWakeWorkerEnabled:          config.RunWakeWorkerEnabled,
 		SkillInstallationEnabled:      config.SkillInstallationEnabled,
 		EvidenceAttachmentEnabled:     config.EvidenceAttachmentEnabled,
 		RunLifecycleController:        lifecycleControl,
@@ -164,6 +170,7 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 		RunWakeController:             runWakeControl,
 		FileEditApplyController:       fileEditApply,
 		RunWakeExecutionController:    runWakeExecution,
+		RunWakeWorkerHealthSource:     workerHealth,
 		SkillInstallationController:   skillInstaller,
 		ModelRegistry:                 models,
 		AppVersion:                    config.AppVersion, UIHandler: config.UIHandler,

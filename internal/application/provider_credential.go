@@ -7,6 +7,7 @@ import (
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/credential"
+	"cyberagent-workbench/internal/modelregistry"
 )
 
 type ProviderCredentialAction string
@@ -21,13 +22,15 @@ var managedCredentialProviders = map[string]struct{}{
 }
 
 type ProviderCredentialStatus struct {
-	ProtocolVersion   string
-	Provider          string
-	Configured        bool
-	StoreKind         string
-	StoreAvailable    bool
-	PlaintextReturned bool
-	RestartRequired   bool
+	ProtocolVersion    string
+	Provider           string
+	Configured         bool
+	StoreKind          string
+	StoreAvailable     bool
+	PlaintextReturned  bool
+	RestartRequired    bool
+	RegistryReloaded   bool
+	RegistryGeneration uint64
 }
 
 type ChangeProviderCredentialRequest struct {
@@ -42,11 +45,28 @@ type ChangeProviderCredentialRequest struct {
 // the renderer/HTTP boundary once, is handed directly to the OS-owned Store,
 // and is never returned, logged, placed in SQLite, or included in an event.
 type ProviderCredentialService struct {
-	store credential.Store
+	store         credential.Store
+	registry      ProviderRegistryReloader
+	routeSettings modelregistry.RouteSettingReader
+}
+
+type ProviderRegistryReloader interface {
+	Reload(context.Context, modelregistry.RouteSettingReader) (modelregistry.ReloadResult, error)
+	Generation() uint64
 }
 
 func NewProviderCredentialService(store credential.Store) *ProviderCredentialService {
 	return &ProviderCredentialService{store: store}
+}
+
+func (s *ProviderCredentialService) WithRegistryReload(registry ProviderRegistryReloader,
+	settings modelregistry.RouteSettingReader,
+) *ProviderCredentialService {
+	if s != nil {
+		s.registry = registry
+		s.routeSettings = settings
+	}
+	return s
 }
 
 func (s *ProviderCredentialService) List(ctx context.Context) (
@@ -61,13 +81,19 @@ func (s *ProviderCredentialService) List(ctx context.Context) (
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	values := make([]ProviderCredentialStatus, 0, len(names))
+	configuredValues := make([]bool, 0, len(names))
 	for _, name := range names {
 		configured, err := s.configured(ctx, name)
 		if err != nil {
 			return nil, err
 		}
-		values = append(values, s.status(name, configured, false))
+		configuredValues = append(configuredValues, configured)
+	}
+	generation := s.registryGeneration()
+	values := make([]ProviderCredentialStatus, 0, len(names))
+	for index, name := range names {
+		values = append(values, s.status(name, configuredValues[index], false, false,
+			generation))
 	}
 	return values, nil
 }
@@ -123,7 +149,31 @@ func (s *ProviderCredentialService) Change(ctx context.Context,
 		return ProviderCredentialStatus{}, apperror.New(apperror.CodeInternal,
 			"system credential change failed final status verification")
 	}
-	return s.status(request.Provider, configured, true), nil
+	reloaded := false
+	if s.registry != nil || s.routeSettings != nil {
+		if s.registry == nil || s.routeSettings == nil {
+			return ProviderCredentialStatus{}, apperror.New(apperror.CodeFailedPrecondition,
+				"Provider Registry reload dependencies are incomplete")
+		}
+		result, reloadErr := s.registry.Reload(ctx, s.routeSettings)
+		if reloadErr != nil {
+			return ProviderCredentialStatus{}, apperror.Wrap(apperror.CodeUnavailable,
+				"Provider credential changed but Registry reload was not applied", reloadErr)
+		}
+		if !result.Reloaded || result.ProtocolVersion != modelregistry.ReloadProtocolVersion ||
+			result.Generation == 0 {
+			return ProviderCredentialStatus{}, apperror.New(apperror.CodeInternal,
+				"Provider Registry reload returned an invalid generation")
+		}
+		generation := s.registry.Generation()
+		if generation == 0 || generation < result.Generation {
+			return ProviderCredentialStatus{}, apperror.New(apperror.CodeInternal,
+				"Provider Registry reload did not retain its generation")
+		}
+		reloaded = true
+	}
+	return s.status(request.Provider, configured, !reloaded, reloaded,
+		s.registryGeneration()), nil
 }
 
 func (s *ProviderCredentialService) configured(ctx context.Context,
@@ -141,12 +191,20 @@ func (s *ProviderCredentialService) configured(ctx context.Context,
 }
 
 func (s *ProviderCredentialService) status(provider string, configured bool,
-	restartRequired bool,
+	restartRequired bool, registryReloaded bool, generation uint64,
 ) ProviderCredentialStatus {
 	return ProviderCredentialStatus{ProtocolVersion: credential.ProtocolVersion,
 		Provider: provider, Configured: configured, StoreKind: s.store.Kind(),
 		StoreAvailable: s.store.Available(), PlaintextReturned: false,
-		RestartRequired: restartRequired}
+		RestartRequired: restartRequired, RegistryReloaded: registryReloaded,
+		RegistryGeneration: generation}
+}
+
+func (s *ProviderCredentialService) registryGeneration() uint64 {
+	if s == nil || s.registry == nil {
+		return 0
+	}
+	return s.registry.Generation()
 }
 
 func managedProvider(value string) bool {
