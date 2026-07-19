@@ -45,6 +45,7 @@ type RuntimeCapabilitiesView struct {
 	RunWakeWorkerEnabled          bool                    `json:"run_wake_worker_enabled"`
 	SkillInstallationEnabled      bool                    `json:"skill_installation_enabled"`
 	EvidenceAttachmentEnabled     bool                    `json:"evidence_attachment_enabled"`
+	VerificationEvidenceEnabled   bool                    `json:"verification_evidence_enabled"`
 	ProcessExecutionEnabled       bool                    `json:"process_execution_enabled"`
 	ShellExecutionEnabled         bool                    `json:"shell_execution_enabled"`
 	DockerExecutionEnabled        bool                    `json:"docker_execution_enabled"`
@@ -88,19 +89,20 @@ func (a *API) runtimeCapabilities(request *http.Request) (any, *Page, error) {
 		SessionMessageEnabled:         a.sessionMessageEnabled,
 		SessionSteeringControlEnabled: a.sessionSteeringControlEnabled,
 		RunLifecycleEnabled:           a.runLifecycleEnabled, RunExecutionEnabled: a.runExecutionEnabled,
-		PlanDeliveryControlEnabled: a.planDeliveryControlEnabled,
-		ApprovalControlEnabled:     a.approvalControlEnabled,
-		ModelControlEnabled:        a.modelControlEnabled,
-		ProviderCredentialEnabled:  a.providerCredentialEnabled,
-		FileEditReviewEnabled:      a.fileEditReviewEnabled,
-		FileEditProposalEnabled:    a.fileEditProposalEnabled,
-		FileEditApplyEnabled:       a.fileEditApplyEnabled,
-		RunWakeControlEnabled:      a.runWakeControlEnabled,
-		RunWakeExecutionEnabled:    a.runWakeExecutionEnabled,
-		RunWakeWorkerEnabled:       a.runWakeWorkerEnabled,
-		SkillInstallationEnabled:   a.skillInstallationEnabled,
-		EvidenceAttachmentEnabled:  a.evidenceAttachmentEnabled,
-		ProcessExecutionEnabled:    false, ShellExecutionEnabled: false,
+		PlanDeliveryControlEnabled:  a.planDeliveryControlEnabled,
+		ApprovalControlEnabled:      a.approvalControlEnabled,
+		ModelControlEnabled:         a.modelControlEnabled,
+		ProviderCredentialEnabled:   a.providerCredentialEnabled,
+		FileEditReviewEnabled:       a.fileEditReviewEnabled,
+		FileEditProposalEnabled:     a.fileEditProposalEnabled,
+		FileEditApplyEnabled:        a.fileEditApplyEnabled,
+		RunWakeControlEnabled:       a.runWakeControlEnabled,
+		RunWakeExecutionEnabled:     a.runWakeExecutionEnabled,
+		RunWakeWorkerEnabled:        a.runWakeWorkerEnabled,
+		SkillInstallationEnabled:    a.skillInstallationEnabled,
+		EvidenceAttachmentEnabled:   a.evidenceAttachmentEnabled,
+		VerificationEvidenceEnabled: a.verificationEvidenceEnabled,
+		ProcessExecutionEnabled:     false, ShellExecutionEnabled: false,
 		DockerExecutionEnabled: false, WakeWorker: worker,
 	}, nil, nil
 }

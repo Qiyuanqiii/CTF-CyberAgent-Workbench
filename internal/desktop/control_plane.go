@@ -58,6 +58,7 @@ type ControlPlaneConfig struct {
 	RunWakeWorkerEnabled          bool
 	SkillInstallationEnabled      bool
 	EvidenceAttachmentEnabled     bool
+	VerificationEvidenceEnabled   bool
 	AppVersion                    string
 	UIHandler                     http.Handler
 	CredentialStore               credential.Store
@@ -159,6 +160,7 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 		RunWakeWorkerEnabled:          config.RunWakeWorkerEnabled,
 		SkillInstallationEnabled:      config.SkillInstallationEnabled,
 		EvidenceAttachmentEnabled:     config.EvidenceAttachmentEnabled,
+		VerificationEvidenceEnabled:   config.VerificationEvidenceEnabled,
 		RunLifecycleController:        lifecycleControl,
 		RunExecutionController:        executionControl,
 		PlanDeliveryController:        planDeliveryControl,

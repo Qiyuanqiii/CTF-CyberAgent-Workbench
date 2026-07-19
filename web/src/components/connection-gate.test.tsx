@@ -74,6 +74,7 @@ describe("ConnectionGate", () => {
       docker_execution_enabled: false,
       skill_installation_enabled: false,
       evidence_attachment_enabled: false,
+      verification_evidence_enabled: false,
       renderer_path_input_supported: false,
     });
     window.go = { desktop: { DesktopBridge: {
@@ -109,6 +110,7 @@ function runtimeCapabilities() {
     run_wake_control_enabled: true, run_wake_execution_enabled: true,
     run_wake_worker_enabled: false, skill_installation_enabled: true,
     evidence_attachment_enabled: true, process_execution_enabled: false,
+    verification_evidence_enabled: true,
     shell_execution_enabled: false, docker_execution_enabled: false,
     wake_worker: { protocol_version: "run_wake_worker_health.v1", enabled: false,
       state: "disabled", active: false, poll_interval_ms: 0, concurrency: 1,

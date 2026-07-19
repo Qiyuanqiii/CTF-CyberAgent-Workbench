@@ -59,6 +59,7 @@ type ConnectionBootstrap struct {
 	DockerExecutionEnabled        bool   `json:"docker_execution_enabled"`
 	SkillInstallationEnabled      bool   `json:"skill_installation_enabled"`
 	EvidenceAttachmentEnabled     bool   `json:"evidence_attachment_enabled"`
+	VerificationEvidenceEnabled   bool   `json:"verification_evidence_enabled"`
 	RendererPathInputSupported    bool   `json:"renderer_path_input_supported"`
 }
 
@@ -139,6 +140,7 @@ type DesktopBridgeConfig struct {
 	RunWakeWorkerEnabled          bool
 	SkillInstallationEnabled      bool
 	EvidenceAttachmentEnabled     bool
+	VerificationEvidenceEnabled   bool
 	APIVersion                    string
 	AppVersion                    string
 	UIDigest                      string
@@ -180,7 +182,7 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 	controlEnabled = controlEnabled || config.FileEditApplyEnabled ||
 		config.RunWakeExecutionEnabled || config.RunWakeWorkerEnabled ||
 		config.SkillInstallationEnabled ||
-		config.EvidenceAttachmentEnabled
+		config.EvidenceAttachmentEnabled || config.VerificationEvidenceEnabled
 	if controlEnabled && config.ControlToken == "" {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop control capabilities require a control token")
@@ -234,9 +236,10 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 			RunWakeWorkerEnabled:          config.RunWakeWorkerEnabled,
 			ReadOnlyDefault:               !controlEnabled,
 			ProcessExecutionEnabled:       false, ShellExecutionEnabled: false, DockerExecutionEnabled: false,
-			SkillInstallationEnabled:   config.SkillInstallationEnabled,
-			EvidenceAttachmentEnabled:  config.EvidenceAttachmentEnabled,
-			RendererPathInputSupported: false,
+			SkillInstallationEnabled:    config.SkillInstallationEnabled,
+			EvidenceAttachmentEnabled:   config.EvidenceAttachmentEnabled,
+			VerificationEvidenceEnabled: config.VerificationEvidenceEnabled,
+			RendererPathInputSupported:  false,
 		},
 	}, nil
 }

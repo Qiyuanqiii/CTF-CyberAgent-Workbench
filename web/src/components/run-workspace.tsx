@@ -3,8 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   Boxes,
+  BookOpenCheck,
   Check,
   ClipboardList,
+  ClipboardCheck,
   Container,
   Database,
   FileArchive,
@@ -53,16 +55,19 @@ import { EmptyState, ErrorState, KeyValue, LoadMoreButton, LoadingState, StatusB
 import { ApprovalPanel } from "./approval-panel";
 import { CommandPalette, type CommandPaletteCommand } from "./command-palette";
 import { CodeJourney } from "./code-journey";
+import { CodeHandoffPanel } from "./code-handoff-panel";
 import { EvidenceInventory } from "./evidence-inventory";
 import { FileEditPanel } from "./file-edit-panel";
 import { OperationReceiptHistory } from "./operation-receipt-history";
 import { OperatorActionCenter } from "./operator-action-center";
 import { RunWakePanel } from "./run-wake-panel";
 import { RepositoryStatePanel } from "./repository-state-panel";
+import { RepositoryDiffPanel } from "./repository-diff-panel";
+import { VerificationEvidence } from "./verification-evidence";
 import { WorkspaceExplorer } from "./workspace-explorer";
 import { AgentGraphPanel, DelegationsPanel, ExternalSkillsPanel, FanoutPanel, FindingsPanel } from "./run-projections";
 
-type RunTab = "overview" | "journey" | "actions" | "approvals" | "diffs" | "repository" | "files" | "evidence" |
+type RunTab = "overview" | "journey" | "actions" | "approvals" | "diffs" | "repository" | "files" | "evidence" | "verify" | "handoff" |
   "receipts" | "agents" | "delegations" | "fanout" | "findings" | "events" | "work" |
   "notes" | "artifacts" | "tools";
 
@@ -75,6 +80,8 @@ const tabs: Array<{ id: RunTab; label: string; icon: typeof Activity }> = [
   { id: "repository", label: "Repository", icon: GitBranch },
   { id: "files", label: "Files", icon: FolderOpen },
   { id: "evidence", label: "Evidence", icon: Paperclip },
+  { id: "verify", label: "Verify", icon: ClipboardCheck },
+  { id: "handoff", label: "Handoff", icon: BookOpenCheck },
   { id: "receipts", label: "Receipts", icon: History },
   { id: "agents", label: "Agents", icon: GitBranch },
   { id: "delegations", label: "委派", icon: Network },
@@ -125,7 +132,8 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
   const artifacts = useMemo(() => artifactsQuery.data?.pages.flatMap((page) => page.items) ?? [], [artifactsQuery.data]);
   const rounds = useMemo(() => toolsQuery.data?.pages.flatMap((page) => page.items) ?? [], [toolsQuery.data]);
   const visibleTabs = useMemo(() => detailQuery.data?.mode.surface === "cyber"
-    ? tabs.filter(({ id }) => id !== "journey") : tabs, [detailQuery.data?.mode.surface]);
+    ? tabs.filter(({ id }) => !["journey", "verify", "handoff"].includes(id)) : tabs,
+  [detailQuery.data?.mode.surface]);
   const commands = useMemo<CommandPaletteCommand[]>(() => [
     ...visibleTabs.map(({ id, label }) => ({ id: `view-${id}`, label: `Open ${label}`,
       group: "Navigate", keywords: [id, "run"], run: () => setTab(id) })),
@@ -182,8 +190,10 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
             destination === "diffs" ? "diffs" : "overview")} />}
         {tab === "approvals" && <ApprovalPanel client={client} runID={runID} />}
         {tab === "diffs" && <FileEditPanel client={client} runID={runID} />}
-        {tab === "repository" && <RepositoryStatePanel client={client}
-          workspaceID={detail.mission.workspace_id ?? ""} />}
+        {tab === "repository" && <div className="projection-stack">
+          <RepositoryStatePanel client={client} workspaceID={detail.mission.workspace_id ?? ""} />
+          <RepositoryDiffPanel client={client} workspaceID={detail.mission.workspace_id ?? ""} />
+        </div>}
         {tab === "files" && <WorkspaceExplorer client={client}
           initialPath={fileTarget.runID === runID ? fileTarget.path : "."}
           key={`${detail.mission.workspace_id ?? "unbound"}:${fileTarget.runID === runID ? fileTarget.path : "."}`}
@@ -193,6 +203,10 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
             setFileTarget({ runID, path: sourceRef });
             setTab("files");
           }} />}
+        {tab === "verify" && detail.mode.surface === "code" &&
+          <VerificationEvidence client={client} runID={runID} />}
+        {tab === "handoff" && detail.mode.surface === "code" &&
+          <CodeHandoffPanel client={client} runID={runID} />}
         {tab === "receipts" && <OperationReceiptHistory client={client} runID={runID} />}
         {tab === "agents" && <AgentGraphPanel client={client} runID={runID} />}
         {tab === "delegations" && <DelegationsPanel client={client} runID={runID} />}

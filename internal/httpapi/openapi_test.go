@@ -112,7 +112,9 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				(path == SkillPackageInstallPath &&
 					item.Post.OperationID == "installSkillPackage") ||
 				(path == EvidenceAttachmentPathTemplate &&
-					item.Post.OperationID == "attachRunEvidence")
+					item.Post.OperationID == "attachRunEvidence") ||
+				(path == VerificationEvidencePathTemplate &&
+					item.Post.OperationID == "recordRunVerificationEvidence")
 			if !validControl ||
 				item.Post.ReadOnly || item.Post.Responses["202"] == nil || item.Post.RequestBody == nil ||
 				len(item.Post.Security) != 1 || item.Post.Security[0]["ControlBearerAuth"] == nil {
@@ -122,7 +124,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 		}
 		expectedOperations := 1
 		if path == RunCreationControlPath || path == SessionMessageControlPathTemplate ||
-			path == RunWakeIntentPathTemplate || path == EvidenceAttachmentPathTemplate {
+			path == RunWakeIntentPathTemplate || path == EvidenceAttachmentPathTemplate ||
+			path == VerificationEvidencePathTemplate {
 			expectedOperations = 2
 		}
 		if len(operations) != expectedOperations {
@@ -167,7 +170,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				path == RunWakeCancellationPathTemplate ||
 				path == RunWakeExecutionPathTemplate ||
 				path == SkillPackageInstallPath ||
-				path == EvidenceAttachmentPathTemplate) &&
+				path == EvidenceAttachmentPathTemplate ||
+				path == VerificationEvidencePathTemplate) &&
 				method == "post") {
 				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
 			}
@@ -352,6 +356,7 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 	fixture.api.runWakeExecutionEnabled = true
 	fixture.api.skillInstallationEnabled = true
 	fixture.api.evidenceAttachmentEnabled = true
+	fixture.api.verificationEvidenceEnabled = true
 	fixture.api.runLifecycleController = application.NewRunLifecycleControlService(fixture.store)
 	executionController := application.NewRunExecutionHandoffService(
 		fixture.store, llm.NewDefaultRouter(), policy.NewDefaultChecker())
@@ -512,6 +517,10 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 					body = `{"version":"session_evidence_attachment.v1",` +
 						`"source_kind":"workspace_file","source_ref":"README.md",` +
 						`"content_sha256":"` + hex.EncodeToString(evidenceDigest[:]) + `"}`
+				} else if spec.Path == VerificationEvidencePathTemplate {
+					body = `{"version":"operator_verification_evidence.v1",` +
+						`"outcome":"pass","title":"OpenAPI verification",` +
+						`"summary":"Live route verified"}`
 				} else if spec.Path != RunExecutionProfileControlPathTemplate {
 					attemptID := fixture.checkpoint.AttemptID
 					modelAttempt := 1

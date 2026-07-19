@@ -46,6 +46,7 @@ export interface DesktopConnectionBootstrap {
   docker_execution_enabled: false;
   skill_installation_enabled: boolean;
   evidence_attachment_enabled: boolean;
+  verification_evidence_enabled: boolean;
   renderer_path_input_supported: false;
 }
 
@@ -241,6 +242,7 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
     "api_base_url", "api_version", "app_version", "approval_control_enabled",
     "control_enabled", "control_token", "docker_execution_enabled", "file_edit_apply_enabled",
     "evidence_attachment_enabled",
+	"verification_evidence_enabled",
     "file_edit_proposal_enabled", "file_edit_review_enabled", "model_control_enabled",
     "provider_credential_enabled", "process_execution_enabled",
     "protocol_version", "read_only_default",
@@ -274,6 +276,7 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
     typeof value.run_wake_worker_enabled === "boolean" &&
     typeof value.skill_installation_enabled === "boolean" &&
     typeof value.evidence_attachment_enabled === "boolean" &&
+	typeof value.verification_evidence_enabled === "boolean" &&
     (value.control_token !== "") === (value.control_enabled || value.run_creation_enabled ||
       value.session_message_enabled || value.session_steering_control_enabled ||
       value.run_lifecycle_enabled || value.run_execution_enabled ||
@@ -283,7 +286,7 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
 	  value.run_wake_control_enabled || value.file_edit_apply_enabled ||
       value.run_wake_execution_enabled || value.run_wake_worker_enabled ||
       value.skill_installation_enabled ||
-      value.evidence_attachment_enabled) &&
+      value.evidence_attachment_enabled || value.verification_evidence_enabled) &&
     (value.control_token === "" || validToken(value.control_token)) &&
     value.control_token !== value.read_token &&
     value.read_only_default === !(value.control_enabled || value.run_creation_enabled ||
@@ -295,7 +298,7 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
 	  value.run_wake_control_enabled || value.file_edit_apply_enabled ||
       value.run_wake_execution_enabled || value.run_wake_worker_enabled ||
       value.skill_installation_enabled ||
-      value.evidence_attachment_enabled) &&
+      value.evidence_attachment_enabled || value.verification_evidence_enabled) &&
     value.process_execution_enabled === false && value.shell_execution_enabled === false &&
     value.docker_execution_enabled === false &&
     value.renderer_path_input_supported === false;

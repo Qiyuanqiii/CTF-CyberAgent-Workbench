@@ -59,6 +59,7 @@ type desktopOptions struct {
 	runWakeWorker          bool
 	skillInstallation      bool
 	evidenceAttachment     bool
+	verificationEvidence   bool
 	version                bool
 }
 
@@ -215,6 +216,8 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 		"enable confirmed inert Skill package installation")
 	evidenceAttachment := fs.Bool("enable-evidence-attachments", false,
 		"enable idempotent non-authorizing Workspace evidence attachment")
+	verificationEvidence := fs.Bool("enable-verification-evidence", false,
+		"enable immutable operator verification evidence recording")
 	version := fs.Bool("version", false, "print version and exit")
 	if err := fs.Parse(args); err != nil {
 		return desktopOptions{}, err
@@ -239,6 +242,7 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 		runWakeWorker:          *runWakeWorker,
 		skillInstallation:      *skillInstallation,
 		evidenceAttachment:     *evidenceAttachment,
+		verificationEvidence:   *verificationEvidence,
 		version:                *version}, nil
 }
 
@@ -264,7 +268,8 @@ func runDesktop(config desktopOptions) error {
 		config.planDeliveryControl || config.approvalControl || config.modelControl ||
 		config.providerCredentials || config.fileEditReview || config.fileEditProposals ||
 		config.runWakeControl || config.fileEditApply || config.runWakeExecution ||
-		config.runWakeWorker || config.skillInstallation || config.evidenceAttachment {
+		config.runWakeWorker || config.skillInstallation || config.evidenceAttachment ||
+		config.verificationEvidence {
 		controlToken, err = httpapi.GenerateAccessToken()
 		if err != nil {
 			return err
@@ -293,6 +298,7 @@ func runDesktop(config desktopOptions) error {
 		RunWakeWorkerEnabled:          config.runWakeWorker,
 		SkillInstallationEnabled:      config.skillInstallation,
 		EvidenceAttachmentEnabled:     config.evidenceAttachment,
+		VerificationEvidenceEnabled:   config.verificationEvidence,
 		AppVersion:                    app.Version, UIHandler: bundle,
 		OnWakeWorkerError: func(runErr error) {
 			fmt.Fprintln(os.Stderr, "wake-worker:", runErr)
@@ -330,6 +336,7 @@ func runDesktop(config desktopOptions) error {
 		RunWakeWorkerEnabled:          config.runWakeWorker,
 		SkillInstallationEnabled:      config.skillInstallation,
 		EvidenceAttachmentEnabled:     config.evidenceAttachment,
+		VerificationEvidenceEnabled:   config.verificationEvidence,
 		AppVersion:                    app.Version, UIDigest: bundle.Digest(), Selector: selector,
 		PreviewBridge: preview, SkillInstaller: controlPlane.SkillInstaller(),
 	})

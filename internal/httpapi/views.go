@@ -154,6 +154,44 @@ type RepositoryStateView struct {
 	HooksExecuted        bool                   `json:"hooks_executed"`
 }
 
+type RepositoryDiffItemView struct {
+	Path         string `json:"path"`
+	Staging      string `json:"staging"`
+	Worktree     string `json:"worktree"`
+	ContentState string `json:"content_state"`
+	Patch        string `json:"patch"`
+	PatchBytes   int    `json:"patch_bytes"`
+	AddedLines   int    `json:"added_lines"`
+	DeletedLines int    `json:"deleted_lines"`
+	Redacted     bool   `json:"redacted"`
+	Truncated    bool   `json:"truncated"`
+}
+
+type RepositoryDiffView struct {
+	ProtocolVersion       string                   `json:"protocol_version"`
+	WorkspaceID           string                   `json:"workspace_id"`
+	Kind                  string                   `json:"kind"`
+	Available             bool                     `json:"available"`
+	BaseHead              string                   `json:"base_head"`
+	Items                 []RepositoryDiffItemView `json:"items"`
+	ReturnedCount         int                      `json:"returned_count"`
+	OmittedCount          int                      `json:"omitted_count"`
+	RedactionCount        int                      `json:"redaction_count"`
+	TotalPatchBytes       int                      `json:"total_patch_bytes"`
+	Truncated             bool                     `json:"truncated"`
+	ReadOnly              bool                     `json:"read_only"`
+	InstructionAuthorized bool                     `json:"instruction_authorized"`
+	MutationSupported     bool                     `json:"mutation_supported"`
+	AuthorityGranted      bool                     `json:"authority_granted"`
+	RootPathExposed       bool                     `json:"root_path_exposed"`
+	RawContentIncluded    bool                     `json:"raw_content_included"`
+	PatchContentIncluded  bool                     `json:"patch_content_included"`
+	RemoteConfigIncluded  bool                     `json:"remote_config_included"`
+	ProcessStarted        bool                     `json:"process_started"`
+	NetworkUsed           bool                     `json:"network_used"`
+	HooksExecuted         bool                     `json:"hooks_executed"`
+}
+
 type FileEditReviewView struct {
 	ProtocolVersion string              `json:"protocol_version"`
 	RunID           string              `json:"run_id"`

@@ -97,6 +97,7 @@ func TestDesktopBridgeBootstrapsMemoryOnlyClosedAuthority(t *testing.T) {
 		bootstrap.ReadOnlyDefault || bootstrap.ProcessExecutionEnabled ||
 		bootstrap.ShellExecutionEnabled || bootstrap.DockerExecutionEnabled ||
 		bootstrap.SkillInstallationEnabled || bootstrap.EvidenceAttachmentEnabled ||
+		bootstrap.VerificationEvidenceEnabled ||
 		bootstrap.RendererPathInputSupported {
 		t.Fatalf("unexpected bootstrap: %#v", bootstrap)
 	}
@@ -116,7 +117,8 @@ func TestDesktopBridgeBootstrapsMemoryOnlyClosedAuthority(t *testing.T) {
 		"run_execution_enabled", "run_lifecycle_enabled", "run_wake_control_enabled",
 		"run_wake_execution_enabled", "run_wake_worker_enabled",
 		"session_message_enabled", "session_steering_control_enabled",
-		"skill_installation_enabled", "evidence_attachment_enabled", "ui_digest",
+		"skill_installation_enabled", "evidence_attachment_enabled",
+		"verification_evidence_enabled", "ui_digest",
 	})
 }
 
@@ -141,6 +143,30 @@ func TestDesktopBridgeSeparatesEvidenceAttachmentFromOtherControls(t *testing.T)
 		bootstrap.SkillInstallationEnabled || bootstrap.ReadOnlyDefault ||
 		bootstrap.ControlToken == "" {
 		t.Fatalf("evidence attachment widened another capability: %#v", bootstrap)
+	}
+}
+
+func TestDesktopBridgeSeparatesVerificationEvidenceFromOtherControls(t *testing.T) {
+	selector, preview := NewSkillPackagePreviewBoundary()
+	bridge, err := NewDesktopBridge(DesktopBridgeConfig{
+		ContextProvider: func() context.Context { return context.Background() },
+		FilePicker:      &testSkillPackagePicker{}, ReadToken: testDesktopReadToken,
+		ControlToken: testDesktopControlToken, VerificationEvidenceEnabled: true,
+		APIVersion: "api.v1", AppVersion: "test", UIDigest: testDesktopUIDigest,
+		Selector: selector, PreviewBridge: preview,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrap, err := bridge.Bootstrap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bootstrap.VerificationEvidenceEnabled || bootstrap.ControlEnabled ||
+		bootstrap.EvidenceAttachmentEnabled || bootstrap.RunCreationEnabled ||
+		bootstrap.SkillInstallationEnabled || bootstrap.ReadOnlyDefault ||
+		bootstrap.ControlToken == "" {
+		t.Fatalf("verification evidence widened another capability: %#v", bootstrap)
 	}
 }
 
@@ -434,6 +460,7 @@ func TestNewDesktopBridgeRejectsInvalidMetadataAndDependencies(t *testing.T) {
 		{name: "capability without token", change: func(c *DesktopBridgeConfig) { c.RunCreationEnabled = true }},
 		{name: "approval without token", change: func(c *DesktopBridgeConfig) { c.ApprovalControlEnabled = true }},
 		{name: "evidence without token", change: func(c *DesktopBridgeConfig) { c.EvidenceAttachmentEnabled = true }},
+		{name: "verification without token", change: func(c *DesktopBridgeConfig) { c.VerificationEvidenceEnabled = true }},
 		{name: "bad digest", change: func(c *DesktopBridgeConfig) { c.UIDigest = strings.Repeat("g", 64) }},
 		{name: "missing version", change: func(c *DesktopBridgeConfig) { c.APIVersion = "" }},
 	}

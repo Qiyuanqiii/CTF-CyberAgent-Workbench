@@ -579,12 +579,23 @@ func removeSchemaV76ForTestStatements() []string {
 }
 
 func removeSchemaV77ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV78ForTestStatements(), []string{
 		`DROP TRIGGER trg_session_evidence_attachment_delete_immutable`,
 		`DROP TRIGGER trg_session_evidence_attachment_update_immutable`,
 		`DROP TRIGGER trg_session_evidence_attachment_insert`,
 		`DROP INDEX idx_session_evidence_attachments_run_created`,
 		`DROP TABLE session_evidence_attachments`,
 		`DELETE FROM schema_migrations WHERE version = 77`,
+	}...)
+}
+
+func removeSchemaV78ForTestStatements() []string {
+	return []string{
+		`DROP TRIGGER trg_operator_verification_evidence_delete_immutable`,
+		`DROP TRIGGER trg_operator_verification_evidence_update_immutable`,
+		`DROP TRIGGER trg_operator_verification_evidence_insert`,
+		`DROP INDEX idx_operator_verification_evidence_run_created`,
+		`DROP TABLE operator_verification_evidence`,
+		`DELETE FROM schema_migrations WHERE version = 78`,
 	}
 }

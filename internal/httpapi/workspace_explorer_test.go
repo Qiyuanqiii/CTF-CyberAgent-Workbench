@@ -71,7 +71,8 @@ func TestWorkspaceRepositoryStateHTTPIsReadOnlyAndRootBound(t *testing.T) {
 	if _, err := git.PlainInit(root, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "untracked.txt"), []byte("evidence\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "untracked.txt"), []byte(
+		"token=workspace-secret-value\nevidence\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	registered := store.WorkspaceRecord{ID: "workspace-repository-http", Name: "repository",
@@ -103,6 +104,30 @@ func TestWorkspaceRepositoryStateHTTPIsReadOnlyAndRootBound(t *testing.T) {
 	query := performSessionMessageRequest(t, api, http.MethodGet, path+"?refresh=true",
 		testAccessToken, "", "", nil)
 	assertAPIError(t, query, http.StatusBadRequest, "INVALID_ARGUMENT")
+
+	diffPath := "/api/v1/workspaces/" + registered.ID + "/repository-diff"
+	diff := performSessionMessageRequest(t, api, http.MethodGet, diffPath,
+		testAccessToken, "", "", nil)
+	diffBody := diff.Body.String()
+	if diff.Code != http.StatusOK ||
+		!strings.Contains(diffBody, `"protocol_version":"repository_diff.v1"`) ||
+		!strings.Contains(diffBody, `"path":"untracked.txt"`) ||
+		!strings.Contains(diffBody, "[REDACTED:secret]") ||
+		!strings.Contains(diffBody, "evidence") ||
+		!strings.Contains(diffBody, `"read_only":true`) ||
+		!strings.Contains(diffBody, `"instruction_authorized":false`) ||
+		!strings.Contains(diffBody, `"mutation_supported":false`) ||
+		!strings.Contains(diffBody, `"authority_granted":false`) ||
+		!strings.Contains(diffBody, `"root_path_exposed":false`) ||
+		!strings.Contains(diffBody, `"process_started":false`) ||
+		!strings.Contains(diffBody, `"network_used":false`) ||
+		!strings.Contains(diffBody, `"hooks_executed":false`) ||
+		strings.Contains(diffBody, "workspace-secret-value") || strings.Contains(diffBody, root) {
+		t.Fatalf("repository diff status=%d body=%s", diff.Code, diffBody)
+	}
+	diffQuery := performSessionMessageRequest(t, api, http.MethodGet,
+		diffPath+"?refresh=true", testAccessToken, "", "", nil)
+	assertAPIError(t, diffQuery, http.StatusBadRequest, "INVALID_ARGUMENT")
 }
 
 func TestWorkspaceSearchHTTPReturnsOnlyRedactedNonAuthorizingEvidence(t *testing.T) {

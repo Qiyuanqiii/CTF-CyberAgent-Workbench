@@ -115,10 +115,11 @@ describe("CyberAgentClient", () => {
       file_edit_apply_enabled: true, run_wake_control_enabled: true,
       run_wake_execution_enabled: true, run_wake_worker_enabled: true,
       skill_installation_enabled: true, evidence_attachment_enabled: true,
+      verification_evidence_enabled: true,
       process_execution_enabled: false, shell_execution_enabled: false,
       docker_execution_enabled: false,
       wake_worker: { protocol_version: "run_wake_worker_health.v1", enabled: true,
-        state: "running", active: false, poll_interval_ms: 2000, concurrency: 1,
+        state: "running", active: true, poll_interval_ms: 2000, concurrency: 1,
         max_steps: 1, runtime_enable_supported: false, persistent_service: false },
     } as const;
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
@@ -129,6 +130,7 @@ describe("CyberAgentClient", () => {
     expect(clientCapabilitiesFromRuntime(view)).toMatchObject({
       fileEditProposalEnabled: true, providerCredentialEnabled: true,
       runWakeWorkerEnabled: true,
+      verificationEvidenceEnabled: true,
     });
   });
 
@@ -909,6 +911,88 @@ describe("CyberAgentClient", () => {
       .rejects.toThrow("read-only bounded contract");
     await expect(client.repositoryState("workspace-1"))
       .rejects.toThrow("path or status authority");
+  });
+
+  it("validates repository Diff, operator verification, and resumable Code handoff", async () => {
+    const patch = "--- a/src/main.go\n+++ b/src/main.go\n@@ -1 +1 @@\n-old\n+new\n";
+    const patchBytes = new TextEncoder().encode(patch).length;
+    const diff = { protocol_version: "repository_diff.v1", workspace_id: "workspace-1",
+      kind: "git", available: true, base_head: "1234567890ab",
+      items: [{ path: "src/main.go", staging: "unmodified", worktree: "modified",
+        content_state: "text", patch, patch_bytes: patchBytes, added_lines: 1,
+        deleted_lines: 1, redacted: false, truncated: false }],
+      returned_count: 1, omitted_count: 0, redaction_count: 0,
+      total_patch_bytes: patchBytes, truncated: false, read_only: true,
+      instruction_authorized: false, mutation_supported: false, authority_granted: false,
+      root_path_exposed: false, raw_content_included: false, patch_content_included: true,
+      remote_config_included: false, process_started: false, network_used: false,
+      hooks_executed: false };
+    const item = { protocol_version: "operator_verification_evidence.v1",
+      id: "verification-1", run_id: "run-1", session_id: "session-1",
+      workspace_id: "workspace-1", outcome: "pass", title: "Focused tests",
+      summary: "Go and React suites passed", summary_sha256: "a".repeat(64), redacted: false,
+      recorded_at: "2026-07-19T12:00:00Z", immutable: true, operator_supplied: true,
+      command_executed: false, model_assertion: false, approval: false,
+      authority_granted: false };
+    const inventory = { protocol_version: "operator_verification_inventory.v1",
+      run_id: "run-1", session_id: "session-1", workspace_id: "workspace-1", items: [item],
+      pass_count: 1, fail_count: 0, unknown_count: 0, truncated: false };
+    const recorded = { ...item, replayed: false };
+    const handoff = { protocol_version: "code_handoff.v1", run_id: "run-1",
+      mission_id: "mission-1", session_id: "session-1", workspace_id: "workspace-1",
+      run_status: "paused", surface: "code", phase: "deliver", mode_revision: 2,
+      generated_at: "2026-07-19T12:01:00Z",
+      plan: { state: "none", proposal_id: "", selection_id: "", direction_count: 0,
+        selected_direction: 0, module_count: 0, pending_count: 0, in_progress_count: 0,
+        blocked_count: 0, completed_count: 0, cancelled_count: 0 },
+      queue: { pending: 0, prepared: 0, committed: 0, cancelled: 0 },
+      change_set: { proposed: 0, approved: 0, applied: 0, denied: 0, failed: 0,
+        returned_count: 0, total_diff_bytes: 0, truncated: false },
+      verification: { pass_count: 1, fail_count: 0, unknown_count: 0, returned_count: 1,
+        truncated: false, references: [{ id: item.id, outcome: "pass", redacted: false,
+          recorded_at: item.recorded_at }] },
+      pending_action_count: 0, pending_actions_truncated: false, pending_actions: [],
+      report_references_truncated: false, report_references: [], regenerable: true,
+      durable_sources: true, private_bodies_included: false, composite_mutation: false,
+      resume_authorized: false, execution_started: false };
+    const envelope = (requestID: string, data: unknown, status = 200) =>
+      new Response(JSON.stringify({ version: "api.v1", request_id: requestID, data }),
+        { status, headers: { "Content-Type": "application/json" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(envelope("req-diff", diff))
+      .mockResolvedValueOnce(envelope("req-verification", inventory))
+      .mockResolvedValueOnce(envelope("req-record", recorded, 202))
+      .mockResolvedValueOnce(envelope("req-handoff", handoff))
+      .mockResolvedValueOnce(envelope("req-forged-diff", { ...diff, authority_granted: true }))
+      .mockResolvedValueOnce(envelope("req-forged-handoff", { ...handoff,
+        pending_action_count: 1, pending_actions: [{ id: "action-forged-reference",
+          kind: "approval_pending", state: "queued", destination: "wake",
+          available_at: "2026-07-19T12:00:00Z" }],
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      runControlEnabled: false, verificationEvidenceEnabled: true,
+    });
+    await expect(client.repositoryDiff("workspace-1")).resolves.toEqual(diff);
+    await expect(client.verificationEvidence("run-1")).resolves.toEqual(inventory);
+    await expect(client.recordVerificationEvidence("run-1", {
+      version: "operator_verification_evidence.v1", outcome: "pass",
+      title: item.title, summary: item.summary,
+    }, "web-verification-operation-0001")).resolves.toEqual(recorded);
+    await expect(client.codeHandoff("run-1")).resolves.toEqual(handoff);
+    const [recordURL, recordInit] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(recordURL).toBe("/api/v1/runs/run-1/verification-evidence");
+    expect(recordInit.headers).toMatchObject({ Authorization: "Bearer control-secret",
+      "Idempotency-Key": "web-verification-operation-0001" });
+    await expect(client.repositoryDiff("workspace-1"))
+      .rejects.toThrow("bounded read-only contract");
+    await expect(client.codeHandoff("run-1"))
+      .rejects.toThrow("widened navigation");
+    await expect(client.recordVerificationEvidence("run-1", {
+      version: "operator_verification_evidence.v1", outcome: "pass",
+      title: "Focused tests", summary: "line one\rline two",
+    }, "web-verification-operation-control"))
+      .rejects.toThrow("bounded observation");
   });
 
   it("validates Workspace search, evidence attachment, and metadata-only receipt history", async () => {

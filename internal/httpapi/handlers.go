@@ -50,12 +50,15 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
 			"external-skills", "workspaces", "workspace-explorer", "workspace-search", "models",
-			"repository-state",
+			"repository-state", "repository-diff", "verification-evidence", "code-handoff",
 			"operation-receipts", "operator-actions", "evidence-inventory",
 			"event-stream", "event-poll", "capabilities", "openapi"}
 		if a.controlEnabled {
 			resources = append(resources, "model-cancellation-control",
 				"specialist-model-cancellation-control", "execution-profile-control")
+		}
+		if a.verificationEvidenceEnabled {
+			resources = append(resources, "verification-evidence-control")
 		}
 		if a.runCreationEnabled {
 			resources = append(resources, "run-creation-control")
@@ -141,6 +144,9 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 		if len(segments) == 3 && segments[2] == "repository-state" {
 			return a.workspaceRepositoryState(request, segments[1])
+		}
+		if len(segments) == 3 && segments[2] == "repository-diff" {
+			return a.workspaceRepositoryDiff(request, segments[1])
 		}
 	case "sessions":
 		return a.routeSessions(request, segments)
@@ -423,6 +429,10 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 			return a.runOperatorActions(request, segments[1])
 		case "evidence-attachments":
 			return a.runEvidenceInventory(request, segments[1])
+		case "verification-evidence":
+			return a.runVerificationEvidence(request, segments[1])
+		case "code-handoff":
+			return a.runCodeHandoff(request, segments[1])
 		}
 	case 4:
 		if segments[2] == "reports" {

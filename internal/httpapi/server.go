@@ -28,9 +28,11 @@ import (
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/modelregistry"
 	"cyberagent-workbench/internal/operationreceipt"
+	"cyberagent-workbench/internal/operatoraction"
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/toolbudget"
+	"cyberagent-workbench/internal/verification"
 )
 
 const (
@@ -73,6 +75,7 @@ type Store interface {
 	ListRuns(ctx context.Context, filter domain.RunFilter) ([]domain.Run, error)
 	ListRunEventsPage(ctx context.Context, runID string, offset int, limit int) ([]events.Event, error)
 	ListRunEventsAfterSequence(ctx context.Context, runID string, afterSequence int64, limit int) ([]events.Event, error)
+	LatestRunEventSequence(ctx context.Context, runID string) (int64, error)
 	GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error)
 	GetRunExecutionLease(ctx context.Context, runID string) (domain.RunExecutionLease, bool, error)
 	ListOperatorSteering(ctx context.Context, runID string,
@@ -127,6 +130,13 @@ type Store interface {
 		session.Message, bool, error)
 	AttachEvidence(context.Context, session.EvidenceAttachment, session.Message) (
 		session.EvidenceAttachment, session.Message, bool, error)
+	GetVerificationEvidenceByOperation(context.Context, string) (
+		verification.Evidence, bool, error)
+	ListVerificationEvidence(context.Context, string, int) ([]verification.Evidence, error)
+	RecordVerificationEvidence(context.Context, verification.Evidence) (
+		verification.Evidence, bool, error)
+	ListOperatorActionRecords(context.Context, string, string, string, time.Time, int) (
+		[]operatoraction.Record, error)
 
 	GetWorkItem(ctx context.Context, id string) (domain.WorkItem, error)
 	ListWorkItems(ctx context.Context, filter domain.WorkItemFilter) ([]domain.WorkItem, error)
@@ -158,6 +168,7 @@ type Config struct {
 	RunWakeWorkerEnabled          bool
 	SkillInstallationEnabled      bool
 	EvidenceAttachmentEnabled     bool
+	VerificationEvidenceEnabled   bool
 	RunLifecycleController        RunLifecycleController
 	RunExecutionController        RunExecutionController
 	PlanDeliveryController        PlanDeliveryController
@@ -199,6 +210,7 @@ type API struct {
 	runWakeWorkerEnabled          bool
 	skillInstallationEnabled      bool
 	evidenceAttachmentEnabled     bool
+	verificationEvidenceEnabled   bool
 	runLifecycleController        RunLifecycleController
 	runExecutionController        RunExecutionController
 	planDeliveryController        PlanDeliveryController
@@ -251,7 +263,8 @@ func New(store Store, config Config) (*API, error) {
 		config.RunWakeControlEnabled ||
 		config.FileEditApplyEnabled || config.RunWakeExecutionEnabled ||
 		config.RunWakeWorkerEnabled ||
-		config.SkillInstallationEnabled || config.EvidenceAttachmentEnabled) &&
+		config.SkillInstallationEnabled || config.EvidenceAttachmentEnabled ||
+		config.VerificationEvidenceEnabled) &&
 		!controlTokenPresent {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"HTTP API control capabilities require a control token")
@@ -344,6 +357,7 @@ func New(store Store, config Config) (*API, error) {
 		runWakeWorkerEnabled:          controlTokenPresent && config.RunWakeWorkerEnabled,
 		skillInstallationEnabled:      controlTokenPresent && config.SkillInstallationEnabled,
 		evidenceAttachmentEnabled:     controlTokenPresent && config.EvidenceAttachmentEnabled,
+		verificationEvidenceEnabled:   controlTokenPresent && config.VerificationEvidenceEnabled,
 		runLifecycleController:        config.RunLifecycleController,
 		runExecutionController:        config.RunExecutionController,
 		planDeliveryController:        config.PlanDeliveryController,
@@ -536,6 +550,11 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if runID, matched := matchEvidenceAttachmentPath(request.URL.Path); matched &&
 		request.Method != http.MethodGet {
 		a.serveEvidenceAttachmentControl(tracked, request, requestID, runID)
+		return
+	}
+	if runID, matched := matchVerificationEvidencePath(request.URL.Path); matched &&
+		request.Method != http.MethodGet {
+		a.serveVerificationEvidenceControl(tracked, request, requestID, runID)
 		return
 	}
 	if runID, matched := matchRunExecutionControlPath(request.URL.Path); matched {

@@ -1,5 +1,6 @@
 import {
   ChevronRight,
+  BookOpenCheck,
   ClipboardList,
   FileDiff,
   GitBranch,
@@ -11,7 +12,7 @@ import type { RunDetailView } from "../api/types";
 import { StatusBadge } from "./common";
 
 export type CodeJourneyDestination = "overview" | "actions" | "diffs" | "repository" |
-  "findings";
+  "verify" | "handoff";
 
 interface JourneyStage {
   id: string;
@@ -41,7 +42,9 @@ export function CodeJourney({ detail, onNavigate }: {
     { id: "review", label: "Review", state: "per-file",
       destination: "actions", icon: ListChecks },
     { id: "verify", label: "Verify and report", state: "inspect",
-      destination: "findings", icon: ShieldCheck },
+      destination: "verify", icon: ShieldCheck },
+    { id: "handoff", label: "Handoff", state: "regenerable",
+      destination: "handoff", icon: BookOpenCheck },
   ];
   return <section aria-label="Code delivery journey" className="code-journey">
     <header className="projection-heading">

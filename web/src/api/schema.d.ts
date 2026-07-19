@@ -408,6 +408,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/code-handoff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Build a resumable Code handoff
+         * @description Regenerates a metadata-only Code Run handoff from durable Plan, queue, change-set, verification, pending-action, and report records. It returns no private body, performs no composite mutation, starts no execution, and grants no resume authority.
+         */
+        get: operations["getCodeHandoff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/delegations": {
         parameters: {
             query?: never;
@@ -912,6 +932,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/verification-evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List immutable operator verification evidence
+         * @description Returns at most one hundred exact Run/Session/Workspace-bound operator observations. Entries are secret-redacted and are neither model assertions, approvals, commands, nor execution authority.
+         */
+        get: operations["listRunVerificationEvidence"];
+        put?: never;
+        /**
+         * Record operator verification evidence
+         * @description Atomically records one secret-redacted immutable pass, fail, or unknown operator observation against the exact active Run Session and Workspace. It executes no command, accepts no model assertion, grants no approval, and authorizes no action.
+         */
+        post: operations["recordRunVerificationEvidence"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/wake-intent": {
         parameters: {
             query?: never;
@@ -1160,6 +1204,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/repository-diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect bounded repository patches
+         * @description Returns secret-redacted bounded UTF-8 patches for a Git repository rooted exactly at the registered Workspace. Go follows no links, discovers no parent repository, starts no process, executes no hooks, uses no network, and grants no mutation authority.
+         */
+        get: operations["getWorkspaceRepositoryDiff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/repository-state": {
         parameters: {
             query?: never;
@@ -1346,6 +1410,131 @@ export interface components {
             max_turns: number;
             /** Format: int64 */
             timeout_seconds?: number;
+        };
+        CodeHandoffActionReferenceView: {
+            /** Format: date-time */
+            available_at: string;
+            /** @enum {string} */
+            destination: "queue" | "approvals" | "diffs" | "wake";
+            /** Format: date-time */
+            due_at?: string;
+            id: string;
+            /** @enum {string} */
+            kind: "steering_pending" | "approval_pending" | "file_edit_review" | "file_edit_apply" | "wake_due";
+            /** @enum {string} */
+            state: "pending" | "proposed" | "approved" | "queued";
+        };
+        CodeHandoffChangeSetView: {
+            /** Format: int32 */
+            applied: number;
+            /** Format: int32 */
+            approved: number;
+            /** Format: int32 */
+            denied: number;
+            /** Format: int32 */
+            failed: number;
+            /** Format: int32 */
+            proposed: number;
+            /** Format: int32 */
+            returned_count: number;
+            /** Format: int32 */
+            total_diff_bytes: number;
+            truncated: boolean;
+        };
+        CodeHandoffPlanView: {
+            /** Format: int32 */
+            blocked_count: number;
+            /** Format: int32 */
+            cancelled_count: number;
+            /** Format: int32 */
+            completed_count: number;
+            /** Format: int32 */
+            direction_count: number;
+            /** Format: int32 */
+            in_progress_count: number;
+            /** Format: int32 */
+            module_count: number;
+            /** Format: int32 */
+            pending_count: number;
+            proposal_id: string;
+            /** Format: int32 */
+            selected_direction: number;
+            selection_id: string;
+            /** @enum {string} */
+            state: "none" | "proposed" | "selected";
+        };
+        CodeHandoffQueueView: {
+            /** Format: int32 */
+            cancelled: number;
+            /** Format: int32 */
+            committed: number;
+            /** Format: int32 */
+            pending: number;
+            /** Format: int32 */
+            prepared: number;
+        };
+        CodeHandoffReportReferenceView: {
+            /** Format: date-time */
+            created_at: string;
+            /** Format: int32 */
+            finding_count: number;
+            id: string;
+            /** @enum {string} */
+            status: "generated";
+        };
+        CodeHandoffVerificationReferenceView: {
+            id: string;
+            /** @enum {string} */
+            outcome: "pass" | "fail" | "unknown";
+            /** Format: date-time */
+            recorded_at: string;
+            redacted: boolean;
+        };
+        CodeHandoffVerificationView: {
+            /** Format: int32 */
+            fail_count: number;
+            /** Format: int32 */
+            pass_count: number;
+            references: components["schemas"]["CodeHandoffVerificationReferenceView"][];
+            /** Format: int32 */
+            returned_count: number;
+            truncated: boolean;
+            /** Format: int32 */
+            unknown_count: number;
+        };
+        CodeHandoffView: {
+            change_set: components["schemas"]["CodeHandoffChangeSetView"];
+            composite_mutation: boolean;
+            durable_sources: boolean;
+            execution_started: boolean;
+            /** Format: date-time */
+            generated_at: string;
+            mission_id: string;
+            /** Format: int64 */
+            mode_revision: number;
+            /** Format: int32 */
+            pending_action_count: number;
+            pending_actions: components["schemas"]["CodeHandoffActionReferenceView"][];
+            pending_actions_truncated: boolean;
+            /** @enum {string} */
+            phase: "plan" | "deliver";
+            plan: components["schemas"]["CodeHandoffPlanView"];
+            private_bodies_included: boolean;
+            /** @enum {string} */
+            protocol_version: "code_handoff.v1";
+            queue: components["schemas"]["CodeHandoffQueueView"];
+            regenerable: boolean;
+            report_references: components["schemas"]["CodeHandoffReportReferenceView"][];
+            report_references_truncated: boolean;
+            resume_authorized: boolean;
+            run_id: string;
+            /** @enum {string} */
+            run_status: "created" | "preparing" | "running" | "waiting_approval" | "paused" | "completed" | "failed" | "cancelled";
+            session_id: string;
+            /** @enum {string} */
+            surface: "code";
+            verification: components["schemas"]["CodeHandoffVerificationView"];
+            workspace_id: string;
         };
         DelegationApplicationView: {
             /** Format: int32 */
@@ -2234,6 +2423,54 @@ export interface components {
             /** @enum {string} */
             worktree: "unmodified" | "untracked" | "modified" | "added" | "deleted" | "renamed" | "copied" | "conflicted";
         };
+        RepositoryDiffItemView: {
+            /** Format: int32 */
+            added_lines: number;
+            /** @enum {string} */
+            content_state: "text" | "binary_or_unsupported" | "size_limited" | "linked" | "unavailable";
+            /** Format: int32 */
+            deleted_lines: number;
+            patch: string;
+            /** Format: int32 */
+            patch_bytes: number;
+            path: string;
+            redacted: boolean;
+            /** @enum {string} */
+            staging: "unmodified" | "untracked" | "modified" | "added" | "deleted" | "renamed" | "copied" | "conflicted";
+            truncated: boolean;
+            /** @enum {string} */
+            worktree: "unmodified" | "untracked" | "modified" | "added" | "deleted" | "renamed" | "copied" | "conflicted";
+        };
+        RepositoryDiffView: {
+            authority_granted: boolean;
+            available: boolean;
+            base_head: string;
+            hooks_executed: boolean;
+            instruction_authorized: boolean;
+            items: components["schemas"]["RepositoryDiffItemView"][];
+            /** @enum {string} */
+            kind: "none" | "git";
+            mutation_supported: boolean;
+            network_used: boolean;
+            /** Format: int32 */
+            omitted_count: number;
+            patch_content_included: boolean;
+            process_started: boolean;
+            /** @enum {string} */
+            protocol_version: "repository_diff.v1";
+            raw_content_included: boolean;
+            read_only: boolean;
+            /** Format: int32 */
+            redaction_count: number;
+            remote_config_included: boolean;
+            /** Format: int32 */
+            returned_count: number;
+            root_path_exposed: boolean;
+            /** Format: int32 */
+            total_patch_bytes: number;
+            truncated: boolean;
+            workspace_id: string;
+        };
         RepositoryStateView: {
             available: boolean;
             branch: string;
@@ -2603,6 +2840,7 @@ export interface components {
             session_steering_control_enabled: boolean;
             shell_execution_enabled: boolean;
             skill_installation_enabled: boolean;
+            verification_evidence_enabled: boolean;
             wake_worker: components["schemas"]["RunWakeWorkerHealthView"];
         };
         ScopeView: {
@@ -2769,6 +3007,74 @@ export interface components {
             limit: number;
             /** Format: int64 */
             remaining: number;
+        };
+        VerificationEvidenceControlView: {
+            approval: boolean;
+            authority_granted: boolean;
+            command_executed: boolean;
+            id: string;
+            immutable: boolean;
+            model_assertion: boolean;
+            operator_supplied: boolean;
+            /** @enum {string} */
+            outcome: "pass" | "fail" | "unknown";
+            /** @enum {string} */
+            protocol_version: "operator_verification_evidence.v1";
+            /** Format: date-time */
+            recorded_at: string;
+            redacted: boolean;
+            replayed: boolean;
+            run_id: string;
+            session_id: string;
+            summary: string;
+            summary_sha256: string;
+            title: string;
+            workspace_id: string;
+        };
+        VerificationEvidenceInventoryView: {
+            /** Format: int32 */
+            fail_count: number;
+            items: components["schemas"]["VerificationEvidenceItemView"][];
+            /** Format: int32 */
+            pass_count: number;
+            /** @enum {string} */
+            protocol_version: "operator_verification_inventory.v1";
+            run_id: string;
+            session_id: string;
+            truncated: boolean;
+            /** Format: int32 */
+            unknown_count: number;
+            workspace_id: string;
+        };
+        VerificationEvidenceItemView: {
+            approval: boolean;
+            authority_granted: boolean;
+            command_executed: boolean;
+            id: string;
+            immutable: boolean;
+            model_assertion: boolean;
+            operator_supplied: boolean;
+            /** @enum {string} */
+            outcome: "pass" | "fail" | "unknown";
+            /** @enum {string} */
+            protocol_version: "operator_verification_evidence.v1";
+            /** Format: date-time */
+            recorded_at: string;
+            redacted: boolean;
+            run_id: string;
+            session_id: string;
+            summary: string;
+            summary_sha256: string;
+            title: string;
+            workspace_id: string;
+        };
+        VerificationEvidenceRequestView: {
+            /** @enum {string} */
+            outcome: "pass" | "fail" | "unknown";
+            summary: string;
+            title: string;
+            /** @enum {string} */
+            version: "operator_verification_evidence.v1";
         };
         WorkItemView: {
             acceptance_criteria: string[];
@@ -3741,6 +4047,41 @@ export interface operations {
                     "application/json": {
                         data: components["schemas"]["ArtifactView"][];
                         page: components["schemas"]["Page"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getCodeHandoff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["CodeHandoffView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";
@@ -4830,6 +5171,87 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    listRunVerificationEvidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["VerificationEvidenceInventoryView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    recordRunVerificationEvidence: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerificationEvidenceRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["VerificationEvidenceControlView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     getRunWakeIntent: {
         parameters: {
             query?: never;
@@ -5393,6 +5815,41 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["WorkspaceExplorerView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getWorkspaceRepositoryDiff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace identity */
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RepositoryDiffView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";

@@ -32,6 +32,7 @@ const bootstrap = {
   docker_execution_enabled: false,
   skill_installation_enabled: false,
   evidence_attachment_enabled: false,
+  verification_evidence_enabled: false,
   renderer_path_input_supported: false,
 };
 
@@ -126,6 +127,18 @@ describe("desktop native bridge", () => {
     installBridge({ Bootstrap: vi.fn().mockResolvedValue(evidenceOnly) });
     const module = await import("./desktop-bridge");
     await expect(module.loadDesktopBootstrap()).resolves.toEqual(evidenceOnly);
+  });
+
+  it("accepts verification evidence as an independent capability", async () => {
+    const verificationOnly = {
+      ...bootstrap,
+      control_token: "control-token-0123456789abcdefghijkl",
+      verification_evidence_enabled: true,
+      read_only_default: false,
+    };
+    installBridge({ Bootstrap: vi.fn().mockResolvedValue(verificationOnly) });
+    const module = await import("./desktop-bridge");
+    await expect(module.loadDesktopBootstrap()).resolves.toEqual(verificationOnly);
   });
 
   it("accepts Session steering cancellation without enabling sibling capabilities", async () => {

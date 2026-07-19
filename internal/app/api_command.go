@@ -137,6 +137,7 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 		RunWakeWorkerEnabled:          *wakeWorker,
 		SkillInstallationEnabled:      controlToken != "",
 		EvidenceAttachmentEnabled:     controlToken != "",
+		VerificationEvidenceEnabled:   controlToken != "",
 		RunLifecycleController:        lifecycleControl,
 		RunExecutionController:        executionControl,
 		PlanDeliveryController:        planDeliveryControl,

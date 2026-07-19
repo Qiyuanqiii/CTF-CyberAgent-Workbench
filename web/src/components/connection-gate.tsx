@@ -50,6 +50,7 @@ export function ConnectionGate() {
 		runWakeWorkerEnabled: bootstrap.run_wake_worker_enabled,
 		skillInstallationEnabled: bootstrap.skill_installation_enabled,
 		evidenceAttachmentEnabled: bootstrap.evidence_attachment_enabled,
+		verificationEvidenceEnabled: bootstrap.verification_evidence_enabled,
       });
     }).catch((caught: unknown) => {
       if (active) {

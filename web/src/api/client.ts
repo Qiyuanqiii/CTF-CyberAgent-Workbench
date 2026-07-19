@@ -3,6 +3,7 @@ import type {
   ApprovalDecisionControlRequestView,
   ApprovalDecisionControlView,
   ApprovalQueueView,
+  CodeHandoffView,
   ErrorEnvelope,
   EvidenceAttachmentRequestView,
   EvidenceAttachmentView,
@@ -34,6 +35,7 @@ import type {
   ProviderCredentialRequestView,
   ProviderCredentialStatusView,
   RepositoryStateView,
+  RepositoryDiffView,
   RunCreationControlRequestView,
   RunCreationControlView,
   RunExecutionControlRequestView,
@@ -58,6 +60,9 @@ import type {
   SuccessEnvelope,
   WorkspaceExplorerView,
   WorkspaceSearchView,
+  VerificationEvidenceControlView,
+  VerificationEvidenceInventoryView,
+  VerificationEvidenceRequestView,
 } from "./types";
 
 export type QueryValue = boolean | number | string | undefined;
@@ -81,6 +86,7 @@ export interface ClientCapabilities {
   runWakeWorkerEnabled?: boolean;
   skillInstallationEnabled?: boolean;
   evidenceAttachmentEnabled?: boolean;
+  verificationEvidenceEnabled?: boolean;
 }
 
 export class APIRequestError extends Error {
@@ -545,7 +551,8 @@ function parseProviderCredentialList(value: unknown): ProviderCredentialListView
 
 function parseRuntimeCapabilities(value: unknown): RuntimeCapabilitiesView {
   const capabilityKeys = ["approval_control_enabled", "docker_execution_enabled",
-    "evidence_attachment_enabled", "file_edit_apply_enabled", "file_edit_proposal_enabled",
+    "evidence_attachment_enabled", "verification_evidence_enabled",
+    "file_edit_apply_enabled", "file_edit_proposal_enabled",
     "file_edit_review_enabled", "model_control_enabled", "plan_delivery_control_enabled",
     "process_execution_enabled", "provider_credential_enabled", "protocol_version",
     "run_control_enabled", "run_creation_enabled", "run_execution_enabled",
@@ -573,6 +580,7 @@ function parseRuntimeCapabilities(value: unknown): RuntimeCapabilitiesView {
     (worker.enabled && (!["ready", "running", "draining", "stopped"].includes(String(worker.state)) ||
       !safeBoundedCount(worker.poll_interval_ms, 60_000) || worker.poll_interval_ms < 250)) ||
     ((worker.state === "ready" || worker.state === "stopped") && worker.active) ||
+    ((worker.state === "running" || worker.state === "draining") && !worker.active) ||
     (!worker.enabled && (worker.state !== "disabled" || worker.active || worker.poll_interval_ms !== 0)) ||
     value.process_execution_enabled !== false || value.shell_execution_enabled !== false ||
     value.docker_execution_enabled !== false) {
@@ -602,6 +610,7 @@ export function clientCapabilitiesFromRuntime(value: RuntimeCapabilitiesView): C
     runWakeWorkerEnabled: value.run_wake_worker_enabled,
     skillInstallationEnabled: value.skill_installation_enabled,
     evidenceAttachmentEnabled: value.evidence_attachment_enabled,
+    verificationEvidenceEnabled: value.verification_evidence_enabled,
   };
 }
 
@@ -1049,6 +1058,265 @@ function parseRepositoryState(value: unknown, workspaceID: string): RepositorySt
   return { ...value, changes } as unknown as RepositoryStateView;
 }
 
+function parseRepositoryDiff(value: unknown, workspaceID: string): RepositoryDiffView {
+  const keys = ["authority_granted", "available", "base_head", "hooks_executed",
+    "instruction_authorized", "items", "kind", "mutation_supported", "network_used",
+    "omitted_count", "patch_content_included", "process_started", "protocol_version",
+    "raw_content_included", "read_only", "redaction_count", "remote_config_included",
+    "returned_count", "root_path_exposed", "total_patch_bytes", "truncated", "workspace_id"];
+  if (!hasExactKeys(value, keys) || value.protocol_version !== "repository_diff.v1" ||
+    value.workspace_id !== workspaceID || !["none", "git"].includes(String(value.kind)) ||
+    typeof value.available !== "boolean" || typeof value.truncated !== "boolean" ||
+    value.read_only !== true || value.instruction_authorized !== false ||
+    value.mutation_supported !== false || value.authority_granted !== false ||
+    value.root_path_exposed !== false || value.raw_content_included !== false ||
+    value.patch_content_included !== value.available || value.remote_config_included !== false ||
+    value.process_started !== false || value.network_used !== false || value.hooks_executed !== false ||
+    typeof value.base_head !== "string" || !/^(?:[0-9a-f]{12})?$/u.test(value.base_head) ||
+    !Array.isArray(value.items) || value.items.length > 50 ||
+    !safeBoundedCount(value.returned_count, 50) || value.returned_count !== value.items.length ||
+    !safeBoundedCount(value.omitted_count, 10_000) ||
+    !safeBoundedCount(value.redaction_count, 10_000) ||
+    !safeBoundedCount(value.total_patch_bytes, 512 * 1024) ||
+    value.available !== (value.kind === "git")) {
+    throw new APIRequestError("Repository diff violated its bounded read-only contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const status = ["unmodified", "untracked", "modified", "added", "deleted", "renamed",
+    "copied", "conflicted"];
+  const contentStates = ["text", "binary_or_unsupported", "size_limited", "linked", "unavailable"];
+  let totalBytes = 0;
+  let redactedItems = 0;
+  const paths = new Set<string>();
+  const items = value.items.map((item) => {
+    if (!hasExactKeys(item, ["added_lines", "content_state", "deleted_lines", "patch",
+      "patch_bytes", "path", "redacted", "staging", "truncated", "worktree"]) ||
+      !validWorkspaceRelativePath(item.path) || item.path === "." || paths.has(String(item.path)) ||
+      !status.includes(String(item.staging)) || !status.includes(String(item.worktree)) ||
+      !contentStates.includes(String(item.content_state)) || typeof item.patch !== "string" ||
+      !safeBoundedCount(item.patch_bytes, 64 * 1024) ||
+      new TextEncoder().encode(item.patch).length !== item.patch_bytes ||
+      !safeBoundedCount(item.added_lines, 64 * 1024) ||
+      !safeBoundedCount(item.deleted_lines, 64 * 1024) ||
+      typeof item.redacted !== "boolean" || typeof item.truncated !== "boolean" ||
+      (item.content_state !== "text" &&
+        (item.patch !== "" || item.patch_bytes !== 0 || item.added_lines !== 0 ||
+          item.deleted_lines !== 0 || item.truncated))) {
+      throw new APIRequestError("Repository diff item widened content or path authority",
+        "INVALID_RESPONSE", 502);
+    }
+    paths.add(String(item.path));
+    totalBytes += Number(item.patch_bytes);
+    redactedItems += item.redacted ? 1 : 0;
+    return item;
+  });
+  if (totalBytes !== value.total_patch_bytes || redactedItems > value.redaction_count ||
+    ((items.some((item) => item.truncated) || value.omitted_count > 0) && !value.truncated) ||
+    (!value.available && (items.length !== 0 || value.base_head !== "" ||
+      value.total_patch_bytes !== 0 || value.omitted_count !== 0 || value.redaction_count !== 0))) {
+    throw new APIRequestError("Repository diff contains inconsistent bounded facts",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, items } as unknown as RepositoryDiffView;
+}
+
+function validVerificationText(value: unknown, maximum: number, multiline: boolean): value is string {
+  if (typeof value !== "string" || value === "" || value.trim() !== value ||
+    [...value].length > maximum || value.includes("\0")) {
+    return false;
+  }
+  return multiline ? !/[\u0001-\u0008\u000b-\u001f\u007f]/u.test(value) :
+    !/[\u0000-\u001f\u007f]/u.test(value);
+}
+
+function parseVerificationEvidenceItem(value: unknown, runID: string,
+  sessionID = "", workspaceID = "", control = false): VerificationEvidenceControlView {
+  const keys = ["approval", "authority_granted", "command_executed", "id", "immutable",
+    "model_assertion", "operator_supplied", "outcome", "protocol_version", "recorded_at",
+    "redacted", "run_id", "session_id", "summary", "summary_sha256", "title", "workspace_id"];
+  if (control) keys.push("replayed");
+  if (!hasExactKeys(value, keys) || value.protocol_version !== "operator_verification_evidence.v1" ||
+    value.run_id !== runID || !boundedIdentity(value.id) || !boundedIdentity(value.session_id) ||
+    !boundedIdentity(value.workspace_id) || (sessionID !== "" && value.session_id !== sessionID) ||
+    (workspaceID !== "" && value.workspace_id !== workspaceID) ||
+    !["pass", "fail", "unknown"].includes(String(value.outcome)) ||
+    !validVerificationText(value.title, 160, false) ||
+    !validVerificationText(value.summary, 2048, true) || !isSHA256(value.summary_sha256) ||
+    typeof value.redacted !== "boolean" || !validDate(value.recorded_at) ||
+    value.immutable !== true || value.operator_supplied !== true ||
+    value.command_executed !== false || value.model_assertion !== false ||
+    value.approval !== false || value.authority_granted !== false ||
+    (control && typeof value.replayed !== "boolean")) {
+    throw new APIRequestError("Verification evidence widened observation authority",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as VerificationEvidenceControlView;
+}
+
+function parseVerificationEvidenceInventory(value: unknown,
+  runID: string): VerificationEvidenceInventoryView {
+  if (!hasExactKeys(value, ["fail_count", "items", "pass_count", "protocol_version", "run_id",
+    "session_id", "truncated", "unknown_count", "workspace_id"]) ||
+    value.protocol_version !== "operator_verification_inventory.v1" || value.run_id !== runID ||
+    !boundedIdentity(value.session_id) || !boundedIdentity(value.workspace_id) ||
+    !Array.isArray(value.items) || value.items.length > 100 ||
+    !safeBoundedCount(value.pass_count, 100) || !safeBoundedCount(value.fail_count, 100) ||
+    !safeBoundedCount(value.unknown_count, 100) || typeof value.truncated !== "boolean" ||
+    value.pass_count + value.fail_count + value.unknown_count !== value.items.length) {
+    throw new APIRequestError("Verification inventory violated its immutable bounded contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const ids = new Set<string>();
+  const items = value.items.map((item) => {
+    const parsed = parseVerificationEvidenceItem(item, runID, String(value.session_id),
+      String(value.workspace_id));
+    if (ids.has(parsed.id)) {
+      throw new APIRequestError("Verification inventory repeated an immutable identity",
+        "INVALID_RESPONSE", 502);
+    }
+    ids.add(parsed.id);
+    return parsed;
+  });
+  if (value.truncated && items.length !== 100) {
+    throw new APIRequestError("Verification inventory truncation is inconsistent",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, items } as unknown as VerificationEvidenceInventoryView;
+}
+
+function parseCodeHandoff(value: unknown, runID: string): CodeHandoffView {
+  const keys = ["change_set", "composite_mutation", "durable_sources", "execution_started",
+    "generated_at", "mission_id", "mode_revision", "pending_action_count", "pending_actions",
+    "pending_actions_truncated", "phase", "plan", "private_bodies_included", "protocol_version",
+    "queue", "regenerable", "report_references", "report_references_truncated",
+    "resume_authorized", "run_id", "run_status", "session_id", "surface", "verification",
+    "workspace_id"];
+  if (!hasExactKeys(value, keys) || value.protocol_version !== "code_handoff.v1" ||
+    value.run_id !== runID || !boundedIdentity(value.mission_id) || !boundedIdentity(value.session_id) ||
+    !boundedIdentity(value.workspace_id) || value.surface !== "code" ||
+    !["plan", "deliver"].includes(String(value.phase)) ||
+    !["created", "preparing", "running", "waiting_approval", "paused", "completed", "failed",
+      "cancelled"].includes(String(value.run_status)) || !safePositiveInteger(value.mode_revision) ||
+    !validDate(value.generated_at) || value.regenerable !== true || value.durable_sources !== true ||
+    value.private_bodies_included !== false || value.composite_mutation !== false ||
+    value.resume_authorized !== false || value.execution_started !== false ||
+    !isRecord(value.plan) || !isRecord(value.queue) || !isRecord(value.change_set) ||
+    !isRecord(value.verification) || !Array.isArray(value.pending_actions) ||
+    value.pending_actions.length > 20 || !Array.isArray(value.report_references) ||
+    value.report_references.length > 20 || !safeBoundedCount(value.pending_action_count, 100) ||
+    typeof value.pending_actions_truncated !== "boolean" ||
+    typeof value.report_references_truncated !== "boolean") {
+    throw new APIRequestError("Code handoff violated its metadata-only boundary",
+      "INVALID_RESPONSE", 502);
+  }
+  const planKeys = ["blocked_count", "cancelled_count", "completed_count", "direction_count",
+    "in_progress_count", "module_count", "pending_count", "proposal_id", "selected_direction",
+    "selection_id", "state"];
+  const plan = value.plan;
+  const planCounts = [plan.pending_count, plan.in_progress_count, plan.blocked_count,
+    plan.completed_count, plan.cancelled_count];
+  if (!hasExactKeys(plan, planKeys) || !["none", "proposed", "selected"].includes(String(plan.state)) ||
+    typeof plan.proposal_id !== "string" || typeof plan.selection_id !== "string" ||
+    !safeBoundedCount(plan.direction_count, 3) || !safeBoundedCount(plan.selected_direction, 3) ||
+    !safeBoundedCount(plan.module_count, 8) ||
+    planCounts.some((count) => !safeBoundedCount(count, 8)) ||
+    planCounts.reduce<number>((total, count) => total + Number(count), 0) !== plan.module_count ||
+    (plan.state === "none" && (plan.proposal_id !== "" || plan.selection_id !== "" ||
+      plan.direction_count !== 0 || plan.selected_direction !== 0 || plan.module_count !== 0)) ||
+    (plan.state === "proposed" && (!boundedIdentity(plan.proposal_id) || plan.selection_id !== "" ||
+      plan.direction_count !== 3 || plan.selected_direction !== 0 || plan.module_count !== 0)) ||
+    (plan.state === "selected" && (!boundedIdentity(plan.proposal_id) ||
+      !boundedIdentity(plan.selection_id) || plan.direction_count !== 3 ||
+      plan.selected_direction < 1))) {
+    throw new APIRequestError("Code handoff Plan summary is inconsistent", "INVALID_RESPONSE", 502);
+  }
+  const queue = value.queue;
+  if (!hasExactKeys(queue, ["cancelled", "committed", "pending", "prepared"]) ||
+    [queue.pending, queue.prepared, queue.committed, queue.cancelled]
+      .some((count) => !safeBoundedCount(count, Number.MAX_SAFE_INTEGER))) {
+    throw new APIRequestError("Code handoff queue summary is invalid", "INVALID_RESPONSE", 502);
+  }
+  const changeSet = value.change_set;
+  const changeCounts = [changeSet.proposed, changeSet.approved, changeSet.applied,
+    changeSet.denied, changeSet.failed];
+  if (!hasExactKeys(changeSet, ["applied", "approved", "denied", "failed", "proposed",
+    "returned_count", "total_diff_bytes", "truncated"]) ||
+    changeCounts.some((count) => !safeBoundedCount(count, 100)) ||
+    !safeBoundedCount(changeSet.returned_count, 100) ||
+    changeCounts.reduce<number>((total, count) => total + Number(count), 0) !==
+      changeSet.returned_count ||
+    !safeBoundedCount(changeSet.total_diff_bytes, 110 * 1024 * 1024) ||
+    typeof changeSet.truncated !== "boolean") {
+    throw new APIRequestError("Code handoff change-set summary is invalid", "INVALID_RESPONSE", 502);
+  }
+  const verification = value.verification;
+  if (!hasExactKeys(verification, ["fail_count", "pass_count", "references", "returned_count",
+    "truncated", "unknown_count"]) || !Array.isArray(verification.references) ||
+    verification.references.length > 20 || !safeBoundedCount(verification.returned_count, 100) ||
+    !safeBoundedCount(verification.pass_count, 100) || !safeBoundedCount(verification.fail_count, 100) ||
+    !safeBoundedCount(verification.unknown_count, 100) ||
+    verification.pass_count + verification.fail_count + verification.unknown_count !==
+      verification.returned_count || typeof verification.truncated !== "boolean" ||
+    verification.references.length !== Math.min(Number(verification.returned_count), 20) ||
+    verification.truncated !== (verification.returned_count > 20)) {
+    throw new APIRequestError("Code handoff verification summary is invalid", "INVALID_RESPONSE", 502);
+  }
+  const verificationIDs = new Set<string>();
+  for (const reference of verification.references) {
+    if (!hasExactKeys(reference, ["id", "outcome", "recorded_at", "redacted"]) ||
+      !boundedIdentity(reference.id) || verificationIDs.has(String(reference.id)) ||
+      !["pass", "fail", "unknown"].includes(String(reference.outcome)) ||
+      typeof reference.redacted !== "boolean" || !validDate(reference.recorded_at)) {
+      throw new APIRequestError("Code handoff verification reference is invalid",
+        "INVALID_RESPONSE", 502);
+    }
+    verificationIDs.add(String(reference.id));
+  }
+  const actionMapping = {
+    steering_pending: ["pending", "queue"], approval_pending: ["pending", "approvals"],
+    file_edit_review: ["proposed", "diffs"], file_edit_apply: ["approved", "diffs"],
+    wake_due: ["queued", "wake"],
+  } as const;
+  if (value.pending_actions.length !== Math.min(Number(value.pending_action_count), 20) ||
+    value.pending_actions_truncated !== (value.pending_action_count > 20) ||
+    (value.report_references_truncated && value.report_references.length !== 20)) {
+    throw new APIRequestError("Code handoff reference summary is invalid", "INVALID_RESPONSE", 502);
+  }
+  const actionIDs = new Set<string>();
+  for (const action of value.pending_actions) {
+    const hasDueAt = Object.prototype.hasOwnProperty.call(action, "due_at");
+    if (!hasExactKeys(action, hasDueAt ?
+      ["available_at", "destination", "due_at", "id", "kind", "state"] :
+      ["available_at", "destination", "id", "kind", "state"]) ||
+      !boundedIdentity(action.id) || !String(action.id).startsWith("action-") ||
+      actionIDs.has(String(action.id)) ||
+      !Object.prototype.hasOwnProperty.call(actionMapping, String(action.kind)) ||
+      !validDate(action.available_at)) {
+      throw new APIRequestError("Code handoff action reference is invalid",
+        "INVALID_RESPONSE", 502);
+    }
+    const expected = actionMapping[action.kind as keyof typeof actionMapping];
+    if (action.state !== expected[0] || action.destination !== expected[1] ||
+      (action.kind === "wake_due" ? !validDate(action.due_at) : hasDueAt)) {
+      throw new APIRequestError("Code handoff action reference widened navigation",
+        "INVALID_RESPONSE", 502);
+    }
+    actionIDs.add(String(action.id));
+  }
+  const reportIDs = new Set<string>();
+  for (const report of value.report_references) {
+    if (!hasExactKeys(report, ["created_at", "finding_count", "id", "status"]) ||
+      !boundedIdentity(report.id) || reportIDs.has(String(report.id)) ||
+      report.status !== "generated" || !safeBoundedCount(report.finding_count, 10_000) ||
+      !validDate(report.created_at)) {
+      throw new APIRequestError("Code handoff report reference is invalid",
+        "INVALID_RESPONSE", 502);
+    }
+    reportIDs.add(String(report.id));
+  }
+  return value as unknown as CodeHandoffView;
+}
+
 function parseEvidenceAttachment(value: unknown, runID: string,
   request: EvidenceAttachmentRequestView): EvidenceAttachmentView {
   if (!hasExactKeys(value, ["attachment_id", "capability_grant", "content_sha256",
@@ -1270,6 +1538,7 @@ export class CyberAgentClient {
   readonly hasRunWakeWorker: boolean;
   readonly hasSkillInstallation: boolean;
   readonly hasEvidenceAttachment: boolean;
+  readonly hasVerificationEvidence: boolean;
 
   constructor(
     private readonly token: string,
@@ -1304,6 +1573,8 @@ export class CyberAgentClient {
     this.hasSkillInstallation = controlPresent && (capabilities.skillInstallationEnabled ?? true);
     this.hasEvidenceAttachment = controlPresent &&
       (capabilities.evidenceAttachmentEnabled ?? true);
+    this.hasVerificationEvidence = controlPresent &&
+      (capabilities.verificationEvidenceEnabled ?? false);
   }
 
   async health(signal?: AbortSignal): Promise<HealthView> {
@@ -1350,6 +1621,16 @@ export class CyberAgentClient {
     ), workspaceID);
   }
 
+  async repositoryDiff(workspaceID: string,
+    signal?: AbortSignal): Promise<RepositoryDiffView> {
+    if (!boundedIdentity(workspaceID) || workspaceID.trim() !== workspaceID) {
+      throw new Error("A normalized Workspace identity is required");
+    }
+    return parseRepositoryDiff(await this.get<unknown>(
+      `/workspaces/${encodeURIComponent(workspaceID)}/repository-diff`, {}, signal,
+    ), workspaceID);
+  }
+
   async operationReceiptHistory(runID = "",
     signal?: AbortSignal): Promise<OperationReceiptHistoryView> {
     if (runID !== "" && (!boundedIdentity(runID) || runID.trim() !== runID)) {
@@ -1377,6 +1658,39 @@ export class CyberAgentClient {
     }
     return parseEvidenceInventory(await this.get<unknown>(
       `/runs/${encodeURIComponent(runID)}/evidence-attachments`, {}, signal,
+    ), runID);
+  }
+
+  async verificationEvidence(runID: string,
+    signal?: AbortSignal): Promise<VerificationEvidenceInventoryView> {
+    if (!boundedIdentity(runID) || runID.trim() !== runID) {
+      throw new Error("A normalized Run identity is required");
+    }
+    return parseVerificationEvidenceInventory(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/verification-evidence`, {}, signal,
+    ), runID);
+  }
+
+  async recordVerificationEvidence(runID: string, body: VerificationEvidenceRequestView,
+    idempotencyKey: string, signal?: AbortSignal): Promise<VerificationEvidenceControlView> {
+    if (!this.hasVerificationEvidence || !boundedIdentity(runID) ||
+      body.version !== "operator_verification_evidence.v1" ||
+      !["pass", "fail", "unknown"].includes(body.outcome) ||
+      !validVerificationText(body.title, 160, false) ||
+      !validVerificationText(body.summary, 2048, true)) {
+      throw new Error("Verification evidence capability and a bounded observation are required");
+    }
+    return parseVerificationEvidenceItem(await this.sendControl<unknown>(
+      `/runs/${encodeURIComponent(runID)}/verification-evidence`, body, idempotencyKey, signal,
+    ), runID, "", "", true);
+  }
+
+  async codeHandoff(runID: string, signal?: AbortSignal): Promise<CodeHandoffView> {
+    if (!boundedIdentity(runID) || runID.trim() !== runID) {
+      throw new Error("A normalized Run identity is required");
+    }
+    return parseCodeHandoff(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/code-handoff`, {}, signal,
     ), runID);
   }
 
