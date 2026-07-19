@@ -972,6 +972,9 @@ OpenAPI 为 57 个 path、61 个 operation、125 个 schema；未签名 GUI SHA-
 攻击流量或外部网络。双指标更新为架构完成度约 99%（V2 约 99%）、完整产品可用度
 约 87-90%、通用 Coding Agent 约 84%、Cyber 自动化约 20%，边界见 ADR 0046。
 
+远端 GitHub Actions run `29674460349` 已通过实现提交 `7d5736e`：TypeScript console
+38 秒、Windows Desktop shell 2 分 49 秒、Go control plane 3 分 43 秒。
+
 下一批建议为 D1-G1 Go-owned 只读 repository-state projection、D1-I3 bounded
 multi-file change-set review 与 D1-F1 Code-mode 端到端旅程。Windows 10 人工矩阵、
 签名/安装包、真实进程、Rust analyzer、xterm 与 CTF 自动化继续独立后置。

@@ -93,6 +93,9 @@ desktop/mobile smoke found no horizontal overflow or console errors. No unresolv
 high- or medium-severity issue is known. No real API key, Provider request, Shell,
 LocalRunner, Docker, attack traffic, or external network operation was used.
 
+GitHub Actions run `29674460349` passed implementation commit `7d5736e`: TypeScript
+console 38s, Windows Desktop shell 2m49s, and Go control plane 3m43s.
+
 ## 中文结论
 
 本决策补齐三条恢复链路而不扩大权限。编辑器只能在原文件哈希未变化时换发短期
