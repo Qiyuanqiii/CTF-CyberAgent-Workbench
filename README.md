@@ -7,12 +7,12 @@
 
 项目从 schema v49 起同时使用两项工程指标，避免把“架构已经搭好”误解为“产品已经完整可用”。这些百分比是基于当前任务书和可验证工作流的工程估算，不是性能基准。
 
-- **架构完成度 / Architecture completion：约 99%**。衡量 Go 控制平面、Run/Session、状态恢复、Policy、审批、预算、事件流、Tool Gateway、Agent 协调、Skills、报告、Sandbox 协议及 Go/TypeScript 边界的覆盖程度；其中 V2 Run-centric Runtime 约 99%。
+- **架构完成度 / Architecture completion：约 99%**。衡量 Go 控制平面、Run/Session、状态恢复、Policy、审批、预算、事件流、Tool Gateway、Agent 协调、Skills、报告、Sandbox 协议及 Go/TypeScript 边界的覆盖程度；其中 V2 Run-centric Runtime 约 99%。schema v79 已补上同步等待环检测、工具硬超时与可恢复的 Run 活锁熔断。
 - **产品可用度 / Product usability：约 92-94%**。衡量普通用户能否依靠当前 CLI、TUI、Web 和 Windows Desktop 完成真实端到端工作。通用 Coding Agent 工作流约 92%，Cyber 自动化工作流约 20%；Run 工作台现已提供安全恢复的 Monaco 提案/Diff 编辑器、只读仓库状态与脱敏 Diff、多文件独立审阅、不可变操作者验证、可恢复 Code Handoff、Code Journey、可热重载的 Windows 系统凭证和有界 wake worker。真实 Sandbox/宿主进程执行、安装时脚本/钩子、Windows 10 人工发布矩阵和 Cyber 工具链仍未开放或完成。
 
 Starting with schema v49, the project reports two engineering indicators so architectural maturity is not mistaken for end-user completeness. These percentages are roadmap estimates backed by tested workflows, not performance benchmarks.
 
-- **Architecture completion: about 99%.** This covers the Go control plane and its Run/Session recovery, Policy, approval, budget, event, Tool Gateway, Agent coordination, Skills, reporting, Sandbox protocol, and Go/TypeScript boundaries. The V2 run-centric runtime itself is about 99% complete.
+- **Architecture completion: about 99%.** This covers the Go control plane and its Run/Session recovery, Policy, approval, budget, event, Tool Gateway, Agent coordination, Skills, reporting, Sandbox protocol, and Go/TypeScript boundaries. The V2 run-centric runtime itself is about 99% complete. Schema v79 adds synchronous wait-cycle rejection, hard Tool deadlines, and a recoverable Run livelock circuit breaker.
 - **Product usability: about 92-94%.** This measures how much real end-to-end work a user can complete through the current CLI, TUI, Web, and Windows Desktop shell. The generic coding-agent workflow is about 92% usable and the Cyber automation workflow about 20%. The Run workbench now includes safely recoverable Monaco proposal/Diff editing, read-only repository state and redacted Diffs, independent multi-file review, immutable operator verification, a resumable Code handoff, the Code Journey, hot-reloaded Windows system credentials, and a bounded wake worker. Real Sandbox/host-process execution, install-time scripts/hooks, the manual Windows 10 release matrix, and the Cyber toolchain remain disabled or unfinished.
 
 ## 项目简介 / Project Overview
@@ -35,9 +35,9 @@ The current priority is the general-purpose Agent runtime and its controlled mul
 
 ## 开发历程 / Development History
 
-下表是唯一按时间排序的 schema 开发历程，完整保留了早期 `v1`、`v2`、`v3`，并连续列到当前 `v78`。这里的 `vN` 是不可变 SQLite schema/runtime 里程碑，不等同于产品发布版本；后面的架构说明按能力域组织，因此不再承担版本排序职责。
+下表是唯一按时间排序的 schema 开发历程，完整保留了早期 `v1`、`v2`、`v3`，并连续列到当前 `v79`。这里的 `vN` 是不可变 SQLite schema/runtime 里程碑，不等同于产品发布版本；后面的架构说明按能力域组织，因此不再承担版本排序职责。
 
-The table below is the canonical chronological schema history. It includes every immutable SQLite schema/runtime milestone from `v1` through the current `v78`. These schema numbers are not product release versions; the architecture notes that follow are grouped by capability instead of chronology.
+The table below is the canonical chronological schema history. It includes every immutable SQLite schema/runtime milestone from `v1` through the current `v79`. These schema numbers are not product release versions; the architecture notes that follow are grouped by capability instead of chronology.
 
 | Schema | 中文里程碑 | English milestone |
 | --- | --- | --- |
@@ -119,6 +119,21 @@ The table below is the canonical chronological schema history. It includes every
 | v76 | 已批准 FileEdit 的幂等独立 apply | idempotent independent apply for approved FileEdits |
 | v77 | 非授权 Session 工作区证据挂载 | non-authorizing Session Workspace evidence attachments |
 | v78 | 不可变操作者验证证据 | immutable operator verification evidence |
+| v79 | 可恢复的 Run 无进展熔断 | recoverable Run livelock progress guard |
+
+## 死锁与活锁保护 / Deadlock And Livelock Protection
+
+Go Tool Runtime 默认给每次调用 15 秒硬截止时间，允许在构建期收窄但不得超过 5 分钟；调用方取消、超时和 panic 都会返回稳定结果。内置文件读取会响应取消，并拒绝 FIFO、设备、socket 等非普通文件，避免在特殊文件上永久阻塞。硬截止时间不能强杀拒绝响应 `context` 的第三方 Go goroutine，因此外部 Tool 仍必须遵守取消契约；未来真实 Runner 还必须独立实现进程树终止。
+
+有界进程级等待图记录 Agent、Tool、Retriever、Store、Runner、Model 和外部依赖的同步边，最多保留 4,096 个节点和 8,192 条边。新增边若形成直接或间接环路会立即失败；Tool/Retriever/Store/Runner 反向同步等待 Agent 永久禁止。root Supervisor、Specialist parent/child 和 Tool Gateway 已接入同一图，未来 RAG、Store callback 和 Runner adapter 必须沿用该协议。
+
+schema v79 的 `run_progress_guard.v1` 只持久化结构化状态与动作的 SHA-256、计数和原因，不保存模型正文。连续三次完全相同的 `continue`，或六次没有可观察结构化进展的不同 `continue`，会在提交该 turn 的同一事务内把 Run 转为 `paused/waiting`，记录 `supervisor.livelock_detected`，并要求操作者显式 resume；重启和完成重放不会重复提交消息。真实 Local/Docker 进程仍关闭，因此进程句柄、端口和容器级死锁由后续 start/wait/TERM/KILL/orphan 门禁负责，而不是由 v79 虚假声明已经解决。
+
+The Go Tool Runtime applies a 15-second hard deadline by default. Construction may narrow it but cannot exceed five minutes. Caller cancellation, timeout, and panic return stable results. Built-in file reads are cancellation-aware and reject FIFOs, devices, sockets, and other non-regular files. A deadline cannot forcibly terminate a third-party Go goroutine that ignores its context, so external Tools must still honor cancellation; future real Runners must separately terminate process trees.
+
+A bounded process-wide wait graph tracks synchronous Agent, Tool, Retriever, Store, Runner, Model, and external dependencies, up to 4,096 nodes and 8,192 edges. A direct or indirect cycle is rejected before the edge is installed, and Tool/Retriever/Store/Runner callbacks that synchronously wait on an Agent are always forbidden. The root Supervisor, Specialist parent/child execution, and Tool Gateway share this graph; future RAG, Store callback, and Runner adapters must use the same protocol.
+
+Schema v79 `run_progress_guard.v1` persists only structured-state/action SHA-256 fingerprints, counters, and reason codes, never model text. Three identical `continue` actions or six varying `continue` actions without observable structured progress atomically move the Run to `paused/waiting`, append `supervisor.livelock_detected`, and require an explicit operator resume. Restart and completion replay do not duplicate messages. Real Local/Docker processes remain disabled, so handle, port, and container deadlocks belong to the later start/wait/TERM/KILL/orphan gate rather than being falsely claimed as solved by v79.
 
 ## 执行环境档位 / Execution Profiles
 
@@ -374,11 +389,11 @@ React adds Actions and Evidence Run tabs plus a `Ctrl+K` command palette. Action
 
 ## Windows 桌面端 / Windows Desktop
 
-Desktop D0-A、D0-B 与 D1-R1 至 D1-G2/V1/F2 自动化核心已完成，SQLite 当前为 v78。项目固定 Wails v2.13.0 稳定版，并提供 Windows `cyberagent-desktop` 开发/便携测试二进制。Vite production bundle 在编译期嵌入；现有 Go `api.v1` Handler 直接接入 Wails AssetServer，不监听 TCP 端口，也不建立第二套业务 API。桌面端默认只读，每类 mutation 都由独立显式 flag 开启。本地 Monaco 可安全恢复提案；Repository 状态/脱敏 Diff、change-set、不可变验证、Code Handoff 与 Code Journey 复用既有 Go read/control 边界；Windows Credential Manager 修改可热重载 Registry；可选 wake worker 固定单并发/单步，仍无 Shell/Local/Docker。
+Desktop D0-A、D0-B 与 D1-R1 至 D1-G2/V1/F2 自动化核心已完成；该桌面产品批次止于 v78，项目全局 SQLite 当前为 v79。项目固定 Wails v2.13.0 稳定版，并提供 Windows `cyberagent-desktop` 开发/便携测试二进制。Vite production bundle 在编译期嵌入；现有 Go `api.v1` Handler 直接接入 Wails AssetServer，不监听 TCP 端口，也不建立第二套业务 API。桌面端默认只读，每类 mutation 都由独立显式 flag 开启。本地 Monaco 可安全恢复提案；Repository 状态/脱敏 Diff、change-set、不可变验证、Code Handoff 与 Code Journey 复用既有 Go read/control 边界；Windows Credential Manager 修改可热重载 Registry；可选 wake worker 固定单并发/单步，仍无 Shell/Local/Docker。
 
 原生 `.zip` 对话框现已接入 ADR 0033：本地路径只在 Go 内部短暂存在，经过严格 `skill_package.v1` 校验后立即丢弃；React 只能得到五分钟、单次消费的不透明句柄和有界风险元数据。Renderer 绑定面只有 `Bootstrap`、`SelectSkillPackage`、`PreviewSkillPackage`、`InstallSkillPackage` 四个方法；安装方法只消费 Go 发放的确认句柄，不能提交路径、文件字节、命令或权限位。进程、Shell、Docker、网络、Provider、工具和 capability authority 全部固定为 false。
 
-The automated core of Desktop D0-A, D0-B, and D1-R1 through D1-G2/V1/F2 is complete at schema v78. The project pins stable Wails v2.13.0 and builds a Windows `cyberagent-desktop` development/portable-test executable. Its Vite production bundle is embedded at compile time, and the existing Go `api.v1` Handler is connected directly to the Wails AssetServer without opening a TCP listener or creating a second business API. The shell defaults to read-only and every mutation class has an independent explicit flag. Monaco recovery, Repository state/redacted Diff, change-set review, immutable verification, Code Handoff, and the Code Journey reuse existing Go boundaries; Windows system-credential changes hot-reload the Registry, and the bounded worker retains no Shell/Local/Docker authority.
+The automated core of Desktop D0-A, D0-B, and D1-R1 through D1-G2/V1/F2 is complete at schema v78; the repository-wide SQLite schema is now v79. The project pins stable Wails v2.13.0 and builds a Windows `cyberagent-desktop` development/portable-test executable. Its Vite production bundle is embedded at compile time, and the existing Go `api.v1` Handler is connected directly to the Wails AssetServer without opening a TCP listener or creating a second business API. The shell defaults to read-only and every mutation class has an independent explicit flag. Monaco recovery, Repository state/redacted Diff, change-set review, immutable verification, Code Handoff, and the Code Journey reuse existing Go boundaries; Windows system-credential changes hot-reload the Registry, and the bounded worker retains no Shell/Local/Docker authority.
 
 The ADR 0033 native `.zip` flow is now visible. A selected path exists briefly inside Go, is strictly validated as `skill_package.v1`, and is then discarded. React receives only a five-minute, single-use opaque handle and bounded risk metadata. The complete renderer binding surface is `Bootstrap`, `SelectSkillPackage`, `PreviewSkillPackage`, and `InstallSkillPackage`; installation consumes only a Go-issued confirmation handle and accepts no path, bytes, command, or authority field. Process, Shell, Docker, network, Provider, tool, and capability authority remain false.
 
@@ -398,7 +413,7 @@ Build locally with `powershell -ExecutionPolicy Bypass -File scripts/build-deskt
 
 ### 中文详解
 
-以下内容按能力域和当前阅读价值组织，不代表 schema 时间顺序；需要核对开发先后时，请以上方 `v1 -> v78` 表为准。
+以下内容按能力域和当前阅读价值组织，不代表 schema 时间顺序；需要核对开发先后时，请以上方 `v1 -> v79` 表为准。
 
 P7 Skills 的第一条纵向链路已经落地。Go 内置并严格校验 `code`、`review`、`learn`、`script` 与跨 Profile 的 `plan-delivery` 五份 `skill.v1` 工作流指导，包括固定版本、兼容 Profile、工具前置声明、相对内容路径、UTF-8、字节数、保守 token 上界和 SHA-256。只读 Registry 与 `skill list/show/validate` 不创建数据库，也不读取任意外部路径；当前内置指导版本为 `1.1.0`，工具依赖绝不直接授予执行权限。
 
@@ -571,7 +586,7 @@ Bubble Tea TUI 现在以 Run-first 选择器启动，可在最近 50 个 Run 与
 
 ### English details
 
-The following notes are organized by capability and current reading value, not by schema order. Use the canonical `v1 -> v78` table above whenever chronology matters.
+The following notes are organized by capability and current reading value, not by schema order. Use the canonical `v1 -> v79` table above whenever chronology matters.
 
 The first P7 Skills vertical slice is now in place. Go embeds and strictly validates five `skill.v1` workflow guides for `code`, `review`, `learn`, `script`, and cross-Profile `plan-delivery`, including pinned versions, compatible Profiles, tool prerequisites, relative content paths, UTF-8, byte counts, a conservative token upper bound, and SHA-256. The read-only Registry and `skill list/show/validate` create no database and accept no arbitrary external path. The current built-in guidance version is `1.1.0`, and a declared tool dependency is never a capability grant.
 
@@ -1251,11 +1266,59 @@ boundary.
 远端 GitHub Actions [run 29682547524](https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench/actions/runs/29682547524) 已通过实现提交 `cff7489`：TypeScript console 42 秒、Windows Desktop shell 2 分 34 秒、含 `go vet` 与 `govulncheck` 的 Go control plane 3 分 33 秒。<br>
 Remote GitHub Actions run 29682547524 passed implementation commit `cff7489`: TypeScript console 42s, Windows Desktop shell 2m34s, and Go control plane including `go vet` and `govulncheck` 3m33s.
 
+## v79 防死锁与活锁加固批次 / v79 Deadlock And Livelock Hardening Batch
+
+本轮三个安全切片分别完成：Tool Runtime 的硬超时、取消、panic 恢复和特殊文件拒绝；Agent/Tool/Retriever/Store/Runner/Model 的有界同步等待图；以及 schema v79 可跨重启恢复的 Run 无进展熔断。等待边使用引用计数并在调用结束后幂等释放，Specialist parent/child 和 Tool Gateway 共用 root Supervisor 注入的身份；低层反向等待 Agent 与任何直接/间接环路都在实际阻塞前失败。
+
+v79 对相同动作三轮、无结构化进展六轮的阈值在 Go 与 SQLite 双层固定。检测、审计事件、Session 消息、checkpoint 和 `running -> paused` 在同一事务提交；原始 `continue` 的完成重放会识别已转换的 `wait`，只有检测之后真实存在的 `paused -> running` 事件才能重置 guard。迁移 v78 -> v79 不伪造任何进展记录，事件只含计数、阈值、原因和摘要元数据，不含模型正文。
+
+累计六切片完整门禁已通过：最终未缓存全仓 Go 测试 312 秒、最终代码全仓 race 358 秒、关键 Tool/等待图 20 轮和 v79 Store 10 轮、普通及 secure-Desktop test/vet、零告警 staticcheck、module verify/tidy、零可达漏洞 govulncheck、35 个前端文件 120 项测试、strict TypeScript、确定性 API、Vite production build、零漏洞 npm audit、隔离 mock-only CLI、仓库凭据/产物扫描、Windows 可复现构建和桌面/移动浏览器检查。未签名 Desktop SHA-256 为 `31e0df63d3fbbccac6728ad2322196bee55d57e775a15cc34f752c0632bdc699`，仍正确保持 `release_ready=false`；浏览器无横向溢出和 console error。
+
+审计补强了 `max_bytes` 的平台整数/OOM 边界、Go/SQL 观察态阈值约束、检测后必须有显式恢复事件、损坏 guard 读取失败关闭和计数饱和。`govulncheck` 仍只报告依赖图中未导入、未调用的 `GO-2026-5932` module-only 残余。当前启用路径未发现未解决高/中风险；没有调用真实 key、Provider、Shell、LocalRunner、Docker、攻击流量或外部网络。架构完成度保持约 99%，产品可用度保持约 92-94%，因为该批次提高运行时可靠性但没有开放新的用户执行权限。边界见 [ADR 0049](docs/adr/0049-deadlock-livelock-runtime-guards.md)。
+
+This three-slice safety batch adds hard Tool deadlines, cancellation, panic recovery,
+and special-file rejection; a bounded synchronous wait graph for Agent, Tool,
+Retriever, Store, Runner, Model, and external nodes; and schema v79's restart-safe Run
+no-progress circuit breaker. Wait edges are reference-counted and idempotently
+released. Specialist parent/child execution and the Tool Gateway share the identity
+injected by the root Supervisor. Lower-layer callbacks into an Agent and every direct
+or indirect cycle fail before blocking.
+
+Go and SQLite fix the v79 thresholds at three identical actions or six turns without
+structured progress. Detection, audit events, Session messages, checkpoint, and the
+`running -> paused` transition commit atomically. Completion replay recognizes the
+original `continue` converted to `wait`, and only a real later `paused -> running`
+event may reset a detected guard. Upgrading v78 to v79 fabricates no progress record;
+events contain bounded counters, thresholds, reasons, and digest metadata, not model
+text.
+
+The cumulative six-slice gate passed the final uncached Go suite in 312s, the
+final-code full race suite in 358s, 20 Tool/wait-graph repetitions, ten v79 Store
+repetitions, ordinary and secure-Desktop tests/vet, zero-warning staticcheck, module
+verification/tidy, zero reachable govulncheck findings, 120 frontend tests across 35
+files, strict TypeScript, deterministic API generation, Vite production build, a
+zero-vulnerability npm audit, isolated mock-only CLI smoke, repository credential and
+artifact scans, reproducible Windows build, and desktop/mobile browser checks. The
+unsigned Desktop SHA-256 is
+`31e0df63d3fbbccac6728ad2322196bee55d57e775a15cc34f752c0632bdc699` and correctly
+remains `release_ready=false`; the browser showed no horizontal overflow or console
+error.
+
+The audit hardened platform-integer/OOM handling for `max_bytes`, Go/SQL observing
+thresholds, explicit post-detection resume proof, fail-closed corrupt guard reads, and
+saturating counters. `govulncheck` retains only module-level `GO-2026-5932`, which the
+application neither imports nor calls. No unresolved high/medium issue is known on an
+enabled path, and no real key, Provider, Shell, LocalRunner, Docker, attack traffic,
+or external network was used. Architecture remains about 99% and product usability
+about 92-94% because this batch improves runtime reliability without granting a new
+execution capability. [ADR 0049](docs/adr/0049-deadlock-livelock-runtime-guards.md)
+records the boundary.
+
 ## Project Memory
 
 Read [docs/PROJECT_MEMORY.md](docs/PROJECT_MEMORY.md), [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [docs/PROGRESS_BOOK.md](docs/PROGRESS_BOOK.md), [docs/TASK_BOOK.md](docs/TASK_BOOK.md), [docs/http-api.md](docs/http-api.md), [docs/openapi.json](docs/openapi.json), [web/README.md](web/README.md), [docs/errors.md](docs/errors.md), and the chronological [ADR 0001](docs/adr/0001-go-control-plane.md), [ADR 0002](docs/adr/0002-run-centric-runtime.md), [ADR 0003](docs/adr/0003-run-execution-modes.md), [ADR 0004](docs/adr/0004-plan-delivery-workflow.md), [ADR 0005](docs/adr/0005-operator-steering-queue.md), [ADR 0006](docs/adr/0006-operator-steering-controls.md), [ADR 0007](docs/adr/0007-specialist-skill-context.md), [ADR 0008](docs/adr/0008-sandbox-manifest-boundary.md), [ADR 0009](docs/adr/0009-sandbox-approval-candidate.md), [ADR 0010](docs/adr/0010-disabled-sandbox-lifecycle.md), [ADR 0011](docs/adr/0011-disabled-sandbox-preflight.md), [ADR 0012](docs/adr/0012-simulation-only-sandbox-evidence.md), [ADR 0013](docs/adr/0013-read-only-docker-observation.md), [ADR 0014](docs/adr/0014-deterministic-docker-container-plan.md), [ADR 0015](docs/adr/0015-bounded-docker-write-rehearsal.md), [ADR 0016](docs/adr/0016-recoverable-docker-rehearsal-attempt.md), [ADR 0017](docs/adr/0017-descriptor-sealed-host-input-staging.md), [ADR 0018](docs/adr/0018-durable-pre-stage-host-input-requirement.md), [ADR 0019](docs/adr/0019-daemon-owned-host-input-handoff.md), [ADR 0020](docs/adr/0020-deterministic-runtime-input-projection.md), [ADR 0021](docs/adr/0021-recoverable-runtime-input-application.md), [ADR 0022](docs/adr/0022-retained-runtime-input-resource-lifecycle.md), [ADR 0023](docs/adr/0023-blocked-docker-start-gate-review.md), [ADR 0024](docs/adr/0024-strict-inert-skill-package.md), [ADR 0025](docs/adr/0025-protected-delete-command-guard.md), [ADR 0026](docs/adr/0026-run-execution-profile-selection.md), [ADR 0027](docs/adr/0027-non-authorizing-docker-production-evidence-ledger.md), and [ADR 0028](docs/adr/0028-recoverable-docker-production-evidence-attempts.md) when resuming development after a long conversation. They record current progress, language ownership, run architecture, execution mode, Plan/Delivery and steering invariants, Specialist Skill delivery, Sandbox authority boundaries, API and error contracts, audit notes, verified commands, and the recommended next slice.
 
-The latest decisions are [ADR 0029](docs/adr/0029-bounded-linux-read-only-docker-evidence-harness.md), [ADR 0030](docs/adr/0030-immutable-docker-production-evidence-review.md), [ADR 0031](docs/adr/0031-content-addressed-inert-skill-registry.md), [ADR 0032](docs/adr/0032-external-skill-run-context.md), [ADR 0033](docs/adr/0033-pathless-desktop-skill-preview.md), [ADR 0034](docs/adr/0034-embedded-read-first-wails-shell.md), [ADR 0035](docs/adr/0035-desktop-lifecycle-and-event-resumption.md), [ADR 0036](docs/adr/0036-idempotent-controlled-run-creation.md), [ADR 0037](docs/adr/0037-controlled-session-message-submission.md), [ADR 0038](docs/adr/0038-idempotent-run-control-and-bounded-handoff.md), [ADR 0039](docs/adr/0039-model-plan-and-approval-controls.md), [ADR 0040](docs/adr/0040-provider-diff-wake-controls.md), [ADR 0041](docs/adr/0041-explicit-wake-file-apply-and-inert-skill-install.md), [ADR 0042](docs/adr/0042-receipts-explorer-portable-build.md), [ADR 0043](docs/adr/0043-workspace-search-evidence-attachment-receipt-history.md), [ADR 0044](docs/adr/0044-operator-action-center-evidence-inventory-command-palette.md), [ADR 0045](docs/adr/0045-go-issued-editor-system-credentials-bounded-wake-worker.md), [ADR 0046](docs/adr/0046-safe-editor-recovery-provider-generation-worker-health.md), [ADR 0047](docs/adr/0047-read-only-repository-change-set-code-journey.md), and [ADR 0048](docs/adr/0048-bounded-diff-verification-code-handoff.md).
+The latest decisions are [ADR 0029](docs/adr/0029-bounded-linux-read-only-docker-evidence-harness.md), [ADR 0030](docs/adr/0030-immutable-docker-production-evidence-review.md), [ADR 0031](docs/adr/0031-content-addressed-inert-skill-registry.md), [ADR 0032](docs/adr/0032-external-skill-run-context.md), [ADR 0033](docs/adr/0033-pathless-desktop-skill-preview.md), [ADR 0034](docs/adr/0034-embedded-read-first-wails-shell.md), [ADR 0035](docs/adr/0035-desktop-lifecycle-and-event-resumption.md), [ADR 0036](docs/adr/0036-idempotent-controlled-run-creation.md), [ADR 0037](docs/adr/0037-controlled-session-message-submission.md), [ADR 0038](docs/adr/0038-idempotent-run-control-and-bounded-handoff.md), [ADR 0039](docs/adr/0039-model-plan-and-approval-controls.md), [ADR 0040](docs/adr/0040-provider-diff-wake-controls.md), [ADR 0041](docs/adr/0041-explicit-wake-file-apply-and-inert-skill-install.md), [ADR 0042](docs/adr/0042-receipts-explorer-portable-build.md), [ADR 0043](docs/adr/0043-workspace-search-evidence-attachment-receipt-history.md), [ADR 0044](docs/adr/0044-operator-action-center-evidence-inventory-command-palette.md), [ADR 0045](docs/adr/0045-go-issued-editor-system-credentials-bounded-wake-worker.md), [ADR 0046](docs/adr/0046-safe-editor-recovery-provider-generation-worker-health.md), [ADR 0047](docs/adr/0047-read-only-repository-change-set-code-journey.md), [ADR 0048](docs/adr/0048-bounded-diff-verification-code-handoff.md), and [ADR 0049](docs/adr/0049-deadlock-livelock-runtime-guards.md).
 
 Windows Desktop D0-A/D0-B 与 D1-R1 至 D1-G2/V1/F2 自动化核心已实现，但仍是未签名开发/便携测试壳，不是安装版或完整工作台；Windows 10 实机发布矩阵仍待完成。分阶段方案见 [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md)。自定义 Skill 已具备严格 `skill_package.v1` 校验、schema v69 本地惰性 Registry、schema v70 CLI Run 选择/最小上下文、schema v71 三端只读来源投影，以及 HTTP/Desktop 显式确认的惰性安装；签名、远程分发和安装时执行仍未开放。详情见 [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md)。
 

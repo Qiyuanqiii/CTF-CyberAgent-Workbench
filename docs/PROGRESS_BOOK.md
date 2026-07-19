@@ -9,7 +9,7 @@
 从 schema v49 起采用“双指标”，不再使用容易混淆的单一“整体产品愿景”百分比：
 
 - 架构完成度：约 99%；其中 V2 Run-centric 控制平面约 99%。该指标衡量 Go 主控、持久化状态机和模块边界的覆盖程度。
-- 产品可用度：完整 Code + Cyber 产品约 89-92%；其中通用 Coding Agent 工作流约 88%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
+- 产品可用度：完整 Code + Cyber 产品约 92-94%；其中通用 Coding Agent 工作流约 92%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
 - 上述数值是依据已测试任务切片给出的工程估算，不是性能基准，也不代表仍被安全关闭的功能已经可用。
 
 V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、主动取消、有界工具循环和跨进程 execution lease。P3-P5 已落地 Work/Note/Context、最多两个核心 child、独立 1/2/4/6 只读 Fan-out、Tool Gateway、审批/Grant、预算、ScriptProcess 与 Artifact。P9 已推进到 schema v77 / D1-G1/I3/F1：除既有 Run/Session/Plan/审批/Workspace/证据/回执/行动中心外，现有 API/Desktop 还支持安全恢复的 Monaco FileEdit、独立多文件汇总、exact-root 只读 Repository、Code Journey、Provider generation reload 和有界 wake worker。真实 Local/Docker/Shell/Git 进程、安装脚本/钩子和远程 Skill 分发继续关闭。
@@ -1052,10 +1052,52 @@ staticcheck/govulncheck/依赖/隐私/构建完整健壮性门。
 42 秒、Windows Desktop shell 2 分 34 秒、含 vet 与 govulncheck 的 Go control plane
 3 分 33 秒。
 
+H1/H2/H3 防死锁与活锁三切片已经完成，任务 ID 为
+`P2-Runtime-Deadlock-Livelock-Guards-v79`。H1 为每次启用的 in-process Tool 调用增加
+默认 15 秒、最多 5 分钟硬截止时间，区分 124 timeout 与 130 cancellation，并恢复 panic。
+内置 read/list 在循环中检查 context，`max_bytes` 不得超过 FS 配额或平台整数边界；Unix
+以 nonblocking/CLOEXEC/NOFOLLOW 打开并 fstat，其他平台比较打开前后身份，只允许普通
+文件，FIFO/device/socket 不再可能把 Tool 调用永久挂住。
+
+H2 新增进程级 `waitgraph`：Agent、Tool、Retriever、Store、Runner、Model 和 External
+节点总计最多 4,096，边最多 8,192；边引用计数、幂等释放，插入前拒绝 self/direct/
+indirect cycle。Tool/Retriever/Store/Runner 永久不能反向同步等待 Agent。root Supervisor
+注入 Agent identity，Specialist scheduler 包围 parent -> child，Tool Gateway 包围当前
+调用并传播唯一 Tool identity。未来 RAG、Store callback、Model adapter 和 Runner 也必须
+复用该协议，不能另建互相回调链。
+
+H3/schema v79 新增 `run_progress_guard.v1`。它只保存结构化状态/动作 SHA-256、饱和计数、
+阈值、原因和时间，不保存模型正文。连续三次相同 `continue` 检测
+`repeated_action`，连续六轮结构化状态不变检测 `no_observable_progress`；检测事件、
+Session 消息、checkpoint 与 `running -> paused` 在同一事务提交，原始 `continue` 重放
+不会重复写消息。只有检测后真实的 `paused -> running` 事件才能把 guard 恢复为 observing；
+v78 原地升级只建表和 trigger，不伪造进展。
+
+本批与前一 v78 批累计六切片，完整健壮性门已通过：最终 uncached 全仓 Go 312 秒
+（Store 304.6 秒）、final-code 全仓 race 358 秒、Tool/等待图重复 20 轮、v79 Store 重复
+10 轮、普通/secure Desktop test 与 vet、零告警 staticcheck、module verify/tidy、零可达
+govulncheck、35 文件 120 项 React、strict TypeScript、确定性 API、Vite production、npm
+零漏洞、隔离 mock-only CLI、凭据/产物扫描、Windows 可复现构建和 production bundle
+桌面/390x844 浏览器检查。GUI SHA-256 为
+`31e0df63d3fbbccac6728ad2322196bee55d57e775a15cc34f752c0632bdc699`，仍为
+`release_ready=false`；浏览器无横向溢出或 console error。
+
+组合审计补强 `max_bytes` 整数/OOM 边界、Go/SQL observing 阈值、检测后显式恢复证明、
+损坏 guard 读取失败关闭和计数饱和。依赖图仅保留未导入/未调用的 module-only
+`GO-2026-5932`。当前启用路径无已知未解决高/中风险；未使用真实 key、Provider、Shell、
+LocalRunner、Docker、攻击流量或外部网络。硬超时无法强杀完全忽略 context 的第三方 Go
+goroutine；真实进程的句柄/端口/进程树死锁仍属于后续 Runner start/wait/TERM/KILL/
+orphan 独立门禁，因为真实执行继续关闭。双指标保持架构约 99%（V2 约 99%）、完整产品
+可用度约 92-94%、通用 Coding Agent 约 92%、Cyber 自动化约 20%，边界见 ADR 0049。
+
+下一批回到产品切片 D1-G3 recent commit/branch history、D1-V2 verification plan/checklist
+和 D1-F3 Markdown/JSON handoff export。它是新六切片周期的前三片，批末执行普通整合门；
+再下一批累计六片时执行完整健壮性门。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0048-bounded-diff-verification-code-handoff.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0049-deadlock-livelock-runtime-guards.md`。

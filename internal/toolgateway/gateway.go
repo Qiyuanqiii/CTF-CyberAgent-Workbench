@@ -13,12 +13,14 @@ import (
 	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/artifact"
 	"cyberagent-workbench/internal/fileedit"
+	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/redact"
 	"cyberagent-workbench/internal/scriptprocess"
 	"cyberagent-workbench/internal/toolbudget"
 	"cyberagent-workbench/internal/toolrun"
 	"cyberagent-workbench/internal/tools"
+	"cyberagent-workbench/internal/waitgraph"
 )
 
 const maxWorkspaceListDepth = 32
@@ -54,6 +56,7 @@ type Gateway struct {
 	structuredMemory      StructuredMemoryExecutor
 	delegationProposals   SpecialistDelegationExecutor
 	planDeliveryProposals PlanDeliveryExecutor
+	waitGraph             *waitgraph.Graph
 }
 
 type WorkspaceRootResolver func(ctx context.Context, workspaceID string) (string, error)
@@ -75,8 +78,16 @@ func New(store Store, checker policy.Checker) *Gateway {
 		scriptStore: scriptStore, scriptRunStore: scriptRunStore,
 		scriptProcesses: scriptprocess.NewManager(scriptStore),
 		artifacts:       artifact.NewManager(store),
+		waitGraph:       waitgraph.Default(),
 	}
 	return gateway
+}
+
+func (g *Gateway) WithWaitGraph(graph *waitgraph.Graph) *Gateway {
+	if g != nil && graph != nil {
+		g.waitGraph = graph
+	}
+	return g
 }
 
 func (g *Gateway) WithWorkspaceRootResolver(resolver WorkspaceRootResolver) *Gateway {
@@ -112,6 +123,18 @@ func (g *Gateway) Invoke(ctx context.Context, call ToolCall) (Outcome, error) {
 	if normalized.Name == PlanDeliveryProposeTool && g.planDeliveryProposals == nil {
 		return Outcome{}, errors.New("Plan/Delivery proposal executor is required")
 	}
+	fallback := waitgraph.External(normalized.RequestedBy)
+	if normalized.AgentID != "" {
+		fallback = waitgraph.Agent(normalized.AgentID)
+	} else if normalized.RequestedBy == "" {
+		fallback = waitgraph.External("operator")
+	}
+	ctx, releaseWait, err := waitgraph.Enter(ctx, g.waitGraph, fallback,
+		waitgraph.Tool(idgen.New("tool-wait")))
+	if err != nil {
+		return Outcome{}, fmt.Errorf("register synchronous tool dependency: %w", err)
+	}
+	defer releaseWait()
 	class, ok := ClassForTool(normalized.Name)
 	if !ok {
 		return Outcome{}, fmt.Errorf("unsupported tool %q", normalized.Name)

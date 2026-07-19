@@ -301,6 +301,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 76, Name: "independently authorized FileEdit apply operations", Statements: fileEditApplyStatements},
 		{Version: 77, Name: "non-authorizing Session evidence attachments", Statements: sessionEvidenceAttachmentStatements},
 		{Version: 78, Name: "immutable operator verification evidence", Statements: operatorVerificationEvidenceStatements},
+		{Version: 79, Name: "durable Run livelock progress guard", Statements: runProgressGuardStatements},
 	})
 }
 

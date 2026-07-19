@@ -278,6 +278,22 @@ The application service exposes in-process active-call query, bounded metadata s
 
 The `cyberagent` process handles `Ctrl+C` and termination signals through its command context. An interrupted Provider call records `model.failed` with a cancelled outcome and keeps the started Supervisor checkpoint recoverable instead of abandoning an unaccounted request.
 
+Schema v79 also stops a logically live but unproductive loop. Three completed root
+turns that return the same normalized `continue` action, or six completed `continue`
+turns without selected structured-state progress, atomically pause the Run with stop
+reason `livelock_detected`. The completed Session turn remains durable and replaying
+its original Provider result does not append it twice. Inspect the Run/events, correct
+the plan, input, or structured work as needed, then use the ordinary explicit
+`run resume <run-id>` control; the first later turn starts a fresh observation window.
+No hidden retry or automatic resume occurs.
+
+Workspace read/list Tools have a default 15-second execution deadline, honor caller
+cancellation, and reject special files. An exit code of 124 means the Tool deadline
+elapsed; 130 means the caller cancelled. These in-process guards do not enable or
+execute Shell, LocalRunner, or Docker. A third-party Tool must honor its Go context;
+real process-tree termination remains unavailable until the separate Runner lifecycle
+gate is implemented.
+
 Ordinary text sent to a Run-created Session uses the same RunSupervisor path as `run step`. The first message automatically starts a `created` Run, a follow-up to a model `wait` automatically resumes its paused Run, and the CLI prints `[run <id>: action=<action> status=<status>]`. Pending input is redacted, limited to 64 KiB, and stored before the Provider call; after restart the same attempt can recover it, while the committed user/assistant pair and lifecycle events are written exactly once. Completed, failed, cancelled, or approval-waiting Runs reject ordinary input instead of falling back to an unsupervised model call.
 
 `run adapt-task` converts a v0.1 `agent.Task` into a new Mission, Run, and Session. The mapping is transactional and keyed by Task ID, so repeated or concurrent calls return the same Run and append only one `legacy.task_adapted` event. Historical task status is recorded for audit, but the new Run always starts at `created` and never executes implicitly. Legacy CTF tasks map to the safe generic `review` profile until the dedicated CTF phase.

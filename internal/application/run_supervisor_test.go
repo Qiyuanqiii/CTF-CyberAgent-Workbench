@@ -81,6 +81,47 @@ func TestRunSupervisorCompletesOneTurnAndEnforcesBudget(t *testing.T) {
 	}
 }
 
+func TestRunSupervisorStopsRepeatedContinueLoopWithRecoverableLivelockWait(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "supervisor-livelock.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	response := rootActionResponse(domain.RootActionContinue, "same answer", "", "")
+	provider := &lifecycleProvider{responses: []string{response, response, response}}
+	router := llm.NewRouter(llm.ModelRef{Provider: provider.Name(), Model: "model"})
+	router.RegisterProvider(provider)
+	runs := application.NewRunService(st)
+	_, run, err := runs.Create(ctx, application.CreateRunRequest{
+		Goal: "stop a repeated model loop", Profile: "code",
+		ModelRoute: provider.Name() + "/model", Budget: domain.Budget{MaxTurns: 10},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runs.Start(ctx, run.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	execution, err := application.NewRunSupervisor(st, router,
+		policy.NewDefaultChecker()).Execute(ctx, run.ID, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution.StopReason != "livelock_detected" ||
+		execution.RunStatus != domain.RunPaused || len(execution.Steps) != 3 ||
+		execution.Steps[2].Action.Kind != domain.RootActionWait ||
+		!strings.HasPrefix(execution.Steps[2].Action.Reason, "livelock_detected:") ||
+		provider.calls != 3 {
+		t.Fatalf("unexpected livelock stop: %#v calls=%d", execution, provider.calls)
+	}
+	guard, found, err := st.GetRunProgressGuard(ctx, run.ID)
+	if err != nil || !found || guard.Status != domain.RunProgressDetected {
+		t.Fatalf("missing durable livelock guard: %#v found=%t err=%v", guard, found, err)
+	}
+}
+
 func TestRunSupervisorInjectsPersistedSkillContextWithoutGrantingTools(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "supervisor-skill-context.db"))
 	if err != nil {

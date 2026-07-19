@@ -19,6 +19,7 @@ import (
 	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/toolgateway"
+	"cyberagent-workbench/internal/waitgraph"
 )
 
 const maxSupervisorHistoryMessages = 20
@@ -58,6 +59,7 @@ type SupervisorStore interface {
 	FinalizeSupervisorRun(ctx context.Context, lease domain.RunExecutionLease, target domain.RunStatus, summary string) (domain.Run, domain.SupervisorCheckpoint, error)
 	GetSupervisorCheckpoint(ctx context.Context, runID string) (domain.SupervisorCheckpoint, bool, error)
 	GetRun(ctx context.Context, id string) (domain.Run, error)
+	GetRunProgressGuard(ctx context.Context, runID string) (domain.RunProgressGuard, bool, error)
 	GetOperatorSteeringQueueSummary(ctx context.Context,
 		runID string) (domain.OperatorSteeringQueueSummary, error)
 	GetRunMode(ctx context.Context, runID string) (domain.RunModeSnapshot, error)
@@ -183,14 +185,15 @@ type RunSupervisor struct {
 	cancellationPollInterval time.Duration
 	skillRegistry            *skills.Registry
 	skillRegistryErr         error
+	waitGraph                *waitgraph.Graph
 }
 
 func NewRunSupervisor(store RunSupervisorStore, router *llm.Router, checker policy.Checker) *RunSupervisor {
 	skillRegistry, skillRegistryErr := skills.BuiltinRegistry()
 	return &RunSupervisor{
 		store: store, router: router, checker: checker, retryPolicy: DefaultModelRetryPolicy(),
-		activeCalls: NewActiveCallRegistry(),
-		leaseOwner:  idgen.New("worker"), leasePolicy: DefaultRunExecutionLeasePolicy(),
+		activeCalls: NewActiveCallRegistry(), waitGraph: waitgraph.Default(),
+		leaseOwner: idgen.New("worker"), leasePolicy: DefaultRunExecutionLeasePolicy(),
 		cancellationPollInterval: 100 * time.Millisecond,
 		tools: toolgateway.New(store, checker).
 			WithStructuredMemoryExecutor(NewStructuredMemoryToolExecutor(store)).
@@ -198,6 +201,16 @@ func NewRunSupervisor(store RunSupervisorStore, router *llm.Router, checker poli
 			WithPlanDeliveryExecutor(NewPlanDeliveryToolExecutor(store)),
 		skillRegistry: skillRegistry, skillRegistryErr: skillRegistryErr,
 	}
+}
+
+func (s *RunSupervisor) WithWaitGraph(graph *waitgraph.Graph) *RunSupervisor {
+	if s != nil && graph != nil {
+		s.waitGraph = graph
+		if s.tools != nil {
+			s.tools.WithWaitGraph(graph)
+		}
+	}
+	return s
 }
 
 type RunExecutionLeasePolicy struct {
@@ -349,6 +362,7 @@ func (s *RunSupervisor) stepWithLeaseMode(ctx context.Context, lease domain.RunE
 	if err != nil {
 		return LifecycleResult{}, apperror.Normalize(err)
 	}
+	ctx = waitgraph.WithCurrent(ctx, waitgraph.Agent(turn.Agent.ID))
 	result := LifecycleResult{
 		Handle:  RunHandle{RunID: turn.Run.ID, MissionID: turn.Mission.ID, SessionID: turn.Run.SessionID},
 		AgentID: turn.Agent.ID,
@@ -691,6 +705,20 @@ func (s *RunSupervisor) stepWithLeaseMode(ctx context.Context, lease domain.RunE
 			safeAction.Summary = ""
 			safeAction.Reason = ""
 		}
+		if safeAction.Kind == domain.RootActionContinue && updatedRun.Status == domain.RunPaused &&
+			checkpoint.Phase == domain.SupervisorWaiting {
+			guard, found, guardErr := s.store.GetRunProgressGuard(ctx, updatedRun.ID)
+			if guardErr != nil {
+				return result, apperror.Normalize(guardErr)
+			}
+			if !found || guard.Status != domain.RunProgressDetected ||
+				guard.LastTurn != turn.Checkpoint.NextTurn {
+				return result, apperror.New(apperror.CodeFailedPrecondition,
+					"Run paused during a continue action without a matching progress guard")
+			}
+			safeAction.Kind = domain.RootActionWait
+			safeAction.Reason = guard.WaitReason()
+		}
 		result.Status = LifecycleTurnCompleted
 		result.Text = safeAction.Message
 		result.Provider = response.Provider
@@ -847,7 +875,7 @@ func (s *RunSupervisor) drainOperatorSteeringWithLease(ctx context.Context,
 			return nil
 		}
 		if step.Action.Kind == domain.RootActionWait {
-			result.StopReason = "root_wait"
+			result.StopReason = supervisorWaitStopReason(step.Action)
 			return nil
 		}
 	}
@@ -903,7 +931,7 @@ func (s *RunSupervisor) executeWithLease(ctx context.Context, lease domain.RunEx
 			result.StopReason = "root_finish"
 			return nil
 		case domain.RootActionWait:
-			result.StopReason = "root_wait"
+			result.StopReason = supervisorWaitStopReason(step.Action)
 			return nil
 		}
 	}
@@ -914,6 +942,13 @@ func (s *RunSupervisor) executeWithLease(ctx context.Context, lease domain.RunEx
 	result.RunStatus = run.Status
 	result.StopReason = "step_limit"
 	return nil
+}
+
+func supervisorWaitStopReason(action domain.RootAction) string {
+	if strings.HasPrefix(strings.TrimSpace(action.Reason), "livelock_detected:") {
+		return "livelock_detected"
+	}
+	return "root_wait"
 }
 
 func (s *RunSupervisor) Finalize(ctx context.Context, runID string, outcome LifecycleOutcome, summary string) (FinalizationResult, error) {

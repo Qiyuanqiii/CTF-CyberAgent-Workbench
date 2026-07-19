@@ -3,6 +3,7 @@ package toolgateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/toolbudget"
+	"cyberagent-workbench/internal/waitgraph"
 )
 
 type trackedStructuredStore struct {
@@ -45,6 +47,24 @@ type structuredExecutorStub struct {
 	lastScope StructuredMemoryContext
 	lastNote  NoteCreateInput
 	result    StructuredMutationResult
+}
+
+type agentCallbackExecutor struct {
+	graph *waitgraph.Graph
+}
+
+func (e agentCallbackExecutor) CreateWorkItem(ctx context.Context, _ StructuredMemoryContext,
+	_ WorkItemCreateInput,
+) (StructuredMutationResult, error) {
+	_, _, err := waitgraph.Enter(ctx, e.graph, waitgraph.External("fallback"), waitgraph.Agent("root"))
+	return StructuredMutationResult{}, err
+}
+
+func (e agentCallbackExecutor) CreateNote(ctx context.Context, _ StructuredMemoryContext,
+	_ NoteCreateInput,
+) (StructuredMutationResult, error) {
+	_, _, err := waitgraph.Enter(ctx, e.graph, waitgraph.External("fallback"), waitgraph.Agent("root"))
+	return StructuredMutationResult{}, err
 }
 
 func (s *structuredExecutorStub) CreateWorkItem(_ context.Context, scope StructuredMemoryContext,
@@ -104,6 +124,21 @@ func TestStructuredMemoryToolDefinitionsAreValidAndCopied(t *testing.T) {
 	if _, _, err := decodeNoteCreateInput(json.RawMessage(
 		`{"title":"x","content":"y","owner_agent_id":"agent-20260711123456-abcdef012345"}`)); err == nil {
 		t.Fatal("model payload was allowed to spoof Note Agent ownership")
+	}
+}
+
+func TestGatewayPropagatesToolWaitIdentityAndRejectsAgentCallback(t *testing.T) {
+	store := newTrackedStructuredStore()
+	graph := waitgraph.New()
+	gateway := New(store, policy.NewDefaultChecker()).WithWaitGraph(graph).
+		WithStructuredMemoryExecutor(agentCallbackExecutor{graph: graph})
+	_, err := gateway.Invoke(t.Context(), ToolCall{
+		Name: WorkItemCreateTool, Payload: json.RawMessage(`{"title":"blocked callback"}`),
+		OperationKey: "callback-1", RunID: "run-1", SessionID: "sess-1",
+		WorkspaceID: "ws-1", RequestedBy: "root",
+	})
+	if !errors.Is(err, waitgraph.ErrReverseAgentWait) {
+		t.Fatalf("expected reverse Agent callback rejection, got %v", err)
 	}
 }
 

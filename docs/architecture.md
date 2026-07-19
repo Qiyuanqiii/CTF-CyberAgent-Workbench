@@ -175,6 +175,32 @@ If a response fails strict `root_lifecycle.v1` parsing, the Supervisor persists 
 
 Ordinary text sent to a Run-bound Session uses this same Supervisor path. A `created` Run starts automatically, a paused Run resumes for follow-up input, and terminal or approval-waiting Runs reject new model turns. The input is checkpointed before the Provider call and is recovered after process restart without duplicating the committed user/assistant pair. Sessions without a Run retain an explicit legacy Router path during migration; slash commands remain command adapters rather than implicit Agent turns.
 
+## Blocking And Progress Guards
+
+Enabled in-process Tool calls have a default 15-second hard deadline and a five-minute
+configuration ceiling. Caller cancellation, timeout, and panic return bounded results.
+Built-in workspace reads check context while walking and reading, enforce configured
+and platform byte limits, and open only regular files; FIFO, device, and socket inputs
+fail instead of blocking. A timeout releases the caller but cannot forcibly kill
+third-party Go code that ignores context, so future plugin isolation should prefer a
+cancellable process boundary.
+
+The process-wide `waitgraph` records bounded reference-counted synchronous edges for
+Agent, Tool, Retriever, Store, Runner, Model, and external nodes. It rejects self,
+direct, and indirect cycles before insertion and permanently forbids Tool/Retriever/
+Store/Runner callbacks that wait synchronously on an Agent. Root Supervisor context,
+Specialist parent-to-child execution, and Tool Gateway invocation use this graph now;
+future RAG, Store callback, Model adapter, and Runner boundaries must enter it too.
+
+Schema v79 adds one metadata-only `run_progress_guard.v1` per observed Run. Three
+identical `continue` actions or six turns without selected structured-state progress
+atomically convert the completed action to a recoverable wait and move the Run to
+`paused`. Session messages, checkpoint, events, and status commit together; completion
+replay remains exactly once. Only a later durable operator `paused -> running`
+transition resets a detected guard. The migration fabricates no progress record and
+the guard stores no model text. Real Local/Docker processes remain disabled, so
+process-tree start/wait/TERM/KILL/orphan handling remains a separate future gate.
+
 ## Agent Coordinator
 
 One `AgentCoordinator` owns the graph for a run:
@@ -476,7 +502,7 @@ The same Go adapter owns read projections for the bounded Agent graph, operator-
 
 ## Persistence
 
-SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2`-`v18` establish the Run/Supervisor/memory/tool/Artifact/lease control plane, `v19`-`v38` add bounded Agent coordination, reviewed delegation, read-only Fan-out, Findings, and operator scheduling, and `v39`-`v47` add immutable Skill selection/context, Run modes, Plan/Delivery, provenance, checkpoints, steering, and Specialist minimization. Schemas `v48`-`v63` build the still-disabled Sandbox evidence and recovery chain; `v64`-`v68` add non-authorizing execution-profile and Docker production-evidence decisions; `v69`-`v71` add the inert user Skill Registry, exact Run selection/context, and read-only provenance; `v72`-`v74` add controlled Run creation/lifecycle/handoff and bounded wake intent; `v75` adds explicit foreground wake consumption; and `v76` adds independently authorized FileEdit apply. Non-schema D1-B1 exposes the existing v69 Registry through inert HTTP/Desktop confirmation and adds no migration. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data or fabricating new operator decisions.
+SQLite remains the local source of truth. Schema migration `v1` records the legacy baseline, `v2`-`v18` establish the Run/Supervisor/memory/tool/Artifact/lease control plane, `v19`-`v38` add bounded Agent coordination, reviewed delegation, read-only Fan-out, Findings, and operator scheduling, and `v39`-`v47` add immutable Skill selection/context, Run modes, Plan/Delivery, provenance, checkpoints, steering, and Specialist minimization. Schemas `v48`-`v63` build the still-disabled Sandbox evidence and recovery chain; `v64`-`v68` add non-authorizing execution-profile and Docker production-evidence decisions; `v69`-`v71` add the inert user Skill Registry, exact Run selection/context, and read-only provenance; `v72`-`v74` add controlled Run creation/lifecycle/handoff and bounded wake intent; `v75` adds explicit foreground wake consumption; `v76` adds independently authorized FileEdit apply; `v77` adds non-authorizing Session evidence attachment; `v78` adds immutable operator verification evidence; and `v79` adds the durable Run progress guard. Non-schema D1-B1 exposes the existing v69 Registry through inert HTTP/Desktop confirmation and adds no migration. Migrations are ordered, checksummed, transactional, and safe to apply repeatedly; legacy databases are upgraded without deleting their data or fabricating new operator decisions.
 
 ```text
 missions

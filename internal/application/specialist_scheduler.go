@@ -11,6 +11,7 @@ import (
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/idgen"
+	"cyberagent-workbench/internal/waitgraph"
 )
 
 const MaxSpecialistScheduleRounds = domain.MaxSpecialistScheduleRounds
@@ -67,11 +68,19 @@ type SpecialistScheduleStore interface {
 // remain internal; the operator CLI reaches it only through an immutable,
 // application-bound schedule request. Models and ordinary tools have no path.
 type SpecialistScheduler struct {
-	runner *SpecialistRunner
+	runner    *SpecialistRunner
+	waitGraph *waitgraph.Graph
 }
 
 func NewSpecialistScheduler(runner *SpecialistRunner) *SpecialistScheduler {
-	return &SpecialistScheduler{runner: runner}
+	return &SpecialistScheduler{runner: runner, waitGraph: waitgraph.Default()}
+}
+
+func (s *SpecialistScheduler) WithWaitGraph(graph *waitgraph.Graph) *SpecialistScheduler {
+	if s != nil && graph != nil {
+		s.waitGraph = graph
+	}
+	return s
 }
 
 func (s *SpecialistScheduler) Execute(ctx context.Context,
@@ -82,7 +91,7 @@ func (s *SpecialistScheduler) Execute(ctx context.Context,
 		return result, err
 	}
 	if s == nil || s.runner == nil || s.runner.store == nil || s.runner.router == nil ||
-		s.runner.checker == nil {
+		s.runner.checker == nil || s.waitGraph == nil {
 		return result, apperror.New(apperror.CodeFailedPrecondition,
 			"Specialist scheduler dependencies are required")
 	}
@@ -326,7 +335,16 @@ func (s *SpecialistScheduler) runSpecialistRound(ctx context.Context,
 	for index, child := range children {
 		index, child := index, child
 		go func() {
-			result, err := s.runSpecialistChild(roundCtx, lease, child, limits[child.ID])
+			childCtx, releaseWait, waitErr := waitgraph.Enter(roundCtx, s.waitGraph,
+				waitgraph.Agent(child.ParentID), waitgraph.Agent(child.ID))
+			if waitErr != nil {
+				outcomeCh <- specialistRoundOutcome{index: index, agentID: child.ID,
+					err: apperror.New(apperror.CodeConflict,
+						"Specialist synchronous dependency was rejected: "+waitErr.Error())}
+				return
+			}
+			defer releaseWait()
+			result, err := s.runSpecialistChild(childCtx, lease, child, limits[child.ID])
 			outcomeCh <- specialistRoundOutcome{
 				index: index, agentID: child.ID, result: result, err: err,
 			}

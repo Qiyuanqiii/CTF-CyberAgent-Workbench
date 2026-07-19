@@ -62,7 +62,12 @@ func (ReadFileTool) Schema() Schema {
 }
 
 func (t ReadFileTool) Run(ctx context.Context, call Call) (Result, error) {
-	_ = ctx
+	if ctx == nil {
+		return Result{Stderr: "tool context is required", ExitCode: 1, MIME: "text/plain; charset=utf-8"}, errors.New("tool context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return interruptedResult(err), err
+	}
 	fs := t.FS.withFallback(call.WorkingDir)
 	path, err := fs.resolveExistingFile(call.Args["path"])
 	if err != nil {
@@ -71,12 +76,13 @@ func (t ReadFileTool) Run(ctx context.Context, call Call) (Result, error) {
 	limit := fs.MaxReadBytes
 	if value := strings.TrimSpace(call.Args["max_bytes"]); value != "" {
 		parsed, err := strconv.Atoi(value)
-		if err != nil || parsed <= 0 {
-			return Result{Stderr: "max_bytes must be a positive integer", ExitCode: 1, MIME: "text/plain; charset=utf-8"}, errors.New("max_bytes must be a positive integer")
+		if err != nil || parsed <= 0 || parsed > fs.MaxReadBytes {
+			message := fmt.Sprintf("max_bytes must be between 1 and %d", fs.MaxReadBytes)
+			return Result{Stderr: message, ExitCode: 1, MIME: "text/plain; charset=utf-8"}, errors.New(message)
 		}
 		limit = parsed
 	}
-	text, truncated, err := readTextLimited(path, limit)
+	text, truncated, err := readTextLimited(ctx, path, limit)
 	if err != nil {
 		return Result{Stderr: err.Error(), ExitCode: 1, MIME: "text/plain; charset=utf-8"}, err
 	}
@@ -106,7 +112,12 @@ func (ListWorkspaceTool) Schema() Schema {
 }
 
 func (t ListWorkspaceTool) Run(ctx context.Context, call Call) (Result, error) {
-	_ = ctx
+	if ctx == nil {
+		return Result{Stderr: "tool context is required", ExitCode: 1, MIME: "text/plain; charset=utf-8"}, errors.New("tool context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return interruptedResult(err), err
+	}
 	fs := t.FS.withFallback(call.WorkingDir)
 	path := strings.TrimSpace(call.Args["path"])
 	if path == "" {
@@ -120,7 +131,7 @@ func (t ListWorkspaceTool) Run(ctx context.Context, call Call) (Result, error) {
 		}
 		depth = parsed
 	}
-	out, truncated, err := fs.list(path, depth)
+	out, truncated, err := fs.list(ctx, path, depth)
 	if err != nil {
 		return Result{Stderr: err.Error(), ExitCode: 1, MIME: "text/plain; charset=utf-8"}, err
 	}
@@ -149,8 +160,8 @@ func (fs WorkspaceFS) resolveExistingFile(requested string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if info.IsDir() {
-		return "", fmt.Errorf("%s is a directory", requested)
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%s is not a regular file", requested)
 	}
 	return path, nil
 }
@@ -265,7 +276,7 @@ func (fs WorkspaceFS) resolveExisting(requested string) (string, error) {
 	return candidate, nil
 }
 
-func (fs WorkspaceFS) list(requested string, maxDepth int) (string, bool, error) {
+func (fs WorkspaceFS) list(ctx context.Context, requested string, maxDepth int) (string, bool, error) {
 	base, err := fs.resolveExistingDir(requested)
 	if err != nil {
 		return "", false, err
@@ -274,6 +285,9 @@ func (fs WorkspaceFS) list(requested string, maxDepth int) (string, bool, error)
 	truncated := false
 	limit := fs.MaxListEntries
 	err = filepath.WalkDir(base, func(path string, entry os.DirEntry, walkErr error) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if walkErr != nil {
 			return walkErr
 		}
@@ -315,18 +329,45 @@ func (fs WorkspaceFS) list(requested string, maxDepth int) (string, bool, error)
 	return strings.Join(lines, "\n"), truncated, nil
 }
 
-func readTextLimited(path string, maxBytes int) (string, bool, error) {
+func readTextLimited(ctx context.Context, path string, maxBytes int) (string, bool, error) {
 	if maxBytes <= 0 {
 		return "", false, errors.New("max bytes must be positive")
 	}
-	file, err := os.Open(path)
+	if maxBytes > int(^uint(0)>>1)-utf8.UTFMax {
+		return "", false, errors.New("max bytes exceeds the platform integer limit")
+	}
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	file, err := openRegularFile(path)
 	if err != nil {
 		return "", false, err
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, int64(maxBytes)+utf8.UTFMax))
-	if err != nil {
-		return "", false, err
+	limit := maxBytes + utf8.UTFMax
+	data := make([]byte, 0, limit)
+	buffer := make([]byte, min(32*1024, limit))
+	for len(data) < limit {
+		if err := ctx.Err(); err != nil {
+			return "", false, err
+		}
+		readLimit := min(len(buffer), limit-len(data))
+		count, readErr := file.Read(buffer[:readLimit])
+		if count > 0 {
+			data = append(data, buffer[:count]...)
+		}
+		if readErr != nil {
+			if errors.Is(readErr, os.ErrClosed) {
+				return "", false, readErr
+			}
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return "", false, readErr
+		}
+		if count == 0 {
+			break
+		}
 	}
 	truncated := len(data) > maxBytes
 	if truncated {

@@ -1157,7 +1157,15 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	if err != nil {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 	}
-	completionReplay := current.Phase == supervisorPhaseForAction(action.Kind) &&
+	progressGuard, progressGuardFound, err := getRunProgressGuardTx(ctx, tx, run.ID)
+	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+	}
+	livelockReplay := action.Kind == domain.RootActionContinue &&
+		current.Phase == domain.SupervisorWaiting && current.NextTurn == checkpoint.NextTurn+1 &&
+		progressGuardFound && progressGuard.Status == domain.RunProgressDetected &&
+		progressGuard.LastTurn == checkpoint.NextTurn
+	completionReplay := livelockReplay || current.Phase == supervisorPhaseForAction(action.Kind) &&
 		current.NextTurn == checkpoint.NextTurn+1
 	if !completionReplay && current.Phase == domain.SupervisorIdle &&
 		current.NextTurn == checkpoint.NextTurn+1 &&
@@ -1234,6 +1242,13 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 			return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
 		}
 	}
+	completedAt := time.Now().UTC()
+	action, err = evaluateSupervisorProgressTx(ctx, tx, run, checkpoint, action,
+		requestedAction, completedAt)
+	if err != nil {
+		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, err
+	}
+	response.Text = action.Message
 	repairCompleted := current.RepairPhase == domain.ProtocolRepairPending
 	if current.PendingInput == "" {
 		return domain.Run{}, domain.SupervisorCheckpoint{}, emptyMessages, apperror.New(apperror.CodeFailedPrecondition, "supervisor turn has no pending input")
@@ -1299,7 +1314,7 @@ func (s *SQLiteStore) CompleteSupervisorTurn(ctx context.Context, checkpoint dom
 	current.RepairPhase = domain.ProtocolRepairNone
 	current.RepairReason = ""
 	current.LastError = ""
-	current.UpdatedAt = time.Now().UTC()
+	current.UpdatedAt = completedAt
 	switch action.Kind {
 	case domain.RootActionFinish:
 		if err := transitionSupervisorRunTx(ctx, tx, &run, domain.RunCompleted, action.Summary, current.UpdatedAt); err != nil {

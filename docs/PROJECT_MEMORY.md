@@ -60,8 +60,10 @@ Read in this order after a long context break:
 50. `docs/adr/0045-go-issued-editor-system-credentials-bounded-wake-worker.md`
 51. `docs/adr/0046-safe-editor-recovery-provider-generation-worker-health.md`
 52. `docs/adr/0047-read-only-repository-change-set-code-journey.md`
-53. `docs/DESKTOP_PLAN.md`
-54. `docs/SKILL_PACKAGE_PLAN.md`
+53. `docs/adr/0048-bounded-diff-verification-code-handoff.md`
+54. `docs/adr/0049-deadlock-livelock-runtime-guards.md`
+55. `docs/DESKTOP_PLAN.md`
+56. `docs/SKILL_PACKAGE_PLAN.md`
 
 ## Current Baseline
 
@@ -70,10 +72,10 @@ Read in this order after a long context break:
 - Generic coding-agent workflow usability: about 92%.
 - Cyber autonomous-workflow usability: about 20%.
 - These are engineering estimates based on tested roadmap slices, not performance benchmarks. Do not reuse the retired single-axis "overall product vision" percentage.
-- Database schema: v78.
-- `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v78` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
+- Database schema: v79.
+- `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v79` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
 - Main languages: Go control plane, TypeScript React/Vite local console; Rust has not started.
-- Desktop status: D0-A/D0-B and D1-R1 through D1-G2/V1/F2 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, read-only Repository state and redacted Diff, independent multi-file review, immutable operator verification, a resumable Code Handoff, a Code-only Journey, generation-safe Windows Credential Manager Provider controls, and a default-off one-concurrent/one-step wake worker. Capability-only launches cannot reach sibling routes. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, terminal, real Shell/Local/Docker process execution, or install-time Skill execution. See ADR 0033 through ADR 0048 and `docs/DESKTOP_PLAN.md`.
+- Desktop status: D0-A/D0-B and D1-R1 through D1-G2/V1/F2 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, read-only Repository state and redacted Diff, independent multi-file review, immutable operator verification, a resumable Code Handoff, a Code-only Journey, generation-safe Windows Credential Manager Provider controls, and a default-off one-concurrent/one-step wake worker. Schema v79 additionally protects the shared Go runtime with Tool deadlines, a synchronous wait graph, and a durable no-progress pause. Capability-only launches cannot reach sibling routes. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, terminal, real Shell/Local/Docker process execution, or install-time Skill execution. See ADR 0033 through ADR 0049 and `docs/DESKTOP_PLAN.md`.
 - Custom Skill status: the five embedded `skill.v1` guides and explicitly selected external packages are Run-loadable through separate protocols. Schema v69 adds persistent content-addressed import/history; schema v70 adds a second explicitly confirmed exact Run selection and redacted user-role root/Specialist context; schema v71 adds bounded read-only provenance across HTTP/TUI/Web. D1-A adds a pathless, one-time-handle preview boundary; D1-B1 adds explicit HTTP/Desktop registration through the same inert Registry. External packages remain untrusted and grant no declared tools. Installation executes no content and still does not select a package for a Run. See ADR 0024, ADR 0031 through ADR 0033, ADR 0041, and `docs/SKILL_PACKAGE_PLAN.md`.
 - Protected-delete status: explicit recursive, absolute/traversing/wildcard, environment-derived, command-substituted, current-home, PowerShell/`cmd`, and common interpreter deletion intents are permanently denied before approval across Shell, ScriptProcess, and Sandbox Policy. This is defense in depth; Local/container process execution remains disabled and a future executor still requires OS/container isolation. See ADR 0025.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
@@ -850,6 +852,54 @@ GitHub Actions run `29682547524` passed implementation commit `cff7489`: TypeScr
 console 42s, Windows Desktop shell 2m34s, and Go control plane including vet and
 govulncheck 3m33s.
 
+## Completed Deadlock And Livelock Runtime Guards (H1/H2/H3, Schema v79)
+
+H1 wraps every enabled in-process Tool invocation in a default 15-second hard
+deadline, capped at five minutes, with stable timeout/cancellation exits and panic
+recovery. Built-in reads now check context in read/walk loops, constrain `max_bytes`
+to the configured and platform limits, and open only regular files. Unix uses
+nonblocking/no-follow descriptors; other platforms compare pre-open and opened-file
+identity. FIFO, device, and socket reads fail instead of blocking.
+
+H2 adds the bounded process-wide `waitgraph`: 4,096 active nodes, 8,192 active edges,
+reference-counted idempotent release, and pre-insertion direct/indirect cycle checks.
+Tool/Retriever/Store/Runner nodes cannot synchronously wait on an Agent. The root
+Supervisor injects Agent identity, Specialist rounds record parent-to-child waits,
+and Tool Gateway invocation propagates a unique Tool identity. Future RAG, Store
+callback, Model, and Runner adapters must register their synchronous boundaries too.
+
+H3/schema v79 adds `run_progress_guard.v1`. Three identical `continue` actions detect
+`repeated_action`; six varying `continue` actions without selected structured-state
+change detect `no_observable_progress`. Detection atomically commits metadata events,
+Session messages, checkpoint, and `running -> paused`; original-action replay remains
+exactly once. Only a later durable `paused -> running` event can reset a detected
+guard. v78 upgrade creates no synthetic guard. Rows and events retain fingerprints,
+counters, thresholds, and reasons, not model text.
+
+The cumulative six-slice robustness gate is green. Final uncached Go passed in 312s
+(Store 304.6s), final-code full race in 358s, Tool/wait-graph repetitions x20, and v79
+Store repetitions x10. Ordinary/secure-Desktop tests and vet, zero-warning
+staticcheck, module verification/tidy, zero reachable govulncheck findings, 120 React
+tests in 35 files, strict TypeScript, deterministic API generation, Vite, zero npm
+vulnerabilities, mock-only CLI smoke, credential/artifact scans, reproducible Windows
+build, and desktop/mobile browser checks passed. The unsigned GUI SHA-256 is
+`31e0df63d3fbbccac6728ad2322196bee55d57e775a15cc34f752c0632bdc699` and remains
+`release_ready=false`.
+
+The audit closed platform-integer/OOM read limits, observing-at-threshold corruption,
+detected-to-observing reset without resume proof, corrupt-row fail-open behavior, and
+counter overflow. The retained module-only `GO-2026-5932` package is neither imported
+nor called. No enabled path has a known unresolved high/medium issue. No real key,
+Provider, Shell, LocalRunner, Docker, attack traffic, or external network was used.
+A timeout cannot forcibly kill an arbitrary third-party goroutine that ignores its
+context, and real process-tree deadlocks remain for the independent Runner lifecycle
+gate because process execution is still disabled. ADR 0049 is authoritative.
+
+中文交接：本批把工具永久阻塞、同步依赖成环和“模型每轮都返回但一直无进展”分成三层
+处理。内置 Tool 已可取消且不读特殊文件；root、child 与 Tool 的同步等待可在阻塞前拒绝
+环路；v79 会把重复三轮或停滞六轮的 Run 原子暂停并要求操作者显式恢复。没有开放任何
+新执行权限，双指标保持架构约 99%、产品可用度约 92-94%。
+
 ## Next Slice
 
 The recommended next three-slice batch keeps the generic Coding Agent ahead of CTF:
@@ -857,11 +907,11 @@ The recommended next three-slice batch keeps the generic Coding Agent ahead of C
 1. D1-G3: add a bounded read-only recent-commit/branch history projection at the exact registered repository root. It must use pure Go, expose no remote credentials or host root, and provide no checkout/fetch/push/hook authority.
 2. D1-V2: persist an operator-authored verification plan/checklist separately from v78 results. Requirements remain evidence guidance, run no command, and cannot convert model claims or document text into a pass.
 3. D1-F3: export the current Code handoff as bounded Markdown/JSON with a source high-water mark and digest. Export remains a download/read projection, not a resume, apply, report-acceptance, or batch mutation endpoint.
-4. Because that batch completes the next six slices, run the full ordinary/race/vet/staticcheck/govulncheck/dependency/privacy/build robustness gate plus browser desktop/mobile checks. The manual Windows 10 matrix, signed/package distribution, real Sandbox/host processes, Rust analyzers, xterm, and CTF solving remain separate work requiring dedicated gates and, where noted, operator hardware/signing input.
+4. That product batch is the first three slices of a new six-slice cycle: run its integrated ordinary functional gate and browser checks, then run the complete race/vet/staticcheck/govulncheck/dependency/privacy/build gate after the following three slices. The manual Windows 10 matrix, signed/package distribution, real Sandbox/host processes, Rust analyzers, xterm, and CTF solving remain separate work requiring dedicated gates and, where noted, operator hardware/signing input.
 
 ## Local Machine Note
 
-The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v78 and D1-Q2 through D1-G2/V1/F2 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the repository's ignored build root or the OS temporary root.
+The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v79 and D1-Q2 through D1-G2/V1/F2 plus H1-H3 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the repository's ignored build root or the OS temporary root.
 
 ## Delivery Loop
 

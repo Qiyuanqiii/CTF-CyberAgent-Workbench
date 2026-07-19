@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,20 @@ func TestReadFileToolTruncatesText(t *testing.T) {
 	}
 	if !strings.Contains(result.Stdout, "abc") || !strings.Contains(result.Stdout, "truncated at 3 bytes") {
 		t.Fatalf("unexpected truncated output: %q", result.Stdout)
+	}
+}
+
+func TestReadFileToolRejectsOversizedReadLimit(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "short.txt"), []byte("text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tool := NewReadFileTool(root)
+	result, err := tool.Run(context.Background(), Call{Args: map[string]string{
+		"path": "short.txt", "max_bytes": "999999999999999999999999",
+	}})
+	if err == nil || !strings.Contains(result.Stderr, "between 1 and") {
+		t.Fatalf("oversized read limit was not rejected: result=%#v err=%v", result, err)
 	}
 }
 
@@ -204,5 +219,33 @@ func TestWorkspaceFSResolveForWriteRejectsSymlinkEscape(t *testing.T) {
 	}
 	if _, err := NewWorkspaceFS(root).ResolveForWrite("link.txt"); err == nil || !strings.Contains(err.Error(), "escapes workspace") {
 		t.Fatalf("expected symlink escape rejection, got %v", err)
+	}
+}
+
+func TestWorkspaceToolsHonorPreCancelledContext(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	readResult, readErr := NewReadFileTool(root).Run(ctx, Call{Args: map[string]string{"path": "notes.txt"}})
+	if !errors.Is(readErr, context.Canceled) || readResult.ExitCode != 130 {
+		t.Fatalf("read did not honor cancellation: result=%#v err=%v", readResult, readErr)
+	}
+	listResult, listErr := NewListWorkspaceTool(root).Run(ctx, Call{Args: map[string]string{"path": "."}})
+	if !errors.Is(listErr, context.Canceled) || listResult.ExitCode != 130 {
+		t.Fatalf("list did not honor cancellation: result=%#v err=%v", listResult, listErr)
+	}
+}
+
+func TestReadFileToolRejectsSpecialFiles(t *testing.T) {
+	root := t.TempDir()
+	result, err := NewReadFileTool(root).Run(context.Background(), Call{
+		Args: map[string]string{"path": "."},
+	})
+	if err == nil || !strings.Contains(result.Stderr, "regular file") {
+		t.Fatalf("directory was not rejected as a non-regular file: result=%#v err=%v", result, err)
 	}
 }
