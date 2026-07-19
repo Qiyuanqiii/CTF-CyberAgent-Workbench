@@ -20,6 +20,7 @@ import (
 
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/coordinator"
+	"cyberagent-workbench/internal/credential"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/llm"
@@ -94,6 +95,10 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 					item.Post.OperationID == "selectModelRoute") ||
 				(path == ProviderDiagnosticPath &&
 					item.Post.OperationID == "diagnoseProvider") ||
+				(path == ProviderCredentialPathTemplate &&
+					item.Post.OperationID == "changeProviderCredential") ||
+				(path == FileEditProposalPathTemplate &&
+					item.Post.OperationID == "createFileEditProposal") ||
 				(path == FileEditReviewPathTemplate &&
 					item.Post.OperationID == "reviewRunFileEdit") ||
 				(path == FileEditApplyPathTemplate &&
@@ -155,7 +160,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				path == ApprovalDecisionControlPathTemplate ||
 				path == RunExecutionControlPathTemplate ||
 				path == ModelRouteControlPathTemplate ||
-				path == ProviderDiagnosticPath || path == FileEditReviewPathTemplate ||
+				path == ProviderDiagnosticPath || path == ProviderCredentialPathTemplate ||
+				path == FileEditProposalPathTemplate || path == FileEditReviewPathTemplate ||
 				path == FileEditApplyPathTemplate ||
 				path == RunWakeIntentPathTemplate ||
 				path == RunWakeCancellationPathTemplate ||
@@ -174,6 +180,10 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 			"OperatorSteeringMessageView", field)
 	}
 	assertOpenAPISchemaOmits(t, document.Components.Schemas, "ArtifactView", "content")
+	assertOpenAPISchemaOmits(t, document.Components.Schemas,
+		"ProviderCredentialStatusView", "secret")
+	assertOpenAPIPropertyFlag(t, document.Components.Schemas,
+		"ProviderCredentialRequestView", "secret", "writeOnly", true)
 	for _, field := range []string{"path", "content", "command", "hook"} {
 		assertOpenAPISchemaOmits(t, document.Components.Schemas,
 			"SkillPackageInstallRequestView", field)
@@ -334,7 +344,9 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 	fixture.api.planDeliveryControlEnabled = true
 	fixture.api.approvalControlEnabled = true
 	fixture.api.modelControlEnabled = true
+	fixture.api.providerCredentialEnabled = true
 	fixture.api.fileEditReviewEnabled = true
+	fixture.api.fileEditProposalEnabled = true
 	fixture.api.runWakeControlEnabled = true
 	fixture.api.fileEditApplyEnabled = true
 	fixture.api.runWakeExecutionEnabled = true
@@ -349,7 +361,13 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		gateway, checker)
 	fixture.api.modelControlController = application.NewModelControlService(
 		fixture.api.modelRegistry, fixture.store)
+	credentialStore := credential.NewMemoryStore()
+	fixture.api.providerCredentialController = application.NewProviderCredentialService(
+		credentialStore)
 	fixture.api.fileEditReviewController = application.NewFileEditReviewService(fixture.store)
+	fileEditProposalController := application.NewFileEditProposalService(fixture.store,
+		checker)
+	fixture.api.fileEditProposalController = fileEditProposalController
 	fixture.api.runWakeController = application.NewRunWakeControlService(fixture.store)
 	fixture.api.fileEditApplyController = application.NewFileEditApplyService(fixture.store, checker)
 	fixture.api.runWakeExecutionController = application.NewForegroundRunWakeConsumer(
@@ -372,6 +390,11 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		t.Fatal(err)
 	}
 	evidenceDigest := sha256.Sum256([]byte(evidenceContent))
+	proposalSource, err := fileEditProposalController.IssueSource(t.Context(),
+		fixture.run.ID, "README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
 	replacements := map[string]string{
 		"{run_id}":       fixture.run.ID,
 		"{workspace_id}": fixture.workspace.ID,
@@ -385,6 +408,7 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		"{approval_id}":  approvalRecord.ID,
 		"{edit_id}":      fileEditRecord.ID,
 		"{route}":        "code",
+		"{provider}":     "mimo",
 	}
 	for _, spec := range openAPIOperationSpecs() {
 		requestPath := spec.Path
@@ -411,6 +435,8 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		}
 		if spec.OperationID == "searchWorkspace" {
 			requestPath += "?query=README"
+		} else if spec.OperationID == "issueFileEditProposalSource" {
+			requestPath += "?path=README.md"
 		}
 		t.Run(spec.OperationID, func(t *testing.T) {
 			var response *httptest.ResponseRecorder
@@ -444,6 +470,12 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 					body = `{"version":"model_route_control.v1","provider":"mock","model":"mock-code"}`
 				} else if spec.Path == ProviderDiagnosticPath {
 					body = `{"version":"provider_diagnostic.v1","provider":"mock","model":"mock-code","confirm_diagnostic":true}`
+				} else if spec.Path == ProviderCredentialPathTemplate {
+					body = `{"version":"provider_credential.v1","action":"set",` +
+						`"secret":"temporary-openapi-key","confirm":true}`
+				} else if spec.Path == FileEditProposalPathTemplate {
+					body = `{"version":"file_edit_proposal.v1","source_handle":"` +
+						proposalSource.Handle + `","proposed_text":"OpenAPI proposal\\n"}`
 				} else if spec.Path == FileEditReviewPathTemplate {
 					body = `{"version":"file_edit_review.v1","action":"approve_intent"}`
 				} else if spec.Path == FileEditApplyPathTemplate {
@@ -682,5 +714,24 @@ func assertOpenAPISchemaOptional(t *testing.T, schemas map[string]map[string]any
 		if current == property {
 			t.Fatalf("OpenAPI component %s unexpectedly requires %s", name, property)
 		}
+	}
+}
+
+func assertOpenAPIPropertyFlag(t *testing.T, schemas map[string]map[string]any,
+	name string, property string, flag string, expected any,
+) {
+	t.Helper()
+	schema, ok := schemas[name]
+	if !ok {
+		t.Fatalf("OpenAPI component %s is missing", name)
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("OpenAPI component %s has no properties", name)
+	}
+	value, ok := properties[property].(map[string]any)
+	if !ok || !reflect.DeepEqual(value[flag], expected) {
+		t.Fatalf("OpenAPI component %s property %s flag %s=%v want=%v",
+			name, property, flag, value[flag], expected)
 	}
 }

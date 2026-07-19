@@ -1050,6 +1050,75 @@ describe("CyberAgentClient", () => {
       onFrame: () => undefined,
     })).rejects.toThrow("id does not match");
   });
+
+  it("keeps Provider credentials write-only and returns status metadata", async () => {
+    const items = ["anthropic", "deepseek", "mimo"].map((provider) => ({
+      protocol_version: "provider_credential.v1", provider, configured: false,
+      store_kind: "windows_credential_manager", store_available: true,
+      plaintext_returned: false, restart_required: false,
+    }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "api.v1",
+        request_id: "req-credential-list", data: {
+          protocol_version: "provider_credential.v1", items,
+        } }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "api.v1",
+        request_id: "req-credential-set", data: { ...items[2], configured: true,
+          restart_required: true } }), { status: 202,
+        headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret",
+      { providerCredentialEnabled: true });
+    await expect(client.providerCredentialStatuses()).resolves.toMatchObject({ items });
+    const secret = "temporary-provider-key";
+    await expect(client.changeProviderCredential("mimo", {
+      version: "provider_credential.v1", action: "set", secret, confirm: true,
+    })).resolves.toMatchObject({ provider: "mimo", configured: true,
+      plaintext_returned: false });
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("/api/v1/models/credentials/mimo");
+    expect(url).not.toContain(secret);
+    expect(init.headers).toMatchObject({ Authorization: "Bearer control-secret" });
+    expect(JSON.parse(String(init.body))).toEqual({ version: "provider_credential.v1",
+      action: "set", secret, confirm: true });
+  });
+
+  it("creates only a pending FileEdit from an opaque Go-issued source", async () => {
+    const source = { protocol_version: "file_edit_proposal.v1", run_id: "run-1",
+      workspace_id: "workspace-1", path: "README.md", content: "before\n",
+      content_sha256: "a".repeat(64), source_handle: "B".repeat(43),
+      expires_at: "2099-07-18T00:05:00Z", editable: true, file_write: false };
+    const edit = { id: "edit-1", session_id: "session-1", workspace_id: "workspace-1",
+      path: "README.md", status: "proposed", diff: "--- a/README.md\n+++ b/README.md\n",
+      original_hash: "a".repeat(64), proposed_hash: "b".repeat(64),
+      secrets_redacted: false, allowed_actions: ["approve_intent", "deny"],
+      apply_enabled: false, created_at: "2026-07-18T00:00:00Z",
+      updated_at: "2026-07-18T00:00:00Z" };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "api.v1",
+        request_id: "req-source", data: source }), { status: 200,
+        headers: { "Content-Type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ version: "api.v1",
+        request_id: "req-proposal", data: { protocol_version: "file_edit_proposal.v1",
+          run_id: "run-1", edit, replayed: false, approval_required: true,
+          file_written: false } }), { status: 202,
+        headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret",
+      { fileEditProposalEnabled: true });
+    await expect(client.issueFileEditProposalSource("run-1", "README.md"))
+      .resolves.toEqual(source);
+    await expect(client.createFileEditProposal("run-1", {
+      version: "file_edit_proposal.v1", source_handle: source.source_handle,
+      proposed_text: "after\n",
+    })).resolves.toMatchObject({ approval_required: true, file_written: false,
+      edit: { status: "proposed" } });
+    const [url, init] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(url).toBe("/api/v1/runs/run-1/file-edit-proposals");
+    expect(JSON.parse(String(init.body))).toEqual({ version: "file_edit_proposal.v1",
+      source_handle: source.source_handle, proposed_text: "after\n" });
+    expect(String(init.body)).not.toContain("README.md");
+  });
 });
 
 function operationReceipt(kind: "file_edit_apply" | "run_wake_consume" | "skill_package_install",

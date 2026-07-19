@@ -329,6 +329,169 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/models/credentials": {
+      "get": {
+        "operationId": "listProviderCredentials",
+        "summary": "Inspect Provider credential status",
+        "description": "Returns only configured status and OS-store availability. It never reads credential plaintext into an API response.",
+        "tags": [
+          "Models"
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProviderCredentialListView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/models/credentials/{provider}": {
+      "post": {
+        "operationId": "changeProviderCredential",
+        "summary": "Set or delete an OS-owned Provider credential",
+        "description": "Accepts one transient secret for direct storage in the OS credential manager, or deletes one exact Provider credential. Plaintext is never returned, persisted in SQLite, logged, or placed in an event.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "description": "Provider name",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProviderCredentialStatusView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderCredentialRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
     "/api/v1/models/diagnostics": {
       "post": {
         "operationId": "diagnoseProvider",
@@ -2683,6 +2846,200 @@
           }
         },
         "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/runs/{run_id}/file-edit-proposal-source": {
+      "get": {
+        "operationId": "issueFileEditProposalSource",
+        "summary": "Issue an exact interactive edit source",
+        "description": "Returns a complete unredacted bounded UTF-8 file body plus a short-lived opaque handle bound to the Run, Session, Workspace, path, and current hash. Redacted or truncated files are refused; issuing the handle writes nothing.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Canonical Go-projected Workspace-relative file path",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FileEditProposalSourceView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/runs/{run_id}/file-edit-proposals": {
+      "post": {
+        "operationId": "createFileEditProposal",
+        "summary": "Create a pending FileEdit from a Go-issued source",
+        "description": "Consumes only an opaque Go-issued source handle and bounded text. It rechecks the exact file hash and Policy, creates a pending approval-backed FileEdit, and cannot approve or write the file.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/FileEditProposalView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileEditProposalRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
       }
     },
     "/api/v1/runs/{run_id}/file-edits": {
@@ -7297,6 +7654,131 @@
         ],
         "type": "object"
       },
+      "FileEditProposalRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "proposed_text": {
+            "maxLength": 262144,
+            "type": "string"
+          },
+          "source_handle": {
+            "maxLength": 43,
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "file_edit_proposal.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "source_handle",
+          "proposed_text"
+        ],
+        "type": "object"
+      },
+      "FileEditProposalSourceView": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "maxLength": 131072,
+            "type": "string"
+          },
+          "content_sha256": {
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "editable": {
+            "type": "boolean"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "file_write": {
+            "type": "boolean"
+          },
+          "path": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "protocol_version": {
+            "enum": [
+              "file_edit_proposal.v1"
+            ],
+            "type": "string"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_handle": {
+            "maxLength": 43,
+            "minLength": 43,
+            "pattern": "^[A-Za-z0-9_-]{43}$",
+            "type": "string"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "workspace_id",
+          "path",
+          "content",
+          "content_sha256",
+          "source_handle",
+          "expires_at",
+          "editable",
+          "file_write"
+        ],
+        "type": "object"
+      },
+      "FileEditProposalView": {
+        "additionalProperties": false,
+        "properties": {
+          "approval_required": {
+            "type": "boolean"
+          },
+          "edit": {
+            "$ref": "#/components/schemas/FileEditPreviewView"
+          },
+          "file_written": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "file_edit_proposal.v1"
+            ],
+            "type": "string"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "edit",
+          "replayed",
+          "approval_required",
+          "file_written"
+        ],
+        "type": "object"
+      },
       "FileEditQueueView": {
         "additionalProperties": false,
         "properties": {
@@ -8947,7 +9429,8 @@
           "credential_source": {
             "enum": [
               "none",
-              "environment"
+              "environment",
+              "system"
             ],
             "type": "string"
           },
@@ -8987,6 +9470,101 @@
           "credential_source",
           "network_required",
           "configuration_error"
+        ],
+        "type": "object"
+      },
+      "ProviderCredentialListView": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderCredentialStatusView"
+            },
+            "maxItems": 3,
+            "type": "array"
+          },
+          "protocol_version": {
+            "enum": [
+              "provider_credential.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "items"
+        ],
+        "type": "object"
+      },
+      "ProviderCredentialRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "set",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "confirm": {
+            "type": "boolean"
+          },
+          "secret": {
+            "maxLength": 2560,
+            "type": "string",
+            "writeOnly": true
+          },
+          "version": {
+            "enum": [
+              "provider_credential.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "action",
+          "secret",
+          "confirm"
+        ],
+        "type": "object"
+      },
+      "ProviderCredentialStatusView": {
+        "additionalProperties": false,
+        "properties": {
+          "configured": {
+            "type": "boolean"
+          },
+          "plaintext_returned": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "provider_credential.v1"
+            ],
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "restart_required": {
+            "type": "boolean"
+          },
+          "store_available": {
+            "type": "boolean"
+          },
+          "store_kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "provider",
+          "configured",
+          "store_kind",
+          "store_available",
+          "plaintext_returned",
+          "restart_required"
         ],
         "type": "object"
       },

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Check, Cpu, LoaderCircle, Route, X } from "lucide-react";
+import { Activity, Check, Cpu, KeyRound, LoaderCircle, Route, Save, Trash2, X } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import type { ProviderDiagnosticView } from "../api/types";
 import { ErrorState, LoadingState, StatusBadge } from "./common";
@@ -13,10 +13,19 @@ export function ModelAvailabilityDialog({ client, open, onClose }: {
   const queryClient = useQueryClient();
   const [selections, setSelections] = useState<Record<string, string>>({});
   const [diagnostic, setDiagnostic] = useState<ProviderDiagnosticView | null>(null);
+  const [credentialBusy, setCredentialBusy] = useState("");
+  const [credentialError, setCredentialError] = useState("");
+  const [credentialRestart, setCredentialRestart] = useState(false);
+  const credentialInputs = useRef(new Map<string, HTMLInputElement>());
   const query = useQuery({
     queryKey: ["models", "availability"],
     queryFn: ({ signal }) => client.modelAvailability(signal),
     enabled: open,
+  });
+  const credentialQuery = useQuery({
+    queryKey: ["models", "credentials"],
+    queryFn: ({ signal }) => client.providerCredentialStatuses(signal),
+    enabled: open && client.hasProviderCredentials,
   });
   const routeMutation = useMutation({
     mutationFn: ({ route, reference }: { route: string; reference: string }) => {
@@ -37,6 +46,31 @@ export function ModelAvailabilityDialog({ client, open, onClose }: {
         confirm_diagnostic: true }),
     onSuccess: setDiagnostic,
   });
+  const changeCredential = async (provider: string, action: "set" | "delete") => {
+    if (credentialBusy) return;
+    const input = credentialInputs.current.get(provider);
+    const secret = action === "set" ? input?.value ?? "" : "";
+    if (action === "set" && secret.length < 8) {
+      setCredentialError("Credential must contain at least 8 non-space characters");
+      return;
+    }
+    if (input) input.value = "";
+    setCredentialBusy(provider);
+    setCredentialError("");
+    const body = { version: "provider_credential.v1" as const, action,
+      secret, confirm: true };
+    try {
+      const status = await client.changeProviderCredential(provider, body);
+      setCredentialRestart(status.restart_required);
+      await Promise.all([credentialQuery.refetch(),
+        queryClient.invalidateQueries({ queryKey: ["models", "availability"] })]);
+    } catch (caught) {
+      setCredentialError(caught instanceof Error ? caught.message : "Credential change failed");
+    } finally {
+      body.secret = "";
+      setCredentialBusy("");
+    }
+  };
   if (!open) {
     return null;
   }
@@ -95,6 +129,46 @@ export function ModelAvailabilityDialog({ client, open, onClose }: {
                     ? diagnosticMutation.error.message : "Provider diagnostic failed"}
                 </div>}
               </section>
+              {client.hasProviderCredentials && <section className="model-availability-section">
+                <h3><KeyRound aria-hidden="true" size={14} />System credentials</h3>
+                {credentialQuery.isLoading && <LoadingState label="Loading credential status" />}
+                {credentialQuery.isError && <ErrorState error={credentialQuery.error} />}
+                {credentialQuery.data && <div className="provider-credential-list">
+                  {credentialQuery.data.items.map((item) => <div className="provider-credential-row"
+                    key={item.provider}>
+                    <div><strong>{item.provider}</strong><small>{item.store_kind}</small></div>
+                    <StatusBadge status={item.configured ? "configured" : "not configured"} />
+                    <input aria-label={`${item.provider} API credential`} autoCapitalize="none"
+                      autoComplete="off" autoCorrect="off"
+                      disabled={!item.store_available || credentialBusy === item.provider}
+                      maxLength={2560} ref={(element) => {
+                        if (element) credentialInputs.current.set(item.provider, element);
+                        else credentialInputs.current.delete(item.provider);
+                      }} spellCheck={false} type="password" />
+                    <button aria-label={`Store ${item.provider} credential`} className="icon-button"
+                      disabled={!item.store_available || Boolean(credentialBusy)}
+                      onClick={() => void changeCredential(item.provider, "set")}
+                      title="Store in the OS credential manager" type="button">
+                      {credentialBusy === item.provider ?
+                        <LoaderCircle aria-hidden="true" className="spin" size={15} /> :
+                        <Save aria-hidden="true" size={15} />}
+                    </button>
+                    <button aria-label={`Delete ${item.provider} credential`} className="icon-button"
+                      disabled={!item.store_available || !item.configured || Boolean(credentialBusy)}
+                      onClick={() => void changeCredential(item.provider, "delete")}
+                      title="Delete OS credential" type="button">
+                      <Trash2 aria-hidden="true" size={15} />
+                    </button>
+                  </div>)}
+                </div>}
+                {credentialRestart && <div className="model-diagnostic-result" role="status">
+                  <Check aria-hidden="true" size={14} />Credential status updated
+                  <span>Restart required to load the Provider</span>
+                </div>}
+                {credentialError && <div className="inline-warning" role="alert">
+                  {credentialError}
+                </div>}
+              </section>}
               <section className="model-availability-section">
                 <h3><Route aria-hidden="true" size={14} />Routes</h3>
                 <div className="model-route-list">

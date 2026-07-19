@@ -87,11 +87,17 @@ func ValidStatus(status string) bool {
 }
 
 type Proposal struct {
+	// ID is optional for legacy callers. Interactive boundaries may supply one
+	// stable Go-generated ID so an uncertain save can be reconciled safely.
+	ID            string
 	SessionID     string
 	WorkspaceID   string
 	WorkspaceRoot string
 	Path          string
 	ProposedText  string
+	// ExpectedOriginalHash binds an interactive proposal to the exact file
+	// version issued by Go. Legacy agent proposals may leave it empty.
+	ExpectedOriginalHash string
 }
 
 type ListFilter struct {
@@ -146,6 +152,12 @@ func (m *Manager) Propose(ctx context.Context, proposal Proposal) (Edit, error) 
 	if err != nil {
 		return Edit{}, err
 	}
+	originalHash := contentHash(original, exists)
+	if proposal.ExpectedOriginalHash != "" &&
+		proposal.ExpectedOriginalHash != originalHash {
+		return Edit{}, errors.New(
+			"workspace file changed after the proposal source was issued")
+	}
 	proposed := redact.String(proposal.ProposedText)
 	secretsRedacted := proposed != proposal.ProposedText
 	if exists && original == proposed {
@@ -157,9 +169,15 @@ func (m *Manager) Propose(ctx context.Context, proposal Proposal) (Edit, error) 
 	if exists && original != proposed && originalPreview == proposed {
 		diff = redactedChangeDiff(relPath)
 	}
+	editID := strings.TrimSpace(proposal.ID)
+	if editID == "" {
+		editID = newID("edit")
+	} else if editID != proposal.ID || !validProposedEditID(editID) {
+		return Edit{}, errors.New("file edit proposal id is invalid")
+	}
 	now := time.Now().UTC()
 	edit := Edit{
-		ID:              newID("edit"),
+		ID:              editID,
 		SessionID:       strings.TrimSpace(proposal.SessionID),
 		WorkspaceID:     proposal.WorkspaceID,
 		Path:            relPath,
@@ -167,7 +185,7 @@ func (m *Manager) Propose(ctx context.Context, proposal Proposal) (Edit, error) 
 		OriginalText:    originalPreview,
 		ProposedText:    proposed,
 		Diff:            diff,
-		OriginalHash:    contentHash(original, exists),
+		OriginalHash:    originalHash,
 		ProposedHash:    contentHash(proposed, true),
 		SecretsRedacted: secretsRedacted || originalPreview != original,
 		CreatedAt:       now,
@@ -610,4 +628,17 @@ func CurrentHash(workspaceRoot string, path string) (string, error) {
 
 func newID(prefix string) string {
 	return idgen.New(prefix)
+}
+
+func validProposedEditID(value string) bool {
+	if len(value) < len("edit-")+1 || len(value) > 64 || !strings.HasPrefix(value, "edit-") {
+		return false
+	}
+	for _, current := range value {
+		if !((current >= 'a' && current <= 'z') || (current >= '0' && current <= '9') ||
+			current == '-') {
+			return false
+		}
+	}
+	return true
 }

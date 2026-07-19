@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { ArrowLeft, File, Folder, FolderOpen, Paperclip, Search, ShieldCheck, X } from "lucide-react";
+import { ArrowLeft, File, Folder, FolderOpen, Paperclip, Pencil, Search, ShieldCheck, X } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import type { WorkspaceSearchView } from "../api/types";
 import { formatBytes } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
+import { FileProposalEditor } from "./file-proposal-editor";
 
 export function WorkspaceExplorer({ client, workspaceID, runID = "", initialPath = "." }: {
   client: CyberAgentClient;
@@ -43,6 +44,9 @@ export function WorkspaceExplorer({ client, workspaceID, runID = "", initialPath
       content_sha256: contentSHA256,
     }, evidenceOperationKey(operationKeys.current, sourceRef, contentSHA256)),
   });
+  const proposalSource = useMutation({
+    mutationFn: (sourcePath: string) => client.issueFileEditProposalSource(runID, sourcePath),
+  });
   const parent = useMemo(() => parentPath(path), [path]);
 
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
@@ -77,6 +81,12 @@ export function WorkspaceExplorer({ client, workspaceID, runID = "", initialPath
           onClick={() => attach(snapshot.path, snapshot.provenance.content_sha256)} type="button">
           <Paperclip aria-hidden="true" size={14} />Attach evidence
         </button>}
+      {snapshot.kind === "file" && client.hasFileEditProposals && runID &&
+        !snapshot.truncated && snapshot.redaction_count === 0 &&
+        <button className="compact-command" disabled={proposalSource.isPending}
+          onClick={() => proposalSource.mutate(snapshot.path)} type="button">
+          <Pencil aria-hidden="true" size={14} />Edit proposal
+        </button>}
     </header>
     <form className="explorer-search" onSubmit={submitSearch} role="search">
       <Search aria-hidden="true" size={15} />
@@ -94,6 +104,7 @@ export function WorkspaceExplorer({ client, workspaceID, runID = "", initialPath
       <code>{snapshot.provenance.content_sha256.slice(0, 12)}</code>
     </div>
     {attachment.isError && <ErrorState error={attachment.error} />}
+    {proposalSource.isError && <ErrorState error={proposalSource.error} />}
     {attachment.data && <div className="explorer-attachment-status" role="status">
       <ShieldCheck aria-hidden="true" size={14} />
       Evidence attached as non-authorizing context
@@ -118,7 +129,10 @@ export function WorkspaceExplorer({ client, workspaceID, runID = "", initialPath
           </div>;
         })}
       </div>}
-    {snapshot.kind === "file" && <div className="explorer-file">
+    {proposalSource.data && proposalSource.data.path === snapshot.path ?
+      <FileProposalEditor client={client} onClose={() => proposalSource.reset()}
+        runID={runID} source={proposalSource.data} /> :
+    snapshot.kind === "file" && <div className="explorer-file">
       <div><span>{formatBytes(snapshot.returned_bytes)} shown</span>
         <span>{formatBytes(snapshot.total_bytes)} total</span></div>
       <pre>{snapshot.content}</pre>

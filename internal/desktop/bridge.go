@@ -46,10 +46,13 @@ type ConnectionBootstrap struct {
 	PlanDeliveryControlEnabled    bool   `json:"plan_delivery_control_enabled"`
 	ApprovalControlEnabled        bool   `json:"approval_control_enabled"`
 	ModelControlEnabled           bool   `json:"model_control_enabled"`
+	ProviderCredentialEnabled     bool   `json:"provider_credential_enabled"`
 	FileEditReviewEnabled         bool   `json:"file_edit_review_enabled"`
+	FileEditProposalEnabled       bool   `json:"file_edit_proposal_enabled"`
 	RunWakeControlEnabled         bool   `json:"run_wake_control_enabled"`
 	FileEditApplyEnabled          bool   `json:"file_edit_apply_enabled"`
 	RunWakeExecutionEnabled       bool   `json:"run_wake_execution_enabled"`
+	RunWakeWorkerEnabled          bool   `json:"run_wake_worker_enabled"`
 	ReadOnlyDefault               bool   `json:"read_only_default"`
 	ProcessExecutionEnabled       bool   `json:"process_execution_enabled"`
 	ShellExecutionEnabled         bool   `json:"shell_execution_enabled"`
@@ -127,10 +130,13 @@ type DesktopBridgeConfig struct {
 	PlanDeliveryControlEnabled    bool
 	ApprovalControlEnabled        bool
 	ModelControlEnabled           bool
+	ProviderCredentialEnabled     bool
 	FileEditReviewEnabled         bool
+	FileEditProposalEnabled       bool
 	RunWakeControlEnabled         bool
 	FileEditApplyEnabled          bool
 	RunWakeExecutionEnabled       bool
+	RunWakeWorkerEnabled          bool
 	SkillInstallationEnabled      bool
 	EvidenceAttachmentEnabled     bool
 	APIVersion                    string
@@ -169,9 +175,11 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 		config.SessionSteeringControlEnabled || config.RunLifecycleEnabled ||
 		config.RunExecutionEnabled || config.PlanDeliveryControlEnabled ||
 		config.ApprovalControlEnabled || config.ModelControlEnabled ||
-		config.FileEditReviewEnabled || config.RunWakeControlEnabled
+		config.ProviderCredentialEnabled || config.FileEditReviewEnabled ||
+		config.FileEditProposalEnabled || config.RunWakeControlEnabled
 	controlEnabled = controlEnabled || config.FileEditApplyEnabled ||
-		config.RunWakeExecutionEnabled || config.SkillInstallationEnabled ||
+		config.RunWakeExecutionEnabled || config.RunWakeWorkerEnabled ||
+		config.SkillInstallationEnabled ||
 		config.EvidenceAttachmentEnabled
 	if controlEnabled && config.ControlToken == "" {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
@@ -217,10 +225,13 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 			PlanDeliveryControlEnabled:    config.PlanDeliveryControlEnabled,
 			ApprovalControlEnabled:        config.ApprovalControlEnabled,
 			ModelControlEnabled:           config.ModelControlEnabled,
+			ProviderCredentialEnabled:     config.ProviderCredentialEnabled,
 			FileEditReviewEnabled:         config.FileEditReviewEnabled,
+			FileEditProposalEnabled:       config.FileEditProposalEnabled,
 			RunWakeControlEnabled:         config.RunWakeControlEnabled,
 			FileEditApplyEnabled:          config.FileEditApplyEnabled,
 			RunWakeExecutionEnabled:       config.RunWakeExecutionEnabled,
+			RunWakeWorkerEnabled:          config.RunWakeWorkerEnabled,
 			ReadOnlyDefault:               !controlEnabled,
 			ProcessExecutionEnabled:       false, ShellExecutionEnabled: false, DockerExecutionEnabled: false,
 			SkillInstallationEnabled:   config.SkillInstallationEnabled,

@@ -84,6 +84,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/models/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Inspect Provider credential status
+         * @description Returns only configured status and OS-store availability. It never reads credential plaintext into an API response.
+         */
+        get: operations["listProviderCredentials"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/models/credentials/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set or delete an OS-owned Provider credential
+         * @description Accepts one transient secret for direct storage in the OS credential manager, or deletes one exact Provider credential. Plaintext is never returned, persisted in SQLite, logged, or placed in an event.
+         */
+        post: operations["changeProviderCredential"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/models/diagnostics": {
         parameters: {
             query?: never;
@@ -526,6 +566,46 @@ export interface paths {
         get: operations["listRunFanoutPlans"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/file-edit-proposal-source": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Issue an exact interactive edit source
+         * @description Returns a complete unredacted bounded UTF-8 file body plus a short-lived opaque handle bound to the Run, Session, Workspace, path, and current hash. Redacted or truncated files are refused; issuing the handle writes nothing.
+         */
+        get: operations["issueFileEditProposalSource"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{run_id}/file-edit-proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a pending FileEdit from a Go-issued source
+         * @description Consumes only an opaque Go-issued source handle and bounded text. It rechecks the exact file hash and Policy, creates a pending approval-backed FileEdit, and cannot approve or write the file.
+         */
+        post: operations["createFileEditProposal"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1497,6 +1577,35 @@ export interface components {
             updated_at: string;
             workspace_id: string;
         };
+        FileEditProposalRequestView: {
+            proposed_text: string;
+            source_handle: string;
+            /** @enum {string} */
+            version: "file_edit_proposal.v1";
+        };
+        FileEditProposalSourceView: {
+            content: string;
+            content_sha256: string;
+            editable: boolean;
+            /** Format: date-time */
+            expires_at: string;
+            file_write: boolean;
+            path: string;
+            /** @enum {string} */
+            protocol_version: "file_edit_proposal.v1";
+            run_id: string;
+            source_handle: string;
+            workspace_id: string;
+        };
+        FileEditProposalView: {
+            approval_required: boolean;
+            edit: components["schemas"]["FileEditPreviewView"];
+            file_written: boolean;
+            /** @enum {string} */
+            protocol_version: "file_edit_proposal.v1";
+            replayed: boolean;
+            run_id: string;
+        };
         FileEditQueueView: {
             apply_enabled: boolean;
             items: components["schemas"]["FileEditPreviewView"][];
@@ -1916,7 +2025,7 @@ export interface components {
         ProviderAvailabilityView: {
             configuration_error: boolean;
             /** @enum {string} */
-            credential_source: "none" | "environment";
+            credential_source: "none" | "environment" | "system";
             /** @enum {string} */
             kind: "local" | "anthropic_compatible";
             models: string[];
@@ -1924,6 +2033,29 @@ export interface components {
             network_required: boolean;
             /** @enum {string} */
             status: "available" | "not_configured" | "invalid_configuration";
+        };
+        ProviderCredentialListView: {
+            items: components["schemas"]["ProviderCredentialStatusView"][];
+            /** @enum {string} */
+            protocol_version: "provider_credential.v1";
+        };
+        ProviderCredentialRequestView: {
+            /** @enum {string} */
+            action: "set" | "delete";
+            confirm: boolean;
+            secret: string;
+            /** @enum {string} */
+            version: "provider_credential.v1";
+        };
+        ProviderCredentialStatusView: {
+            configured: boolean;
+            plaintext_returned: boolean;
+            /** @enum {string} */
+            protocol_version: "provider_credential.v1";
+            provider: string;
+            restart_required: boolean;
+            store_available: boolean;
+            store_kind: string;
         };
         ProviderDiagnosticRequestView: {
             confirm_diagnostic: boolean;
@@ -2735,6 +2867,79 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listProviderCredentials: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ProviderCredentialListView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    changeProviderCredential: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Provider name */
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderCredentialRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ProviderCredentialStatusView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];
         };
@@ -3697,6 +3902,87 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    issueFileEditProposalSource: {
+        parameters: {
+            query: {
+                /** @description Canonical Go-projected Workspace-relative file path */
+                path: string;
+            };
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FileEditProposalSourceView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createFileEditProposal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FileEditProposalRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["FileEditProposalView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];
         };

@@ -46,10 +46,13 @@ func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitCapabilities(t *testin
 		{flag: "--enable-plan-delivery", want: desktopOptions{planDeliveryControl: true}},
 		{flag: "--enable-approvals", want: desktopOptions{approvalControl: true}},
 		{flag: "--enable-model-control", want: desktopOptions{modelControl: true}},
+		{flag: "--enable-provider-credentials", want: desktopOptions{providerCredentials: true}},
 		{flag: "--enable-file-edit-review", want: desktopOptions{fileEditReview: true}},
+		{flag: "--enable-file-edit-proposals", want: desktopOptions{fileEditProposals: true}},
 		{flag: "--enable-run-wake", want: desktopOptions{runWakeControl: true}},
 		{flag: "--enable-file-edit-apply", want: desktopOptions{fileEditApply: true}},
 		{flag: "--enable-run-wake-execution", want: desktopOptions{runWakeExecution: true}},
+		{flag: "--enable-wake-worker", want: desktopOptions{runWakeWorker: true}},
 		{flag: "--enable-skill-installation", want: desktopOptions{skillInstallation: true}},
 		{flag: "--enable-evidence-attachments", want: desktopOptions{evidenceAttachment: true}},
 	} {

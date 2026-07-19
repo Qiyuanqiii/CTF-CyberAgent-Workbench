@@ -103,6 +103,65 @@ func TestRegistryBuildsRedactedEnvironmentAvailabilityAndRoutes(t *testing.T) {
 	}
 }
 
+func TestRegistryBootstrapsSystemCredentialWithoutProjectingIt(t *testing.T) {
+	secret := "system-provider-key-0123456789"
+	registry, err := newRegistry(func(string) (string, bool) { return "", false },
+		func(provider string) (string, bool, error) {
+			if provider == "mimo" {
+				return secret, true, nil
+			}
+			return "", false, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := registry.Snapshot()
+	var mimo ProviderAvailability
+	for _, provider := range snapshot.Providers {
+		if provider.Name == "mimo" {
+			mimo = provider
+		}
+	}
+	if mimo.Status != ProviderAvailable || mimo.CredentialSource != "system" ||
+		!contains(registry.Router().ProviderNames(), "mimo") ||
+		strings.Contains(snapshotText(snapshot), secret) {
+		t.Fatalf("system credential bootstrap violated its projection boundary: %#v", mimo)
+	}
+}
+
+func TestRegistryContainsSystemCredentialReadFailureToOneProvider(t *testing.T) {
+	registry, err := newRegistry(func(string) (string, bool) { return "", false },
+		func(provider string) (string, bool, error) {
+			if provider == "mimo" {
+				return "", false, errors.New("credential store unavailable")
+			}
+			return "", false, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := registry.Snapshot()
+	for _, provider := range snapshot.Providers {
+		if provider.Name == "mimo" &&
+			(provider.Status != ProviderInvalidConfiguration ||
+				provider.CredentialSource != "system" || !provider.ConfigurationError) {
+			t.Fatalf("system credential failure escaped its Provider boundary: %#v", provider)
+		}
+	}
+	if !contains(registry.Router().ProviderNames(), "mock") {
+		t.Fatal("system credential failure disabled the local Provider")
+	}
+}
+
+func TestRegistryProjectsNoCredentialSourceWhenUnconfigured(t *testing.T) {
+	registry := New(func(string) (string, bool) { return "", false })
+	for _, provider := range registry.Snapshot().Providers {
+		if provider.Name != "mock" && provider.CredentialSource != "none" {
+			t.Fatalf("unconfigured Provider projected a false credential source: %#v", provider)
+		}
+	}
+}
+
 func TestRegistryMarksInvalidAndUnavailableConfigurationWithoutRegisteringIt(t *testing.T) {
 	values := map[string]string{
 		"DEEPSEEK_API_KEY": " invalid-key ",

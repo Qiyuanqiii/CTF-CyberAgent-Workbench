@@ -1,0 +1,125 @@
+package httpapi
+
+import (
+	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"cyberagent-workbench/internal/application"
+	"cyberagent-workbench/internal/credential"
+	"cyberagent-workbench/internal/policy"
+)
+
+func TestProposalAndCredentialHTTPControlsAreDefaultOff(t *testing.T) {
+	fixture := newAPIFixture(t)
+	sourcePath := "/api/v1/runs/" + fixture.run.ID +
+		"/file-edit-proposal-source?path=README.md"
+	assertAPIError(t, performSessionMessageRequest(t, fixture.api, http.MethodGet,
+		sourcePath, testAccessToken, "", "", nil), http.StatusNotFound, "NOT_FOUND")
+	assertAPIError(t, performSessionMessageRequest(t, fixture.api, http.MethodPost,
+		"/api/v1/runs/"+fixture.run.ID+"/file-edit-proposals", testControlToken,
+		"", "application/json", strings.NewReader(`{}`)), http.StatusNotFound, "NOT_FOUND")
+	assertAPIError(t, performSessionMessageRequest(t, fixture.api, http.MethodGet,
+		ProviderCredentialsPath, testAccessToken, "", "", nil),
+		http.StatusNotFound, "NOT_FOUND")
+	assertAPIError(t, performSessionMessageRequest(t, fixture.api, http.MethodPost,
+		"/api/v1/models/credentials/mimo", testControlToken, "", "application/json",
+		strings.NewReader(`{}`)), http.StatusNotFound, "NOT_FOUND")
+}
+
+func TestFileEditProposalHTTPRequiresGoSourceAndNeverWritesFile(t *testing.T) {
+	fixture := newAPIFixture(t)
+	const relativePath = "proposal-source.txt"
+	original := "original Workspace content\n"
+	proposed := "operator-proposed content\n"
+	absolutePath := filepath.Join(fixture.workspace.RootPath, relativePath)
+	if err := os.WriteFile(absolutePath, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	proposalService := application.NewFileEditProposalService(fixture.store,
+		policy.NewDefaultChecker())
+	api, err := New(fixture.store, Config{AccessToken: testAccessToken,
+		ControlToken: testControlToken, FileEditProposalEnabled: true,
+		FileEditProposalController: proposalService, AppVersion: "proposal-http-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourcePath := "/api/v1/runs/" + fixture.run.ID +
+		"/file-edit-proposal-source?path=" + url.QueryEscape(relativePath)
+	sourceResponse := performSessionMessageRequest(t, api, http.MethodGet, sourcePath,
+		testAccessToken, "", "", nil)
+	var source FileEditProposalSourceView
+	decodeDataStatus(t, sourceResponse, http.StatusOK, &source)
+	if source.Content != original || source.SourceHandle == "" || !source.Editable ||
+		source.FileWrite || source.Path != relativePath {
+		t.Fatalf("unsafe or incomplete proposal source: %#v", source)
+	}
+
+	body := `{"version":"file_edit_proposal.v1","source_handle":"` +
+		source.SourceHandle + `","proposed_text":"operator-proposed content\n"}`
+	proposalPath := "/api/v1/runs/" + fixture.run.ID + "/file-edit-proposals"
+	readToken := performSessionMessageRequest(t, api, http.MethodPost, proposalPath,
+		testAccessToken, "", "application/json", strings.NewReader(body))
+	assertAPIError(t, readToken, http.StatusUnauthorized, "POLICY_DENIED")
+
+	proposalResponse := performSessionMessageRequest(t, api, http.MethodPost, proposalPath,
+		testControlToken, "", "application/json", strings.NewReader(body))
+	var result FileEditProposalView
+	decodeDataStatus(t, proposalResponse, http.StatusAccepted, &result)
+	if result.FileWritten || !result.ApprovalRequired || result.Edit.Status != "proposed" ||
+		result.Edit.Path != relativePath || result.Edit.ApplyEnabled {
+		t.Fatalf("proposal widened into write authority: %#v", result)
+	}
+	current, err := os.ReadFile(absolutePath)
+	if err != nil || string(current) != original || string(current) == proposed {
+		t.Fatalf("proposal changed the Workspace file: content=%q err=%v", current, err)
+	}
+}
+
+func TestProviderCredentialHTTPNeverReturnsPlaintext(t *testing.T) {
+	fixture := newAPIFixture(t)
+	ownedStore := credential.NewMemoryStore()
+	service := application.NewProviderCredentialService(ownedStore)
+	api, err := New(fixture.store, Config{AccessToken: testAccessToken,
+		ControlToken: testControlToken, ProviderCredentialEnabled: true,
+		ProviderCredentialController: service, AppVersion: "credential-http-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const secret = "temporary-provider-http-key"
+	path := "/api/v1/models/credentials/mimo"
+	body := `{"version":"provider_credential.v1","action":"set",` +
+		`"secret":"` + secret + `","confirm":true}`
+	readToken := performSessionMessageRequest(t, api, http.MethodPost, path,
+		testAccessToken, "", "application/json", strings.NewReader(body))
+	assertAPIError(t, readToken, http.StatusUnauthorized, "POLICY_DENIED")
+
+	response := performSessionMessageRequest(t, api, http.MethodPost, path,
+		testControlToken, "", "application/json", strings.NewReader(body))
+	if strings.Contains(response.Body.String(), secret) || strings.Contains(response.Body.String(), `"secret"`) {
+		t.Fatalf("credential control response exposed plaintext: %s", response.Body.String())
+	}
+	var status ProviderCredentialStatusView
+	decodeDataStatus(t, response, http.StatusAccepted, &status)
+	if !status.Configured || status.PlaintextReturned || !status.RestartRequired {
+		t.Fatalf("credential status violated its metadata-only contract: %#v", status)
+	}
+	stored, found, err := ownedStore.Get(t.Context(), "mimo")
+	if err != nil || !found || stored != secret {
+		t.Fatalf("credential did not reach the Go-owned Store: found=%t err=%v", found, err)
+	}
+
+	list := performSessionMessageRequest(t, api, http.MethodGet,
+		ProviderCredentialsPath, testAccessToken, "", "", nil)
+	if strings.Contains(list.Body.String(), secret) || strings.Contains(list.Body.String(), `"secret"`) {
+		t.Fatalf("credential status response exposed plaintext: %s", list.Body.String())
+	}
+	var statuses ProviderCredentialListView
+	decodeDataStatus(t, list, http.StatusOK, &statuses)
+	if len(statuses.Items) != 3 {
+		t.Fatalf("credential status count=%d want=3", len(statuses.Items))
+	}
+}

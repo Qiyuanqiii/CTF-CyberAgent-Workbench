@@ -33,10 +33,13 @@ export interface DesktopConnectionBootstrap {
   plan_delivery_control_enabled: boolean;
   approval_control_enabled: boolean;
   model_control_enabled: boolean;
+  provider_credential_enabled: boolean;
   file_edit_review_enabled: boolean;
+  file_edit_proposal_enabled: boolean;
   run_wake_control_enabled: boolean;
   file_edit_apply_enabled: boolean;
   run_wake_execution_enabled: boolean;
+  run_wake_worker_enabled: boolean;
   read_only_default: boolean;
   process_execution_enabled: false;
   shell_execution_enabled: false;
@@ -238,12 +241,13 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
     "api_base_url", "api_version", "app_version", "approval_control_enabled",
     "control_enabled", "control_token", "docker_execution_enabled", "file_edit_apply_enabled",
     "evidence_attachment_enabled",
-    "file_edit_review_enabled", "model_control_enabled", "process_execution_enabled",
+    "file_edit_proposal_enabled", "file_edit_review_enabled", "model_control_enabled",
+    "provider_credential_enabled", "process_execution_enabled",
     "protocol_version", "read_only_default",
     "plan_delivery_control_enabled", "read_token", "renderer_path_input_supported",
     "run_creation_enabled", "shell_execution_enabled",
 	"run_execution_enabled", "run_lifecycle_enabled", "run_wake_control_enabled",
-    "run_wake_execution_enabled",
+    "run_wake_execution_enabled", "run_wake_worker_enabled",
     "session_message_enabled", "skill_installation_enabled", "ui_digest",
     "session_steering_control_enabled",
   ])) {
@@ -261,19 +265,24 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
     typeof value.plan_delivery_control_enabled === "boolean" &&
     typeof value.approval_control_enabled === "boolean" &&
 	typeof value.model_control_enabled === "boolean" &&
+	typeof value.provider_credential_enabled === "boolean" &&
 	typeof value.file_edit_review_enabled === "boolean" &&
+	typeof value.file_edit_proposal_enabled === "boolean" &&
 	typeof value.run_wake_control_enabled === "boolean" &&
     typeof value.file_edit_apply_enabled === "boolean" &&
     typeof value.run_wake_execution_enabled === "boolean" &&
+    typeof value.run_wake_worker_enabled === "boolean" &&
     typeof value.skill_installation_enabled === "boolean" &&
     typeof value.evidence_attachment_enabled === "boolean" &&
     (value.control_token !== "") === (value.control_enabled || value.run_creation_enabled ||
       value.session_message_enabled || value.session_steering_control_enabled ||
       value.run_lifecycle_enabled || value.run_execution_enabled ||
 	  value.plan_delivery_control_enabled || value.approval_control_enabled ||
-	  value.model_control_enabled || value.file_edit_review_enabled ||
+	  value.model_control_enabled || value.provider_credential_enabled ||
+	  value.file_edit_review_enabled || value.file_edit_proposal_enabled ||
 	  value.run_wake_control_enabled || value.file_edit_apply_enabled ||
-      value.run_wake_execution_enabled || value.skill_installation_enabled ||
+      value.run_wake_execution_enabled || value.run_wake_worker_enabled ||
+      value.skill_installation_enabled ||
       value.evidence_attachment_enabled) &&
     (value.control_token === "" || validToken(value.control_token)) &&
     value.control_token !== value.read_token &&
@@ -281,9 +290,11 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
       value.session_message_enabled || value.session_steering_control_enabled ||
       value.run_lifecycle_enabled || value.run_execution_enabled ||
 	  value.plan_delivery_control_enabled || value.approval_control_enabled ||
-	  value.model_control_enabled || value.file_edit_review_enabled ||
+	  value.model_control_enabled || value.provider_credential_enabled ||
+	  value.file_edit_review_enabled || value.file_edit_proposal_enabled ||
 	  value.run_wake_control_enabled || value.file_edit_apply_enabled ||
-      value.run_wake_execution_enabled || value.skill_installation_enabled ||
+      value.run_wake_execution_enabled || value.run_wake_worker_enabled ||
+      value.skill_installation_enabled ||
       value.evidence_attachment_enabled) &&
     value.process_execution_enabled === false && value.shell_execution_enabled === false &&
     value.docker_execution_enabled === false &&

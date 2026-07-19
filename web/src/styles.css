@@ -345,6 +345,11 @@ td code { font-size: 11px; }
 .model-provider-row > div { min-width: 0; display: grid; gap: 3px; }
 .model-provider-row strong, .model-provider-row small, .model-provider-row > span { overflow-wrap: anywhere; }
 .model-provider-row small, .model-provider-row > span { color: var(--muted); }
+.provider-credential-list { display: grid; }
+.provider-credential-row { min-height: 52px; display: grid; grid-template-columns: minmax(110px, .7fr) auto minmax(180px, 1.4fr) 34px 34px; align-items: center; gap: 10px; padding: 8px 3px; border-bottom: 1px solid var(--border); }
+.provider-credential-row > div { display: grid; gap: 2px; }
+.provider-credential-row small { color: var(--muted); overflow-wrap: anywhere; }
+.provider-credential-row input { min-width: 0; height: 32px; border: 1px solid var(--border-strong); border-radius: 5px; padding: 5px 8px; background: #fff; color: var(--text); font: inherit; }
 .model-route-row { min-height: 44px; display: grid; grid-template-columns: minmax(90px, .6fr) minmax(180px, 1.4fr) auto 34px; align-items: center; gap: 12px; padding: 7px 3px; border-bottom: 1px solid var(--border); font-size: 11px; }
 .model-route-row span { min-width: 0; overflow-wrap: anywhere; color: var(--muted); }
 .model-route-row select { min-width: 0; height: 32px; padding: 0 7px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--surface); color: var(--ink); font-size: 11px; }
@@ -393,6 +398,16 @@ td code { font-size: 11px; }
 .explorer-list button small { color: var(--muted); font-size: 10px; }
 .explorer-file > div { min-height: 34px; display: flex; justify-content: flex-end; align-items: center; gap: 12px; color: var(--muted); font-size: 10px; }
 .explorer-file pre { max-height: calc(100vh - 280px); min-height: 280px; margin: 0; padding: 14px; overflow: auto; border: 1px solid var(--border); border-radius: 5px; background: #f6f8f9; color: #26343d; font-size: 11px; line-height: 1.55; white-space: pre; }
+.file-proposal-editor { display: grid; grid-template-rows: auto minmax(360px, calc(100vh - 360px)) auto; min-width: 0; margin-top: 12px; border: 1px solid var(--border-strong); border-radius: 6px; overflow: hidden; background: var(--surface); }
+.file-proposal-editor > header, .file-proposal-editor > footer { min-height: 44px; display: flex; align-items: center; gap: 12px; padding: 7px 10px; background: #f6f8f9; }
+.file-proposal-editor > header { border-bottom: 1px solid var(--border); }
+.file-proposal-editor > footer { justify-content: flex-end; border-top: 1px solid var(--border); color: var(--muted); font-size: 10px; }
+.file-proposal-editor > header > div:first-child { min-width: 0; display: flex; align-items: center; gap: 8px; margin-right: auto; }
+.file-proposal-editor > header strong { overflow-wrap: anywhere; font-size: 12px; }
+.file-proposal-editor .segmented-control button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.monaco-proposal-surface { min-width: 0; min-height: 360px; background: #fff; }
+.monaco-local-state { align-items: center; display: flex; height: 100%; justify-content: center; }
+.proposal-created-status { display: inline-flex; align-items: center; gap: 5px; color: #125f45; font-weight: 600; }
 .receipt-history { min-width: 0; }
 .receipt-history > header { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--border); }
 .receipt-history > header > div { display: flex; align-items: center; gap: 8px; }
@@ -533,8 +548,9 @@ td code { font-size: 11px; }
   .desktop-package-metrics > div:nth-child(2n) { border-right: 0; }
   .desktop-package-metrics > div:nth-last-child(-n+2) { border-bottom: 0; }
   .desktop-install-controls { grid-template-columns: minmax(0, 1fr); }
-  .model-provider-row, .model-route-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .model-provider-row, .model-route-row, .provider-credential-row { grid-template-columns: minmax(0, 1fr) auto; }
   .model-provider-row > span { grid-column: 1; }
+  .provider-credential-row input { grid-column: 1 / -1; }
 	.file-edit-row summary { grid-template-columns: minmax(0, 1fr) auto; }
 	.file-edit-row summary > span:not(.status-badge) { grid-column: 1; }
 	.file-edit-body footer { align-items: flex-start; flex-direction: column; }

@@ -14,8 +14,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@monaco-editor/react": "4.7.0",
     "@tanstack/react-query": "5.101.2",
     "lucide-react": "1.24.0",
+    "monaco-editor": "0.53.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "zustand": "5.0.14"

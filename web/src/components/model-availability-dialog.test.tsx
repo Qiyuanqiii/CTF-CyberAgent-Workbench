@@ -61,4 +61,46 @@ describe("ModelAvailabilityDialog", () => {
       version: "model_route_control.v1", provider: "mock", model: "mock-fast",
     }));
   });
+
+  it("submits a Provider secret once and renders status without plaintext", async () => {
+    const user = userEvent.setup();
+    const statuses = { protocol_version: "provider_credential.v1", items:
+      ["anthropic", "deepseek", "mimo"].map((provider) => ({
+        protocol_version: "provider_credential.v1", provider, configured: false,
+        store_kind: "windows_credential_manager", store_available: true,
+        plaintext_returned: false, restart_required: false,
+      })) };
+    let submittedCredential: unknown;
+    const changeProviderCredential = vi.fn().mockImplementation((provider, body) => {
+      submittedCredential = { provider, body: { ...body } };
+      return Promise.resolve({
+        ...statuses.items[2], configured: true, restart_required: true,
+      });
+    });
+    const client = { hasModelControl: false, hasProviderCredentials: true,
+      providerCredentialStatuses: vi.fn().mockResolvedValue(statuses),
+      changeProviderCredential,
+      modelAvailability: vi.fn().mockResolvedValue({
+        protocol_version: "model_availability.v1",
+        providers: [{ name: "mock", kind: "local", status: "available",
+          models: ["mock-code"], credential_source: "none", network_required: false,
+          configuration_error: false }],
+        routes: [{ name: "code", provider: "mock", model: "mock-code", available: true }],
+      }),
+    } as unknown as CyberAgentClient;
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(<QueryClientProvider client={queryClient}>
+      <ModelAvailabilityDialog client={client} open onClose={vi.fn()} />
+    </QueryClientProvider>);
+    const secret = "temporary-provider-key";
+    const input = await screen.findByLabelText("mimo API credential");
+    await user.type(input, secret);
+    await user.click(screen.getByRole("button", { name: "Store mimo credential" }));
+    await waitFor(() => expect(submittedCredential).toEqual({ provider: "mimo", body: {
+      version: "provider_credential.v1", action: "set", secret, confirm: true,
+    } }));
+    expect(input).toHaveValue("");
+    expect(await screen.findByText("Credential status updated")).toBeInTheDocument();
+    expect(container.textContent).not.toContain(secret);
+  });
 });

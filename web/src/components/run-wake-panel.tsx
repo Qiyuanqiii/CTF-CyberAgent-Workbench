@@ -97,7 +97,8 @@ export function RunWakePanel({ client, detail }: {
       <KeyValue label="Attempts" value={`${formatNumber(intent.attempt_count)} / ${formatNumber(intent.max_attempts)}`} />
       <KeyValue label="Next wake" value={formatDate(intent.next_wake_at)} />
       <KeyValue label="Deadline" value={formatDate(intent.deadline_at)} />
-      <KeyValue label="Execution" value={client.hasRunWakeExecution ? "foreground" : "disabled"} />
+      <KeyValue label="Execution" value={client.hasRunWakeWorker ? "bounded worker (1 x 1 step)" :
+        client.hasRunWakeExecution ? "foreground" : "disabled"} />
       <KeyValue label="Background loop" value="disabled" />
     </dl>}
     <div className="run-control-row">

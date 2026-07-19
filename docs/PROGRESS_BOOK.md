@@ -8,11 +8,11 @@
 
 从 schema v49 起采用“双指标”，不再使用容易混淆的单一“整体产品愿景”百分比：
 
-- 架构完成度：约 98%；其中 V2 Run-centric 控制平面约 99%。该指标衡量 Go 主控、持久化状态机和模块边界的覆盖程度。
-- 产品可用度：完整 Code + Cyber 产品约 80-84%；其中通用 Coding Agent 工作流约 77%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
+- 架构完成度：约 99%；其中 V2 Run-centric 控制平面约 99%。该指标衡量 Go 主控、持久化状态机和模块边界的覆盖程度。
+- 产品可用度：完整 Code + Cyber 产品约 84-87%；其中通用 Coding Agent 工作流约 82%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
 - 上述数值是依据已测试任务切片给出的工程估算，不是性能基准，也不代表仍被安全关闭的功能已经可用。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、进程内主动取消、schema v16 有界工具循环、schema v17 跨进程执行租约/心跳/fencing，以及 schema v18 独立 capability 的跨进程 root 活动模型取消。P3 主体已落地 WorkItem/Note/Context，P4 已完成 schema v19-v38 的单 root Coordinator、最多两个核心 child 和独立 1/2/4/6 只读 Fan-out，P5 已落地统一 Tool Gateway、审批/Grant、预算、ScriptProcess、Artifact 和结构化工具。P9 已推进到 schema v77 / D1-K1：除 Run/Session/Plan/审批/有界执行外，现有 CLI/API/Desktop 还支持显式无正文 Provider 诊断、持久化模型路由、Diff 独立审阅/apply、可取消 wake/retry 意图与一次前台消费、惰性 Skill 安装、有界 Workspace explore/search、非授权 evidence 附加/清单、可刷新终态回执、操作者行动中心和只导航/刷新的命令面板。真实 Local/Docker/Shell 进程、后台 wake worker、安装脚本/钩子和远程 Skill 分发继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、主动取消、有界工具循环和跨进程 execution lease。P3-P5 已落地 Work/Note/Context、最多两个核心 child、独立 1/2/4/6 只读 Fan-out、Tool Gateway、审批/Grant、预算、ScriptProcess 与 Artifact。P9 已推进到 schema v77 / D1-I1/M3/J1：除既有 Run/Session/Plan/审批/Workspace/证据/回执/行动中心外，现有 API/Desktop 还支持 Go-issued 本地 Monaco FileEdit 提案、Windows Credential Manager Provider 设置，以及默认关闭、单并发、单步的 wake worker。真实 Local/Docker/Shell 进程、安装脚本/钩子和远程 Skill 分发继续关闭。
 
 P8 已推进到 schema v37 及其只读 CI 投影：v35 把完成的 Fan-out execution 投影为通用 `draft` Finding、不可变 `model_assertion` Evidence 和可重建的 Markdown/JSON Report；v36 增加同 Run 冻结 Artifact Evidence、一次性 operator `validated/rejected` 决定与完整复核；v37 以独立不可变事实完成 `validated -> accepted -> fixed`，并强制修复 Evidence 来自接受后新建且未用于验证的同 Run Artifact。验证、接受和修复始终分离；SARIF、通用 CI gate 与 GitHub Actions annotations 均为同一持久化事实上的 Go 只读投影。
 
@@ -936,10 +936,18 @@ D1-C2 新增 `session_evidence_inventory.v1`：只列 exact Run-bound active Ses
 
 双指标更新为架构完成度约 98%（V2 约 99%）、完整产品可用度约 80-84%、通用 Coding Agent 约 77%、Cyber 自动化约 20%。下一批候选为 D1-I1 Go-issued Monaco proposal/Diff editor、D1-M3 Go/OS-owned Provider secret boundary 与 D1-J1 默认关闭的 bounded wake worker；三项均先做独立威胁模型，renderer 不直接写文件/读取明文密钥，worker 不取得 Shell/Local/Docker 权限。Windows 10 人工矩阵、签名/安装包、Rust analyzer 与 CTF 自动化继续独立后置。
 
+非 schema D1-I1/D1-M3/D1-J1 三切片批次已完成，任务 ID 为 `P9-Editor-System-Credentials-Bounded-Wake-D1IMJ1`，SQLite 保持 v77。D1-I1 增加 `file_edit_proposal.v1`：Go 为 exact running Run/active Session/registered Workspace 发放 256-bit、五分钟、单意图 source handle；本地 lazy Monaco/Diff 只接收完整未截断的安全 UTF-8 和 handle，提交只含新文本。Go 重检绑定、当前 hash、secret 和 Policy 后只创建 pending proposal，review/apply 仍独立且 proposal 不写文件。
+
+D1-M3 增加 `provider_credential.v1` 与 Windows Credential Manager system store。只支持 exact `mimo|deepseek|anthropic`，generic credential 上限 2,560 bytes；TypeScript 只能设置/删除并读取 configured/store/restart 状态，固定 `plaintext_returned=false`。明文不进入 SQLite、事件、日志、模型上下文或浏览器存储；非 Windows 无明文 fallback，环境变量优先，修改后当前要求重启。D1-J1 增加 default-off `run_wake_worker.v1`：只有 startup flag + distinct control token 才启动一个 process-lifetime serial owner，每轮最多一条 due intent 和 `max_steps=1`，复用 Foreground Wake Consumer/RunSupervisor/预算/Policy/lease/checkpoint/cancel，不依赖 Tool Runner、Shell、LocalRunner 或 Docker。
+
+最终普通整合门通过：uncached 全仓 Go 327.6 秒、`go vet`、secure Desktop tag、28 文件 102 项 React、strict TypeScript、确定性 OpenAPI/TypeScript、Vite production build、npm 零漏洞和 Windows 可复现双构建均为绿色；未签名 GUI SHA-256 为 `a0e6aa0a3d15ccc39712f8a0a64d7de06e4a6af426e060b6378b1011c93a1cf6`，`release_ready=false`。审计修复 exact provider normalization、Windows credential 长度、单凭证读取失败导致全局不可用、ControlPlane 关闭后 worker 重启、不确定 FileEdit 保存后的 ID/意图漂移、审批后重试误报内部错误、未配置 Provider 的 `models:null` 契约回归、前端密钥测试快照，以及 Monaco CDN/依赖漏洞风险；桌面和 390x844 移动 UI 冒烟通过。当前无已知未解决高/中风险，没有使用真实 API key、Provider 网络、Shell、LocalRunner 或 Docker，边界见 ADR 0045。
+
+双指标更新为架构完成度约 99%（V2 约 99%）、完整产品可用度约 84-87%、通用 Coding Agent 约 82%、Cyber 自动化约 20%。下一批固定为 D1-I2 安全编辑恢复、D1-M4 Provider Registry generation reload、D1-J2 metadata-only browser capability + worker health/drain；它会补齐普通 `api serve` 保守隐藏新控件的低风险 discovery 缺口。该批结束累计六片，执行全仓 ordinary/race/vet/staticcheck/govulncheck/依赖/隐私完整门。Windows 10 人工矩阵、签名/安装包、Rust analyzer、xterm 与 CTF 自动化继续独立后置。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0044-operator-action-center-evidence-inventory-command-palette.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0045-go-issued-editor-system-credentials-bounded-wake-worker.md`。

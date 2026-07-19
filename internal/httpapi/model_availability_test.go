@@ -48,7 +48,8 @@ func TestModelAvailabilityIsRedactedAndDoesNotProbeProviders(t *testing.T) {
 	if strings.Contains(response.Body.String(), secret) ||
 		strings.Contains(response.Body.String(), "MIMO_API_KEY") ||
 		strings.Contains(response.Body.String(), "token-plan-cn") ||
-		strings.Contains(response.Body.String(), "base_url") {
+		strings.Contains(response.Body.String(), "base_url") ||
+		strings.Contains(response.Body.String(), `"models":null`) {
 		t.Fatalf("model availability exposed private configuration: %s", response.Body.String())
 	}
 	var envelope struct {

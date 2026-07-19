@@ -50,10 +50,13 @@ type desktopOptions struct {
 	planDeliveryControl    bool
 	approvalControl        bool
 	modelControl           bool
+	providerCredentials    bool
 	fileEditReview         bool
+	fileEditProposals      bool
 	runWakeControl         bool
 	fileEditApply          bool
 	runWakeExecution       bool
+	runWakeWorker          bool
 	skillInstallation      bool
 	evidenceAttachment     bool
 	version                bool
@@ -194,14 +197,20 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 		"enable bounded approve-once and deny decisions for durable approvals")
 	modelControl := fs.Bool("enable-model-control", false,
 		"enable persisted model route selection and explicit connectivity diagnostics")
+	providerCredentials := fs.Bool("enable-provider-credentials", false,
+		"enable OS-owned Provider credential changes")
 	fileEditReview := fs.Bool("enable-file-edit-review", false,
 		"enable review-only file edit approval or denial without applying files")
+	fileEditProposals := fs.Bool("enable-file-edit-proposals", false,
+		"enable Go-issued interactive FileEdit proposal sources")
 	runWakeControl := fs.Bool("enable-run-wake", false,
 		"enable durable bounded Run wake intent scheduling and cancellation")
 	fileEditApply := fs.Bool("enable-file-edit-apply", false,
 		"enable independently authorized approved FileEdit application")
 	runWakeExecution := fs.Bool("enable-run-wake-execution", false,
 		"enable explicitly launched foreground wake execution")
+	runWakeWorker := fs.Bool("enable-wake-worker", false,
+		"enable the bounded single-owner Run wake worker")
 	skillInstallation := fs.Bool("enable-skill-installation", false,
 		"enable confirmed inert Skill package installation")
 	evidenceAttachment := fs.Bool("enable-evidence-attachments", false,
@@ -221,10 +230,13 @@ func parseDesktopOptions(args []string) (desktopOptions, error) {
 		planDeliveryControl:    *planDeliveryControl,
 		approvalControl:        *approvalControl,
 		modelControl:           *modelControl,
+		providerCredentials:    *providerCredentials,
 		fileEditReview:         *fileEditReview,
+		fileEditProposals:      *fileEditProposals,
 		runWakeControl:         *runWakeControl,
 		fileEditApply:          *fileEditApply,
 		runWakeExecution:       *runWakeExecution,
+		runWakeWorker:          *runWakeWorker,
 		skillInstallation:      *skillInstallation,
 		evidenceAttachment:     *evidenceAttachment,
 		version:                *version}, nil
@@ -250,8 +262,9 @@ func runDesktop(config desktopOptions) error {
 	if config.profileControl || config.runCreation || config.sessionMessages ||
 		config.sessionSteeringControl || config.runLifecycle || config.runExecution ||
 		config.planDeliveryControl || config.approvalControl || config.modelControl ||
-		config.fileEditReview || config.runWakeControl || config.fileEditApply ||
-		config.runWakeExecution || config.skillInstallation || config.evidenceAttachment {
+		config.providerCredentials || config.fileEditReview || config.fileEditProposals ||
+		config.runWakeControl || config.fileEditApply || config.runWakeExecution ||
+		config.runWakeWorker || config.skillInstallation || config.evidenceAttachment {
 		controlToken, err = httpapi.GenerateAccessToken()
 		if err != nil {
 			return err
@@ -271,19 +284,29 @@ func runDesktop(config desktopOptions) error {
 		PlanDeliveryControlEnabled:    config.planDeliveryControl,
 		ApprovalControlEnabled:        config.approvalControl,
 		ModelControlEnabled:           config.modelControl,
+		ProviderCredentialEnabled:     config.providerCredentials,
 		FileEditReviewEnabled:         config.fileEditReview,
+		FileEditProposalEnabled:       config.fileEditProposals,
 		RunWakeControlEnabled:         config.runWakeControl,
 		FileEditApplyEnabled:          config.fileEditApply,
 		RunWakeExecutionEnabled:       config.runWakeExecution,
+		RunWakeWorkerEnabled:          config.runWakeWorker,
 		SkillInstallationEnabled:      config.skillInstallation,
 		EvidenceAttachmentEnabled:     config.evidenceAttachment,
 		AppVersion:                    app.Version, UIHandler: bundle,
+		OnWakeWorkerError: func(runErr error) {
+			fmt.Fprintln(os.Stderr, "wake-worker:", runErr)
+		},
 	})
 	if err != nil {
 		return apperror.Wrap(apperror.CodeFailedPrecondition,
 			"desktop data store validation failed", err)
 	}
 	defer controlPlane.Close()
+	if err := controlPlane.StartWakeWorker(context.Background()); err != nil {
+		return apperror.Wrap(apperror.CodeFailedPrecondition,
+			"desktop wake worker could not start", err)
+	}
 
 	lifecycle := desktop.NewLifecycle(wailsWindowRestorer{})
 	selector, preview := desktop.NewSkillPackagePreviewBoundary()
@@ -298,10 +321,13 @@ func runDesktop(config desktopOptions) error {
 		PlanDeliveryControlEnabled:    config.planDeliveryControl,
 		ApprovalControlEnabled:        config.approvalControl,
 		ModelControlEnabled:           config.modelControl,
+		ProviderCredentialEnabled:     config.providerCredentials,
 		FileEditReviewEnabled:         config.fileEditReview,
+		FileEditProposalEnabled:       config.fileEditProposals,
 		RunWakeControlEnabled:         config.runWakeControl,
 		FileEditApplyEnabled:          config.fileEditApply,
 		RunWakeExecutionEnabled:       config.runWakeExecution,
+		RunWakeWorkerEnabled:          config.runWakeWorker,
 		SkillInstallationEnabled:      config.skillInstallation,
 		EvidenceAttachmentEnabled:     config.evidenceAttachment,
 		AppVersion:                    app.Version, UIDigest: bundle.Digest(), Selector: selector,

@@ -9,6 +9,9 @@ import type {
   EvidenceInventoryView,
   FileEditApplyRequestView,
   FileEditApplyView,
+  FileEditProposalRequestView,
+  FileEditProposalSourceView,
+  FileEditProposalView,
   FileEditQueueView,
   FileEditReviewRequestView,
   FileEditReviewView,
@@ -25,6 +28,9 @@ import type {
   PlanDirectionControlView,
   ProviderDiagnosticRequestView,
   ProviderDiagnosticView,
+  ProviderCredentialListView,
+  ProviderCredentialRequestView,
+  ProviderCredentialStatusView,
   RunCreationControlRequestView,
   RunCreationControlView,
   RunExecutionControlRequestView,
@@ -62,10 +68,13 @@ export interface ClientCapabilities {
   planDeliveryControlEnabled?: boolean;
   approvalControlEnabled?: boolean;
   modelControlEnabled?: boolean;
+  providerCredentialEnabled?: boolean;
   fileEditReviewEnabled?: boolean;
+  fileEditProposalEnabled?: boolean;
   fileEditApplyEnabled?: boolean;
   runWakeControlEnabled?: boolean;
   runWakeExecutionEnabled?: boolean;
+  runWakeWorkerEnabled?: boolean;
   skillInstallationEnabled?: boolean;
   evidenceAttachmentEnabled?: boolean;
 }
@@ -346,7 +355,8 @@ function parseModelAvailability(value: unknown): ModelAvailabilityView {
       (provider.kind !== "local" && provider.kind !== "anthropic_compatible") ||
       (provider.status !== "available" && provider.status !== "not_configured" &&
         provider.status !== "invalid_configuration") ||
-      (provider.credential_source !== "none" && provider.credential_source !== "environment") ||
+      (provider.credential_source !== "none" && provider.credential_source !== "environment" &&
+        provider.credential_source !== "system") ||
       typeof provider.network_required !== "boolean" ||
       typeof provider.configuration_error !== "boolean" || !Array.isArray(provider.models) ||
       provider.models.length > 64 || !provider.models.every((model) => boundedText(model, 256)) ||
@@ -491,6 +501,72 @@ function parseProviderDiagnostic(value: unknown, request: ProviderDiagnosticRequ
       "INVALID_RESPONSE", 502);
   }
   return value as unknown as ProviderDiagnosticView;
+}
+
+function parseProviderCredentialStatus(value: unknown,
+  expectedProvider = ""): ProviderCredentialStatusView {
+  if (!hasExactKeys(value, ["configured", "plaintext_returned", "protocol_version",
+    "provider", "restart_required", "store_available", "store_kind"]) ||
+    value.protocol_version !== "provider_credential.v1" ||
+    !["anthropic", "deepseek", "mimo"].includes(String(value.provider)) ||
+    (expectedProvider !== "" && value.provider !== expectedProvider) ||
+    typeof value.configured !== "boolean" || typeof value.store_available !== "boolean" ||
+    !boundedText(value.store_kind, 128) || value.plaintext_returned !== false ||
+    typeof value.restart_required !== "boolean") {
+    throw new APIRequestError("Provider credential status violated its plaintext-free contract",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as ProviderCredentialStatusView;
+}
+
+function parseProviderCredentialList(value: unknown): ProviderCredentialListView {
+  if (!hasExactKeys(value, ["items", "protocol_version"]) ||
+    value.protocol_version !== "provider_credential.v1" || !Array.isArray(value.items) ||
+    value.items.length !== 3) {
+    throw new APIRequestError("Provider credential list is invalid", "INVALID_RESPONSE", 502);
+  }
+  const items = value.items.map((item) => parseProviderCredentialStatus(item));
+  if (new Set(items.map((item) => item.provider)).size !== items.length ||
+    items.some((item) => item.restart_required)) {
+    throw new APIRequestError("Provider credential list widened status authority",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, items } as unknown as ProviderCredentialListView;
+}
+
+function parseFileEditProposalSource(value: unknown, runID: string,
+  expectedPath: string): FileEditProposalSourceView {
+  if (!hasExactKeys(value, ["content", "content_sha256", "editable", "expires_at",
+    "file_write", "path", "protocol_version", "run_id", "source_handle", "workspace_id"]) ||
+    value.protocol_version !== "file_edit_proposal.v1" || value.run_id !== runID ||
+    value.path !== expectedPath || !boundedIdentity(value.run_id) ||
+    !boundedIdentity(value.workspace_id) || !validWorkspaceRelativePath(value.path) ||
+    typeof value.content !== "string" || new TextEncoder().encode(value.content).length > 131_072 ||
+    !isSHA256(value.content_sha256) || typeof value.source_handle !== "string" ||
+    !/^[A-Za-z0-9_-]{43}$/u.test(value.source_handle) || !validDate(value.expires_at) ||
+    Date.parse(value.expires_at) <= Date.now() || value.editable !== true ||
+    value.file_write !== false) {
+    throw new APIRequestError("File edit source violated its exact no-write contract",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as FileEditProposalSourceView;
+}
+
+function parseFileEditProposal(value: unknown, runID: string): FileEditProposalView {
+  if (!hasExactKeys(value, ["approval_required", "edit", "file_written",
+    "protocol_version", "replayed", "run_id"]) ||
+    value.protocol_version !== "file_edit_proposal.v1" || value.run_id !== runID ||
+    value.approval_required !== true || value.file_written !== false ||
+    typeof value.replayed !== "boolean") {
+    throw new APIRequestError("File edit proposal widened write authority", "INVALID_RESPONSE", 502);
+  }
+  const edit = parseFileEditPreview(value.edit);
+  if (edit.status !== "proposed" || edit.apply_enabled !== false ||
+    edit.allowed_actions.length > 2) {
+    throw new APIRequestError("File edit proposal result is not pending review",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, edit } as unknown as FileEditProposalView;
 }
 
 function parseFileEditPreview(value: unknown): FileEditQueueView["items"][number] {
@@ -974,10 +1050,13 @@ export class CyberAgentClient {
   readonly hasPlanDelivery: boolean;
   readonly hasApprovalControl: boolean;
   readonly hasModelControl: boolean;
+  readonly hasProviderCredentials: boolean;
   readonly hasFileEditReview: boolean;
+  readonly hasFileEditProposals: boolean;
   readonly hasFileEditApply: boolean;
   readonly hasRunWakeControl: boolean;
   readonly hasRunWakeExecution: boolean;
+  readonly hasRunWakeWorker: boolean;
   readonly hasSkillInstallation: boolean;
   readonly hasEvidenceAttachment: boolean;
 
@@ -1002,10 +1081,15 @@ export class CyberAgentClient {
     this.hasPlanDelivery = controlPresent && (capabilities.planDeliveryControlEnabled ?? true);
     this.hasApprovalControl = controlPresent && (capabilities.approvalControlEnabled ?? true);
     this.hasModelControl = controlPresent && (capabilities.modelControlEnabled ?? true);
+    this.hasProviderCredentials = controlPresent &&
+      (capabilities.providerCredentialEnabled ?? false);
     this.hasFileEditReview = controlPresent && (capabilities.fileEditReviewEnabled ?? true);
+    this.hasFileEditProposals = controlPresent &&
+      (capabilities.fileEditProposalEnabled ?? false);
     this.hasFileEditApply = controlPresent && (capabilities.fileEditApplyEnabled ?? true);
     this.hasRunWakeControl = controlPresent && (capabilities.runWakeControlEnabled ?? true);
     this.hasRunWakeExecution = controlPresent && (capabilities.runWakeExecutionEnabled ?? true);
+    this.hasRunWakeWorker = controlPresent && (capabilities.runWakeWorkerEnabled ?? false);
     this.hasSkillInstallation = controlPresent && (capabilities.skillInstallationEnabled ?? true);
     this.hasEvidenceAttachment = controlPresent &&
       (capabilities.evidenceAttachmentEnabled ?? true);
@@ -1104,12 +1188,63 @@ export class CyberAgentClient {
     return parseProviderDiagnostic(result, body);
   }
 
+  async providerCredentialStatuses(signal?: AbortSignal): Promise<ProviderCredentialListView> {
+    if (!this.hasProviderCredentials) {
+      throw new Error("Provider credential capability is required");
+    }
+    return parseProviderCredentialList(await this.get<unknown>("/models/credentials", {}, signal));
+  }
+
+  async changeProviderCredential(provider: string, body: ProviderCredentialRequestView,
+    signal?: AbortSignal): Promise<ProviderCredentialStatusView> {
+    if (!this.hasProviderCredentials || !["anthropic", "deepseek", "mimo"].includes(provider) ||
+      body.version !== "provider_credential.v1" || body.confirm !== true ||
+      (body.action === "set" ? typeof body.secret !== "string" || body.secret.length < 8 :
+        body.action !== "delete" || body.secret !== "")) {
+      throw new Error("Confirmed Provider credential capability is required");
+    }
+    const result = await this.sendControlRequest<unknown>(
+      `/models/credentials/${encodeURIComponent(provider)}`, body, signal,
+    );
+    const status = parseProviderCredentialStatus(result, provider);
+    if (status.configured !== (body.action === "set") || status.restart_required !== true) {
+      throw new APIRequestError("Provider credential change returned the wrong status",
+        "INVALID_RESPONSE", 502);
+    }
+    return status;
+  }
+
   async fileEditQueue(runID: string, signal?: AbortSignal): Promise<FileEditQueueView> {
     if (!boundedIdentity(runID) || runID.trim() !== runID) {
       throw new Error("A normalized Run identity is required");
     }
     return parseFileEditQueue(await this.get<unknown>(
       `/runs/${encodeURIComponent(runID)}/file-edits`, {}, signal,
+    ), runID);
+  }
+
+  async issueFileEditProposalSource(runID: string, path: string,
+    signal?: AbortSignal): Promise<FileEditProposalSourceView> {
+    if (!this.hasFileEditProposals || !boundedIdentity(runID) ||
+      !validWorkspaceRelativePath(path)) {
+      throw new Error("File edit proposal capability and a Go-issued path are required");
+    }
+    return parseFileEditProposalSource(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/file-edit-proposal-source`, { path }, signal,
+    ), runID, path);
+  }
+
+  async createFileEditProposal(runID: string, body: FileEditProposalRequestView,
+    signal?: AbortSignal): Promise<FileEditProposalView> {
+    if (!this.hasFileEditProposals || !boundedIdentity(runID) ||
+      body.version !== "file_edit_proposal.v1" ||
+      !/^[A-Za-z0-9_-]{43}$/u.test(body.source_handle) ||
+      typeof body.proposed_text !== "string" ||
+      new TextEncoder().encode(body.proposed_text).length > 256 * 1024) {
+      throw new Error("A bounded Go-issued file edit proposal is required");
+    }
+    return parseFileEditProposal(await this.sendControlRequest<unknown>(
+      `/runs/${encodeURIComponent(runID)}/file-edit-proposals`, body, signal,
     ), runID);
   }
 

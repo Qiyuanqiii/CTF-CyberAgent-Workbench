@@ -20,10 +20,13 @@ interface ConnectionState {
   planDeliveryControlEnabled: boolean;
   approvalControlEnabled: boolean;
   modelControlEnabled: boolean;
+  providerCredentialEnabled: boolean;
   fileEditReviewEnabled: boolean;
+  fileEditProposalEnabled: boolean;
   fileEditApplyEnabled: boolean;
   runWakeControlEnabled: boolean;
   runWakeExecutionEnabled: boolean;
+  runWakeWorkerEnabled: boolean;
   skillInstallationEnabled: boolean;
   evidenceAttachmentEnabled: boolean;
   connect: (token: string, health: HealthView, controlToken?: string,
@@ -55,10 +58,13 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   planDeliveryControlEnabled: false,
   approvalControlEnabled: false,
   modelControlEnabled: false,
+  providerCredentialEnabled: false,
   fileEditReviewEnabled: false,
+  fileEditProposalEnabled: false,
   fileEditApplyEnabled: false,
   runWakeControlEnabled: false,
   runWakeExecutionEnabled: false,
+  runWakeWorkerEnabled: false,
   skillInstallationEnabled: false,
   evidenceAttachmentEnabled: false,
   connect: (token, health, controlToken = "", capabilities = {}) => {
@@ -75,10 +81,13 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
         (capabilities.planDeliveryControlEnabled ?? true),
       approvalControlEnabled: present && (capabilities.approvalControlEnabled ?? true),
 	  modelControlEnabled: present && (capabilities.modelControlEnabled ?? true),
+	  providerCredentialEnabled: present && (capabilities.providerCredentialEnabled ?? false),
 	  fileEditReviewEnabled: present && (capabilities.fileEditReviewEnabled ?? true),
+	  fileEditProposalEnabled: present && (capabilities.fileEditProposalEnabled ?? false),
 	  fileEditApplyEnabled: present && (capabilities.fileEditApplyEnabled ?? true),
 	  runWakeControlEnabled: present && (capabilities.runWakeControlEnabled ?? true),
 	  runWakeExecutionEnabled: present && (capabilities.runWakeExecutionEnabled ?? true),
+	  runWakeWorkerEnabled: present && (capabilities.runWakeWorkerEnabled ?? false),
 	  skillInstallationEnabled: present && (capabilities.skillInstallationEnabled ?? true),
 	  evidenceAttachmentEnabled: present && (capabilities.evidenceAttachmentEnabled ?? true),
     });
@@ -88,8 +97,10 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
     sessionSteeringControlEnabled: false,
     runLifecycleEnabled: false, runExecutionEnabled: false,
 	planDeliveryControlEnabled: false, approvalControlEnabled: false,
-	modelControlEnabled: false, fileEditReviewEnabled: false, fileEditApplyEnabled: false,
-	runWakeControlEnabled: false, runWakeExecutionEnabled: false, skillInstallationEnabled: false,
+	modelControlEnabled: false, providerCredentialEnabled: false,
+	fileEditReviewEnabled: false, fileEditProposalEnabled: false, fileEditApplyEnabled: false,
+	runWakeControlEnabled: false, runWakeExecutionEnabled: false, runWakeWorkerEnabled: false,
+	skillInstallationEnabled: false,
 	evidenceAttachmentEnabled: false,
     ...initialSelection }),
   selectRun: (selectedRunID) => set({ selectedRunID, resourceKind: "run" }),

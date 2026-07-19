@@ -106,6 +106,10 @@ type RouteSettingWriter interface {
 
 type EnvironmentLookup func(string) (string, bool)
 
+type CredentialReader interface {
+	Get(context.Context, string) (string, bool, error)
+}
+
 type Registry struct {
 	mu        sync.RWMutex
 	routeMu   sync.Mutex
@@ -127,7 +131,28 @@ func NewFromEnvironment() *Registry {
 	return New(os.LookupEnv)
 }
 
+// NewFromEnvironmentWithCredentials preserves environment-variable priority
+// while allowing the Go control plane to bootstrap secrets from an OS-owned
+// credential store. No credential is copied into Registry snapshots.
+func NewFromEnvironmentWithCredentials(reader CredentialReader) (*Registry, error) {
+	return newRegistry(os.LookupEnv, func(provider string) (string, bool, error) {
+		if reader == nil {
+			return "", false, nil
+		}
+		return reader.Get(context.Background(), provider)
+	})
+}
+
 func New(lookup EnvironmentLookup) *Registry {
+	registry, _ := newRegistry(lookup, nil)
+	return registry
+}
+
+type credentialLookup func(string) (string, bool, error)
+
+func newRegistry(lookup EnvironmentLookup,
+	credentials credentialLookup,
+) (*Registry, error) {
 	if lookup == nil {
 		lookup = func(string) (string, bool) { return "", false }
 	}
@@ -153,12 +178,15 @@ func New(lookup EnvironmentLookup) *Registry {
 			defaultBaseURL: defaultAnthropicURL, defaultModel: DefaultAnthropicModel},
 	}
 	for _, config := range configs {
-		registry.registerAnthropicEnvironment(config, lookup)
+		if err := registry.registerAnthropicEnvironment(config, lookup,
+			credentials); err != nil {
+			return nil, err
+		}
 	}
 	sort.Slice(registry.providers, func(i, j int) bool {
 		return registry.providers[i].Name < registry.providers[j].Name
 	})
-	return registry
+	return registry, nil
 }
 
 func (r *Registry) Router() *llm.Router {
@@ -359,9 +387,29 @@ func containsRoute(route string) bool {
 }
 
 func (r *Registry) registerAnthropicEnvironment(config anthropicEnvironment,
-	lookup EnvironmentLookup,
-) {
+	lookup EnvironmentLookup, credentials credentialLookup,
+) error {
 	key, present := lookup(config.apiKeyEnv)
+	credentialSource := "none"
+	if present {
+		credentialSource = "environment"
+	}
+	if !present && credentials != nil {
+		var err error
+		key, present, err = credentials(config.name)
+		if err != nil {
+			r.providers = append(r.providers, ProviderAvailability{
+				Name: config.name, Kind: ProviderKindAnthropicCompatible,
+				Status: ProviderInvalidConfiguration, Models: []string{},
+				CredentialSource: "system", NetworkRequired: true,
+				ConfigurationError: true,
+			})
+			return nil
+		}
+		if present {
+			credentialSource = "system"
+		}
+	}
 	status := ProviderNotConfigured
 	models := []string{}
 	configurationError := false
@@ -373,10 +421,10 @@ func (r *Registry) registerAnthropicEnvironment(config anthropicEnvironment,
 			configurationError = true
 			r.providers = append(r.providers, ProviderAvailability{
 				Name: config.name, Kind: ProviderKindAnthropicCompatible, Status: status,
-				Models: models, CredentialSource: "environment", NetworkRequired: true,
+				Models: models, CredentialSource: credentialSource, NetworkRequired: true,
 				ConfigurationError: configurationError,
 			})
-			return
+			return nil
 		}
 		provider, err := llm.NewAnthropicCompatibleProvider(llm.AnthropicCompatibleConfig{
 			Name: config.name, BaseURL: baseURL, APIKey: key, DefaultModel: model,
@@ -396,9 +444,10 @@ func (r *Registry) registerAnthropicEnvironment(config anthropicEnvironment,
 	}
 	r.providers = append(r.providers, ProviderAvailability{
 		Name: config.name, Kind: ProviderKindAnthropicCompatible, Status: status,
-		Models: models, CredentialSource: "environment", NetworkRequired: true,
+		Models: models, CredentialSource: credentialSource, NetworkRequired: true,
 		ConfigurationError: configurationError,
 	})
+	return nil
 }
 
 func environmentValue(lookup EnvironmentLookup, name string, fallback string) string {

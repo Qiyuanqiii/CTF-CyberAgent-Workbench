@@ -1,0 +1,47 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { CyberAgentClient } from "../api/client";
+import type { FileEditProposalSourceView } from "../api/types";
+import { FileProposalEditor } from "./file-proposal-editor";
+
+vi.mock("@monaco-editor/react", () => ({
+  default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) =>
+    <textarea aria-label="Monaco proposal editor" onChange={(event) => onChange(event.target.value)}
+      value={value} />,
+  DiffEditor: ({ original, modified }: { original: string; modified: string }) =>
+    <pre aria-label="Monaco diff preview">{original}{modified}</pre>,
+}));
+
+vi.mock("../lib/monaco-local", () => ({ configureLocalMonaco: vi.fn() }));
+
+describe("FileProposalEditor", () => {
+  it("submits only the opaque source handle and creates a pending proposal", async () => {
+    const source: FileEditProposalSourceView = {
+      protocol_version: "file_edit_proposal.v1", run_id: "run-1",
+      workspace_id: "workspace-1", path: "README.md", content: "before\n",
+      content_sha256: "a".repeat(64), source_handle: "B".repeat(43),
+      expires_at: "2099-07-18T00:05:00Z", editable: true, file_write: false,
+    };
+    const createFileEditProposal = vi.fn().mockResolvedValue({
+      protocol_version: "file_edit_proposal.v1", run_id: "run-1", replayed: false,
+      approval_required: true, file_written: false,
+      edit: { id: "edit-1", status: "proposed", path: "README.md" },
+    });
+    const client = { createFileEditProposal } as unknown as CyberAgentClient;
+    const user = userEvent.setup();
+    render(<QueryClientProvider client={new QueryClient()}>
+      <FileProposalEditor client={client} onClose={vi.fn()} runID="run-1" source={source} />
+    </QueryClientProvider>);
+    const editor = await screen.findByLabelText("Monaco proposal editor");
+    await user.clear(editor);
+    await user.type(editor, "after");
+    await user.click(screen.getByRole("button", { name: "Create proposal" }));
+    await waitFor(() => expect(createFileEditProposal).toHaveBeenCalledWith("run-1", {
+      version: "file_edit_proposal.v1", source_handle: source.source_handle,
+      proposed_text: "after",
+    }));
+    expect(await screen.findByText(/Pending review/)).toBeInTheDocument();
+    expect(createFileEditProposal.mock.calls[0]?.[1]).not.toHaveProperty("path");
+  });
+});

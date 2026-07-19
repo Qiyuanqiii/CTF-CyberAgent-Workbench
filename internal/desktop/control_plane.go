@@ -10,6 +10,7 @@ import (
 
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
+	"cyberagent-workbench/internal/credential"
 	"cyberagent-workbench/internal/httpapi"
 	"cyberagent-workbench/internal/modelregistry"
 	"cyberagent-workbench/internal/policy"
@@ -27,6 +28,11 @@ type ControlPlane struct {
 	closeOnce      sync.Once
 	closeErr       error
 	skillInstaller *application.SkillPackageRegistryService
+	wakeWorker     *application.RunWakeWorker
+	workerMu       sync.Mutex
+	workerCancel   context.CancelFunc
+	workerDone     chan struct{}
+	closed         bool
 }
 
 type ControlPlaneConfig struct {
@@ -43,14 +49,19 @@ type ControlPlaneConfig struct {
 	PlanDeliveryControlEnabled    bool
 	ApprovalControlEnabled        bool
 	ModelControlEnabled           bool
+	ProviderCredentialEnabled     bool
 	FileEditReviewEnabled         bool
+	FileEditProposalEnabled       bool
 	RunWakeControlEnabled         bool
 	FileEditApplyEnabled          bool
 	RunWakeExecutionEnabled       bool
+	RunWakeWorkerEnabled          bool
 	SkillInstallationEnabled      bool
 	EvidenceAttachmentEnabled     bool
 	AppVersion                    string
 	UIHandler                     http.Handler
+	CredentialStore               credential.Store
+	OnWakeWorkerError             func(error)
 }
 
 func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
@@ -62,7 +73,18 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 	if err != nil {
 		return nil, err
 	}
+	credentialStore := config.CredentialStore
+	if credentialStore == nil {
+		credentialStore = credential.NewSystemStore()
+	}
 	models := modelregistry.NewFromEnvironment()
+	if credentialStore.Available() {
+		models, err = modelregistry.NewFromEnvironmentWithCredentials(credentialStore)
+		if err != nil {
+			_ = stateStore.Close()
+			return nil, err
+		}
+	}
 	if err := models.LoadRouteSettings(context.Background(), stateStore); err != nil {
 		_ = stateStore.Close()
 		return nil, err
@@ -76,11 +98,23 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 	approvalControl := application.NewApprovalControlService(stateStore,
 		toolgateway.New(stateStore, checker), checker)
 	modelControl := application.NewModelControlService(models, stateStore)
+	providerCredentialControl := application.NewProviderCredentialService(credentialStore)
 	fileEditReview := application.NewFileEditReviewService(stateStore)
+	fileEditProposal := application.NewFileEditProposalService(stateStore, checker)
 	fileEditApply := application.NewFileEditApplyService(stateStore, checker)
 	runWakeControl := application.NewRunWakeControlService(stateStore)
 	runWakeExecution := application.NewForegroundRunWakeConsumer(stateStore,
 		executionControl)
+	var wakeWorker *application.RunWakeWorker
+	if config.RunWakeWorkerEnabled {
+		wakeWorker, err = application.NewRunWakeWorker(
+			application.NewRunWakeCoordinator(stateStore), runWakeExecution,
+			application.RunWakeWorkerConfig{OnError: config.OnWakeWorkerError})
+		if err != nil {
+			_ = stateStore.Close()
+			return nil, err
+		}
+	}
 	var skillInstaller *application.SkillPackageRegistryService
 	if config.SkillInstallationEnabled {
 		home := strings.TrimSpace(config.HomePath)
@@ -111,7 +145,9 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 		PlanDeliveryControlEnabled:    config.PlanDeliveryControlEnabled,
 		ApprovalControlEnabled:        config.ApprovalControlEnabled,
 		ModelControlEnabled:           config.ModelControlEnabled,
+		ProviderCredentialEnabled:     config.ProviderCredentialEnabled,
 		FileEditReviewEnabled:         config.FileEditReviewEnabled,
+		FileEditProposalEnabled:       config.FileEditProposalEnabled,
 		RunWakeControlEnabled:         config.RunWakeControlEnabled,
 		FileEditApplyEnabled:          config.FileEditApplyEnabled,
 		RunWakeExecutionEnabled:       config.RunWakeExecutionEnabled,
@@ -122,7 +158,9 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 		PlanDeliveryController:        planDeliveryControl,
 		ApprovalController:            approvalControl,
 		ModelControlController:        modelControl,
+		ProviderCredentialController:  providerCredentialControl,
 		FileEditReviewController:      fileEditReview,
+		FileEditProposalController:    fileEditProposal,
 		RunWakeController:             runWakeControl,
 		FileEditApplyController:       fileEditApply,
 		RunWakeExecutionController:    runWakeExecution,
@@ -135,7 +173,7 @@ func OpenControlPlane(config ControlPlaneConfig) (*ControlPlane, error) {
 		return nil, err
 	}
 	return &ControlPlane{stateStore: stateStore, handler: api.Handler(),
-		skillInstaller: skillInstaller}, nil
+		skillInstaller: skillInstaller, wakeWorker: wakeWorker}, nil
 }
 
 func (c *ControlPlane) Handler() http.Handler {
@@ -152,11 +190,51 @@ func (c *ControlPlane) SkillInstaller() SkillPackageInstaller {
 	return c.skillInstaller
 }
 
+func (c *ControlPlane) StartWakeWorker(parent context.Context) error {
+	if c == nil {
+		return errors.New("desktop control plane is unavailable")
+	}
+	if parent == nil {
+		return errors.New("desktop wake worker context is required")
+	}
+	c.workerMu.Lock()
+	defer c.workerMu.Unlock()
+	if c.closed {
+		return errors.New("desktop control plane is closed")
+	}
+	if c.wakeWorker == nil {
+		return nil
+	}
+	if c.workerDone != nil {
+		return errors.New("desktop wake worker is already started")
+	}
+	ctx, cancel := context.WithCancel(parent)
+	c.workerCancel = cancel
+	c.workerDone = make(chan struct{})
+	go func(done chan struct{}) {
+		defer close(done)
+		_ = c.wakeWorker.Run(ctx)
+	}(c.workerDone)
+	return nil
+}
+
 func (c *ControlPlane) Close() error {
 	if c == nil {
 		return nil
 	}
 	c.closeOnce.Do(func() {
+		c.workerMu.Lock()
+		c.closed = true
+		cancel, done := c.workerCancel, c.workerDone
+		c.workerCancel = nil
+		c.workerDone = nil
+		c.workerMu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		if done != nil {
+			<-done
+		}
 		if c.stateStore == nil {
 			c.closeErr = errors.New("desktop control plane store is unavailable")
 			return

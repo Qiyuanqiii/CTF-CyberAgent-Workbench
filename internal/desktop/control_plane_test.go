@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
@@ -240,6 +241,36 @@ func TestControlPlaneSeparatesSessionMessagesFromOtherControls(t *testing.T) {
 	if profile.Code != http.StatusNotFound {
 		t.Fatalf("Session capability widened profile control: status=%d body=%s",
 			profile.Code, profile.Body.String())
+	}
+}
+
+func TestControlPlaneWakeWorkerStopsOnceAndCannotRestartAfterClose(t *testing.T) {
+	plane, err := OpenControlPlane(ControlPlaneConfig{
+		DatabasePath: filepath.Join(t.TempDir(), "wake-worker.db"),
+		ReadToken:    desktopControlPlaneTestToken, ControlToken: desktopControlPlaneControlToken,
+		RunWakeWorkerEnabled: true, AppVersion: "desktop-worker-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plane.StartWakeWorker(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := plane.StartWakeWorker(t.Context()); err == nil {
+		t.Fatal("a second desktop wake worker was started")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- plane.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("desktop wake worker did not stop during close")
+	}
+	if err := plane.StartWakeWorker(t.Context()); err == nil {
+		t.Fatal("closed desktop control plane restarted its wake worker")
 	}
 }
 

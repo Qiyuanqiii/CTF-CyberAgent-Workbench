@@ -13,6 +13,7 @@ import (
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/approval"
 	"cyberagent-workbench/internal/artifact"
+	"cyberagent-workbench/internal/credential"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/events"
 	"cyberagent-workbench/internal/fileedit"
@@ -225,6 +226,7 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 	editID := pathIdentityParameter("edit_id", "File edit identity")
 	workspaceID := pathIdentityParameter("workspace_id", "Workspace identity")
 	routeName := pathIdentityParameter("route", "Model route name")
+	providerName := pathIdentityParameter("provider", "Provider name")
 	return []openAPIOperationSpec{
 		{Path: "/api/v1", OperationID: "getAPIIndex", Summary: "Inspect API resources",
 			Description: "Returns API and application versions plus top-level resources.", Tag: "System",
@@ -249,6 +251,17 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 			Description: "Makes at most one minimal no-tool model request after explicit confirmation. The response is content-free and never includes model text, raw Provider errors, credentials, or endpoint URLs.",
 			DataType:    reflect.TypeOf(ProviderDiagnosticView{}),
 			RequestType: reflect.TypeOf(ProviderDiagnosticRequestView{}), Control: true},
+		{Path: ProviderCredentialsPath, OperationID: "listProviderCredentials",
+			Summary: "Inspect Provider credential status", Tag: "Models",
+			Description: "Returns only configured status and OS-store availability. It never reads credential plaintext into an API response.",
+			DataType:    reflect.TypeOf(ProviderCredentialListView{})},
+		{Path: ProviderCredentialPathTemplate, Method: http.MethodPost,
+			OperationID: "changeProviderCredential", Summary: "Set or delete an OS-owned Provider credential",
+			Tag:         "Control",
+			Description: "Accepts one transient secret for direct storage in the OS credential manager, or deletes one exact Provider credential. Plaintext is never returned, persisted in SQLite, logged, or placed in an event.",
+			DataType:    reflect.TypeOf(ProviderCredentialStatusView{}),
+			RequestType: reflect.TypeOf(ProviderCredentialRequestView{}), Control: true,
+			Parameters: []openAPIParameter{providerName}},
 		{Path: OpenAPIPath, OperationID: "getOpenAPI", Summary: "Read the OpenAPI contract",
 			Description: "Returns the raw deterministic OpenAPI 3.1 JSON document under the same authentication boundary.",
 			Tag:         "System", RawDocument: true},
@@ -477,6 +490,22 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 			Description: "Returns at most one hundred Run-bound metadata-only file edit previews. Original and proposed file bodies are omitted and apply authority is always false.",
 			DataType:    reflect.TypeOf(FileEditQueueView{}), NotFound: true,
 			Parameters: []openAPIParameter{runID}},
+		{Path: FileEditProposalSourcePathTemplate,
+			OperationID: "issueFileEditProposalSource", Summary: "Issue an exact interactive edit source",
+			Tag:         "Runs",
+			Description: "Returns a complete unredacted bounded UTF-8 file body plus a short-lived opaque handle bound to the Run, Session, Workspace, path, and current hash. Redacted or truncated files are refused; issuing the handle writes nothing.",
+			DataType:    reflect.TypeOf(FileEditProposalSourceView{}), NotFound: true,
+			Parameters: []openAPIParameter{runID,
+				{Name: "path", In: "query", Description: "Canonical Go-projected Workspace-relative file path",
+					Required: true, Schema: map[string]any{"type": "string", "minLength": 1,
+						"maxLength": workspace.MaxExplorerPathRunes}}}},
+		{Path: FileEditProposalPathTemplate, Method: http.MethodPost,
+			OperationID: "createFileEditProposal", Summary: "Create a pending FileEdit from a Go-issued source",
+			Tag:         "Control",
+			Description: "Consumes only an opaque Go-issued source handle and bounded text. It rechecks the exact file hash and Policy, creates a pending approval-backed FileEdit, and cannot approve or write the file.",
+			DataType:    reflect.TypeOf(FileEditProposalView{}),
+			RequestType: reflect.TypeOf(FileEditProposalRequestView{}), Control: true,
+			NotFound: true, Parameters: []openAPIParameter{runID}},
 		{Path: "/api/v1/runs/{run_id}/file-edits/{edit_id}",
 			OperationID: "getRunFileEdit", Summary: "Inspect a Run file edit preview", Tag: "Runs",
 			Description: "Returns one exact Run-bound redacted diff without original or proposed file bodies.",
@@ -960,6 +989,17 @@ func applyOpenAPIFieldMetadata(typeName string, fieldName string, schema map[str
 	if typeName == "EvidenceInventoryView" && fieldName == "items" {
 		schema["maxItems"] = session.MaxEvidenceInventoryItems
 	}
+	if typeName == "ProviderCredentialListView" && fieldName == "items" {
+		schema["maxItems"] = 3
+	}
+	if typeName == "ProviderCredentialRequestView" && fieldName == "secret" {
+		schema["writeOnly"] = true
+	}
+	if typeName == "FileEditProposalSourceView" && fieldName == "source_handle" {
+		schema["minLength"] = 43
+		schema["maxLength"] = 43
+		schema["pattern"] = "^[A-Za-z0-9_-]{43}$"
+	}
 }
 
 var openAPIFieldEnums = map[string][]string{
@@ -973,6 +1013,13 @@ var openAPIFieldEnums = map[string][]string{
 	"ProviderDiagnosticView.status":                     {modelregistry.DiagnosticReachable, modelregistry.DiagnosticUnreachable},
 	"ProviderDiagnosticView.outcome":                    {string(llm.OutcomeSuccess), string(llm.OutcomeRetryable), string(llm.OutcomeRateLimited), string(llm.OutcomeInvalidResponse), string(llm.OutcomeCancelled), string(llm.OutcomePermanent)},
 	"ModelRouteControlRequestView.version":              {modelregistry.RouteControlProtocolVersion},
+	"ProviderCredentialListView.protocol_version":       {credential.ProtocolVersion},
+	"ProviderCredentialStatusView.protocol_version":     {credential.ProtocolVersion},
+	"ProviderCredentialRequestView.version":             {credential.ProtocolVersion},
+	"ProviderCredentialRequestView.action":              {string(application.ProviderCredentialSet), string(application.ProviderCredentialDelete)},
+	"FileEditProposalSourceView.protocol_version":       {application.FileEditProposalProtocolVersion},
+	"FileEditProposalRequestView.version":               {application.FileEditProposalProtocolVersion},
+	"FileEditProposalView.protocol_version":             {application.FileEditProposalProtocolVersion},
 	"FileEditQueueView.protocol_version":                {application.FileEditReviewProtocolVersion},
 	"FileEditReviewRequestView.version":                 {application.FileEditReviewProtocolVersion},
 	"FileEditReviewRequestView.action":                  {string(application.FileEditApproveIntent), string(application.FileEditDeny)},
@@ -1024,7 +1071,7 @@ var openAPIFieldEnums = map[string][]string{
 	"OperatorActionItemView.destination":                {string(operatoraction.DestinationQueue), string(operatoraction.DestinationApprovals), string(operatoraction.DestinationDiffs), string(operatoraction.DestinationWake)},
 	"ProviderAvailabilityView.kind":                     {modelregistry.ProviderKindLocal, modelregistry.ProviderKindAnthropicCompatible},
 	"ProviderAvailabilityView.status":                   {modelregistry.ProviderAvailable, modelregistry.ProviderNotConfigured, modelregistry.ProviderInvalidConfiguration},
-	"ProviderAvailabilityView.credential_source":        {"none", "environment"},
+	"ProviderAvailabilityView.credential_source":        {"none", "environment", "system"},
 	"ScopeView.network_mode":                            {"disabled", "allowlist"},
 	"MissionView.profile":                               {"code", "review", "learn", "script"},
 	"RunView.status":                                    runStatuses(),
@@ -1238,6 +1285,12 @@ var openAPIFieldMaxLengths = map[string]int{
 	"SessionMessageControlRequestView.content":       domain.MaxOperatorSteeringContentBytes,
 	"SessionSteeringCancellationRequestView.reason":  domain.MaxOperatorSteeringReasonBytes,
 	"ApprovalDecisionControlRequestView.reason":      approval.MaxReasonRunes,
+	"ProviderCredentialRequestView.secret":           credential.MaxSecretBytes,
+	"FileEditProposalSourceView.path":                workspace.MaxExplorerPathRunes,
+	"FileEditProposalSourceView.content":             workspace.MaxExplorerProjectedBytes,
+	"FileEditProposalSourceView.content_sha256":      64,
+	"FileEditProposalRequestView.source_handle":      43,
+	"FileEditProposalRequestView.proposed_text":      fileedit.MaxContentBytes,
 	"MessageView.source_ref":                         session.MaxContextSourceRefRunes,
 	"MessageView.content_sha256":                     64,
 	"SkillPackageInstallRequestView.archive_base64":  base64.StdEncoding.EncodedLen(skills.MaxPackageArchiveBytes),

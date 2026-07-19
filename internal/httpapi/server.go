@@ -149,7 +149,9 @@ type Config struct {
 	PlanDeliveryControlEnabled    bool
 	ApprovalControlEnabled        bool
 	ModelControlEnabled           bool
+	ProviderCredentialEnabled     bool
 	FileEditReviewEnabled         bool
+	FileEditProposalEnabled       bool
 	RunWakeControlEnabled         bool
 	FileEditApplyEnabled          bool
 	RunWakeExecutionEnabled       bool
@@ -160,7 +162,9 @@ type Config struct {
 	PlanDeliveryController        PlanDeliveryController
 	ApprovalController            ApprovalController
 	ModelControlController        ModelControlController
+	ProviderCredentialController  ProviderCredentialController
 	FileEditReviewController      FileEditReviewController
+	FileEditProposalController    FileEditProposalController
 	RunWakeController             RunWakeController
 	FileEditApplyController       FileEditApplyController
 	RunWakeExecutionController    RunWakeExecutionController
@@ -184,7 +188,9 @@ type API struct {
 	planDeliveryControlEnabled    bool
 	approvalControlEnabled        bool
 	modelControlEnabled           bool
+	providerCredentialEnabled     bool
 	fileEditReviewEnabled         bool
+	fileEditProposalEnabled       bool
 	runWakeControlEnabled         bool
 	fileEditApplyEnabled          bool
 	runWakeExecutionEnabled       bool
@@ -195,7 +201,9 @@ type API struct {
 	planDeliveryController        PlanDeliveryController
 	approvalController            ApprovalController
 	modelControlController        ModelControlController
+	providerCredentialController  ProviderCredentialController
 	fileEditReviewController      FileEditReviewController
+	fileEditProposalController    FileEditProposalController
 	runWakeController             RunWakeController
 	fileEditApplyController       FileEditApplyController
 	runWakeExecutionController    RunWakeExecutionController
@@ -234,7 +242,9 @@ func New(store Store, config Config) (*API, error) {
 		config.SessionSteeringControlEnabled || config.RunLifecycleEnabled ||
 		config.RunExecutionEnabled || config.PlanDeliveryControlEnabled ||
 		config.ApprovalControlEnabled || config.ModelControlEnabled ||
-		config.FileEditReviewEnabled || config.RunWakeControlEnabled ||
+		config.ProviderCredentialEnabled ||
+		config.FileEditReviewEnabled || config.FileEditProposalEnabled ||
+		config.RunWakeControlEnabled ||
 		config.FileEditApplyEnabled || config.RunWakeExecutionEnabled ||
 		config.SkillInstallationEnabled || config.EvidenceAttachmentEnabled) &&
 		!controlTokenPresent {
@@ -261,9 +271,17 @@ func New(store Store, config Config) (*API, error) {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"HTTP API model controller is required when enabled")
 	}
+	if config.ProviderCredentialEnabled && config.ProviderCredentialController == nil {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API Provider credential controller is required when enabled")
+	}
 	if config.FileEditReviewEnabled && config.FileEditReviewController == nil {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"HTTP API file edit review controller is required when enabled")
+	}
+	if config.FileEditProposalEnabled && config.FileEditProposalController == nil {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"HTTP API file edit proposal controller is required when enabled")
 	}
 	if config.RunWakeControlEnabled && config.RunWakeController == nil {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
@@ -308,7 +326,9 @@ func New(store Store, config Config) (*API, error) {
 		planDeliveryControlEnabled:    controlTokenPresent && config.PlanDeliveryControlEnabled,
 		approvalControlEnabled:        controlTokenPresent && config.ApprovalControlEnabled,
 		modelControlEnabled:           controlTokenPresent && config.ModelControlEnabled,
+		providerCredentialEnabled:     controlTokenPresent && config.ProviderCredentialEnabled,
 		fileEditReviewEnabled:         controlTokenPresent && config.FileEditReviewEnabled,
+		fileEditProposalEnabled:       controlTokenPresent && config.FileEditProposalEnabled,
 		runWakeControlEnabled:         controlTokenPresent && config.RunWakeControlEnabled,
 		fileEditApplyEnabled:          controlTokenPresent && config.FileEditApplyEnabled,
 		runWakeExecutionEnabled:       controlTokenPresent && config.RunWakeExecutionEnabled,
@@ -319,7 +339,9 @@ func New(store Store, config Config) (*API, error) {
 		planDeliveryController:        config.PlanDeliveryController,
 		approvalController:            config.ApprovalController,
 		modelControlController:        config.ModelControlController,
+		providerCredentialController:  config.ProviderCredentialController,
 		fileEditReviewController:      config.FileEditReviewController,
+		fileEditProposalController:    config.FileEditProposalController,
 		runWakeController:             config.RunWakeController,
 		fileEditApplyController:       config.FileEditApplyController,
 		runWakeExecutionController:    config.RunWakeExecutionController,
@@ -469,6 +491,14 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if route, diagnostic, matched := matchModelControlPath(request.URL.Path); matched {
 		a.serveModelControl(tracked, request, requestID, route, diagnostic)
+		return
+	}
+	if provider, matched := matchProviderCredentialControlPath(request.URL.Path); matched {
+		a.serveProviderCredentialControl(tracked, request, requestID, provider)
+		return
+	}
+	if runID, matched := matchFileEditProposalControlPath(request.URL.Path); matched {
+		a.serveFileEditProposalControl(tracked, request, requestID, runID)
 		return
 	}
 	if runID, editID, matched := matchFileEditReviewControlPath(request.URL.Path); matched {

@@ -38,15 +38,26 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 	fs := newFlagSet("api serve", a.errOut)
 	listenAddress := fs.String("listen", httpapi.DefaultListenAddress, "loopback listen address")
 	uiDirectory := fs.String("ui-dir", "", "optional built Web UI directory")
-	if err := fs.Parse(reorderFlags(args, map[string]bool{"listen": true, "ui-dir": true})); err != nil {
+	fileEditProposals := fs.Bool("enable-file-edit-proposals", false,
+		"enable Go-issued interactive FileEdit proposal sources")
+	providerCredentials := fs.Bool("enable-provider-credentials", false,
+		"enable OS-owned Provider credential changes")
+	wakeWorker := fs.Bool("enable-wake-worker", false,
+		"enable the bounded single-owner Run wake worker")
+	if err := fs.Parse(reorderFlags(args, map[string]bool{"listen": true, "ui-dir": true,
+		"enable-file-edit-proposals": false, "enable-provider-credentials": false,
+		"enable-wake-worker": false})); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return errors.New("usage: cyberagent api serve [--listen <loopback-host:port>] [--ui-dir <built-web-directory>]")
+		return errors.New("usage: cyberagent api serve [--listen <loopback-host:port>] [--ui-dir <built-web-directory>] [explicit capability flags]")
 	}
 
 	accessToken := os.Getenv(apiTokenEnvironment)
 	controlToken := os.Getenv(apiControlTokenEnvironment)
+	if (*fileEditProposals || *providerCredentials || *wakeWorker) && controlToken == "" {
+		return errors.New("interactive proposals, Provider credentials, and the wake worker require CYBERAGENT_API_CONTROL_TOKEN")
+	}
 	generated := accessToken == ""
 	if generated {
 		var err error
@@ -73,7 +84,9 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 	approvalControl := application.NewApprovalControlService(a.store,
 		a.newToolGateway(), a.checker)
 	modelControl := application.NewModelControlService(a.models, a.store)
+	providerCredentialControl := application.NewProviderCredentialService(a.credentials)
 	fileEditReview := application.NewFileEditReviewService(a.store)
+	fileEditProposal := application.NewFileEditProposalService(a.store, a.checker)
 	fileEditApply := application.NewFileEditApplyService(a.store, a.checker)
 	runWakeControl := application.NewRunWakeControlService(a.store)
 	runWakeExecution := application.NewForegroundRunWakeConsumer(a.store,
@@ -98,7 +111,9 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 		PlanDeliveryControlEnabled:    controlToken != "",
 		ApprovalControlEnabled:        controlToken != "",
 		ModelControlEnabled:           controlToken != "",
+		ProviderCredentialEnabled:     *providerCredentials,
 		FileEditReviewEnabled:         controlToken != "",
+		FileEditProposalEnabled:       *fileEditProposals,
 		RunWakeControlEnabled:         controlToken != "",
 		FileEditApplyEnabled:          controlToken != "",
 		RunWakeExecutionEnabled:       controlToken != "",
@@ -109,7 +124,9 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 		PlanDeliveryController:        planDeliveryControl,
 		ApprovalController:            approvalControl,
 		ModelControlController:        modelControl,
+		ProviderCredentialController:  providerCredentialControl,
 		FileEditReviewController:      fileEditReview,
+		FileEditProposalController:    fileEditProposal,
 		RunWakeController:             runWakeControl,
 		FileEditApplyController:       fileEditApply,
 		RunWakeExecutionController:    runWakeExecution,
@@ -146,6 +163,35 @@ func (a *App) apiServeCommand(ctx context.Context, args []string) error {
 	if controlToken != "" {
 		fmt.Fprintf(a.out, "api_control_token_source: %s\n", apiControlTokenEnvironment)
 	}
+	var workerCancel context.CancelFunc
+	var workerDone chan struct{}
+	if *wakeWorker {
+		worker, workerErr := application.NewRunWakeWorker(
+			application.NewRunWakeCoordinator(a.store), runWakeExecution,
+			application.RunWakeWorkerConfig{OnError: func(runErr error) {
+				fmt.Fprintln(a.errOut, "wake-worker:", runErr)
+			}})
+		if workerErr != nil {
+			_ = listener.Close()
+			return workerErr
+		}
+		workerCtx, cancel := context.WithCancel(ctx)
+		workerCancel = cancel
+		workerDone = make(chan struct{})
+		go func() {
+			defer close(workerDone)
+			_ = worker.Run(workerCtx)
+		}()
+	}
+	if workerCancel != nil {
+		defer func() {
+			workerCancel()
+			<-workerDone
+		}()
+	}
+	fmt.Fprintf(a.out, "file_edit_proposals_enabled: %t\nprovider_credentials_enabled: %t\nwake_worker_enabled: %t\nwake_worker_concurrency: %d\nwake_worker_max_steps: %d\n",
+		*fileEditProposals, *providerCredentials, *wakeWorker,
+		application.RunWakeWorkerConcurrency, application.RunWakeWorkerMaxSteps)
 	fmt.Fprintln(a.out, "note: the API is loopback-only; control is separately authorized and tokens are not persisted")
 	return server.Serve(ctx, listener)
 }

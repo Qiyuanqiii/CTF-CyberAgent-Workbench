@@ -17,6 +17,7 @@ import (
 	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/buildinfo"
+	"cyberagent-workbench/internal/credential"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/idgen"
 	"cyberagent-workbench/internal/llm"
@@ -41,6 +42,7 @@ type App struct {
 	store                *store.SQLiteStore
 	router               *llm.Router
 	models               *modelregistry.Registry
+	credentials          credential.Store
 	checker              policy.Checker
 	kernel               *agent.Kernel
 	calls                *application.ActiveCallRegistry
@@ -68,15 +70,26 @@ func executeContextWithConfig(ctx context.Context, args []string, out io.Writer,
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	credentials := credential.NewSystemStore()
 	models := modelregistry.NewFromEnvironment()
+	if credentials.Available() {
+		var err error
+		models, err = modelregistry.NewFromEnvironmentWithCredentials(credentials)
+		if err != nil {
+			classified := apperror.Normalize(err)
+			fmt.Fprintln(errOut, "error:", classified)
+			return apperror.ExitCode(classified)
+		}
+	}
 	app := &App{
-		home:    DefaultHome(),
-		out:     out,
-		errOut:  errOut,
-		router:  models.Router(),
-		models:  models,
-		checker: policy.NewDefaultChecker(),
-		calls:   application.NewActiveCallRegistry(),
+		home:        DefaultHome(),
+		out:         out,
+		errOut:      errOut,
+		router:      models.Router(),
+		models:      models,
+		credentials: credentials,
+		checker:     policy.NewDefaultChecker(),
+		calls:       application.NewActiveCallRegistry(),
 	}
 	if configure != nil {
 		configure(app)

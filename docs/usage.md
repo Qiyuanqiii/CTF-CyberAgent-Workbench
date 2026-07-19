@@ -122,7 +122,7 @@ Schema v40 loads the complete selected set for root Supervisor turns. Before eve
 
 Schema v47 derives `specialist_skill_context.v1` for each active child Attempt. Go reloads the child after Attempt start, binds the current immutable Run mode and parent selection, requires delegated `model.chat`, and selects at most one already-pinned guide. Code uses the guide matching its Profile. Cyber receives no broad Code/Review/Learn guide and receives `script` only for the Script Profile. `plan-delivery` is root-only. The default child budget is 1,024 conservative tokens with a 2,048 hard maximum. Preparation is idempotent across concurrent Store callers and commits atomically with the first Specialist model start; a selected Run cannot start that call without preparation. Child assignment text, model output, HTTP, Tool Gateway, and external directories cannot select Skills. The body remains in the current Go Provider request only, while SQLite and events store aggregate metadata and fingerprints.
 
-## Windows Desktop D0-A Through D1-B1
+## Windows Desktop D0-A Through D1-I1/M3/J1
 
 Build the unsigned development/portable-test shell from the repository root:
 
@@ -187,9 +187,18 @@ inert Skill installation:
 .\build\desktop\cyberagent-desktop.exe --enable-skill-installation
 ```
 
-Any flag creates one distinct in-memory control token, while capability bits keep routes independent. Profile selection does not enable a backend. Run creation makes only a default-budget, network-disabled `preview/noop` graph. Session submission queues one redacted item; cancellation applies only before preparation. Lifecycle performs strict start/pause/resume. Execution freezes at most eight pending identities and invokes only the existing Go RunSupervisor, Policy, budgets, model/tool ledgers, checkpoints, and private execution lease. Plan selection and Deliver are separate explicit operations. Approve-once rechecks Policy and remains dry-run/process-disabled; file replacement cannot be approved there. A model diagnostic is an explicit one-request operation and may incur a small Provider charge; its response is status-only. FileEdit review never applies the file; apply is a different capability with fresh Policy/hash checks. Wake intent never executes by itself; consume is a user-triggered foreground operation. Skill installation writes only an untrusted inert Registry object. There is no background wake/retry worker, terminal, LocalRunner, Docker start, real Shell process, install-time execution, startup entry, updater, or installer.
+To expose Go-issued FileEdit proposals, Windows system credentials, or the bounded
+process-start wake worker independently:
 
-The New Run dialog selects a Workspace, Profile, Code/Cyber surface, and Plan/Deliver phase. The top-bar Models dialog reads redacted Provider/route status and exposes diagnostics/routes only when model control is enabled. The Session composer, pending Cancel action, Start/Pause/Resume, Run Queue, Plan/Deliver, Approval, Diff review/apply, and wake controls retain intent-bound retry keys only in memory. Changing message, lifecycle action, `maxSteps`, Plan direction, approval intent, Diff action, or wake intent rotates the key. Go performs authoritative validation and transactions. A single-capability launch does not unlock sibling controls.
+```powershell
+.\build\desktop\cyberagent-desktop.exe --enable-file-edit-proposals
+.\build\desktop\cyberagent-desktop.exe --enable-provider-credentials
+.\build\desktop\cyberagent-desktop.exe --enable-wake-worker
+```
+
+Any flag creates one distinct in-memory control token, while capability bits keep routes independent. Profile selection does not enable a backend. Run creation makes only a default-budget, network-disabled `preview/noop` graph. Session submission queues one redacted item; cancellation applies only before preparation. Lifecycle performs strict start/pause/resume. Execution freezes at most eight pending identities and invokes only the existing Go RunSupervisor, Policy, budgets, model/tool ledgers, checkpoints, and private execution lease. Plan selection and Deliver are separate explicit operations. Approve-once rechecks Policy and remains dry-run/process-disabled. A model diagnostic may incur one small Provider charge. FileEdit propose/review/apply are three separate capabilities: local Monaco submits a Go handle plus text, proposal never writes, and apply performs fresh Policy/hash checks. Provider credential mutation writes only Windows Credential Manager and returns status, never plaintext. The optional wake worker is a process-lifetime serial consumer capped at one due intent and one step. There is no terminal, LocalRunner, Docker start, real Shell process, install-time execution, persistent service, startup entry, updater, or installer.
+
+The New Run dialog selects a Workspace, Profile, Code/Cyber surface, and Plan/Deliver phase. The Models dialog reads redacted Provider/route/credential status; credentials appear only when their independent capability is enabled. The local Monaco editor and five workers load lazily from the bundle with no CDN fallback. Session, Run, Plan, Approval, Diff, and wake controls retain intent-bound retry keys only in memory. Go performs authoritative validation and transactions, and a single-capability launch does not unlock sibling controls.
 
 The top-bar package button opens the native `.zip` picker. The operating-system path stays inside Go and is immediately validated. React receives bounded metadata plus opaque preview/confirmation handles, never the path or bytes. When Skill installation is enabled, a separate explicit confirmation consumes the one-time handle and returns only inert Registry metadata; cancellation creates no state, and installation does not select or execute the Skill. Set `CYBERAGENT_HOME` before launch only when intentionally using an isolated data directory for testing. The renderer cannot read or change that path.
 
@@ -648,7 +657,7 @@ cyberagent model set script mock/mock-code
 
 `provider test` accepts either a route name, such as `learn`, or a direct `provider/model` reference. It is an explicit online diagnostic: each invocation may send one small, content-free, tool-disabled model request with a 15-second deadline and may incur Provider charges. Output is status-only and never contains model response text, API keys, endpoints, environment-variable names, or raw errors. `model set` validates and persists the route before changing the in-memory Router, so a failed SQLite write cannot create a process-only route.
 
-The optional `mimo` provider is registered from `MIMO_API_KEY`, `MIMO_BASE_URL`, and `MIMO_MODEL`. The optional `deepseek` provider uses `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, and `DEEPSEEK_MODEL`; its defaults are `https://api.deepseek.com/anthropic` and `deepseek-v4-flash`. Only the API key is required. Base URLs must be absolute HTTPS URLs unless they target an exact loopback host over HTTP; embedded credentials, query strings, fragments, and redirects are rejected. API keys are bounded normalized UTF-8 without whitespace or control characters.
+The optional `mimo`, `deepseek`, and `anthropic` Providers load credentials from the process environment first and may then use the Go-owned system credential store. Windows stores exact supported keys in Credential Manager; non-Windows has no plaintext-file fallback. Credential status and mutation never return plaintext and a change currently requires process restart. Base URLs must be absolute HTTPS URLs unless they target an exact loopback host over HTTP; embedded credentials, query strings, fragments, and redirects are rejected. API keys are bounded normalized UTF-8 without whitespace or control characters.
 
 ## Durable Run Wake Intent
 
@@ -661,7 +670,7 @@ cyberagent run wake consume <run-id> --max-steps 1
 
 `run wake schedule` persists bounded retry intent with at most eight attempts, bounded delay/backoff, and a fixed deadline. Schedule and cancellation are digest-idempotent. Schema v74 also generation-fences one internal owner, but public output omits lease identity. These commands do not start a background loop, resume a Run, acquire a Run execution lease, call a model/tool, or execute a process.
 
-Schema v75 `run wake consume` is the separately gated foreground consumer. It handles at most one due intent and passes `--max-steps 1..8` only to the existing durable handoff and RunSupervisor, which keep Policy, budgets, cancellation, checkpoints, model/tool ledgers, and the private execution lease authoritative. A completed result replays without another model call. An uncertain handoff with no durable result remains prepared and fails closed for a competing request. Nothing runs until the operator invokes this command or clicks the corresponding control; no timer, service, startup task, or background worker is installed.
+Schema v75 `run wake consume` is the separately gated foreground consumer. It handles at most one due intent and passes `--max-steps 1..8` only to the existing durable handoff and RunSupervisor, which keep Policy, budgets, cancellation, checkpoints, model/tool ledgers, and the private execution lease authoritative. D1-J1 may automate this same path only when `api serve` or Desktop starts with `--enable-wake-worker` and a distinct control token. The worker is serial, polls within hard bounds, and always uses `max_steps=1`; no HTTP/UI route can enable it at runtime. It is not a service/startup task and has no Shell/Local/Docker dependency.
 
 ## TUI
 
@@ -760,6 +769,14 @@ cyberagent edit deny <edit-id> --reason "not needed"
 File edits replace the complete text content of one file. Existing files and new files under an existing workspace directory are supported. Absolute paths, `..` traversal, directory targets, symlink escapes, non-UTF-8 content, missing parent directories, and content over 256 KiB are rejected.
 
 Proposals are stored without modifying the workspace. `review-approve` and `review-deny` exact-bind the Run, Mission, Session, Workspace, proposal, and durable approval. `review-approve` records approval intent only and prints `file_written: false`; it never changes the workspace. The Desktop/Web Diff surface uses this review-only path and receives bounded redacted diff metadata without original/proposed file bodies.
+
+D1-I1 adds the interactive proposal path used by Desktop/Web. With
+`--enable-file-edit-proposals`, Go issues complete, untruncated, unredacted UTF-8 for
+one exact running Run/active Session/Workspace behind a five-minute opaque handle. The
+locally bundled Monaco editor receives no host path and submits only that handle plus
+replacement text. Go rechecks the current hash, bindings, secret policy, and
+`replace_file` Policy before creating a pending proposal. The editor cannot review,
+approve, apply, or directly write the file.
 
 Schema v76 `edit apply` is the separately authorized Run-bound write path. It reloads the exact Run/Mission/Session/Workspace/Edit/Approval, rechecks current Policy, resolves the target inside the stored Workspace, compares the current SHA-256 with the proposal's original hash, writes once, verifies the proposed digest, and persists an idempotent result. A replay reports `file_written: false` and does not write again. HTTP/React submit neither path nor file body. Run-bound edits cannot use the older `edit approve` command; that compatibility command remains only for proposals that are not bound to a Run. Proposed secrets are replaced with redaction markers before persistence and before any approved write. For exact multiline or whitespace-sensitive content, prefer `--content-file`; session `/write` trims the outer message whitespace.
 

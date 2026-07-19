@@ -73,8 +73,14 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		if a.modelControlEnabled {
 			resources = append(resources, "model-control")
 		}
+		if a.providerCredentialEnabled {
+			resources = append(resources, "provider-credential-control")
+		}
 		if a.fileEditReviewEnabled {
 			resources = append(resources, "file-edit-review-control")
+		}
+		if a.fileEditProposalEnabled {
+			resources = append(resources, "file-edit-proposal-control")
 		}
 		if a.runWakeControlEnabled {
 			resources = append(resources, "run-wake-control")
@@ -113,6 +119,9 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 	case "models":
 		if len(segments) == 1 {
 			return a.modelAvailability(request)
+		}
+		if len(segments) == 2 && segments[1] == "credentials" {
+			return a.providerCredentialStatuses(request)
 		}
 	case "runs":
 		return a.routeRuns(request, segments)
@@ -287,7 +296,7 @@ func (a *API) modelAvailability(request *http.Request) (any, *Page, error) {
 	for index, provider := range snapshot.Providers {
 		providers[index] = ProviderAvailabilityView{
 			Name: provider.Name, Kind: provider.Kind, Status: provider.Status,
-			Models:             append([]string(nil), provider.Models...),
+			Models:             append([]string{}, provider.Models...),
 			CredentialSource:   provider.CredentialSource,
 			NetworkRequired:    provider.NetworkRequired,
 			ConfigurationError: provider.ConfigurationError,
@@ -359,6 +368,8 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 			return a.runApprovals(request, segments[1])
 		case "file-edits":
 			return a.runFileEdits(request, segments[1])
+		case "file-edit-proposal-source":
+			return a.runFileEditProposalSource(request, segments[1])
 		case "wake-intent":
 			return a.runWakeIntent(request, segments[1])
 		case "operator-actions":
