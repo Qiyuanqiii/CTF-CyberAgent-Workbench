@@ -174,7 +174,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/skills/packages/inst
 - Cancellation must bind either the exact Run/Supervisor/model attempt or the exact Run/Specialist Agent/AgentAttempt/model attempt and carry a 16-to-256-byte `Idempotency-Key`. Clients cannot submit a lease id, generation, or fencing token. The JSON body is capped at 4 KiB; unknown fields and trailing JSON are rejected.
 - Session-message requests must bind the path Session to an exact running or paused Run and use `session_message_submission.v1`, 1-16384 UTF-8 content bytes, and a 16-to-256-byte idempotency key. The encoded JSON body is capped at 128 KiB to permit valid escaping; duplicate/unknown fields, trailing data, invalid UTF-8, query fields, and duplicate headers are rejected. The response returns neither content nor private identities.
 - Session cancellation binds the exact path Session/message and Run and is accepted only while the message is pending and unprepared. Lifecycle accepts only `start|pause|resume`; bounded execution accepts only `max_steps=1..8` and uses a private lease after freezing its selection. Neither response exposes content, model output, tool arguments, or lease identity.
-- Plan direction binds the path Run, persisted proposal, and `direction=1..3`; Deliver requires an existing selection. Provider credential control accepts an exact provider, explicit confirmation, and at most 2,560 secret bytes and never returns plaintext; a generation advances atomically only after candidate Registry, routes, and credential reads all succeed, otherwise the old generation remains active. FileEdit source is restricted to complete safe UTF-8 for an exact running Run/active Session; its five-minute handle can create only a pending proposal. Reissue with `expected_sha256` must match the current file, and recovery returns only a non-editable pending Diff. Verification evidence records only a redacted operator observation and neither runs a command nor becomes a model assertion, approval, or grant. The twenty-three control responses grant no general filesystem, process, Shell, Docker, Session-Grant, tool, or capability authority; only the separate apply route may write one exact approved and freshly rechecked file.
+- Plan direction binds the path Run, persisted proposal, and `direction=1..3`; Deliver requires an existing selection. Provider credential control accepts an exact provider, explicit confirmation, and at most 2,560 secret bytes and never returns plaintext; a generation advances atomically only after candidate Registry, routes, and credential reads all succeed, otherwise the old generation remains active. FileEdit source is restricted to complete safe UTF-8 for an exact running Run/active Session; its five-minute handle can create only a pending proposal. Reissue with `expected_sha256` must match the current file, and recovery returns only a non-editable pending Diff. Verification evidence records only a redacted operator observation and neither runs a command nor becomes a model assertion, approval, or grant. Verification association exact-binds one earlier plan item and one later observation but does not infer an aggregate outcome. Control responses grant no general filesystem, process, Shell, Docker, Session-Grant, tool, or capability authority; only the separate apply route may write one exact approved and freshly rechecked file.
 - SSE uses the same Authorization header; the token never enters the URL, cursor, or event data. Defaults allow at most 16 concurrent streams, 32 events per batch, 2 MiB per frame, 10,000 events per connection, a five-minute lifetime, and a two-second deadline on each write.
 - Event polling accepts only query `cursor` and a 1-100 `limit`; it rejects `Last-Event-ID`, cross-Run cursors, sequence gaps, and unknown parameters. An empty batch still returns a reusable high-water cursor, and polling itself writes no event.
 
@@ -191,6 +191,8 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/skills/packages/inst
 | `GET` | `/api/v1/workspaces/{workspace_id}/search` | One bounded deterministic filename/redacted-text search; canonical evidence references only, no indexer |
 | `GET` | `/api/v1/workspaces/{workspace_id}/repository-state` | Bounded exact-root Git metadata only; no parent discovery, host root, body, remote, process, network, or hook |
 | `GET` | `/api/v1/workspaces/{workspace_id}/repository-diff` | At most 50 secret-redacted exact-root patches; 64 KiB each/512 KiB total, no raw body, process, remote, network, hook, or mutation |
+| `GET` | `/api/v1/workspaces/{workspace_id}/repository-history` | At most 50 first-parent commits and 64 local branches; no author/email/body/remote/root/process/network/hook |
+| `GET` | `/api/v1/workspaces/{workspace_id}/repository-commits/{object_id}` | One exact lowercase SHA-1 commit's bounded changed-path/mode metadata; no blob body, checkout, ref mutation, remote, process, network, or hook |
 | `GET` | `/api/v1/operation-receipts` | At most 100 terminal metadata-only receipts; optional exact `run_id`, no operation key/path/private lease |
 | `GET` | `/api/v1/models` | Redacted Provider/model-route availability with one Registry generation; no key, Base URL, environment name, probe, or model call |
 | `GET` | `/api/v1/models/credentials` | Supported Provider system-store and Registry generation status only; fixed `plaintext_returned=false` |
@@ -231,7 +233,12 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/skills/packages/inst
 | `POST` | `/api/v1/runs/{run_id}/evidence-attachments` | Revalidate and append one exact Workspace file as non-authorizing Session evidence; no execution |
 | `GET` | `/api/v1/runs/{run_id}/verification-evidence` | At most 100 immutable operator observations with closed outcomes; no command/model/approval/authority inference |
 | `POST` | `/api/v1/runs/{run_id}/verification-evidence` | Record one redacted exact-bound `pass|fail|unknown` operator observation; no verification command or execution |
+| `GET` | `/api/v1/runs/{run_id}/verification-plan` | At most 50 immutable guidance-only operator plans and ordered checks; no outcome inference |
+| `POST` | `/api/v1/runs/{run_id}/verification-plan` | Record one exact-bound 1-32 item operator checklist; no command/model/execution/authority |
+| `GET` | `/api/v1/runs/{run_id}/verification-plan-coverage` | Per-item explicit pass/fail/unknown association counts and unobserved state; no aggregate pass |
+| `POST` | `/api/v1/runs/{run_id}/verification-plan-associations` | Immutably associate one later evidence record with one earlier plan item; no reassignment, execution, approval, or inference |
 | `GET` | `/api/v1/runs/{run_id}/code-handoff` | Regenerable Code-only Plan/queue/change/verification/action/report summary; no private body, resume, execution, or composite mutation |
+| `GET` | `/api/v1/runs/{run_id}/code-handoff/export` | Digest-bound Markdown/JSON export of one stable Handoff; no import, resume, mutation, acceptance, or execution |
 | `GET` | `/api/v1/runs/{run_id}/wake-intent` | Bounded public wake state without owner/lease identity |
 | `POST` | `/api/v1/runs/{run_id}/wake-intent` | Schedule bounded digest-idempotent wake intent; no execution |
 | `POST` | `/api/v1/runs/{run_id}/wake-intent/cancel` | Cancel the exact active intent without running it |
@@ -360,9 +367,9 @@ cyberagent api openapi
 cyberagent api openapi --output docs/openapi.json
 ```
 
-运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 62 个 path、67 个 operation 和 143 个 schema。测试逐条命中公开 handler，并确认普通 DTO 不包含 Workspace root、Artifact/Skill/Session 正文、模型输出、工具参数、私有 lifecycle、operation/fencing/lease owner、API key、Provider Base URL 或环境变量名。Explorer/Search/Repository Diff 绝不返回 Workspace root；它们只提供有界、脱敏且明确非授权的 Workspace 文本投影。行动中心、证据清单、验证 inventory 和 Code Handoff 只提供闭集或有界 metadata，不包含 private operation、message/report body 或 capability。Skill 安装请求仍是唯一有界 archive 传输，并明确排除 path/content/command/hook 字段；证据附件请求只包含相对引用与投影摘要，verification POST 只包含闭集 outcome 与有界文本。
+运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 68 个 path、74 个 operation 和 163 个 schema。测试逐条命中公开 handler，并确认普通 DTO 不包含 Workspace root、Artifact/Skill/Session 正文、模型输出、工具参数、私有 lifecycle、operation/fencing/lease owner、API key、Provider Base URL 或环境变量名。Explorer/Search/Repository Diff/History/Commit Detail 绝不返回 Workspace root；它们只提供有界、脱敏且明确非授权的 Workspace 投影。行动中心、证据清单、验证计划/结果/显式关联 coverage 和 Code Handoff 只提供闭集或有界 metadata，不包含 private operation、message/report body 或 capability。Skill 安装请求仍是唯一有界 archive 传输，并明确排除 path/content/command/hook 字段；证据附件请求只包含相对引用与投影摘要，verification evidence POST 只包含闭集 outcome 与有界文本，association POST 只包含精确 plan/item/evidence identity。
 
-The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract contains 62 paths, 67 operations, and 143 schemas. Tests exercise every handler and verify that ordinary DTOs omit Workspace roots, Artifact/Skill/Session bodies, model output, tool arguments, private lifecycle, operation/fencing/lease-owner identities, API keys, Provider base URLs, and environment-variable names. Explorer, Search, and Repository Diff never return a Workspace root; they are bounded, redacted, explicitly non-authorizing Workspace-text projections. Operator actions, evidence inventory, verification inventory, and Code Handoff expose only closed or bounded metadata without private operations, message/report bodies, or capability fields. The Skill-install request remains the sole bounded archive transport and explicitly omits path, content, command, and hook fields; evidence attachment carries only a relative reference and projected digest, while verification POST carries only a closed outcome and bounded text.
+The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract contains 68 paths, 74 operations, and 163 schemas. Tests exercise every handler and verify that ordinary DTOs omit Workspace roots, Artifact/Skill/Session bodies, model output, tool arguments, private lifecycle, operation/fencing/lease-owner identities, API keys, Provider base URLs, and environment-variable names. Explorer, Search, Repository Diff, History, and Commit Detail never return a Workspace root; they are bounded, redacted, explicitly non-authorizing Workspace projections. Operator actions, evidence inventory, verification plans/outcomes/explicit-association coverage, and Code Handoff expose only closed or bounded metadata without private operations, message/report bodies, or capability fields. The Skill-install request remains the sole bounded archive transport and explicitly omits path, content, command, and hook fields; evidence attachment carries only a relative reference and projected digest, verification evidence POST carries only a closed outcome and bounded text, and association POST carries only exact plan/item/evidence identity.
 
 ## 主动取消 / Active-Call Cancellation
 
@@ -419,6 +426,15 @@ returned local branches, and 1,024 scanned branch references. It excludes author
 identity, email, commit body, remote configuration, host root, subprocess, network,
 and hook data. Redirected or linked Git metadata fails closed.
 
+`GET /api/v1/workspaces/{workspace_id}/repository-commits/{object_id}` returns
+`repository_commit_detail.v1`. `object_id` must be one exact lowercase 40-character
+SHA-1 object ID; symbolic refs and revision expressions are rejected. The pure-Go
+reader compares that tree with its first parent under bounded entry/depth/change
+limits and returns canonical path plus added/modified/deleted and content/mode-change
+metadata. Author/email/body, blob content, remote/root, checkout/ref mutation,
+subprocess, network, and hook data remain absent. Missing objects and malformed or
+linked metadata fail closed rather than yielding a partial success.
+
 `GET /api/v1/runs/{run_id}/verification-plan` lists at most 50 immutable
 operator-authored plans. `POST` on the same path uses the existing distinct verification
 control capability, strict `operator_verification_plan.v1` JSON, and an in-memory
@@ -427,6 +443,15 @@ observation items. Go and SQLite exact-bind the active Code Session and keep
 `guidance_only=true`; command execution, model assertion, result inference, approval,
 and authority are always false. Results remain on the separate verification-evidence
 route.
+
+`POST /api/v1/runs/{run_id}/verification-plan-associations` records one immutable
+`operator_verification_plan_evidence_association.v1`. The request contains only exact
+plan, item, and evidence IDs plus an in-memory idempotency key. Go and SQLite require
+the same Code Run, active Session, Workspace, an earlier plan item, and one unassociated
+later evidence record. It cannot reassign evidence, execute a check, approve an action,
+or infer a result. `GET /api/v1/runs/{run_id}/verification-plan-coverage` returns only
+bounded per-item pass/fail/unknown counts and unobserved state; contradictory outcomes
+remain visible and there is no aggregate pass field.
 
 `GET /api/v1/runs/{run_id}/code-handoff/export?format=markdown|json` returns a
 `code_handoff_export.v1` envelope with at most 256 KiB of content, source event
@@ -480,4 +505,4 @@ Pagination is a bounded live SQLite projection, not a multi-request snapshot. Ap
 - No Artifact content route. Use the authenticated local CLI `artifact read` when content is explicitly required.
 - No real Shell, LocalSandbox, or Docker process execution. Schema v64 profile selection records intent only; HTTP exposes no runner start, Sandbox execution, approval, output-export, or Artifact-commit route. Existing approvals still resolve to audited dry-run results.
 - No per-resource authorization below the process token. Future remote or multi-user use requires a separate identity and authorization design.
-- Repository history has no checkout/fetch/push/ref-update endpoint. Verification plans do not run checks or imply outcomes. Handoff exports have no import/resume endpoint.
+- Repository history and exact commit detail have no checkout/fetch/push/ref-update or raw-blob endpoint. Verification plans and associations do not run checks or imply aggregate outcomes. Handoff exports have no import/resume endpoint.

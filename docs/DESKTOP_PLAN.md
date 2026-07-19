@@ -150,7 +150,7 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D0-B 增加精确 renderer origin、规范 `RequestURI`、外部 navigation/form/popup 阻断、secure build-tag 门禁、Windows CI 和 Windows 11 实机恢复记录；仍不增加业务 mutation。
 - [ ] 在正式便携或签名发行前补齐 Windows 10 x64 实机启动、第二实例、强制结束/重开和 WebView2 缺失路径矩阵。
 
-### D1：日常工作台（产品可用度约 93-95%）
+### D1：日常工作台（产品可用度约 94-96%）
 
 - [x] D1-R1 / schema v72：Go API 受控创建 Mission/Run/Session，严格注册 Workspace、Scope、默认预算、幂等 operation、事务事件和关闭 execution profile；React 可选择 Workspace/Profile/Surface/Phase 并在成功后刷新、选中新 Run。
 - [x] D1-R1 capability 与 `--enable-profile-control` 独立；creation-only token 不能访问旧控制 route，Wails native bridge 不增加方法。
@@ -207,7 +207,11 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D1-V2 / schema v80：Verify 增加与结果分离的不可变操作者计划/检查清单；固定 guidance-only 且不推导 pass。
 - [x] D1-F3：Handoff 增加带 source event high-water、byte count 和 SHA-256 的 Markdown/JSON 下载；下载不恢复或执行。
 - [x] D1-G3/V2/F3 普通功能门通过：Go 334.6 秒、post-audit 聚焦回归、vet、124 React、strict TypeScript、确定性 OpenAPI/TypeScript、Vite 与 Chrome 插件 production-bundle 检查均为绿色；OpenAPI 65/71/155，边界见 ADR 0050。
-- [ ] 下一批候选 D1-G4 exact-commit changed-file metadata、D1-V3 plan-item/evidence 显式关联和 R1 Runner 生命周期非产品 harness；累计六片后执行完整 robustness gate，Local/Docker 产品执行继续关闭。
+- [x] D1-G4：Repository 增加 exact-object、first-parent 的有界 changed-path/mode metadata；不读取 commit/blob 正文、身份、remote/root，不 checkout 或调用进程/网络/hook。
+- [x] D1-V3 / schema v81：Verify 增加 plan-item/evidence 不可变显式关联与 per-item coverage；矛盾观察保留，不生成整体 pass。
+- [x] Runtime R1：simulation-only Runner lifecycle contract 已覆盖 start/wait/cancel/timeout、wait graph、TERM/KILL、inspect/reap、partial/invalid start 与 orphan cleanup；无产品执行接线。
+- [x] D1-G4/V3/R1 后累计六片完整 robustness gate 通过：final Go/race 509/341 秒、ordinary/secure-Desktop test/vet、staticcheck/govulncheck/module、127 React、strict TypeScript、确定性契约、Vite/npm、Chrome、隐私/产物和 Windows 可复现构建全部为绿色；OpenAPI 68/74/163，GUI SHA-256 `77fb4d6fede1c1e3a0c3f3e9d39581e28f7a6880e0e25b222dcf0d3c701d1213`，边界见 ADR 0051。
+- [ ] 下一批候选 D1-G5 bounded redacted exact-commit file preview、D1-V4 Handoff/export coverage metadata 与 R2 test-only non-product process-tree conformance adapters；Local/Docker 产品执行继续关闭。
 - [ ] 所有状态 mutation 使用独立 control capability、Origin/Host 校验、稳定 operation key 和 typed errors；显式 Provider 诊断每次只允许一次有界无正文请求。CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。
 
@@ -239,4 +243,4 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - 安装、升级和卸载不会静默删除 Workspace、数据库、凭证或用户创建文件。
 - 未签名开发产物不得伪装成正式发布；正式包必须有可核验签名和哈希。
 
-ADR 0034 至 ADR 0047 分别记录可见壳、生命周期/事件续传、受控 Run 创建、Session message submission、Run 控制/有界交接、模型/Plan/审批、Provider/Diff/wake intent、前台 wake/独立 apply/惰性 Skill 安装、统一回执/Workspace evidence/便携构建诊断、Workspace search/non-authorizing attachment/receipt history、operator actions/evidence inventory/command palette、Go-issued editor/system credentials/bounded worker、安全编辑恢复/Provider generation/worker health，以及只读 Repository/change-set/Code Journey。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。
+ADR 0034 至 ADR 0051 依次记录桌面壳与生命周期、受控 Run/Session/Plan/审批/Provider/FileEdit/wake/Skill/Workspace/Repository/Verification/Handoff 能力、运行时防死锁/活锁，以及 exact commit、显式验证关联和 simulation-only Runner 生命周期边界。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。

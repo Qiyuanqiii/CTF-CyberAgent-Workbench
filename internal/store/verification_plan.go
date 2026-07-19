@@ -23,6 +23,32 @@ type verificationPlanQueryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
+func (s *SQLiteStore) GetVerificationPlan(ctx context.Context,
+	id string,
+) (verification.Plan, error) {
+	if id != strings.TrimSpace(id) || !domain.ValidAgentID(id) {
+		return verification.Plan{}, apperror.New(apperror.CodeInvalidArgument,
+			"verification plan identity is invalid")
+	}
+	value, itemCount, err := scanVerificationPlanHeader(s.db.QueryRowContext(ctx,
+		verificationPlanSelect+` WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return verification.Plan{}, apperror.New(apperror.CodeNotFound,
+			"verification plan was not found")
+	}
+	if err != nil {
+		return verification.Plan{}, err
+	}
+	value.Items, err = loadVerificationPlanItems(ctx, s.db, value.ID, itemCount)
+	if err != nil {
+		return verification.Plan{}, err
+	}
+	if err := value.Validate(); err != nil {
+		return verification.Plan{}, fmt.Errorf("stored verification plan is invalid: %w", err)
+	}
+	return value, nil
+}
+
 func (s *SQLiteStore) GetVerificationPlanByOperation(ctx context.Context,
 	keyDigest string,
 ) (verification.Plan, bool, error) {

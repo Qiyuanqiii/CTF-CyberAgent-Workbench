@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardCheck, LoaderCircle, RefreshCw } from "lucide-react";
+import { ClipboardCheck, Link2, LoaderCircle, RefreshCw } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import type { VerificationEvidenceRequestView } from "../api/types";
 import { formatDate } from "../lib/format";
@@ -12,12 +12,24 @@ export function VerificationEvidence({ client, runID }: {
 }) {
   const queryClient = useQueryClient();
   const operationKey = useRef("");
+  const associationKeys = useRef(new Map<string, { intent: string; key: string }>());
   const [outcome, setOutcome] = useState<VerificationEvidenceRequestView["outcome"]>("unknown");
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
+  const [associationTargets, setAssociationTargets] = useState<Record<string, string>>({});
   const query = useQuery({
     queryKey: ["run", runID, "verification-evidence"],
     queryFn: ({ signal }) => client.verificationEvidence(runID, signal),
+    enabled: Boolean(runID),
+  });
+  const plansQuery = useQuery({
+    queryKey: ["run", runID, "verification-plan"],
+    queryFn: ({ signal }) => client.verificationPlans(runID, signal),
+    enabled: Boolean(runID),
+  });
+  const coverageQuery = useQuery({
+    queryKey: ["run", runID, "verification-plan-coverage"],
+    queryFn: ({ signal }) => client.verificationPlanCoverage(runID, signal),
     enabled: Boolean(runID),
   });
   const record = useMutation({
@@ -33,10 +45,42 @@ export function VerificationEvidence({ client, runID }: {
       setSummary("");
       setOutcome("unknown");
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "verification-evidence"] });
+      void queryClient.invalidateQueries({ queryKey: ["run", runID, "verification-plan-coverage"] });
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "code-handoff"] });
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "events"] });
     },
   });
+  const associate = useMutation({
+    mutationFn: ({ evidenceID, planID, ordinal }: {
+      evidenceID: string; planID: string; ordinal: number;
+    }) => {
+      const intent = `${evidenceID}:${planID}:${ordinal}`;
+      let operation = associationKeys.current.get(evidenceID);
+      if (!operation || operation.intent !== intent) {
+        operation = { intent, key: `web-verification-association-${globalThis.crypto.randomUUID()}` };
+        associationKeys.current.set(evidenceID, operation);
+      }
+      return client.associateVerificationEvidence(runID, {
+        version: "operator_verification_plan_evidence_association.v1",
+        plan_id: planID, plan_item_ordinal: ordinal, evidence_id: evidenceID,
+      }, operation.key);
+    },
+    onSuccess: (_, input) => {
+      associationKeys.current.delete(input.evidenceID);
+      setAssociationTargets((current) => {
+        const next = { ...current };
+        delete next[input.evidenceID];
+        return next;
+      });
+      void queryClient.invalidateQueries({ queryKey: ["run", runID, "verification-plan-coverage"] });
+      void queryClient.invalidateQueries({ queryKey: ["run", runID, "code-handoff"] });
+      void queryClient.invalidateQueries({ queryKey: ["run", runID, "events"] });
+    },
+  });
+  const changeIntent = (change: () => void) => {
+    operationKey.current = "";
+    change();
+  };
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const normalizedTitle = title.trim();
@@ -45,6 +89,13 @@ export function VerificationEvidence({ client, runID }: {
     record.mutate({ version: "operator_verification_evidence.v1", outcome,
       title: normalizedTitle, summary: normalizedSummary });
   };
+  const planOptions = plansQuery.data?.items.flatMap((plan) => plan.items.map((item) => ({
+    key: JSON.stringify([plan.id, item.ordinal]), planID: plan.id, ordinal: item.ordinal,
+    label: `${plan.title} / Check ${item.ordinal}: ${item.title}`,
+  }))) ?? [];
+  const associationsByEvidence = new Map(coverageQuery.data?.associations.map((association) =>
+    [association.evidence_id, association]) ?? []);
+  const planTitles = new Map(plansQuery.data?.items.map((plan) => [plan.id, plan.title]) ?? []);
   return <section aria-label="Verification evidence" className="verification-evidence">
     <header className="operator-list-header">
       <div><ClipboardCheck aria-hidden="true" size={16} /><h2>Verification</h2></div>
@@ -52,38 +103,75 @@ export function VerificationEvidence({ client, runID }: {
         {query.data && <>
           <StatusBadge status={`${query.data.pass_count} pass`} />
           {query.data.fail_count > 0 && <StatusBadge status={`${query.data.fail_count} fail`} />}
+          {coverageQuery.data && <StatusBadge status={`${coverageQuery.data.associated_evidence_count} linked`} />}
         </>}
         <button aria-label="Refresh verification evidence" className="icon-button"
-          disabled={query.isFetching} onClick={() => void query.refetch()}
+          disabled={query.isFetching || plansQuery.isFetching || coverageQuery.isFetching}
+          onClick={() => {
+            void query.refetch();
+            void plansQuery.refetch();
+            void coverageQuery.refetch();
+          }}
           title="Refresh" type="button">
-          <RefreshCw aria-hidden="true" className={query.isFetching ? "spin" : ""} size={15} />
+          <RefreshCw aria-hidden="true"
+            className={query.isFetching || plansQuery.isFetching || coverageQuery.isFetching ? "spin" : ""}
+            size={15} />
         </button>
       </div>
     </header>
     {client.hasVerificationEvidence && <form className="verification-form" onSubmit={submit}>
       <label>Result<select aria-label="Verification result" value={outcome}
-        onChange={(event) => setOutcome(event.target.value as VerificationEvidenceRequestView["outcome"])}>
+        onChange={(event) => changeIntent(() =>
+          setOutcome(event.target.value as VerificationEvidenceRequestView["outcome"]))}>
         <option value="pass">Pass</option><option value="fail">Fail</option>
         <option value="unknown">Unknown</option>
       </select></label>
       <label>Title<input maxLength={160} required value={title}
-        onChange={(event) => setTitle(event.target.value)} /></label>
+        onChange={(event) => changeIntent(() => setTitle(event.target.value))} /></label>
       <label className="verification-summary">Summary<textarea maxLength={2048} required rows={3}
-        value={summary} onChange={(event) => setSummary(event.target.value)} /></label>
+        value={summary} onChange={(event) => changeIntent(() => setSummary(event.target.value))} /></label>
       <button className="command-button" disabled={record.isPending || !title.trim() || !summary.trim()}
         type="submit">{record.isPending ? <LoaderCircle aria-hidden="true" className="spin" size={15} /> :
           <ClipboardCheck aria-hidden="true" size={15} />}Record</button>
     </form>}
     {record.error && <ErrorState error={record.error} />}
+    {associate.error && <ErrorState error={associate.error} />}
     {query.isLoading && <LoadingState label="Loading verification evidence" />}
     {query.isError && <ErrorState error={query.error} />}
+    {plansQuery.isError && <ErrorState error={plansQuery.error} />}
+    {coverageQuery.isError && <ErrorState error={coverageQuery.error} />}
     {query.data?.items.length === 0 && <EmptyState>No verification evidence recorded</EmptyState>}
     {query.data && query.data.items.length > 0 && <div className="verification-list">
-      {query.data.items.map((item) => <article key={item.id}>
+      {query.data.items.map((item) => {
+        const linked = associationsByEvidence.get(item.id);
+        const selected = associationTargets[item.id] ?? "";
+        const target = planOptions.find((option) => option.key === selected);
+        return <article key={item.id}>
         <header><StatusBadge status={item.outcome} /><strong>{item.title}</strong>
           <time dateTime={item.recorded_at}>{formatDate(item.recorded_at)}</time></header>
         <p>{item.summary}</p>
-      </article>)}
+        {linked ? <div className="verification-association-state">
+          <Link2 aria-hidden="true" size={13} /><span>{planTitles.get(linked.plan_id) ?? linked.plan_id}</span>
+          <StatusBadge status={`check ${linked.plan_item_ordinal}`} />
+        </div> : client.hasVerificationEvidence && planOptions.length > 0 &&
+        <div className="verification-association-controls">
+          <select aria-label={`Plan item for ${item.title}`} disabled={associate.isPending} value={selected}
+            onChange={(event) => {
+              associationKeys.current.delete(item.id);
+              setAssociationTargets((current) => ({ ...current, [item.id]: event.target.value }));
+            }}>
+            <option value="">Select plan check</option>
+            {planOptions.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
+          </select>
+          <button aria-label={`Associate ${item.title}`} className="compact-command"
+            disabled={!target || associate.isPending} onClick={() => target && associate.mutate({
+              evidenceID: item.id, planID: target.planID, ordinal: target.ordinal,
+            })} type="button">
+            {associate.isPending ? <LoaderCircle aria-hidden="true" className="spin" size={14} /> :
+              <Link2 aria-hidden="true" size={14} />}Associate</button>
+        </div>}
+      </article>;
+      })}
     </div>}
   </section>;
 }

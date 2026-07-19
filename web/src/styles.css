@@ -396,9 +396,18 @@ td code { font-size: 11px; }
 .repository-history-grid h3 { margin: 0 0 8px; font-size: 11px; }
 .repository-branch-list, .repository-commit-list { display: grid; }
 .repository-branch-list > div { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; min-height: 32px; border-bottom: 1px solid var(--border); font-size: 10px; }
-.repository-branch-list span, .repository-commit-list span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.repository-commit-list > div { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 9px; min-height: 34px; border-bottom: 1px solid var(--border); font-size: 10px; }
+.repository-branch-list span, .repository-commit-list > div > span:not(.repository-commit-flags) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-commit-list > div { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto 32px; align-items: center; gap: 9px; min-height: 34px; border-bottom: 1px solid var(--border); font-size: 10px; }
 .repository-commit-list time { color: var(--muted); }
+.repository-commit-flags { min-width: 58px; display: flex; justify-content: flex-end; }
+.repository-commit-detail { min-width: 0; border-bottom: 1px solid var(--border); }
+.repository-commit-detail > header { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.repository-commit-detail > header > span { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.repository-commit-detail > header strong { min-width: 0; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.repository-commit-change-list { display: grid; }
+.repository-commit-change-list > div { min-width: 0; display: grid; grid-template-columns: 76px minmax(180px, 1fr) 170px 70px; align-items: center; gap: 9px; min-height: 36px; border-top: 1px solid var(--border); font-size: 10px; }
+.repository-commit-change-list code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-commit-change-list > div > span:not(.status-badge) { color: var(--muted); }
 .repository-diff-summary { min-height: 38px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 10px; }
 .repository-diff-list { display: grid; }
 .repository-diff-list > article { min-width: 0; border-bottom: 1px solid var(--border); }
@@ -426,6 +435,7 @@ td code { font-size: 11px; }
 .verification-plan-list li { padding-left: 3px; font-size: 11px; }
 .verification-plan-list li strong, .verification-plan-list li span { display: block; overflow-wrap: anywhere; }
 .verification-plan-list li span { margin-top: 2px; color: var(--muted); }
+.verification-coverage-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
 .verification-form { display: grid; grid-template-columns: 130px minmax(180px, .8fr) minmax(260px, 1.5fr) auto; align-items: end; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--border); }
 .verification-form label { min-width: 0; display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
 .verification-form input, .verification-form select, .verification-form textarea { width: 100%; min-width: 0; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--surface); color: var(--ink); font: inherit; }
@@ -437,6 +447,10 @@ td code { font-size: 11px; }
 .verification-list strong { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .verification-list time { color: var(--muted); font-size: 10px; text-align: right; }
 .verification-list p { margin: 8px 0 0; color: #3c484f; font-size: 11px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.verification-association-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; margin-top: 9px; }
+.verification-association-controls select { width: 100%; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--border-strong); border-radius: 5px; background: var(--surface); color: var(--ink); font-size: 10px; }
+.verification-association-state { display: flex; align-items: center; gap: 7px; margin-top: 9px; color: var(--muted); font-size: 10px; }
+.verification-association-state span:not(.status-badge) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .handoff-grid { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); margin: 0; border-bottom: 1px solid var(--border); }
 .handoff-grid .key-value { padding: 11px 10px; border-right: 1px solid var(--border); }
 .handoff-grid .key-value:nth-child(4n) { border-right: 0; }
@@ -656,7 +670,13 @@ td code { font-size: 11px; }
 	.repository-diff-list > article > header { grid-template-columns: minmax(0, 1fr) auto; padding: 7px 0; }
 	.repository-diff-list > article > header .status-badge { justify-self: start; }
 	.repository-history-grid { grid-template-columns: minmax(0, 1fr); }
-	.repository-commit-list > div { grid-template-columns: auto minmax(0, 1fr); padding: 5px 0; }
+	.repository-commit-list > div { grid-template-columns: auto minmax(0, 1fr) 32px; padding: 5px 0; }
+	.repository-commit-list time, .repository-commit-flags { grid-column: 2; }
+	.repository-commit-flags { min-width: 0; justify-content: flex-start; }
+	.repository-commit-list .icon-button { grid-column: 3; grid-row: 1 / span 2; }
+	.repository-commit-detail > header { align-items: flex-start; flex-direction: column; padding: 8px 0; }
+	.repository-commit-change-list > div { grid-template-columns: 76px minmax(0, 1fr); padding: 6px 0; }
+	.repository-commit-change-list > div > span:not(.status-badge) { grid-column: 2; }
 	.verification-plan-items fieldset { grid-template-columns: minmax(0, 1fr); }
 	.verification-plan-actions { align-items: stretch; flex-direction: column; }
 	.verification-plan-actions .command-button, .verification-plan-actions .compact-command { width: 100%; justify-content: center; }
@@ -666,6 +686,8 @@ td code { font-size: 11px; }
 	.verification-form .command-button { width: 100%; }
 	.verification-list article > header { grid-template-columns: auto minmax(0, 1fr); }
 	.verification-list time { grid-column: 2; text-align: left; }
+	.verification-association-controls { grid-template-columns: minmax(0, 1fr); }
+	.verification-association-controls .compact-command { width: 100%; justify-content: center; }
 	.handoff-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.handoff-grid .key-value:nth-child(2n) { border-right: 0; }
 	.handoff-export-actions { align-items: stretch; flex-wrap: wrap; padding: 8px 0; }

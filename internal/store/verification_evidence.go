@@ -19,6 +19,22 @@ const verificationEvidenceSelect = `SELECT id, protocol_version, operation_key_d
 	summary_sha256, redacted, recorded_by, event_sequence, created_at
 	FROM operator_verification_evidence`
 
+func (s *SQLiteStore) GetVerificationEvidence(ctx context.Context,
+	id string,
+) (verification.Evidence, error) {
+	if id != strings.TrimSpace(id) || !domain.ValidAgentID(id) {
+		return verification.Evidence{}, apperror.New(apperror.CodeInvalidArgument,
+			"verification evidence identity is invalid")
+	}
+	value, err := scanVerificationEvidence(s.db.QueryRowContext(ctx,
+		verificationEvidenceSelect+` WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return verification.Evidence{}, apperror.New(apperror.CodeNotFound,
+			"verification evidence was not found")
+	}
+	return value, err
+}
+
 func (s *SQLiteStore) GetVerificationEvidenceByOperation(ctx context.Context,
 	keyDigest string,
 ) (verification.Evidence, bool, error) {

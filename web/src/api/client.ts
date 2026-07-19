@@ -38,6 +38,7 @@ import type {
   RepositoryStateView,
   RepositoryDiffView,
   RepositoryHistoryView,
+  RepositoryCommitDetailView,
   RunCreationControlRequestView,
   RunCreationControlView,
   RunExecutionControlRequestView,
@@ -68,6 +69,9 @@ import type {
   VerificationPlanControlView,
   VerificationPlanInventoryView,
   VerificationPlanRequestView,
+  VerificationAssociationRequestView,
+  VerificationAssociationControlView,
+  VerificationPlanCoverageInventoryView,
 } from "./types";
 
 export type QueryValue = boolean | number | string | undefined;
@@ -1152,10 +1156,13 @@ function parseRepositoryHistory(value: unknown, workspaceID: string): Repository
       "INVALID_RESPONSE", 502);
   }
   const hashes = new Set<string>();
+  const objectIDs = new Set<string>();
   const commits = value.commits.map((commit) => {
-    if (!hasExactKeys(commit, ["committed_at", "hash", "parent_count", "redacted",
+    if (!hasExactKeys(commit, ["committed_at", "hash", "object_id", "parent_count", "redacted",
       "subject", "subject_bounded"]) || typeof commit.hash !== "string" ||
       !/^[0-9a-f]{12}$/u.test(commit.hash) || hashes.has(commit.hash) ||
+      typeof commit.object_id !== "string" || !/^[0-9a-f]{40}$/u.test(commit.object_id) ||
+      !commit.object_id.startsWith(commit.hash) || objectIDs.has(commit.object_id) ||
       typeof commit.subject !== "string" || commit.subject.length === 0 ||
       [...commit.subject].length > 512 || /[\u0000-\u001f\u007f]/u.test(commit.subject) ||
       !safeBoundedCount(commit.parent_count, 10_000) || !validDate(commit.committed_at) ||
@@ -1164,6 +1171,7 @@ function parseRepositoryHistory(value: unknown, workspaceID: string): Repository
         "INVALID_RESPONSE", 502);
     }
     hashes.add(commit.hash);
+    objectIDs.add(commit.object_id);
     return commit;
   });
   const branchNames = new Set<string>();
@@ -1191,6 +1199,73 @@ function parseRepositoryHistory(value: unknown, workspaceID: string): Repository
       "INVALID_RESPONSE", 502);
   }
   return { ...value, commits, branches } as unknown as RepositoryHistoryView;
+}
+
+function parseRepositoryCommitDetail(value: unknown, workspaceID: string,
+  objectID: string): RepositoryCommitDetailView {
+  const keys = ["author_identity_included", "available", "changed_file_count", "changes",
+    "checkout_performed", "commit_body_included", "committed_at", "file_content_included",
+    "first_parent_only", "hash", "hooks_executed", "kind", "network_used", "object_id",
+    "omitted_change_count", "parent_count", "patch_included", "process_started",
+    "protocol_version", "read_only", "redaction_count", "reference_updated",
+    "remote_config_included", "returned_change_count", "root_path_exposed", "subject",
+    "truncated", "workspace_id"];
+  if (!hasExactKeys(value, keys) || value.protocol_version !== "repository_commit_detail.v1" ||
+    value.workspace_id !== workspaceID || value.object_id !== objectID ||
+    !/^[0-9a-f]{40}$/u.test(String(value.object_id)) ||
+    !["none", "git"].includes(String(value.kind)) ||
+    typeof value.available !== "boolean" || value.available !== (value.kind === "git") ||
+    value.first_parent_only !== true || value.read_only !== true ||
+    value.root_path_exposed !== false || value.author_identity_included !== false ||
+    value.commit_body_included !== false || value.file_content_included !== false ||
+    value.patch_included !== false || value.remote_config_included !== false ||
+    value.checkout_performed !== false || value.reference_updated !== false ||
+    value.process_started !== false || value.network_used !== false ||
+    value.hooks_executed !== false || typeof value.truncated !== "boolean" ||
+    !Array.isArray(value.changes) || value.changes.length > 200 ||
+    !safeBoundedCount(value.changed_file_count, 40_000) ||
+    !safeBoundedCount(value.returned_change_count, 200) ||
+    value.returned_change_count !== value.changes.length ||
+    !safeBoundedCount(value.omitted_change_count, 40_000) ||
+    value.changed_file_count !== value.returned_change_count + value.omitted_change_count ||
+    !safeBoundedCount(value.redaction_count, 40_000) ||
+    !safeBoundedCount(value.parent_count, 1024)) {
+    throw new APIRequestError("Repository commit detail violated its exact read-only contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const paths = new Set<string>();
+  const kinds = ["", "regular", "executable", "symlink", "submodule"];
+  const changes = value.changes.map((change) => {
+    if (!hasExactKeys(change, ["change", "content_changed", "current_kind", "mode_changed",
+      "path", "previous_kind"]) || !validWorkspaceRelativePath(change.path) ||
+      change.path === "." || paths.has(String(change.path)) ||
+      !["added", "modified", "deleted"].includes(String(change.change)) ||
+      !kinds.includes(String(change.previous_kind)) || !kinds.includes(String(change.current_kind)) ||
+      typeof change.content_changed !== "boolean" || typeof change.mode_changed !== "boolean" ||
+      (!change.content_changed && !change.mode_changed) ||
+      (change.change === "added" && (change.previous_kind !== "" || change.current_kind === "")) ||
+      (change.change === "deleted" && (change.previous_kind === "" || change.current_kind !== "")) ||
+      (change.change === "modified" &&
+        (change.previous_kind === "" || change.current_kind === ""))) {
+      throw new APIRequestError("Repository commit file metadata widened content authority",
+        "INVALID_RESPONSE", 502);
+    }
+    paths.add(String(change.path));
+    return change;
+  });
+  if ((!value.available && (value.hash !== "" || value.subject !== "" ||
+    value.committed_at !== "0001-01-01T00:00:00Z" || value.parent_count !== 0 ||
+    value.changed_file_count !== 0 || value.omitted_change_count !== 0 ||
+    value.redaction_count !== 0 || value.truncated)) ||
+    (value.available && (typeof value.hash !== "string" || !/^[0-9a-f]{12}$/u.test(value.hash) ||
+      !objectID.startsWith(value.hash) || typeof value.subject !== "string" ||
+      value.subject.length === 0 || [...value.subject].length > 512 ||
+      /[\u0000-\u001f\u007f]/u.test(value.subject) || !validDate(value.committed_at))) ||
+    (value.omitted_change_count > 0 && !value.truncated)) {
+    throw new APIRequestError("Repository commit detail contains inconsistent bounded facts",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, changes } as unknown as RepositoryCommitDetailView;
 }
 
 function validVerificationText(value: unknown, maximum: number, multiline: boolean): value is string {
@@ -1326,6 +1401,152 @@ function parseVerificationPlanInventory(value: unknown,
 	  "INVALID_RESPONSE", 502);
   }
   return { ...value, items } as unknown as VerificationPlanInventoryView;
+}
+
+function parseVerificationAssociation(value: unknown, runID: string,
+  control = false): VerificationAssociationControlView {
+  const keys = ["approval", "associated_at", "association_event_sequence",
+    "authority_granted", "command_executed", "evidence_event_sequence", "evidence_id",
+    "evidence_outcome", "id", "immutable", "metadata_only", "model_assertion",
+    "operator_supplied", "plan_id", "plan_item_ordinal", "plan_item_sha256",
+    "protocol_version", "record_rewritten", "result_inferred", "run_id", "session_id",
+    "workspace_id"];
+  if (control) keys.push("replayed");
+  if (!hasExactKeys(value, keys) ||
+    value.protocol_version !== "operator_verification_plan_evidence_association.v1" ||
+    value.run_id !== runID || !boundedIdentity(value.id) || !boundedIdentity(value.session_id) ||
+    !boundedIdentity(value.workspace_id) || !boundedIdentity(value.plan_id) ||
+    !safePositiveInteger(value.plan_item_ordinal) || value.plan_item_ordinal > 32 ||
+    !isSHA256(value.plan_item_sha256) || !boundedIdentity(value.evidence_id) ||
+    !["pass", "fail", "unknown"].includes(String(value.evidence_outcome)) ||
+    !safePositiveInteger(value.evidence_event_sequence) ||
+    !safePositiveInteger(value.association_event_sequence) ||
+    value.association_event_sequence <= value.evidence_event_sequence ||
+    !validDate(value.associated_at) || value.immutable !== true ||
+    value.operator_supplied !== true || value.metadata_only !== true ||
+    value.command_executed !== false || value.model_assertion !== false ||
+    value.result_inferred !== false || value.record_rewritten !== false ||
+    value.approval !== false || value.authority_granted !== false ||
+    (control && typeof value.replayed !== "boolean")) {
+    throw new APIRequestError("Verification association widened result or mutation authority",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as VerificationAssociationControlView;
+}
+
+function parseVerificationPlanCoverage(value: unknown,
+  runID: string): VerificationPlanCoverageInventoryView {
+  const keys = ["approval", "associated_evidence_count", "associations",
+    "associations_truncated", "authority_granted", "command_executed", "metadata_only",
+    "model_assertion", "observed_plan_item_count", "plan_count", "plan_item_count", "plans",
+    "plans_truncated", "protocol_version", "read_only", "record_rewritten",
+    "result_inferred", "run_id", "session_id", "workspace_id"];
+  if (!hasExactKeys(value, keys) ||
+    value.protocol_version !== "operator_verification_plan_coverage.v1" ||
+    value.run_id !== runID || !boundedIdentity(value.session_id) ||
+    !boundedIdentity(value.workspace_id) || !Array.isArray(value.plans) ||
+    value.plans.length > 50 || value.plan_count !== value.plans.length ||
+    !safeBoundedCount(value.plan_item_count, 1600) ||
+    !safeBoundedCount(value.observed_plan_item_count, 1600) ||
+    value.observed_plan_item_count > value.plan_item_count ||
+    !safeBoundedCount(value.associated_evidence_count, 1_000_000_000) ||
+    !Array.isArray(value.associations) || value.associations.length > 100 ||
+    typeof value.plans_truncated !== "boolean" ||
+    typeof value.associations_truncated !== "boolean" || value.metadata_only !== true ||
+    value.read_only !== true || value.result_inferred !== false ||
+    value.command_executed !== false || value.model_assertion !== false ||
+    value.record_rewritten !== false || value.approval !== false ||
+    value.authority_granted !== false) {
+    throw new APIRequestError("Verification coverage widened metadata-only authority",
+      "INVALID_RESPONSE", 502);
+  }
+  const planIDs = new Set<string>();
+  const planItems = new Map<string, Map<number, string>>();
+  let itemTotal = 0;
+  let observedTotal = 0;
+  let associationTotal = 0;
+  const plans = value.plans.map((plan) => {
+    if (!hasExactKeys(plan, ["associated_evidence_count", "item_count", "items",
+      "observed_item_count", "plan_id", "plan_sha256"]) ||
+      !boundedIdentity(plan.plan_id) || planIDs.has(String(plan.plan_id)) ||
+      !isSHA256(plan.plan_sha256) || !Array.isArray(plan.items) ||
+      plan.items.length < 1 || plan.items.length > 32 || plan.item_count !== plan.items.length ||
+      !safeBoundedCount(plan.observed_item_count, 32) ||
+      !safeBoundedCount(plan.associated_evidence_count, 1_000_000_000)) {
+      throw new APIRequestError("Verification coverage plan metadata is invalid",
+        "INVALID_RESPONSE", 502);
+    }
+    const ordinals = new Map<number, string>();
+    let observed = 0;
+    let associated = 0;
+    const items = plan.items.map((item, index) => {
+      if (!hasExactKeys(item, ["associated_evidence_count", "fail_count", "item_sha256",
+        "latest_association_event_sequence", "ordinal", "pass_count", "unknown_count"]) ||
+        item.ordinal !== index + 1 || !isSHA256(item.item_sha256) ||
+        !safeBoundedCount(item.associated_evidence_count, 1_000_000_000) ||
+        !safeBoundedCount(item.pass_count, 1_000_000_000) ||
+        !safeBoundedCount(item.fail_count, 1_000_000_000) ||
+        !safeBoundedCount(item.unknown_count, 1_000_000_000) ||
+        item.pass_count + item.fail_count + item.unknown_count !==
+          item.associated_evidence_count ||
+        !safeBoundedCount(item.latest_association_event_sequence, Number.MAX_SAFE_INTEGER) ||
+        ((item.associated_evidence_count === 0) !==
+          (item.latest_association_event_sequence === 0))) {
+        throw new APIRequestError("Verification coverage item inferred a non-explicit result",
+          "INVALID_RESPONSE", 502);
+      }
+      if (item.associated_evidence_count > 0) observed += 1;
+      associated += Number(item.associated_evidence_count);
+      ordinals.set(Number(item.ordinal), String(item.item_sha256));
+      return item;
+    });
+    if (plan.observed_item_count !== observed || plan.associated_evidence_count !== associated) {
+      throw new APIRequestError("Verification coverage plan counts are inconsistent",
+        "INVALID_RESPONSE", 502);
+    }
+    planIDs.add(String(plan.plan_id));
+    planItems.set(String(plan.plan_id), ordinals);
+    itemTotal += Number(plan.item_count);
+    observedTotal += observed;
+    associationTotal += associated;
+    return { ...plan, items };
+  });
+  const associationIDs = new Set<string>();
+  const evidenceIDs = new Set<string>();
+  const associations = value.associations.map((association) => {
+    if (!hasExactKeys(association, ["associated_at", "association_event_sequence",
+      "evidence_event_sequence", "evidence_id", "evidence_outcome", "id", "plan_id",
+      "plan_item_ordinal", "plan_item_sha256"]) || !boundedIdentity(association.id) ||
+      associationIDs.has(String(association.id)) || !boundedIdentity(association.plan_id) ||
+      !safePositiveInteger(association.plan_item_ordinal) || association.plan_item_ordinal > 32 ||
+      !isSHA256(association.plan_item_sha256) || !boundedIdentity(association.evidence_id) ||
+      evidenceIDs.has(String(association.evidence_id)) ||
+      !["pass", "fail", "unknown"].includes(String(association.evidence_outcome)) ||
+      !safePositiveInteger(association.evidence_event_sequence) ||
+      !safePositiveInteger(association.association_event_sequence) ||
+      association.association_event_sequence <= association.evidence_event_sequence ||
+      !validDate(association.associated_at)) {
+      throw new APIRequestError("Verification coverage association metadata is invalid",
+        "INVALID_RESPONSE", 502);
+    }
+    const knownItems = planItems.get(String(association.plan_id));
+    if (knownItems && knownItems.get(Number(association.plan_item_ordinal)) !==
+      association.plan_item_sha256) {
+      throw new APIRequestError("Verification association escaped its exact plan item",
+        "INVALID_RESPONSE", 502);
+    }
+    associationIDs.add(String(association.id));
+    evidenceIDs.add(String(association.evidence_id));
+    return association;
+  });
+  if (itemTotal !== value.plan_item_count || observedTotal !== value.observed_plan_item_count ||
+    associationTotal !== value.associated_evidence_count ||
+    (value.plans_truncated && plans.length !== 50) ||
+    (value.associations_truncated && associations.length !== 100)) {
+    throw new APIRequestError("Verification coverage aggregate is inconsistent",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, plans, associations } as unknown as VerificationPlanCoverageInventoryView;
 }
 
 function parseCodeHandoff(value: unknown, runID: string): CodeHandoffView {
@@ -1862,6 +2083,17 @@ export class CyberAgentClient {
     ), workspaceID);
   }
 
+  async repositoryCommit(workspaceID: string, objectID: string,
+    signal?: AbortSignal): Promise<RepositoryCommitDetailView> {
+    if (!boundedIdentity(workspaceID) || workspaceID.trim() !== workspaceID ||
+      !/^[0-9a-f]{40}$/u.test(objectID)) {
+      throw new Error("A normalized Workspace identity and exact commit object are required");
+    }
+    return parseRepositoryCommitDetail(await this.get<unknown>(
+      `/workspaces/${encodeURIComponent(workspaceID)}/repository-commits/${objectID}`, {}, signal,
+    ), workspaceID, objectID);
+  }
+
   async operationReceiptHistory(runID = "",
     signal?: AbortSignal): Promise<OperationReceiptHistoryView> {
     if (runID !== "" && (!boundedIdentity(runID) || runID.trim() !== runID)) {
@@ -1940,6 +2172,29 @@ export class CyberAgentClient {
     return parseVerificationPlan(await this.sendControl<unknown>(
       `/runs/${encodeURIComponent(runID)}/verification-plan`, body,
       idempotencyKey, signal), runID, "", "", true);
+  }
+
+  async verificationPlanCoverage(runID: string,
+    signal?: AbortSignal): Promise<VerificationPlanCoverageInventoryView> {
+    if (!boundedIdentity(runID) || runID.trim() !== runID) {
+      throw new Error("A normalized Run identity is required");
+    }
+    return parseVerificationPlanCoverage(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/verification-plan-coverage`, {}, signal,
+    ), runID);
+  }
+
+  async associateVerificationEvidence(runID: string, body: VerificationAssociationRequestView,
+    idempotencyKey: string, signal?: AbortSignal): Promise<VerificationAssociationControlView> {
+    if (!this.hasVerificationEvidence || !boundedIdentity(runID) ||
+      body.version !== "operator_verification_plan_evidence_association.v1" ||
+      !boundedIdentity(body.plan_id) || !safePositiveInteger(body.plan_item_ordinal) ||
+      body.plan_item_ordinal > 32 || !boundedIdentity(body.evidence_id)) {
+      throw new Error("Verification capability and exact plan/evidence identities are required");
+    }
+    return parseVerificationAssociation(await this.sendControl<unknown>(
+      `/runs/${encodeURIComponent(runID)}/verification-plan-associations`, body,
+      idempotencyKey, signal), runID, true);
   }
 
   async codeHandoff(runID: string, signal?: AbortSignal): Promise<CodeHandoffView> {

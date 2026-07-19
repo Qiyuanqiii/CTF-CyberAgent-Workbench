@@ -5,15 +5,25 @@ import { describe, expect, it, vi } from "vitest";
 import type { CyberAgentClient } from "../api/client";
 import { VerificationPlan } from "./verification-plan";
 
+const emptyCoverage = () => ({
+  protocol_version: "operator_verification_plan_coverage.v1", run_id: "run-1",
+  session_id: "session-1", workspace_id: "workspace-1", plans: [], plan_count: 0,
+  plan_item_count: 0, observed_plan_item_count: 0, associated_evidence_count: 0,
+  associations: [], plans_truncated: false, associations_truncated: false,
+  metadata_only: true, read_only: true, result_inferred: false, command_executed: false,
+  model_assertion: false, record_rewritten: false, approval: false, authority_granted: false,
+});
+
 describe("VerificationPlan", () => {
   it("records a bounded operator checklist without a result field", async () => {
     const verificationPlans = vi.fn().mockResolvedValue({
       protocol_version: "operator_verification_plan_inventory.v1", run_id: "run-1",
       session_id: "session-1", workspace_id: "workspace-1", items: [], truncated: false,
     });
+    const verificationPlanCoverage = vi.fn().mockResolvedValue(emptyCoverage());
     const recordVerificationPlan = vi.fn().mockResolvedValue({ id: "verification-plan-1" });
     const client = { hasVerificationEvidence: true, verificationPlans,
-      recordVerificationPlan } as unknown as CyberAgentClient;
+      verificationPlanCoverage, recordVerificationPlan } as unknown as CyberAgentClient;
     const user = userEvent.setup();
     render(<QueryClientProvider client={new QueryClient()}>
       <VerificationPlan client={client} runID="run-1" />
@@ -39,12 +49,13 @@ describe("VerificationPlan", () => {
       protocol_version: "operator_verification_plan_inventory.v1", run_id: "run-1",
       session_id: "session-1", workspace_id: "workspace-1", items: [], truncated: false,
     });
+    const verificationPlanCoverage = vi.fn().mockResolvedValue(emptyCoverage());
     const recordVerificationPlan = vi.fn()
       .mockRejectedValueOnce(new Error("uncertain transport failure"))
       .mockRejectedValueOnce(new Error("uncertain transport failure"))
       .mockResolvedValueOnce({ id: "verification-plan-1" });
     const client = { hasVerificationEvidence: true, verificationPlans,
-      recordVerificationPlan } as unknown as CyberAgentClient;
+      verificationPlanCoverage, recordVerificationPlan } as unknown as CyberAgentClient;
     const user = userEvent.setup();
     render(<QueryClientProvider client={new QueryClient()}>
       <VerificationPlan client={client} runID="run-1" />
@@ -66,5 +77,31 @@ describe("VerificationPlan", () => {
     await waitFor(() => expect(recordVerificationPlan).toHaveBeenCalledTimes(3));
     expect(recordVerificationPlan.mock.calls[2]?.[2])
       .not.toBe(recordVerificationPlan.mock.calls[0]?.[2]);
+  });
+
+  it("shows contradictory explicit observations without inferring an overall result", async () => {
+    const verificationPlans = vi.fn().mockResolvedValue({
+      protocol_version: "operator_verification_plan_inventory.v1", run_id: "run-1",
+      session_id: "session-1", workspace_id: "workspace-1", truncated: false,
+      items: [{ id: "plan-1", title: "Release checks", summary: "Operator guidance",
+        created_at: "2026-07-20T01:00:00Z", items: [{ ordinal: 1,
+          title: "Focused tests", expected_observation: "Observe explicit results" }] }],
+    });
+    const verificationPlanCoverage = vi.fn().mockResolvedValue({
+      ...emptyCoverage(), plan_count: 1, plan_item_count: 1, observed_plan_item_count: 1,
+      associated_evidence_count: 2, plans: [{ plan_id: "plan-1", plan_sha256: "a".repeat(64),
+        item_count: 1, observed_item_count: 1, associated_evidence_count: 2,
+        items: [{ ordinal: 1, item_sha256: "b".repeat(64), associated_evidence_count: 2,
+          pass_count: 1, fail_count: 1, unknown_count: 0,
+          latest_association_event_sequence: 8 }] }],
+    });
+    const client = { hasVerificationEvidence: true, verificationPlans,
+      verificationPlanCoverage, recordVerificationPlan: vi.fn() } as unknown as CyberAgentClient;
+    render(<QueryClientProvider client={new QueryClient()}>
+      <VerificationPlan client={client} runID="run-1" />
+    </QueryClientProvider>);
+    expect(await screen.findByText("1 pass")).toBeInTheDocument();
+    expect(screen.getByText("1 fail")).toBeInTheDocument();
+    expect(screen.queryByText("overall pass", { exact: false })).not.toBeInTheDocument();
   });
 });

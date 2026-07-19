@@ -84,9 +84,10 @@ func TestWorkspaceRepositoryStateHTTPIsReadOnlyAndRootBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	commitSecret := "sk-123456789012345678901234567890"
-	if _, err := worktree.Commit("safe "+commitSecret+"\nprivate body", &git.CommitOptions{
+	commitID, err := worktree.Commit("safe "+commitSecret+"\nprivate body", &git.CommitOptions{
 		Author: &object.Signature{Name: "Private", Email: "private@example.invalid"},
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "untracked.txt"), []byte(
@@ -157,6 +158,7 @@ func TestWorkspaceRepositoryStateHTTPIsReadOnlyAndRootBound(t *testing.T) {
 		!strings.Contains(historyBody, `"read_only":true`) ||
 		!strings.Contains(historyBody, `"author_identity_included":false`) ||
 		!strings.Contains(historyBody, `"commit_body_included":false`) ||
+		!strings.Contains(historyBody, `"object_id":"`+commitID.String()+`"`) ||
 		!strings.Contains(historyBody, "[REDACTED:") ||
 		strings.Contains(historyBody, commitSecret) || strings.Contains(historyBody, "Private") ||
 		strings.Contains(historyBody, "private@example.invalid") ||
@@ -166,6 +168,33 @@ func TestWorkspaceRepositoryStateHTTPIsReadOnlyAndRootBound(t *testing.T) {
 	historyQuery := performSessionMessageRequest(t, api, http.MethodGet,
 		historyPath+"?refresh=true", testAccessToken, "", "", nil)
 	assertAPIError(t, historyQuery, http.StatusBadRequest, "INVALID_ARGUMENT")
+
+	commitPath := "/api/v1/workspaces/" + registered.ID + "/repository-commits/" +
+		commitID.String()
+	commit := performSessionMessageRequest(t, api, http.MethodGet, commitPath,
+		testAccessToken, "", "", nil)
+	commitBody := commit.Body.String()
+	if commit.Code != http.StatusOK ||
+		!strings.Contains(commitBody, `"protocol_version":"repository_commit_detail.v1"`) ||
+		!strings.Contains(commitBody, `"object_id":"`+commitID.String()+`"`) ||
+		!strings.Contains(commitBody, `"path":"tracked.txt"`) ||
+		!strings.Contains(commitBody, `"change":"added"`) ||
+		!strings.Contains(commitBody, `"read_only":true`) ||
+		!strings.Contains(commitBody, `"file_content_included":false`) ||
+		!strings.Contains(commitBody, `"patch_included":false`) ||
+		!strings.Contains(commitBody, `"checkout_performed":false`) ||
+		!strings.Contains(commitBody, `"reference_updated":false`) ||
+		strings.Contains(commitBody, commitSecret) || strings.Contains(commitBody, "private body") ||
+		strings.Contains(commitBody, "initial") || strings.Contains(commitBody, root) {
+		t.Fatalf("repository commit status=%d body=%s", commit.Code, commitBody)
+	}
+	commitQuery := performSessionMessageRequest(t, api, http.MethodGet,
+		commitPath+"?patch=true", testAccessToken, "", "", nil)
+	assertAPIError(t, commitQuery, http.StatusBadRequest, "INVALID_ARGUMENT")
+	invalidCommit := performSessionMessageRequest(t, api, http.MethodGet,
+		strings.TrimSuffix(commitPath, commitID.String())+commitID.String()[:12],
+		testAccessToken, "", "", nil)
+	assertAPIError(t, invalidCommit, http.StatusBadRequest, "INVALID_ARGUMENT")
 }
 
 func TestWorkspaceSearchHTTPReturnsOnlyRedactedNonAuthorizingEvidence(t *testing.T) {

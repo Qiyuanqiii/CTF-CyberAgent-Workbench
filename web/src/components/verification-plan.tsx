@@ -24,6 +24,11 @@ export function VerificationPlan({ client, runID }: {
     queryFn: ({ signal }) => client.verificationPlans(runID, signal),
     enabled: Boolean(runID),
   });
+  const coverageQuery = useQuery({
+    queryKey: ["run", runID, "verification-plan-coverage"],
+    queryFn: ({ signal }) => client.verificationPlanCoverage(runID, signal),
+    enabled: Boolean(runID),
+  });
   const record = useMutation({
     mutationFn: (body: VerificationPlanRequestView) => {
       if (!operationKey.current) {
@@ -37,6 +42,7 @@ export function VerificationPlan({ client, runID }: {
       setSummary("");
       setItems([emptyItem()]);
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "verification-plan"] });
+      void queryClient.invalidateQueries({ queryKey: ["run", runID, "verification-plan-coverage"] });
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "events"] });
     },
   });
@@ -61,10 +67,15 @@ export function VerificationPlan({ client, runID }: {
     <header className="operator-list-header">
       <div><ClipboardList aria-hidden="true" size={16} /><h2>Verification plan</h2></div>
       <div>{query.data && <StatusBadge status={`${query.data.items.length} plans`} />}
+        {coverageQuery.data && <StatusBadge
+          status={`${coverageQuery.data.observed_plan_item_count}/${coverageQuery.data.plan_item_count} observed`} />}
         <button aria-label="Refresh verification plans" className="icon-button"
-          disabled={query.isFetching} onClick={() => void query.refetch()}
+          disabled={query.isFetching || coverageQuery.isFetching} onClick={() => {
+            void query.refetch();
+            void coverageQuery.refetch();
+          }}
           title="Refresh" type="button"><RefreshCw aria-hidden="true"
-            className={query.isFetching ? "spin" : ""} size={15} /></button></div>
+            className={query.isFetching || coverageQuery.isFetching ? "spin" : ""} size={15} /></button></div>
     </header>
     {client.hasVerificationEvidence && <form className="verification-plan-form" onSubmit={submit}>
       <label>Title<input disabled={record.isPending} maxLength={160} required value={title}
@@ -100,13 +111,26 @@ export function VerificationPlan({ client, runID }: {
     {record.error && <ErrorState error={record.error} />}
     {query.isLoading && <LoadingState label="Loading verification plans" />}
     {query.isError && <ErrorState error={query.error} />}
+    {coverageQuery.isError && <ErrorState error={coverageQuery.error} />}
     {query.data?.items.length === 0 && <EmptyState>No verification plan recorded</EmptyState>}
     {query.data && query.data.items.length > 0 && <div className="verification-plan-list">
       {query.data.items.map((plan) => <article key={plan.id}>
         <header><strong>{plan.title}</strong><StatusBadge status="guidance only" />
           <time dateTime={plan.created_at}>{formatDate(plan.created_at)}</time></header>
-        <p>{plan.summary}</p><ol>{plan.items.map((item) => <li key={item.ordinal}>
-          <strong>{item.title}</strong><span>{item.expected_observation}</span></li>)}</ol>
+        <p>{plan.summary}</p><ol>{plan.items.map((item) => {
+          const coverage = coverageQuery.data?.plans.find((entry) => entry.plan_id === plan.id)
+            ?.items.find((entry) => entry.ordinal === item.ordinal);
+          return <li key={item.ordinal}>
+            <strong>{item.title}</strong><span>{item.expected_observation}</span>
+            {coverage && <div className="verification-coverage-badges">
+              {coverage.associated_evidence_count === 0 ? <StatusBadge status="unobserved" /> : <>
+                {coverage.pass_count > 0 && <StatusBadge status={`${coverage.pass_count} pass`} />}
+                {coverage.fail_count > 0 && <StatusBadge status={`${coverage.fail_count} fail`} />}
+                {coverage.unknown_count > 0 && <StatusBadge status={`${coverage.unknown_count} unknown`} />}
+              </>}
+            </div>}
+          </li>;
+        })}</ol>
       </article>)}
     </div>}
   </section>;

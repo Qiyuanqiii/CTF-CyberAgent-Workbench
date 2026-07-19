@@ -189,6 +189,24 @@ func VerificationPlanRequestFingerprint(runID string, sessionID string,
 		sessionID, workspaceID, planSHA256, authoredBy)
 }
 
+func VerificationPlanEvidenceAssociationOperationDigest(runID string,
+	operationKey string,
+) string {
+	return Fingerprint("operator_verification_plan_evidence_association_operation.v1",
+		runID, operationKey)
+}
+
+func VerificationPlanEvidenceAssociationRequestFingerprint(runID string,
+	sessionID string, workspaceID string, planID string, planItemOrdinal int,
+	planItemSHA256 string, evidenceID string, evidenceOutcome string,
+	evidenceEventSequence int64, associatedBy string,
+) string {
+	return Fingerprint("operator_verification_plan_evidence_association_request.v1",
+		runID, sessionID, workspaceID, planID, strconv.Itoa(planItemOrdinal),
+		planItemSHA256, evidenceID, evidenceOutcome,
+		strconv.FormatInt(evidenceEventSequence, 10), associatedBy)
+}
+
 func SupervisorToolOperationKey(runID string, turn int, toolName string, payloadJSON string) string {
 	return Fingerprint("supervisor_structured_tool.v1", strings.TrimSpace(runID), strconv.Itoa(turn),
 		strings.TrimSpace(toolName), strings.TrimSpace(payloadJSON))

@@ -138,6 +138,16 @@ type Store interface {
 	GetVerificationPlanByOperation(context.Context, string) (verification.Plan, bool, error)
 	ListVerificationPlans(context.Context, string, int) ([]verification.Plan, error)
 	RecordVerificationPlan(context.Context, verification.Plan) (verification.Plan, bool, error)
+	GetVerificationPlan(context.Context, string) (verification.Plan, error)
+	GetVerificationEvidence(context.Context, string) (verification.Evidence, error)
+	GetVerificationPlanEvidenceAssociationByOperation(context.Context, string) (
+		verification.PlanEvidenceAssociation, bool, error)
+	ListVerificationPlanEvidenceAssociations(context.Context, string, int) (
+		[]verification.PlanEvidenceAssociation, error)
+	ListVerificationPlanCoverageCounts(context.Context, string, []string) (
+		[]verification.PlanItemCoverageCount, error)
+	RecordVerificationPlanEvidenceAssociation(context.Context,
+		verification.PlanEvidenceAssociation) (verification.PlanEvidenceAssociation, bool, error)
 	ListOperatorActionRecords(context.Context, string, string, string, time.Time, int) (
 		[]operatoraction.Record, error)
 
@@ -563,6 +573,10 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if runID, matched := matchVerificationPlanPath(request.URL.Path); matched &&
 		request.Method != http.MethodGet {
 		a.serveVerificationPlanControl(tracked, request, requestID, runID)
+		return
+	}
+	if runID, matched := matchVerificationAssociationPath(request.URL.Path); matched {
+		a.serveVerificationAssociationControl(tracked, request, requestID, runID)
 		return
 	}
 	if runID, matched := matchRunExecutionControlPath(request.URL.Path); matched {

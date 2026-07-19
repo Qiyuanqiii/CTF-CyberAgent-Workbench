@@ -1400,16 +1400,62 @@ GitHub Actions run `29695882120` passed implementation commit `d70d96c`: TypeScr
 console 43s, Windows Desktop shell 2m39s, and Go control plane including vet and
 govulncheck 3m56s.
 
+## Schema v81 D1-G4/V3/R1 Exact Commit, Association, And Runner Lifecycle Batch
+
+D1-G4 adds pure-Go `repository_commit_detail.v1` for one exact lowercase SHA-1 object
+at the exact registered Workspace root. It compares the commit tree with its first
+parent and returns at most 200 canonical path entries with added/modified/deleted,
+content-change, and regular/executable/symlink/submodule mode metadata. Author/email/
+body, blob content, remote/root, checkout/ref mutation, subprocess, network, and hooks
+remain absent. Redirected metadata, links, malformed trees, and missing objects fail
+closed.
+
+D1-V3/schema v81 adds immutable plan-item/evidence associations. One evidence may
+answer exactly one earlier plan item, while an item may retain multiple contradictory
+observations. Exact Code Run/active Session/Workspace/plan/item/evidence/event/
+operation/digest binding is repeated in Go, the transactional Store, and SQLite.
+Coverage is a bounded per-item pass/fail/unknown count plus unobserved state, never an
+inferred aggregate result.
+
+R1 adds `runner_lifecycle_contract.v1` for simulation-only backends. It covers
+start/wait, pre-cancellation, timeout, shared wait-graph admission, TERM/KILL grace,
+final inspect/reap, partial-start cleanup, invalid-identity cleanup, and orphan cleanup.
+There is no CLI, HTTP, Desktop, Agent, LocalRunner, Docker, `os/exec`, or product
+capability wiring.
+
+The cumulative six-slice robustness gate passed final uncached Go in 509s and full
+race in 341s, ordinary/secure-Desktop tests and vet, zero-warning staticcheck, module
+verify/tidy, zero reachable govulncheck findings, 127 React tests across 37 files,
+strict TypeScript, deterministic OpenAPI/TypeScript, Vite, zero-vulnerability npm
+audit, isolated mock-only CLI, privacy/artifact scans, reproducible Windows build, and
+desktop/mobile Chrome checks. OpenAPI is 68/74/163 with SHA-256
+`CFAD160A85306B2602F95A62298828DB86BDFAAF6D55F47BA468860079C42E8D`; generated
+TypeScript schema SHA-256 is
+`CCA5EF8B86E7F0D494E7B2BAF4FCA92FBE3FCB9C3A54E58D4A3C3B77028D5B73`. The unsigned
+GUI SHA-256 is `77fb4d6fede1c1e3a0c3f3e9d39581e28f7a6880e0e25b222dcf0d3c701d1213` and remains
+`release_ready=false`.
+
+Chrome recorded and recovered one plan, pass observation, and explicit association as
+`1/1 observed` plus `1 linked`, with no page-level overflow or console warning/error.
+The audit replaced a Git tree walker that could silently skip missing subtree objects,
+fixed v81 downgrade-trigger cleanup ordering, saturated redaction counters, constrained
+the OpenAPI control whitelist, and cleaned partial/invalid Runner starts. No unresolved
+high/medium issue is known on an enabled path. The module graph retains only unimported/
+uncalled transitive `GO-2026-5932`. No real key, Provider, Shell, LocalRunner, Docker,
+hook, attack traffic, or external network was used. Architecture remains about 99%,
+complete-product usability about 94-96%, generic Coding Agent usability about 94%, and
+Cyber automation about 20%. ADR 0051 records the boundary.
+
 ## Recommended Next Batch
 
-Complete D1-G4 bounded exact-commit changed-file metadata, D1-V3 explicit immutable
-plan-item/evidence association with no inferred result, and R1 a Go-owned Runner
-start/wait/cancel/timeout/process-tree-orphan contract plus non-product harness. R1 must
-not map Local to unrestricted `os/exec` or enable host/container execution through any
-product path. This closes the current six-slice cycle, so the batch owns the complete
-ordinary/race/vet/staticcheck/govulncheck/dependency/privacy/build/browser gate. The
-manual Windows 10 matrix, signed ZIP/MSIX distribution, real Sandbox release gate,
-Rust analyzers, xterm input, network grants, and CTF solving remain separately gated.
+Complete D1-G5 bounded redacted exact-commit file preview, D1-V4 verification coverage
+metadata in Code Handoff/export, and R2 platform-specific process-tree conformance
+adapters behind a test-only, non-product build boundary. D1-G5 must not expose raw
+unredacted blobs or mutate Git state; D1-V4 must not infer aggregate pass; R2 must not
+map Local/Docker or any product capability to process start. This is the first half of
+the next six-slice cycle, so it receives the ordinary integrated gate. The manual
+Windows 10 matrix, signed ZIP/MSIX distribution, real Sandbox release gate, Rust
+analyzers, xterm input, network grants, and CTF solving remain separately gated.
 
 Keep the Local profile disabled until a real OS sandbox makes protected host roots unavailable or read-only; never map it to unrestricted `os/exec`. Runtime verification and the Docker start/wait/TERM/KILL/orphan lifecycle still require a later independent release gate. Broader HTTP/Desktop mutations, Rust analyzers, network/secret support, end-user process execution, and CTF solving remain deferred.
 

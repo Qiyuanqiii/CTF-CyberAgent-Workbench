@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { GitCommitHorizontal, RefreshCw } from "lucide-react";
+import { FileDiff, GitCommitHorizontal, RefreshCw } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import { formatDate } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
@@ -8,10 +9,17 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
   client: CyberAgentClient;
   workspaceID: string;
 }) {
+  const [selection, setSelection] = useState({ workspaceID: "", objectID: "" });
+  const selectedObjectID = selection.workspaceID === workspaceID ? selection.objectID : "";
   const query = useQuery({
     queryKey: ["workspace", workspaceID, "repository-history"],
     queryFn: ({ signal }) => client.repositoryHistory(workspaceID, signal),
     enabled: Boolean(workspaceID),
+  });
+  const detailQuery = useQuery({
+    queryKey: ["workspace", workspaceID, "repository-commit", selectedObjectID],
+    queryFn: ({ signal }) => client.repositoryCommit(workspaceID, selectedObjectID, signal),
+    enabled: Boolean(workspaceID && selectedObjectID),
   });
   if (!workspaceID) return null;
   return <section aria-label="Repository history" className="repository-history-panel">
@@ -37,10 +45,36 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
       <section><h3>First-parent commits</h3>
         {query.data.commits.length === 0 ? <EmptyState>No commits</EmptyState> :
           <div className="repository-commit-list">{query.data.commits.map((commit) =>
-            <div key={commit.hash}><code>{commit.hash}</code><span>{commit.subject}</span>
+            <div key={commit.object_id}><code>{commit.hash}</code><span>{commit.subject}</span>
               <time dateTime={commit.committed_at}>{formatDate(commit.committed_at)}</time>
-              {commit.redacted && <StatusBadge status="redacted" />}</div>)}</div>}
+              <span className="repository-commit-flags">
+                {commit.redacted && <StatusBadge status="redacted" />}
+              </span>
+              <button aria-label={`Inspect commit ${commit.hash}`} aria-pressed={selectedObjectID === commit.object_id}
+                className="icon-button" onClick={() => setSelection((current) =>
+                  current.workspaceID === workspaceID && current.objectID === commit.object_id ?
+                    { workspaceID: "", objectID: "" } : { workspaceID, objectID: commit.object_id })}
+                title="Inspect changed files" type="button">
+                <FileDiff aria-hidden="true" size={14} />
+              </button></div>)}</div>}
       </section>
     </div>}
+    {selectedObjectID && <section aria-label="Exact commit metadata" className="repository-commit-detail">
+      {detailQuery.isLoading && <LoadingState label="Loading exact commit metadata" />}
+      {detailQuery.isError && <ErrorState error={detailQuery.error} />}
+      {detailQuery.data && <>
+        <header><span><code>{detailQuery.data.hash}</code><strong>{detailQuery.data.subject}</strong></span>
+          <span><StatusBadge status={`${detailQuery.data.changed_file_count} changed`} />
+            {detailQuery.data.truncated && <StatusBadge status="truncated" />}</span></header>
+        {detailQuery.data.changes.length === 0 ? <EmptyState>No changed files in this commit</EmptyState> :
+          <div className="repository-commit-change-list">{detailQuery.data.changes.map((change) =>
+            <div key={`${change.change}:${change.path}`}><StatusBadge status={change.change} />
+              <code title={change.path}>{change.path}</code>
+              <span>{change.previous_kind || "none"} to {change.current_kind || "none"}</span>
+              <span>{change.content_changed ? "content" : "mode only"}</span></div>)}</div>}
+        {detailQuery.data.omitted_change_count > 0 &&
+          <p className="repository-diff-omitted">{detailQuery.data.omitted_change_count} additional changes omitted</p>}
+      </>}
+    </section>}
   </section>;
 }

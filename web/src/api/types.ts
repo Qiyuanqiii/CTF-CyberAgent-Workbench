@@ -86,12 +86,16 @@ export type WorkspaceSearchView = components["schemas"]["WorkspaceSearchView"];
 export type RepositoryStateView = components["schemas"]["RepositoryStateView"];
 export type RepositoryDiffView = components["schemas"]["RepositoryDiffView"];
 export type RepositoryHistoryView = components["schemas"]["RepositoryHistoryView"];
+export type RepositoryCommitDetailView = components["schemas"]["RepositoryCommitDetailView"];
 export type VerificationEvidenceRequestView = components["schemas"]["VerificationEvidenceRequestView"];
 export type VerificationEvidenceControlView = components["schemas"]["VerificationEvidenceControlView"];
 export type VerificationEvidenceInventoryView = components["schemas"]["VerificationEvidenceInventoryView"];
 export type VerificationPlanRequestView = components["schemas"]["VerificationPlanRequestView"];
 export type VerificationPlanControlView = components["schemas"]["VerificationPlanControlView"];
 export type VerificationPlanInventoryView = components["schemas"]["VerificationPlanInventoryView"];
+export type VerificationAssociationRequestView = components["schemas"]["VerificationAssociationRequestView"];
+export type VerificationAssociationControlView = components["schemas"]["VerificationAssociationControlView"];
+export type VerificationPlanCoverageInventoryView = components["schemas"]["VerificationPlanCoverageInventoryView"];
 export type CodeHandoffView = components["schemas"]["CodeHandoffView"];
 export type CodeHandoffExportView = components["schemas"]["CodeHandoffExportView"];
 

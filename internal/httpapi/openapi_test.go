@@ -27,6 +27,7 @@ import (
 	"cyberagent-workbench/internal/policy"
 	"cyberagent-workbench/internal/skills"
 	"cyberagent-workbench/internal/toolgateway"
+	"cyberagent-workbench/internal/verification"
 )
 
 func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testing.T) {
@@ -116,7 +117,9 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				(path == VerificationEvidencePathTemplate &&
 					item.Post.OperationID == "recordRunVerificationEvidence") ||
 				(path == VerificationPlanPathTemplate &&
-					item.Post.OperationID == "recordRunVerificationPlan")
+					item.Post.OperationID == "recordRunVerificationPlan") ||
+				(path == VerificationAssociationPathTemplate &&
+					item.Post.OperationID == "associateRunVerificationEvidence")
 			if !validControl ||
 				item.Post.ReadOnly || item.Post.Responses["202"] == nil || item.Post.RequestBody == nil ||
 				len(item.Post.Security) != 1 || item.Post.Security[0]["ControlBearerAuth"] == nil {
@@ -174,7 +177,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				path == SkillPackageInstallPath ||
 				path == EvidenceAttachmentPathTemplate ||
 				path == VerificationEvidencePathTemplate ||
-				path == VerificationPlanPathTemplate) &&
+				path == VerificationPlanPathTemplate ||
+				path == VerificationAssociationPathTemplate) &&
 				method == "post") {
 				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
 			}
@@ -416,6 +420,27 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	verificationPlan, err := application.NewVerificationPlanService(fixture.store).Record(
+		t.Context(), application.RecordVerificationPlanRequest{
+			Version: verification.PlanProtocolVersion, RunID: fixture.run.ID,
+			Title: "OpenAPI association plan", Summary: "Live route metadata",
+			Items: []application.VerificationPlanItemRequest{{Title: "Live association",
+				ExpectedObservation: "Observe an explicit operator result"}},
+			OperationKey: "openapi-association-plan-operation-0001", AuthoredBy: "operator",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationEvidence, err := application.NewVerificationEvidenceService(fixture.store).Record(
+		t.Context(), application.RecordVerificationEvidenceRequest{
+			Version: verification.EvidenceProtocolVersion, RunID: fixture.run.ID,
+			Outcome: string(verification.OutcomePass), Title: "OpenAPI association evidence",
+			Summary:      "Explicit live route observation",
+			OperationKey: "openapi-association-evidence-operation-0001", RecordedBy: "operator",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
 	replacements := map[string]string{
 		"{run_id}":       fixture.run.ID,
 		"{workspace_id}": fixture.workspace.ID,
@@ -428,6 +453,7 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		"{report_id}":    "report-openapi-missing-0001",
 		"{approval_id}":  approvalRecord.ID,
 		"{edit_id}":      fileEditRecord.ID,
+		"{object_id}":    strings.Repeat("a", 40),
 		"{route}":        "code",
 		"{provider}":     "mimo",
 	}
@@ -531,6 +557,11 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 						`"title":"OpenAPI verification plan","summary":"Operator guidance",` +
 						`"items":[{"title":"Live route",` +
 						`"expected_observation":"Observe a successful response"}]}`
+				} else if spec.Path == VerificationAssociationPathTemplate {
+					body = `{"version":"operator_verification_plan_evidence_association.v1",` +
+						`"plan_id":"` + verificationPlan.Plan.ID + `",` +
+						`"plan_item_ordinal":1,"evidence_id":"` +
+						verificationEvidence.Evidence.ID + `"}`
 				} else if spec.Path != RunExecutionProfileControlPathTemplate {
 					attemptID := fixture.checkpoint.AttemptID
 					modelAttempt := 1

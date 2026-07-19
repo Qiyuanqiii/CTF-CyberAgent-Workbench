@@ -227,6 +227,10 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 	approvalID := pathIdentityParameter("approval_id", "Approval identity")
 	editID := pathIdentityParameter("edit_id", "File edit identity")
 	workspaceID := pathIdentityParameter("workspace_id", "Workspace identity")
+	commitObjectID := openAPIParameter{Name: "object_id", In: "path",
+		Description: "Exact lowercase forty-character Git commit object identity",
+		Required:    true, Schema: map[string]any{"type": "string", "minLength": 40,
+			"maxLength": 40, "pattern": `^[0-9a-f]{40}$`}}
 	routeName := pathIdentityParameter("route", "Model route name")
 	providerName := pathIdentityParameter("provider", "Provider name")
 	return []openAPIOperationSpec{
@@ -338,6 +342,12 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 			Description: "Returns at most fifty first-parent commit subjects and sixty-four local branch heads for a Git repository rooted exactly at the registered Workspace. Subjects are secret-redacted; author identities, commit bodies, remotes, host paths, processes, hooks, and network access are excluded.",
 			DataType:    reflect.TypeOf(RepositoryHistoryView{}), NotFound: true,
 			Parameters: []openAPIParameter{workspaceID}},
+		{Path: "/api/v1/workspaces/{workspace_id}/repository-commits/{object_id}",
+			OperationID: "getWorkspaceRepositoryCommit",
+			Summary:     "Inspect exact commit changed-file metadata", Tag: "Workspaces",
+			Description: "Compares one exact local commit object with its first parent and returns only bounded path, change-kind, file-kind, and content/mode-change metadata. It returns no author, body, blob, patch, remote, or host path and performs no checkout, ref update, process, hook, or network operation.",
+			DataType:    reflect.TypeOf(RepositoryCommitDetailView{}), NotFound: true,
+			Parameters: []openAPIParameter{workspaceID, commitObjectID}},
 		{Path: EvidenceAttachmentPathTemplate, Method: http.MethodPost,
 			OperationID: "attachRunEvidence", Summary: "Attach non-authorizing Workspace evidence",
 			Tag:         "Control",
@@ -381,6 +391,23 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 			Description: "Atomically records one secret-redacted immutable operator checklist against the exact active Code Run Session and Workspace. It executes no command and has no outcome, pass inference, model assertion, approval, or action authority.",
 			DataType:    reflect.TypeOf(VerificationPlanControlView{}),
 			RequestType: reflect.TypeOf(VerificationPlanRequestView{}), Control: true,
+			NotFound: true, Parameters: []openAPIParameter{runID,
+				{Name: "Idempotency-Key", In: "header", Description: "Opaque retry key; only a domain-separated digest is persisted",
+					Required: true, Schema: map[string]any{"type": "string",
+						"minLength": domain.MinAgentOperationKeyBytes,
+						"maxLength": domain.MaxAgentOperationKeyBytes, "pattern": `^\S+$`}}}},
+		{Path: VerificationCoveragePathTemplate,
+			OperationID: "getRunVerificationPlanCoverage",
+			Summary:     "Inspect explicit verification plan coverage", Tag: "Runs",
+			Description: "Derives bounded metadata-only per-item counts from immutable operator associations. It exposes explicit pass, fail, and unknown observation counts but infers no item result, rewrites no record, and grants no command, approval, or execution authority.",
+			DataType:    reflect.TypeOf(VerificationPlanCoverageInventoryView{}), NotFound: true,
+			Parameters: []openAPIParameter{runID}},
+		{Path: VerificationAssociationPathTemplate, Method: http.MethodPost,
+			OperationID: "associateRunVerificationEvidence",
+			Summary:     "Associate evidence with one verification plan item", Tag: "Control",
+			Description: "Appends one immutable operator association between an earlier checklist item and a later observation in the same active Code Run. It does not alter either record, execute the check, infer a result, call a model, approve an action, or grant authority.",
+			DataType:    reflect.TypeOf(VerificationAssociationControlView{}),
+			RequestType: reflect.TypeOf(VerificationAssociationRequestView{}), Control: true,
 			NotFound: true, Parameters: []openAPIParameter{runID,
 				{Name: "Idempotency-Key", In: "header", Description: "Opaque retry key; only a domain-separated digest is persisted",
 					Required: true, Schema: map[string]any{"type": "string",

@@ -28,6 +28,7 @@ const (
 
 type HistoryCommit struct {
 	Hash         string    `json:"hash"`
+	ObjectID     string    `json:"object_id"`
 	Subject      string    `json:"subject"`
 	ParentCount  int       `json:"parent_count"`
 	CommittedAt  time.Time `json:"committed_at"`
@@ -119,7 +120,7 @@ func InspectHistory(ctx context.Context, root string, workspaceID string) (Histo
 		parentCount, parentsBounded := boundedHistoryParentCount(len(commit.ParentHashes))
 		base.Truncated = base.Truncated || parentsBounded
 		base.Commits = append(base.Commits, HistoryCommit{
-			Hash: shortHash(commit.Hash.String()), Subject: subject,
+			Hash: shortHash(commit.Hash.String()), ObjectID: commit.Hash.String(), Subject: subject,
 			ParentCount: parentCount, CommittedAt: commit.Committer.When.UTC(),
 			Redacted: redacted, SubjectBound: bounded,
 		})

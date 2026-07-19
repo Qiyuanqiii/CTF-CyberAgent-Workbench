@@ -11,12 +11,15 @@ import (
 )
 
 const (
-	VerificationEvidencePathTemplate = "/api/v1/runs/{run_id}/verification-evidence"
-	VerificationPlanPathTemplate     = "/api/v1/runs/{run_id}/verification-plan"
-	CodeHandoffPathTemplate          = "/api/v1/runs/{run_id}/code-handoff"
-	CodeHandoffExportPathTemplate    = "/api/v1/runs/{run_id}/code-handoff/export"
-	MaxVerificationEvidenceBodyBytes = 16 * 1024
-	MaxVerificationPlanBodyBytes     = 64 * 1024
+	VerificationEvidencePathTemplate    = "/api/v1/runs/{run_id}/verification-evidence"
+	VerificationPlanPathTemplate        = "/api/v1/runs/{run_id}/verification-plan"
+	VerificationAssociationPathTemplate = "/api/v1/runs/{run_id}/verification-plan-associations"
+	VerificationCoveragePathTemplate    = "/api/v1/runs/{run_id}/verification-plan-coverage"
+	CodeHandoffPathTemplate             = "/api/v1/runs/{run_id}/code-handoff"
+	CodeHandoffExportPathTemplate       = "/api/v1/runs/{run_id}/code-handoff/export"
+	MaxVerificationEvidenceBodyBytes    = 16 * 1024
+	MaxVerificationPlanBodyBytes        = 64 * 1024
+	MaxVerificationAssociationBodyBytes = 8 * 1024
 )
 
 func (a *API) workspaceRepositoryDiff(request *http.Request,
@@ -87,7 +90,8 @@ func (a *API) workspaceRepositoryHistory(request *http.Request,
 	commits := make([]RepositoryHistoryCommitView, len(projection.Commits))
 	for index, commit := range projection.Commits {
 		commits[index] = RepositoryHistoryCommitView{
-			Hash: commit.Hash, Subject: commit.Subject, ParentCount: commit.ParentCount,
+			Hash: commit.Hash, ObjectID: commit.ObjectID, Subject: commit.Subject,
+			ParentCount: commit.ParentCount,
 			CommittedAt: commit.CommittedAt, Redacted: commit.Redacted,
 			SubjectBounded: commit.SubjectBound,
 		}
@@ -111,6 +115,56 @@ func (a *API) workspaceRepositoryHistory(request *http.Request,
 		AuthorIdentityIncluded: projection.AuthorIdentityIncluded,
 		CommitBodyIncluded:     projection.CommitBodyIncluded,
 		RemoteConfigIncluded:   projection.RemoteConfigIncluded,
+		ProcessStarted:         projection.ProcessStarted, NetworkUsed: projection.NetworkUsed,
+		HooksExecuted: projection.HooksExecuted,
+	}, nil, nil
+}
+
+func (a *API) workspaceRepositoryCommit(request *http.Request,
+	workspaceID string, objectID string,
+) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	registered, err := a.store.GetWorkspaceInfo(request.Context(), workspaceID)
+	if err != nil {
+		return nil, nil, apperror.Normalize(err)
+	}
+	if registered.ID != workspaceID {
+		return nil, nil, apperror.New(apperror.CodeInternal,
+			"workspace lookup returned a mismatched identity")
+	}
+	projection, err := repository.InspectCommitDetail(request.Context(),
+		registered.RootPath, registered.ID, objectID)
+	if err != nil {
+		return nil, nil, err
+	}
+	changes := make([]RepositoryCommitFileChangeView, len(projection.Changes))
+	for index, change := range projection.Changes {
+		changes[index] = RepositoryCommitFileChangeView{
+			Path: change.Path, Change: change.Change, PreviousKind: change.PreviousKind,
+			CurrentKind: change.CurrentKind, ContentChanged: change.ContentChanged,
+			ModeChanged: change.ModeChanged,
+		}
+	}
+	return RepositoryCommitDetailView{
+		ProtocolVersion: projection.ProtocolVersion, WorkspaceID: projection.WorkspaceID,
+		Kind: projection.Kind, Available: projection.Available, ObjectID: projection.ObjectID,
+		Hash: projection.Hash, Subject: projection.Subject, CommittedAt: projection.CommittedAt,
+		ParentCount: projection.ParentCount, Changes: changes,
+		ChangedFileCount:    projection.ChangedFileCount,
+		ReturnedChangeCount: projection.ReturnedChangeCount,
+		OmittedChangeCount:  projection.OmittedChangeCount,
+		RedactionCount:      projection.RedactionCount, Truncated: projection.Truncated,
+		FirstParentOnly: projection.FirstParentOnly, ReadOnly: projection.ReadOnly,
+		RootPathExposed:        projection.RootPathExposed,
+		AuthorIdentityIncluded: projection.AuthorIdentityIncluded,
+		CommitBodyIncluded:     projection.CommitBodyIncluded,
+		FileContentIncluded:    projection.FileContentIncluded,
+		PatchIncluded:          projection.PatchIncluded,
+		RemoteConfigIncluded:   projection.RemoteConfigIncluded,
+		CheckoutPerformed:      projection.CheckoutPerformed,
+		ReferenceUpdated:       projection.ReferenceUpdated,
 		ProcessStarted:         projection.ProcessStarted, NetworkUsed: projection.NetworkUsed,
 		HooksExecuted: projection.HooksExecuted,
 	}, nil, nil
@@ -158,6 +212,62 @@ func (a *API) runVerificationPlans(request *http.Request,
 		ProtocolVersion: inventory.ProtocolVersion, RunID: inventory.RunID,
 		SessionID: inventory.SessionID, WorkspaceID: inventory.WorkspaceID,
 		Items: items, Truncated: inventory.Truncated,
+	}, nil, nil
+}
+
+func (a *API) runVerificationPlanCoverage(request *http.Request,
+	runID string,
+) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	inventory, err := application.NewVerificationAssociationService(a.store).Coverage(
+		request.Context(), runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	plans := make([]VerificationPlanCoverageView, len(inventory.Plans))
+	for index, plan := range inventory.Plans {
+		items := make([]VerificationPlanItemCoverageView, len(plan.Items))
+		for itemIndex, item := range plan.Items {
+			items[itemIndex] = VerificationPlanItemCoverageView{
+				Ordinal: item.Ordinal, ItemSHA256: item.ItemSHA256,
+				AssociatedEvidenceCount: item.AssociatedEvidenceCount,
+				PassCount:               item.PassCount, FailCount: item.FailCount,
+				UnknownCount:                   item.UnknownCount,
+				LatestAssociationEventSequence: item.LatestAssociationEventSequence,
+			}
+		}
+		plans[index] = VerificationPlanCoverageView{
+			PlanID: plan.PlanID, PlanSHA256: plan.PlanSHA256, ItemCount: plan.ItemCount,
+			ObservedItemCount:       plan.ObservedItemCount,
+			AssociatedEvidenceCount: plan.AssociatedEvidenceCount, Items: items,
+		}
+	}
+	associations := make([]VerificationAssociationReferenceView, len(inventory.Associations))
+	for index, association := range inventory.Associations {
+		associations[index] = VerificationAssociationReferenceView{
+			ID: association.ID, PlanID: association.PlanID,
+			PlanItemOrdinal: association.PlanItemOrdinal,
+			PlanItemSHA256:  association.PlanItemSHA256, EvidenceID: association.EvidenceID,
+			EvidenceOutcome:          string(association.EvidenceOutcome),
+			EvidenceEventSequence:    association.EvidenceEventSequence,
+			AssociationEventSequence: association.AssociationSequence,
+			AssociatedAt:             association.CreatedAt,
+		}
+	}
+	return VerificationPlanCoverageInventoryView{
+		ProtocolVersion: inventory.ProtocolVersion, RunID: inventory.RunID,
+		SessionID: inventory.SessionID, WorkspaceID: inventory.WorkspaceID,
+		Plans: plans, PlanCount: inventory.PlanCount, PlanItemCount: inventory.PlanItemCount,
+		ObservedPlanItemCount:   inventory.ObservedPlanItemCount,
+		AssociatedEvidenceCount: inventory.AssociatedEvidenceCount,
+		Associations:            associations, PlansTruncated: inventory.PlansTruncated,
+		AssociationsTruncated: inventory.AssociationsTruncated,
+		MetadataOnly:          inventory.MetadataOnly, ReadOnly: inventory.ReadOnly,
+		ResultInferred: inventory.ResultInferred, CommandExecuted: inventory.CommandExecuted,
+		ModelAssertion: inventory.ModelAssertion, RecordRewritten: inventory.RecordRewritten,
+		Approval: inventory.Approval, AuthorityGranted: inventory.AuthorityGranted,
 	}, nil, nil
 }
 
@@ -214,6 +324,16 @@ func matchVerificationEvidencePath(requestPath string) (string, bool) {
 func matchVerificationPlanPath(requestPath string) (string, bool) {
 	const prefix = "/api/v1/runs/"
 	const suffix = "/verification-plan"
+	if !strings.HasPrefix(requestPath, prefix) || !strings.HasSuffix(requestPath, suffix) {
+		return "", false
+	}
+	runID := strings.TrimSuffix(strings.TrimPrefix(requestPath, prefix), suffix)
+	return runID, runID != "" && !strings.Contains(runID, "/")
+}
+
+func matchVerificationAssociationPath(requestPath string) (string, bool) {
+	const prefix = "/api/v1/runs/"
+	const suffix = "/verification-plan-associations"
 	if !strings.HasPrefix(requestPath, prefix) || !strings.HasSuffix(requestPath, suffix) {
 		return "", false
 	}
@@ -331,6 +451,81 @@ func (a *API) serveVerificationPlanControl(writer http.ResponseWriter,
 	}
 	a.writeSuccessStatus(writer, requestID,
 		verificationPlanControlView(result.Plan, result.Replayed), nil, http.StatusAccepted)
+}
+
+func (a *API) serveVerificationAssociationControl(writer http.ResponseWriter,
+	request *http.Request, requestID string, runID string,
+) {
+	const label = "Verification association"
+	if request.Method != http.MethodPost {
+		a.writeError(writer, requestID,
+			apperror.New(apperror.CodeInvalidArgument, "HTTP method is not supported"),
+			http.StatusMethodNotAllowed)
+		return
+	}
+	if !a.authorizeRunOperation(writer, request, requestID,
+		a.verificationEvidenceEnabled, label) {
+		return
+	}
+	if err := validatePathIdentity(runID); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	if err := validateJSONContentType(request.Header); err != nil {
+		a.writeError(writer, requestID, err, http.StatusUnsupportedMediaType)
+		return
+	}
+	operationKey, err := sessionControlIdempotencyKey(request.Header, label)
+	if err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	body, err := readBoundedRequestBody(request, MaxVerificationAssociationBodyBytes)
+	if err != nil {
+		a.writeError(writer, requestID, err, runOperationErrorStatus(err))
+		return
+	}
+	if err := rejectDuplicateJSONObjectFields(body, label); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	var view VerificationAssociationRequestView
+	if err := decodeStrictRunOperation(body, &view, label); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	result, err := application.NewVerificationAssociationService(a.store).Record(
+		request.Context(), application.RecordVerificationAssociationRequest{
+			Version: view.Version, RunID: runID, PlanID: view.PlanID,
+			PlanItemOrdinal: view.PlanItemOrdinal, EvidenceID: view.EvidenceID,
+			OperationKey: operationKey, AssociatedBy: "http_run_operator",
+		})
+	if err != nil {
+		a.writeError(writer, requestID, apperror.Normalize(err), 0)
+		return
+	}
+	a.writeSuccessStatus(writer, requestID,
+		verificationAssociationControlView(result.Association, result.Replayed), nil,
+		http.StatusAccepted)
+}
+
+func verificationAssociationControlView(value verification.PlanEvidenceAssociation,
+	replayed bool,
+) VerificationAssociationControlView {
+	return VerificationAssociationControlView{
+		ProtocolVersion: value.ProtocolVersion, ID: value.ID, RunID: value.RunID,
+		SessionID: value.SessionID, WorkspaceID: value.WorkspaceID, PlanID: value.PlanID,
+		PlanItemOrdinal: value.PlanItemOrdinal, PlanItemSHA256: value.PlanItemSHA256,
+		EvidenceID: value.EvidenceID, EvidenceOutcome: string(value.EvidenceOutcome),
+		EvidenceEventSequence:    value.EvidenceEventSequence,
+		AssociationEventSequence: value.EventSequence, AssociatedAt: value.CreatedAt,
+		Immutable: true, OperatorSupplied: true, MetadataOnly: true,
+		Replayed: replayed,
+	}
 }
 
 func verificationEvidenceItemView(value verification.Evidence) VerificationEvidenceItemView {

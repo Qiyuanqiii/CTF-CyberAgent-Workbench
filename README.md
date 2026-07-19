@@ -121,6 +121,7 @@ The table below is the canonical chronological schema history. It includes every
 | v78 | 不可变操作者验证证据 | immutable operator verification evidence |
 | v79 | 可恢复的 Run 无进展熔断 | recoverable Run livelock progress guard |
 | v80 | 不可变操作者验证计划与检查清单 | immutable operator verification plans and checklists |
+| v81 | 验证计划项与人工证据的不可变显式关联 | immutable explicit verification plan-item/evidence associations |
 
 ## 死锁与活锁保护 / Deadlock And Livelock Protection
 
@@ -1396,15 +1397,108 @@ records the boundary.
 远端 GitHub Actions [run 29695882120](https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench/actions/runs/29695882120) 已通过实现提交 `d70d96c`：TypeScript console 43 秒、Windows Desktop shell 2 分 39 秒、含 `go vet` 与 `govulncheck` 的 Go control plane 3 分 56 秒。<br>
 Remote GitHub Actions run 29695882120 passed implementation commit `d70d96c`: TypeScript console 43s, Windows Desktop shell 2m39s, and Go control plane including `go vet` and `govulncheck` 3m56s.
 
+## 精确提交、验证关联与 Runner 生命周期 / Exact Commit, Verification Association, And Runner Lifecycle
+
+D1-G4、schema v81 / D1-V3 与 R1 完成当前六切片周期的后三片。纯 Go
+`repository_commit_detail.v1` 只接受注册 Workspace root 中一个精确的小写 40 位 SHA-1
+对象 ID，将提交树与 first parent 比较，最多返回 200 个 canonical changed path 及
+added/modified/deleted、content changed、mode changed 元数据。它不读取 author、email、
+commit body、blob body、remote 或宿主 root，不 checkout、不调用进程/网络/hook；重定向
+Git metadata、link、畸形 tree 和缺失 object 均失败关闭。
+
+schema v81 新增不可变 `operator_verification_plan_evidence_association.v1`。一条 evidence
+只能显式关联到一个更早的 plan item，一个 item 可保留多条甚至相互矛盾的观察。Go、事务
+Store 与 SQLite trigger 精确绑定 Code Run、active Session、Workspace、plan/item/evidence、
+operation、event 和 digest，并把 command execution、model assertion、result inference、
+approval 与 authority 固定为 false。`operator_verification_plan_coverage.v1` 只显示每项
+`pass|fail|unknown` 计数和 unobserved 状态，绝不推导整份计划通过。
+
+非 schema `runner_lifecycle_contract.v1` 固化 start/wait/cancel/timeout、TERM/KILL grace、
+最终 inspect/reap 和 orphan cleanup，并在 start 前进入共享 wait graph。当前只接受
+`SimulationOnly` backend；partial start 或非法 process identity 也必须清理。它没有 CLI、
+HTTP、Desktop、Agent、LocalRunner、Docker、`os/exec` 或产品 capability 接线，因此不是
+开放真实宿主机/容器执行的后门。
+
+累计六切片完整健壮性门已通过：最终 uncached 全仓 Go 509 秒、全仓 race 341 秒、普通与
+secure-Desktop test/vet、零告警 staticcheck、module verify/tidy、零可达 govulncheck、
+37 文件 127 项 React、strict TypeScript、确定性 OpenAPI/TypeScript、Vite production、
+npm 零漏洞、隔离 mock-only CLI、隐私/产物检查和 Windows 可复现构建均为绿色。OpenAPI
+为 68 path、74 operation、163 schema，SHA-256 为
+`CFAD160A85306B2602F95A62298828DB86BDFAAF6D55F47BA468860079C42E8D`；生成 TypeScript
+schema SHA-256 为 `CCA5EF8B86E7F0D494E7B2BAF4FCA92FBE3FCB9C3A54E58D4A3C3B77028D5B73`。
+未签名 GUI SHA-256 为
+`77fb4d6fede1c1e3a0c3f3e9d39581e28f7a6880e0e25b222dcf0d3c701d1213`，自动检查通过但
+`release_ready=false`。
+
+Chrome 插件在 Go-hosted production bundle 中真实记录 plan、pass evidence 和显式关联，
+刷新后仍恢复 `1/1 observed` 与 `1 linked`；桌面及 390x844 移动宽度无页面级横向溢出，
+console 零 warning/error。组合审计修复了会静默略过缺失 subtree object 的 Git walker、
+v81 降级夹具 trigger 清理顺序、脱敏计数饱和、OpenAPI control 白名单，以及 partial/
+invalid Runner start 清理。当前启用路径无已知未解决高/中风险；模块图只保留应用未导入/
+未调用的 transitive `GO-2026-5932`。没有使用真实 key、Provider、Shell、LocalRunner、
+Docker、hook、攻击流量或外部网络。架构完成度约 99%，完整产品可用度约 94-96%，通用
+Coding Agent 约 94%，Cyber 自动化约 20%。边界见
+[ADR 0051](docs/adr/0051-exact-commit-verification-association-runner-lifecycle.md)。
+
+D1-G4, schema-v81 D1-V3, and R1 complete the second half of the current six-slice
+cycle. Pure-Go `repository_commit_detail.v1` accepts one exact lowercase 40-character
+SHA-1 object ID at the registered Workspace root, compares the commit tree with its
+first parent, and returns at most 200 canonical changed paths with added, modified,
+deleted, content-change, and mode-change metadata. It reads no author, email, commit
+body, blob body, remote, or host root and performs no checkout, subprocess, network,
+or hook action. Redirected Git metadata, links, malformed trees, and missing objects
+fail closed.
+
+Schema v81 adds immutable `operator_verification_plan_evidence_association.v1` facts.
+One evidence record can explicitly answer one earlier plan item, while an item may
+retain multiple or contradictory observations. Go, transactional Store checks, and
+SQLite triggers exact-bind the Code Run, active Session, Workspace, plan, item,
+evidence, operation, event, and digest and keep command execution, model assertion,
+result inference, approval, and authority false. The bounded
+`operator_verification_plan_coverage.v1` reports per-item `pass|fail|unknown` counts
+and unobserved state only; it never infers an overall pass.
+
+Non-schema `runner_lifecycle_contract.v1` defines start/wait/cancel/timeout, TERM/KILL
+grace, final inspection/reaping, orphan cleanup, and shared wait-graph entry. It accepts
+only `SimulationOnly` backends today and cleans partial starts and invalid process
+identities. There is no CLI, HTTP, Desktop, Agent, LocalRunner, Docker, `os/exec`, or
+product-capability wiring, so this does not enable real host or container execution.
+
+The cumulative six-slice robustness gate passed the final uncached full Go suite in
+509s and full race suite in 341s, ordinary and secure-Desktop test/vet, zero-warning
+staticcheck, module verification/tidy, zero reachable govulncheck findings, 127 React
+tests across 37 files, strict TypeScript, deterministic OpenAPI/TypeScript, Vite,
+zero-vulnerability npm audit, isolated mock-only CLI, privacy/artifact checks, and a
+reproducible Windows build. OpenAPI has 68 paths, 74 operations, and 163 schemas with
+SHA-256 `CFAD160A85306B2602F95A62298828DB86BDFAAF6D55F47BA468860079C42E8D`;
+the generated TypeScript schema SHA-256 is
+`CCA5EF8B86E7F0D494E7B2BAF4FCA92FBE3FCB9C3A54E58D4A3C3B77028D5B73`. The unsigned
+GUI SHA-256 is `77fb4d6fede1c1e3a0c3f3e9d39581e28f7a6880e0e25b222dcf0d3c701d1213`, with
+automated checks passing and `release_ready=false`.
+
+Chrome-extension verification against the Go-hosted production bundle recorded a
+plan, pass evidence, and their explicit association, then recovered `1/1 observed`
+and `1 linked` after reload. Desktop and 390x844 mobile layouts had no page-level
+horizontal overflow or console warning/error. The audit replaced a Git walker that
+could silently omit missing subtree objects, fixed v81 downgrade-fixture trigger
+ordering, saturated redaction counts, constrained the OpenAPI control whitelist, and
+cleaned partial/invalid Runner starts. No unresolved high/medium issue is known on an
+enabled path. The module graph retains only unimported and uncalled transitive
+`GO-2026-5932`. No real key, Provider, Shell, LocalRunner, Docker, hook, attack traffic,
+or external network was used. Architecture is about 99%, complete-product usability
+about 94-96%, generic Coding Agent usability about 94%, and Cyber automation about
+20%. [ADR 0051](docs/adr/0051-exact-commit-verification-association-runner-lifecycle.md)
+records the boundary.
+
 ## Project Memory
 
 Read [docs/PROJECT_MEMORY.md](docs/PROJECT_MEMORY.md), [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [docs/PROGRESS_BOOK.md](docs/PROGRESS_BOOK.md), [docs/TASK_BOOK.md](docs/TASK_BOOK.md), [docs/http-api.md](docs/http-api.md), [docs/openapi.json](docs/openapi.json), [web/README.md](web/README.md), [docs/errors.md](docs/errors.md), and the chronological [ADR 0001](docs/adr/0001-go-control-plane.md), [ADR 0002](docs/adr/0002-run-centric-runtime.md), [ADR 0003](docs/adr/0003-run-execution-modes.md), [ADR 0004](docs/adr/0004-plan-delivery-workflow.md), [ADR 0005](docs/adr/0005-operator-steering-queue.md), [ADR 0006](docs/adr/0006-operator-steering-controls.md), [ADR 0007](docs/adr/0007-specialist-skill-context.md), [ADR 0008](docs/adr/0008-sandbox-manifest-boundary.md), [ADR 0009](docs/adr/0009-sandbox-approval-candidate.md), [ADR 0010](docs/adr/0010-disabled-sandbox-lifecycle.md), [ADR 0011](docs/adr/0011-disabled-sandbox-preflight.md), [ADR 0012](docs/adr/0012-simulation-only-sandbox-evidence.md), [ADR 0013](docs/adr/0013-read-only-docker-observation.md), [ADR 0014](docs/adr/0014-deterministic-docker-container-plan.md), [ADR 0015](docs/adr/0015-bounded-docker-write-rehearsal.md), [ADR 0016](docs/adr/0016-recoverable-docker-rehearsal-attempt.md), [ADR 0017](docs/adr/0017-descriptor-sealed-host-input-staging.md), [ADR 0018](docs/adr/0018-durable-pre-stage-host-input-requirement.md), [ADR 0019](docs/adr/0019-daemon-owned-host-input-handoff.md), [ADR 0020](docs/adr/0020-deterministic-runtime-input-projection.md), [ADR 0021](docs/adr/0021-recoverable-runtime-input-application.md), [ADR 0022](docs/adr/0022-retained-runtime-input-resource-lifecycle.md), [ADR 0023](docs/adr/0023-blocked-docker-start-gate-review.md), [ADR 0024](docs/adr/0024-strict-inert-skill-package.md), [ADR 0025](docs/adr/0025-protected-delete-command-guard.md), [ADR 0026](docs/adr/0026-run-execution-profile-selection.md), [ADR 0027](docs/adr/0027-non-authorizing-docker-production-evidence-ledger.md), and [ADR 0028](docs/adr/0028-recoverable-docker-production-evidence-attempts.md) when resuming development after a long conversation. They record current progress, language ownership, run architecture, execution mode, Plan/Delivery and steering invariants, Specialist Skill delivery, Sandbox authority boundaries, API and error contracts, audit notes, verified commands, and the recommended next slice.
 
-The latest decisions are [ADR 0029](docs/adr/0029-bounded-linux-read-only-docker-evidence-harness.md), [ADR 0030](docs/adr/0030-immutable-docker-production-evidence-review.md), [ADR 0031](docs/adr/0031-content-addressed-inert-skill-registry.md), [ADR 0032](docs/adr/0032-external-skill-run-context.md), [ADR 0033](docs/adr/0033-pathless-desktop-skill-preview.md), [ADR 0034](docs/adr/0034-embedded-read-first-wails-shell.md), [ADR 0035](docs/adr/0035-desktop-lifecycle-and-event-resumption.md), [ADR 0036](docs/adr/0036-idempotent-controlled-run-creation.md), [ADR 0037](docs/adr/0037-controlled-session-message-submission.md), [ADR 0038](docs/adr/0038-idempotent-run-control-and-bounded-handoff.md), [ADR 0039](docs/adr/0039-model-plan-and-approval-controls.md), [ADR 0040](docs/adr/0040-provider-diff-wake-controls.md), [ADR 0041](docs/adr/0041-explicit-wake-file-apply-and-inert-skill-install.md), [ADR 0042](docs/adr/0042-receipts-explorer-portable-build.md), [ADR 0043](docs/adr/0043-workspace-search-evidence-attachment-receipt-history.md), [ADR 0044](docs/adr/0044-operator-action-center-evidence-inventory-command-palette.md), [ADR 0045](docs/adr/0045-go-issued-editor-system-credentials-bounded-wake-worker.md), [ADR 0046](docs/adr/0046-safe-editor-recovery-provider-generation-worker-health.md), [ADR 0047](docs/adr/0047-read-only-repository-change-set-code-journey.md), [ADR 0048](docs/adr/0048-bounded-diff-verification-code-handoff.md), [ADR 0049](docs/adr/0049-deadlock-livelock-runtime-guards.md), and [ADR 0050](docs/adr/0050-repository-history-verification-plan-handoff-export.md).
+The latest decisions are [ADR 0029](docs/adr/0029-bounded-linux-read-only-docker-evidence-harness.md), [ADR 0030](docs/adr/0030-immutable-docker-production-evidence-review.md), [ADR 0031](docs/adr/0031-content-addressed-inert-skill-registry.md), [ADR 0032](docs/adr/0032-external-skill-run-context.md), [ADR 0033](docs/adr/0033-pathless-desktop-skill-preview.md), [ADR 0034](docs/adr/0034-embedded-read-first-wails-shell.md), [ADR 0035](docs/adr/0035-desktop-lifecycle-and-event-resumption.md), [ADR 0036](docs/adr/0036-idempotent-controlled-run-creation.md), [ADR 0037](docs/adr/0037-controlled-session-message-submission.md), [ADR 0038](docs/adr/0038-idempotent-run-control-and-bounded-handoff.md), [ADR 0039](docs/adr/0039-model-plan-and-approval-controls.md), [ADR 0040](docs/adr/0040-provider-diff-wake-controls.md), [ADR 0041](docs/adr/0041-explicit-wake-file-apply-and-inert-skill-install.md), [ADR 0042](docs/adr/0042-receipts-explorer-portable-build.md), [ADR 0043](docs/adr/0043-workspace-search-evidence-attachment-receipt-history.md), [ADR 0044](docs/adr/0044-operator-action-center-evidence-inventory-command-palette.md), [ADR 0045](docs/adr/0045-go-issued-editor-system-credentials-bounded-wake-worker.md), [ADR 0046](docs/adr/0046-safe-editor-recovery-provider-generation-worker-health.md), [ADR 0047](docs/adr/0047-read-only-repository-change-set-code-journey.md), [ADR 0048](docs/adr/0048-bounded-diff-verification-code-handoff.md), [ADR 0049](docs/adr/0049-deadlock-livelock-runtime-guards.md), [ADR 0050](docs/adr/0050-repository-history-verification-plan-handoff-export.md), and [ADR 0051](docs/adr/0051-exact-commit-verification-association-runner-lifecycle.md).
 
-Windows Desktop D0-A/D0-B 与 D1-R1 至 D1-G2/V1/F2 自动化核心已实现，但仍是未签名开发/便携测试壳，不是安装版或完整工作台；Windows 10 实机发布矩阵仍待完成。分阶段方案见 [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md)。自定义 Skill 已具备严格 `skill_package.v1` 校验、schema v69 本地惰性 Registry、schema v70 CLI Run 选择/最小上下文、schema v71 三端只读来源投影，以及 HTTP/Desktop 显式确认的惰性安装；签名、远程分发和安装时执行仍未开放。详情见 [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md)。
+Windows Desktop D0-A/D0-B 与 D1-R1 至 D1-G4/V3 加 R1 非产品 Runner contract 自动化核心已实现，但仍是未签名开发/便携测试壳，不是安装版或完整工作台；Windows 10 实机发布矩阵仍待完成。分阶段方案见 [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md)。自定义 Skill 已具备严格 `skill_package.v1` 校验、schema v69 本地惰性 Registry、schema v70 CLI Run 选择/最小上下文、schema v71 三端只读来源投影，以及 HTTP/Desktop 显式确认的惰性安装；签名、远程分发和安装时执行仍未开放。详情见 [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md)。
 
-The automated core of Windows Desktop through D1-G2/V1/F2 now exists, but it remains an unsigned development/portable-test client rather than an installer or complete workbench; the Windows 10 real-machine release matrix is still pending. See [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md) for the phased Wails/React/Go plan. Custom Skills now have strict `skill_package.v1` validation, the schema-v69 local inert Registry, schema-v70 CLI Run selection/minimized context, schema-v71 read-only provenance across HTTP/TUI/Web, and explicitly confirmed inert HTTP/Desktop installation. Signatures, remote distribution, and install-time execution remain closed. See [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md).
+The automated Windows Desktop core now reaches D1-G4/V3 plus the non-product R1 Runner contract, but it remains an unsigned development/portable-test client rather than an installer or complete workbench; the Windows 10 real-machine release matrix is still pending. See [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md) for the phased Wails/React/Go plan. Custom Skills now have strict `skill_package.v1` validation, the schema-v69 local inert Registry, schema-v70 CLI Run selection/minimized context, schema-v71 read-only provenance across HTTP/TUI/Web, and explicitly confirmed inert HTTP/Desktop installation. Signatures, remote distribution, and install-time execution remain closed. See [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md).
 
 ## Repository Workflow
 

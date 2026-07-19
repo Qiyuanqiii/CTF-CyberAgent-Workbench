@@ -303,6 +303,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 78, Name: "immutable operator verification evidence", Statements: operatorVerificationEvidenceStatements},
 		{Version: 79, Name: "durable Run livelock progress guard", Statements: runProgressGuardStatements},
 		{Version: 80, Name: "immutable operator verification plans", Statements: operatorVerificationPlanStatements},
+		{Version: 81, Name: "immutable verification plan evidence associations", Statements: operatorVerificationPlanEvidenceAssociationStatements},
 	})
 }
 

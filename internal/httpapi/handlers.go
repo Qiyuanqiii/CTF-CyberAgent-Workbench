@@ -50,7 +50,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
 			"external-skills", "workspaces", "workspace-explorer", "workspace-search", "models",
-			"repository-state", "repository-diff", "repository-history", "verification-evidence", "verification-plan", "code-handoff", "code-handoff-export",
+			"repository-state", "repository-diff", "repository-history", "repository-commit-detail", "verification-evidence", "verification-plan", "verification-plan-coverage", "code-handoff", "code-handoff-export",
 			"operation-receipts", "operator-actions", "evidence-inventory",
 			"event-stream", "event-poll", "capabilities", "openapi"}
 		if a.controlEnabled {
@@ -58,7 +58,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 				"specialist-model-cancellation-control", "execution-profile-control")
 		}
 		if a.verificationEvidenceEnabled {
-			resources = append(resources, "verification-evidence-control", "verification-plan-control")
+			resources = append(resources, "verification-evidence-control", "verification-plan-control", "verification-plan-association-control")
 		}
 		if a.runCreationEnabled {
 			resources = append(resources, "run-creation-control")
@@ -150,6 +150,9 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 		if len(segments) == 3 && segments[2] == "repository-history" {
 			return a.workspaceRepositoryHistory(request, segments[1])
+		}
+		if len(segments) == 4 && segments[2] == "repository-commits" {
+			return a.workspaceRepositoryCommit(request, segments[1], segments[3])
 		}
 	case "sessions":
 		return a.routeSessions(request, segments)
@@ -436,6 +439,8 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 			return a.runVerificationEvidence(request, segments[1])
 		case "verification-plan":
 			return a.runVerificationPlans(request, segments[1])
+		case "verification-plan-coverage":
+			return a.runVerificationPlanCoverage(request, segments[1])
 		case "code-handoff":
 			return a.runCodeHandoff(request, segments[1])
 		}

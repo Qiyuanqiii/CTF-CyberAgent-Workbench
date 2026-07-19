@@ -1000,7 +1000,8 @@ describe("CyberAgentClient", () => {
   it("validates local history, guidance-only verification plans, and digest-bound handoff exports", async () => {
     const history = { protocol_version: "repository_history.v1", workspace_id: "workspace-1",
       kind: "git", available: true, head: "1234567890ab", detached: false,
-      commits: [{ hash: "1234567890ab", subject: "bounded commit", parent_count: 0,
+      commits: [{ hash: "1234567890ab", object_id: "1234567890abcdef1234567890abcdef12345678",
+        subject: "bounded commit", parent_count: 0,
         committed_at: "2026-07-19T10:00:00Z", redacted: false, subject_bounded: false }],
       branches: [{ name: "main", head: "1234567890ab", current: true }],
       returned_commit_count: 1, returned_branch_count: 1, omitted_branch_count: 0,
@@ -1061,6 +1062,74 @@ describe("CyberAgentClient", () => {
       "/api/v1/workspaces/workspace-1/repository-history");
     expect(String(fetchMock.mock.calls[3]?.[0])).toBe(
       "/api/v1/runs/run-1/code-handoff/export?format=json");
+  });
+
+  it("validates exact commit metadata and explicit plan evidence coverage", async () => {
+    const objectID = "1234567890abcdef1234567890abcdef12345678";
+    const commit = { protocol_version: "repository_commit_detail.v1",
+      workspace_id: "workspace-1", kind: "git", available: true, object_id: objectID,
+      hash: objectID.slice(0, 12), subject: "bounded commit", committed_at: "2026-07-19T10:00:00Z",
+      parent_count: 1, changes: [{ path: "internal/check.go", change: "added",
+        previous_kind: "", current_kind: "regular", content_changed: true, mode_changed: true }],
+      changed_file_count: 1, returned_change_count: 1, omitted_change_count: 0,
+      redaction_count: 0, truncated: false, first_parent_only: true, read_only: true,
+      root_path_exposed: false, author_identity_included: false, commit_body_included: false,
+      file_content_included: false, patch_included: false, remote_config_included: false,
+      checkout_performed: false, reference_updated: false, process_started: false,
+      network_used: false, hooks_executed: false };
+    const itemSHA = "b".repeat(64);
+    const coverage = { protocol_version: "operator_verification_plan_coverage.v1",
+      run_id: "run-1", session_id: "session-1", workspace_id: "workspace-1",
+      plans: [{ plan_id: "verification-plan-1", plan_sha256: "c".repeat(64), item_count: 1,
+        observed_item_count: 1, associated_evidence_count: 1,
+        items: [{ ordinal: 1, item_sha256: itemSHA, associated_evidence_count: 1,
+          pass_count: 1, fail_count: 0, unknown_count: 0,
+          latest_association_event_sequence: 13 }] }],
+      plan_count: 1, plan_item_count: 1, observed_plan_item_count: 1,
+      associated_evidence_count: 1,
+      associations: [{ id: "verification-association-1", plan_id: "verification-plan-1",
+        plan_item_ordinal: 1, plan_item_sha256: itemSHA, evidence_id: "verification-1",
+        evidence_outcome: "pass", evidence_event_sequence: 12,
+        association_event_sequence: 13, associated_at: "2026-07-19T12:00:00Z" }],
+      plans_truncated: false, associations_truncated: false, metadata_only: true,
+      read_only: true, result_inferred: false, command_executed: false,
+      model_assertion: false, record_rewritten: false, approval: false,
+      authority_granted: false };
+    const associated = { protocol_version: "operator_verification_plan_evidence_association.v1",
+      id: "verification-association-2", run_id: "run-1", session_id: "session-1",
+      workspace_id: "workspace-1", plan_id: "verification-plan-1", plan_item_ordinal: 1,
+      plan_item_sha256: itemSHA, evidence_id: "verification-2", evidence_outcome: "unknown",
+      evidence_event_sequence: 14, association_event_sequence: 15,
+      associated_at: "2026-07-19T12:05:00Z", immutable: true, operator_supplied: true,
+      metadata_only: true, command_executed: false, model_assertion: false,
+      result_inferred: false, record_rewritten: false, approval: false,
+      authority_granted: false, replayed: false };
+    const envelope = (data: unknown, status = 200) => new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-exact-metadata", data,
+    }), { status, headers: { "Content-Type": "application/json" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(envelope(commit))
+      .mockResolvedValueOnce(envelope(coverage))
+      .mockResolvedValueOnce(envelope(associated, 202))
+      .mockResolvedValueOnce(envelope({ ...coverage, result_inferred: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      verificationEvidenceEnabled: true,
+    });
+    await expect(client.repositoryCommit("workspace-1", objectID)).resolves.toEqual(commit);
+    await expect(client.verificationPlanCoverage("run-1")).resolves.toEqual(coverage);
+    await expect(client.associateVerificationEvidence("run-1", {
+      version: "operator_verification_plan_evidence_association.v1",
+      plan_id: "verification-plan-1", plan_item_ordinal: 1, evidence_id: "verification-2",
+    }, "web-verification-association-operation-0001")).resolves.toEqual(associated);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      `/api/v1/workspaces/workspace-1/repository-commits/${objectID}`);
+    const [associationURL, associationInit] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(associationURL).toBe("/api/v1/runs/run-1/verification-plan-associations");
+    expect(associationInit.headers).toMatchObject({ Authorization: "Bearer control-secret",
+      "Idempotency-Key": "web-verification-association-operation-0001" });
+    await expect(client.verificationPlanCoverage("run-1"))
+      .rejects.toThrow("metadata-only authority");
   });
 
   it("validates Workspace search, evidence attachment, and metadata-only receipt history", async () => {

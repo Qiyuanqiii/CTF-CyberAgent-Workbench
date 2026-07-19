@@ -1133,10 +1133,53 @@ Shell、LocalRunner、Docker、hook、攻击流量或外部网络。双指标更
 构建/浏览器完整健壮性门；Local/Docker 产品执行、xterm 输入、Rust analyzer 和 CTF 自动化
 继续独立后置。
 
+D1-G4/D1-V3/R1 三切片已经完成，schema 升至 v81，任务 ID 为
+`P9-Exact-Commit-Verification-Association-Runner-Lifecycle-v81`。D1-G4 增加纯 Go
+`repository_commit_detail.v1`：只接受 exact registered Workspace root 内一个小写 40 位
+SHA-1 object，将 commit tree 与 first parent 比较，最多输出 200 条 canonical path 的
+added/modified/deleted、content/mode-change metadata。author/email/body/blob/remote/root、
+checkout/ref mutation、process/network/hook 均不进入协议；redirected metadata、link、畸形
+tree 与缺失 object 失败关闭。
+
+D1-V3 增加不可变 `operator_verification_plan_evidence_association.v1` 与 bounded coverage。
+一条 later evidence 只能显式关联一个 earlier plan item，一个 item 可保留多条甚至互相矛盾的
+观察。Go、事务 Store 与 schema v81 trigger 重复复核 exact Code Run、active Session、
+Workspace、plan/item/evidence、operation/event/digest；command/model/result inference/
+approval/authority 全为 false。UI 只显示每项 pass/fail/unknown 和 unobserved，不生成整体 pass。
+
+R1 增加 simulation-only `runner_lifecycle_contract.v1`，覆盖 start/wait、pre-cancel、timeout、
+共享 waitgraph、TERM/KILL grace、最终 inspect/reap、partial/invalid start cleanup 与 orphan
+cleanup。当前没有 CLI、HTTP、Desktop、Agent、LocalRunner、Docker、`os/exec` 或任何产品
+capability 接线，因此不开放真实宿主机/容器执行。
+
+本批与前一 v80 批累计六切片，完整健壮性门全绿：最终 uncached 全仓 Go 509 秒、全仓 race
+341 秒、ordinary/secure-Desktop test/vet、零告警 staticcheck、module verify/tidy、零可达
+govulncheck、37 文件 127 项 React、strict TypeScript、确定性 OpenAPI/TypeScript、Vite、
+npm 零漏洞、隔离 mock-only CLI、隐私/产物检查、Windows 可复现构建和 Chrome 桌面/390x844
+复核。OpenAPI 为 68 path/74 operation/163 schema，SHA-256
+`CFAD160A85306B2602F95A62298828DB86BDFAAF6D55F47BA468860079C42E8D`；TypeScript schema
+SHA-256 `CCA5EF8B86E7F0D494E7B2BAF4FCA92FBE3FCB9C3A54E58D4A3C3B77028D5B73`；未签名 GUI
+SHA-256 `77fb4d6fede1c1e3a0c3f3e9d39581e28f7a6880e0e25b222dcf0d3c701d1213`，仍为
+`release_ready=false`。
+
+真实 production bundle 录入 plan、pass evidence 与显式 association，刷新后恢复为
+`1/1 observed` 和 `1 linked`；桌面/移动无页面级横向溢出，console 零 warning/error。
+组合审计替换会静默漏掉 missing subtree object 的 Git walker，修复 v81 downgrade fixture
+trigger 清理顺序、脱敏计数饱和、OpenAPI control whitelist，并补齐 partial/invalid Runner
+start 清理。当前启用路径无已知未解决高/中风险；依赖图仅保留应用未导入/未调用的
+transitive `GO-2026-5932`。未使用真实 key、Provider、Shell、LocalRunner、Docker、hook、
+攻击流量或外部网络。双指标更新为架构约 99%（V2 约 99%）、完整产品可用度约 94-96%、
+通用 Coding Agent 约 94%、Cyber 自动化约 20%，边界见 ADR 0051。
+
+下一批建议 D1-G5 有界脱敏 exact-commit file preview、D1-V4 把显式 verification coverage
+以 metadata-only 方式加入 Handoff/export，以及 R2 仅测试构建可见的 platform process-tree
+conformance adapters。三者仍不得开放 raw blob、aggregate pass inference 或产品 Local/Docker
+start；人工 Windows 10、签名/安装包、Rust analyzer、xterm 与 CTF 自动化继续独立后置。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0050-repository-history-verification-plan-handoff-export.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0051-exact-commit-verification-association-runner-lifecycle.md`。

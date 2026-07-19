@@ -5198,6 +5198,201 @@
         "x-cyberagent-read-only": false
       }
     },
+    "/api/v1/runs/{run_id}/verification-plan-associations": {
+      "post": {
+        "operationId": "associateRunVerificationEvidence",
+        "summary": "Associate evidence with one verification plan item",
+        "description": "Appends one immutable operator association between an earlier checklist item and a later observation in the same active Code Run. It does not alter either record, execute the check, infer a result, call a model, approve an action, or grant authority.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque retry key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/VerificationAssociationControlView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationAssociationRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
+    "/api/v1/runs/{run_id}/verification-plan-coverage": {
+      "get": {
+        "operationId": "getRunVerificationPlanCoverage",
+        "summary": "Inspect explicit verification plan coverage",
+        "description": "Derives bounded metadata-only per-item counts from immutable operator associations. It exposes explicit pass, fail, and unknown observation counts but infers no item result, rewrites no record, and grants no command, approval, or execution authority.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/VerificationPlanCoverageInventoryView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
     "/api/v1/runs/{run_id}/wake-intent": {
       "get": {
         "operationId": "getRunWakeIntent",
@@ -6603,6 +6798,96 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/WorkspaceExplorerView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/repository-commits/{object_id}": {
+      "get": {
+        "operationId": "getWorkspaceRepositoryCommit",
+        "summary": "Inspect exact commit changed-file metadata",
+        "description": "Compares one exact local commit object with its first parent and returns only bounded path, change-kind, file-kind, and content/mode-change metadata. It returns no author, body, blob, patch, remote, or host path and performs no checkout, ref update, process, hook, or network operation.",
+        "tags": [
+          "Workspaces"
+        ],
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "Workspace identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "object_id",
+            "in": "path",
+            "description": "Exact lowercase forty-character Git commit object identity",
+            "required": true,
+            "schema": {
+              "maxLength": 40,
+              "minLength": 40,
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RepositoryCommitDetailView"
                     },
                     "request_id": {
                       "maxLength": 256,
@@ -11648,6 +11933,171 @@
         ],
         "type": "object"
       },
+      "RepositoryCommitDetailView": {
+        "additionalProperties": false,
+        "properties": {
+          "author_identity_included": {
+            "type": "boolean"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "changed_file_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/RepositoryCommitFileChangeView"
+            },
+            "type": "array"
+          },
+          "checkout_performed": {
+            "type": "boolean"
+          },
+          "commit_body_included": {
+            "type": "boolean"
+          },
+          "committed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "file_content_included": {
+            "type": "boolean"
+          },
+          "first_parent_only": {
+            "type": "boolean"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "hooks_executed": {
+            "type": "boolean"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "network_used": {
+            "type": "boolean"
+          },
+          "object_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "omitted_change_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "parent_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "patch_included": {
+            "type": "boolean"
+          },
+          "process_started": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "redaction_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "reference_updated": {
+            "type": "boolean"
+          },
+          "remote_config_included": {
+            "type": "boolean"
+          },
+          "returned_change_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "root_path_exposed": {
+            "type": "boolean"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "workspace_id",
+          "kind",
+          "available",
+          "object_id",
+          "hash",
+          "subject",
+          "committed_at",
+          "parent_count",
+          "changes",
+          "changed_file_count",
+          "returned_change_count",
+          "omitted_change_count",
+          "redaction_count",
+          "truncated",
+          "first_parent_only",
+          "read_only",
+          "root_path_exposed",
+          "author_identity_included",
+          "commit_body_included",
+          "file_content_included",
+          "patch_included",
+          "remote_config_included",
+          "checkout_performed",
+          "reference_updated",
+          "process_started",
+          "network_used",
+          "hooks_executed"
+        ],
+        "type": "object"
+      },
+      "RepositoryCommitFileChangeView": {
+        "additionalProperties": false,
+        "properties": {
+          "change": {
+            "type": "string"
+          },
+          "content_changed": {
+            "type": "boolean"
+          },
+          "current_kind": {
+            "type": "string"
+          },
+          "mode_changed": {
+            "type": "boolean"
+          },
+          "path": {
+            "type": "string"
+          },
+          "previous_kind": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "change",
+          "previous_kind",
+          "current_kind",
+          "content_changed",
+          "mode_changed"
+        ],
+        "type": "object"
+      },
       "RepositoryDiffItemView": {
         "additionalProperties": false,
         "properties": {
@@ -11882,6 +12332,11 @@
           "hash": {
             "type": "string"
           },
+          "object_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
           "parent_count": {
             "format": "int32",
             "type": "integer"
@@ -11898,6 +12353,7 @@
         },
         "required": [
           "hash",
+          "object_id",
           "subject",
           "parent_count",
           "committed_at",
@@ -14064,6 +14520,205 @@
         ],
         "type": "object"
       },
+      "VerificationAssociationControlView": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "type": "boolean"
+          },
+          "associated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "association_event_sequence": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "authority_granted": {
+            "type": "boolean"
+          },
+          "command_executed": {
+            "type": "boolean"
+          },
+          "evidence_event_sequence": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "evidence_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "evidence_outcome": {
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "immutable": {
+            "type": "boolean"
+          },
+          "metadata_only": {
+            "type": "boolean"
+          },
+          "model_assertion": {
+            "type": "boolean"
+          },
+          "operator_supplied": {
+            "type": "boolean"
+          },
+          "plan_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_item_ordinal": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "plan_item_sha256": {
+            "type": "string"
+          },
+          "protocol_version": {
+            "type": "string"
+          },
+          "record_rewritten": {
+            "type": "boolean"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "result_inferred": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "id",
+          "run_id",
+          "session_id",
+          "workspace_id",
+          "plan_id",
+          "plan_item_ordinal",
+          "plan_item_sha256",
+          "evidence_id",
+          "evidence_outcome",
+          "evidence_event_sequence",
+          "association_event_sequence",
+          "associated_at",
+          "immutable",
+          "operator_supplied",
+          "metadata_only",
+          "command_executed",
+          "model_assertion",
+          "result_inferred",
+          "record_rewritten",
+          "approval",
+          "authority_granted",
+          "replayed"
+        ],
+        "type": "object"
+      },
+      "VerificationAssociationReferenceView": {
+        "additionalProperties": false,
+        "properties": {
+          "associated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "association_event_sequence": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "evidence_event_sequence": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "evidence_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "evidence_outcome": {
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_item_ordinal": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "plan_item_sha256": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "plan_id",
+          "plan_item_ordinal",
+          "plan_item_sha256",
+          "evidence_id",
+          "evidence_outcome",
+          "evidence_event_sequence",
+          "association_event_sequence",
+          "associated_at"
+        ],
+        "type": "object"
+      },
+      "VerificationAssociationRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_item_ordinal": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "plan_id",
+          "plan_item_ordinal",
+          "evidence_id"
+        ],
+        "type": "object"
+      },
       "VerificationEvidenceControlView": {
         "additionalProperties": false,
         "properties": {
@@ -14467,6 +15122,150 @@
         ],
         "type": "object"
       },
+      "VerificationPlanCoverageInventoryView": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "type": "boolean"
+          },
+          "associated_evidence_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "associations": {
+            "items": {
+              "$ref": "#/components/schemas/VerificationAssociationReferenceView"
+            },
+            "type": "array"
+          },
+          "associations_truncated": {
+            "type": "boolean"
+          },
+          "authority_granted": {
+            "type": "boolean"
+          },
+          "command_executed": {
+            "type": "boolean"
+          },
+          "metadata_only": {
+            "type": "boolean"
+          },
+          "model_assertion": {
+            "type": "boolean"
+          },
+          "observed_plan_item_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "plan_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "plan_item_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/VerificationPlanCoverageView"
+            },
+            "type": "array"
+          },
+          "plans_truncated": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "record_rewritten": {
+            "type": "boolean"
+          },
+          "result_inferred": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "session_id",
+          "workspace_id",
+          "plans",
+          "plan_count",
+          "plan_item_count",
+          "observed_plan_item_count",
+          "associated_evidence_count",
+          "associations",
+          "plans_truncated",
+          "associations_truncated",
+          "metadata_only",
+          "read_only",
+          "result_inferred",
+          "command_executed",
+          "model_assertion",
+          "record_rewritten",
+          "approval",
+          "authority_granted"
+        ],
+        "type": "object"
+      },
+      "VerificationPlanCoverageView": {
+        "additionalProperties": false,
+        "properties": {
+          "associated_evidence_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "item_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VerificationPlanItemCoverageView"
+            },
+            "type": "array"
+          },
+          "observed_item_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "plan_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_sha256": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan_id",
+          "plan_sha256",
+          "item_count",
+          "observed_item_count",
+          "associated_evidence_count",
+          "items"
+        ],
+        "type": "object"
+      },
       "VerificationPlanInventoryView": {
         "additionalProperties": false,
         "properties": {
@@ -14505,6 +15304,48 @@
           "workspace_id",
           "items",
           "truncated"
+        ],
+        "type": "object"
+      },
+      "VerificationPlanItemCoverageView": {
+        "additionalProperties": false,
+        "properties": {
+          "associated_evidence_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "fail_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "item_sha256": {
+            "type": "string"
+          },
+          "latest_association_event_sequence": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "ordinal": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "pass_count": {
+            "format": "int32",
+            "type": "integer"
+          },
+          "unknown_count": {
+            "format": "int32",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ordinal",
+          "item_sha256",
+          "associated_evidence_count",
+          "pass_count",
+          "fail_count",
+          "unknown_count",
+          "latest_association_event_sequence"
         ],
         "type": "object"
       },

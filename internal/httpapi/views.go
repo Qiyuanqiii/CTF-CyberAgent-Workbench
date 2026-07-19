@@ -194,11 +194,52 @@ type RepositoryDiffView struct {
 
 type RepositoryHistoryCommitView struct {
 	Hash           string    `json:"hash"`
+	ObjectID       string    `json:"object_id"`
 	Subject        string    `json:"subject"`
 	ParentCount    int       `json:"parent_count"`
 	CommittedAt    time.Time `json:"committed_at"`
 	Redacted       bool      `json:"redacted"`
 	SubjectBounded bool      `json:"subject_bounded"`
+}
+
+type RepositoryCommitFileChangeView struct {
+	Path           string `json:"path"`
+	Change         string `json:"change"`
+	PreviousKind   string `json:"previous_kind"`
+	CurrentKind    string `json:"current_kind"`
+	ContentChanged bool   `json:"content_changed"`
+	ModeChanged    bool   `json:"mode_changed"`
+}
+
+type RepositoryCommitDetailView struct {
+	ProtocolVersion        string                           `json:"protocol_version"`
+	WorkspaceID            string                           `json:"workspace_id"`
+	Kind                   string                           `json:"kind"`
+	Available              bool                             `json:"available"`
+	ObjectID               string                           `json:"object_id"`
+	Hash                   string                           `json:"hash"`
+	Subject                string                           `json:"subject"`
+	CommittedAt            time.Time                        `json:"committed_at"`
+	ParentCount            int                              `json:"parent_count"`
+	Changes                []RepositoryCommitFileChangeView `json:"changes"`
+	ChangedFileCount       int                              `json:"changed_file_count"`
+	ReturnedChangeCount    int                              `json:"returned_change_count"`
+	OmittedChangeCount     int                              `json:"omitted_change_count"`
+	RedactionCount         int                              `json:"redaction_count"`
+	Truncated              bool                             `json:"truncated"`
+	FirstParentOnly        bool                             `json:"first_parent_only"`
+	ReadOnly               bool                             `json:"read_only"`
+	RootPathExposed        bool                             `json:"root_path_exposed"`
+	AuthorIdentityIncluded bool                             `json:"author_identity_included"`
+	CommitBodyIncluded     bool                             `json:"commit_body_included"`
+	FileContentIncluded    bool                             `json:"file_content_included"`
+	PatchIncluded          bool                             `json:"patch_included"`
+	RemoteConfigIncluded   bool                             `json:"remote_config_included"`
+	CheckoutPerformed      bool                             `json:"checkout_performed"`
+	ReferenceUpdated       bool                             `json:"reference_updated"`
+	ProcessStarted         bool                             `json:"process_started"`
+	NetworkUsed            bool                             `json:"network_used"`
+	HooksExecuted          bool                             `json:"hooks_executed"`
 }
 
 type RepositoryHistoryBranchView struct {

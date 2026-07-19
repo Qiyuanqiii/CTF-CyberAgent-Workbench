@@ -142,6 +142,93 @@ type VerificationPlanInventoryView struct {
 	Truncated       bool                   `json:"truncated"`
 }
 
+type VerificationAssociationRequestView struct {
+	Version         string `json:"version"`
+	PlanID          string `json:"plan_id"`
+	PlanItemOrdinal int    `json:"plan_item_ordinal"`
+	EvidenceID      string `json:"evidence_id"`
+}
+
+type VerificationAssociationControlView struct {
+	ProtocolVersion          string    `json:"protocol_version"`
+	ID                       string    `json:"id"`
+	RunID                    string    `json:"run_id"`
+	SessionID                string    `json:"session_id"`
+	WorkspaceID              string    `json:"workspace_id"`
+	PlanID                   string    `json:"plan_id"`
+	PlanItemOrdinal          int       `json:"plan_item_ordinal"`
+	PlanItemSHA256           string    `json:"plan_item_sha256"`
+	EvidenceID               string    `json:"evidence_id"`
+	EvidenceOutcome          string    `json:"evidence_outcome"`
+	EvidenceEventSequence    int64     `json:"evidence_event_sequence"`
+	AssociationEventSequence int64     `json:"association_event_sequence"`
+	AssociatedAt             time.Time `json:"associated_at"`
+	Immutable                bool      `json:"immutable"`
+	OperatorSupplied         bool      `json:"operator_supplied"`
+	MetadataOnly             bool      `json:"metadata_only"`
+	CommandExecuted          bool      `json:"command_executed"`
+	ModelAssertion           bool      `json:"model_assertion"`
+	ResultInferred           bool      `json:"result_inferred"`
+	RecordRewritten          bool      `json:"record_rewritten"`
+	Approval                 bool      `json:"approval"`
+	AuthorityGranted         bool      `json:"authority_granted"`
+	Replayed                 bool      `json:"replayed"`
+}
+
+type VerificationPlanItemCoverageView struct {
+	Ordinal                        int    `json:"ordinal"`
+	ItemSHA256                     string `json:"item_sha256"`
+	AssociatedEvidenceCount        int    `json:"associated_evidence_count"`
+	PassCount                      int    `json:"pass_count"`
+	FailCount                      int    `json:"fail_count"`
+	UnknownCount                   int    `json:"unknown_count"`
+	LatestAssociationEventSequence int64  `json:"latest_association_event_sequence"`
+}
+
+type VerificationPlanCoverageView struct {
+	PlanID                  string                             `json:"plan_id"`
+	PlanSHA256              string                             `json:"plan_sha256"`
+	ItemCount               int                                `json:"item_count"`
+	ObservedItemCount       int                                `json:"observed_item_count"`
+	AssociatedEvidenceCount int                                `json:"associated_evidence_count"`
+	Items                   []VerificationPlanItemCoverageView `json:"items"`
+}
+
+type VerificationAssociationReferenceView struct {
+	ID                       string    `json:"id"`
+	PlanID                   string    `json:"plan_id"`
+	PlanItemOrdinal          int       `json:"plan_item_ordinal"`
+	PlanItemSHA256           string    `json:"plan_item_sha256"`
+	EvidenceID               string    `json:"evidence_id"`
+	EvidenceOutcome          string    `json:"evidence_outcome"`
+	EvidenceEventSequence    int64     `json:"evidence_event_sequence"`
+	AssociationEventSequence int64     `json:"association_event_sequence"`
+	AssociatedAt             time.Time `json:"associated_at"`
+}
+
+type VerificationPlanCoverageInventoryView struct {
+	ProtocolVersion         string                                 `json:"protocol_version"`
+	RunID                   string                                 `json:"run_id"`
+	SessionID               string                                 `json:"session_id"`
+	WorkspaceID             string                                 `json:"workspace_id"`
+	Plans                   []VerificationPlanCoverageView         `json:"plans"`
+	PlanCount               int                                    `json:"plan_count"`
+	PlanItemCount           int                                    `json:"plan_item_count"`
+	ObservedPlanItemCount   int                                    `json:"observed_plan_item_count"`
+	AssociatedEvidenceCount int                                    `json:"associated_evidence_count"`
+	Associations            []VerificationAssociationReferenceView `json:"associations"`
+	PlansTruncated          bool                                   `json:"plans_truncated"`
+	AssociationsTruncated   bool                                   `json:"associations_truncated"`
+	MetadataOnly            bool                                   `json:"metadata_only"`
+	ReadOnly                bool                                   `json:"read_only"`
+	ResultInferred          bool                                   `json:"result_inferred"`
+	CommandExecuted         bool                                   `json:"command_executed"`
+	ModelAssertion          bool                                   `json:"model_assertion"`
+	RecordRewritten         bool                                   `json:"record_rewritten"`
+	Approval                bool                                   `json:"approval"`
+	AuthorityGranted        bool                                   `json:"authority_granted"`
+}
+
 type CodeHandoffPlanView struct {
 	State             string `json:"state"`
 	ProposalID        string `json:"proposal_id"`
