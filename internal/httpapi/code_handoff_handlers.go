@@ -170,6 +170,55 @@ func (a *API) workspaceRepositoryCommit(request *http.Request,
 	}, nil, nil
 }
 
+func (a *API) workspaceRepositoryCommitFilePreview(request *http.Request,
+	workspaceID string, objectID string,
+) (any, *Page, error) {
+	values := request.URL.Query()
+	if err := validateSingleQueryValues(values, "path"); err != nil {
+		return nil, nil, err
+	}
+	paths, present := values["path"]
+	if !present || len(paths) != 1 || paths[0] == "" {
+		return nil, nil, apperror.New(apperror.CodeInvalidArgument,
+			"repository commit file preview path must appear exactly once")
+	}
+	path := paths[0]
+	registered, err := a.store.GetWorkspaceInfo(request.Context(), workspaceID)
+	if err != nil {
+		return nil, nil, apperror.Normalize(err)
+	}
+	if registered.ID != workspaceID {
+		return nil, nil, apperror.New(apperror.CodeInternal,
+			"workspace lookup returned a mismatched identity")
+	}
+	projection, err := repository.InspectCommitFilePreview(request.Context(),
+		registered.RootPath, registered.ID, objectID, path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return RepositoryCommitFilePreviewView{
+		ProtocolVersion: projection.ProtocolVersion, WorkspaceID: projection.WorkspaceID,
+		ObjectID: projection.ObjectID, Hash: projection.Hash, Path: projection.Path,
+		Kind: projection.Kind, Content: projection.Content, TotalBytes: projection.TotalBytes,
+		ReturnedBytes: projection.ReturnedBytes, RedactionCount: projection.RedactionCount,
+		Redacted: projection.Redacted,
+		Provenance: RepositoryCommitFilePreviewProvenanceView{
+			Version: projection.Provenance.Version, SourceKind: projection.Provenance.SourceKind,
+			SourceRef:             projection.Provenance.SourceRef,
+			ContentSHA256:         projection.Provenance.ContentSHA256,
+			InstructionAuthorized: projection.Provenance.InstructionAuthorized,
+		},
+		ReadOnly: projection.ReadOnly, MutationSupported: projection.MutationSupported,
+		AuthorityGranted: projection.AuthorityGranted,
+		RootPathExposed:  projection.RootPathExposed, RawBlobIncluded: projection.RawBlobIncluded,
+		RedactedContentIncluded: projection.RedactedContentIncluded,
+		RemoteConfigIncluded:    projection.RemoteConfigIncluded,
+		CheckoutPerformed:       projection.CheckoutPerformed,
+		ReferenceUpdated:        projection.ReferenceUpdated, ProcessStarted: projection.ProcessStarted,
+		NetworkUsed: projection.NetworkUsed, HooksExecuted: projection.HooksExecuted,
+	}, nil, nil
+}
+
 func (a *API) runVerificationEvidence(request *http.Request,
 	runID string,
 ) (any, *Page, error) {
@@ -605,6 +654,18 @@ func codeHandoffView(value application.CodeHandoff) CodeHandoffView {
 			CreatedAt: reference.CreatedAt,
 		}
 	}
+	coverageItems := make([]CodeHandoffVerificationCoverageItemView,
+		len(value.VerificationCoverage.Items))
+	for index, item := range value.VerificationCoverage.Items {
+		coverageItems[index] = CodeHandoffVerificationCoverageItemView{
+			PlanID: item.PlanID, PlanSHA256: item.PlanSHA256, Ordinal: item.Ordinal,
+			ItemSHA256:              item.ItemSHA256,
+			AssociatedEvidenceCount: item.AssociatedEvidenceCount,
+			PassCount:               item.PassCount, FailCount: item.FailCount,
+			UnknownCount:                   item.UnknownCount,
+			LatestAssociationEventSequence: item.LatestAssociationEventSequence,
+		}
+	}
 	actions := make([]CodeHandoffActionReferenceView, len(value.PendingActions))
 	for index, action := range value.PendingActions {
 		actions[index] = CodeHandoffActionReferenceView{
@@ -652,6 +713,21 @@ func codeHandoffView(value application.CodeHandoff) CodeHandoffView {
 			ReturnedCount: value.VerificationPlans.ReturnedCount,
 			Truncated:     value.VerificationPlans.Truncated,
 			References:    verificationPlanReferences,
+		},
+		VerificationCoverage: CodeHandoffVerificationCoverageView{
+			ProtocolVersion:         value.VerificationCoverage.ProtocolVersion,
+			PlanCount:               value.VerificationCoverage.PlanCount,
+			PlanItemCount:           value.VerificationCoverage.PlanItemCount,
+			ObservedPlanItemCount:   value.VerificationCoverage.ObservedPlanItemCount,
+			UnobservedPlanItemCount: value.VerificationCoverage.UnobservedPlanItemCount,
+			AssociatedEvidenceCount: value.VerificationCoverage.AssociatedEvidenceCount,
+			ContradictoryItemCount:  value.VerificationCoverage.ContradictoryItemCount,
+			ReturnedItemCount:       value.VerificationCoverage.ReturnedItemCount,
+			Truncated:               value.VerificationCoverage.Truncated,
+			Items:                   coverageItems, MetadataOnly: value.VerificationCoverage.MetadataOnly,
+			ReadOnly:              value.VerificationCoverage.ReadOnly,
+			ResultInferred:        value.VerificationCoverage.ResultInferred,
+			PrivateBodiesIncluded: value.VerificationCoverage.PrivateBodiesIncluded,
 		},
 		PendingActionCount:      value.PendingActionCount,
 		PendingActionsTruncated: value.PendingActionsTruncated, PendingActions: actions,

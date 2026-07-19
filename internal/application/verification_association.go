@@ -16,21 +16,25 @@ import (
 	"cyberagent-workbench/internal/verification"
 )
 
-type VerificationAssociationStore interface {
+type VerificationCoverageStore interface {
 	GetRun(context.Context, string) (domain.Run, error)
 	GetMission(context.Context, string) (domain.Mission, error)
 	GetRunMode(context.Context, string) (domain.RunModeSnapshot, error)
 	GetSession(context.Context, string) (session.Session, error)
 	GetWorkspaceInfo(context.Context, string) (session.WorkspaceInfo, error)
-	GetVerificationPlan(context.Context, string) (verification.Plan, error)
-	GetVerificationEvidence(context.Context, string) (verification.Evidence, error)
-	GetVerificationPlanEvidenceAssociationByOperation(context.Context, string) (
-		verification.PlanEvidenceAssociation, bool, error)
 	ListVerificationPlans(context.Context, string, int) ([]verification.Plan, error)
 	ListVerificationPlanEvidenceAssociations(context.Context, string, int) (
 		[]verification.PlanEvidenceAssociation, error)
 	ListVerificationPlanCoverageCounts(context.Context, string, []string) (
 		[]verification.PlanItemCoverageCount, error)
+}
+
+type VerificationAssociationStore interface {
+	VerificationCoverageStore
+	GetVerificationPlan(context.Context, string) (verification.Plan, error)
+	GetVerificationEvidence(context.Context, string) (verification.Evidence, error)
+	GetVerificationPlanEvidenceAssociationByOperation(context.Context, string) (
+		verification.PlanEvidenceAssociation, bool, error)
 	RecordVerificationPlanEvidenceAssociation(context.Context,
 		verification.PlanEvidenceAssociation) (verification.PlanEvidenceAssociation, bool, error)
 }
@@ -227,15 +231,21 @@ func (s *VerificationAssociationService) Coverage(ctx context.Context,
 		return VerificationPlanCoverageInventory{}, apperror.New(
 			apperror.CodeFailedPrecondition, "verification association store is required")
 	}
+	return buildVerificationCoverage(ctx, s.store, runID)
+}
+
+func buildVerificationCoverage(ctx context.Context, store VerificationCoverageStore,
+	runID string,
+) (VerificationPlanCoverageInventory, error) {
 	if runID != strings.TrimSpace(runID) {
 		return VerificationPlanCoverageInventory{}, apperror.New(
 			apperror.CodeInvalidArgument, "verification coverage Run identity is invalid")
 	}
-	run, mission, linkedSession, _, err := s.loadBinding(ctx, runID, false)
+	run, mission, linkedSession, _, err := loadVerificationCoverageBinding(ctx, store, runID)
 	if err != nil {
 		return VerificationPlanCoverageInventory{}, err
 	}
-	plans, err := s.store.ListVerificationPlans(ctx, run.ID,
+	plans, err := store.ListVerificationPlans(ctx, run.ID,
 		verification.MaxPlanInventoryItems+1)
 	if err != nil {
 		return VerificationPlanCoverageInventory{}, apperror.Normalize(err)
@@ -252,8 +262,17 @@ func (s *VerificationAssociationService) Coverage(ctx context.Context,
 	planIDs := make([]string, len(plans))
 	planIndex := make(map[string]int, len(plans))
 	itemIndex := make(map[string]map[int]int, len(plans))
+	countIndex := make(map[string]map[int]struct{}, len(plans))
 	result.Plans = make([]VerificationPlanCoverage, len(plans))
 	for index, plan := range plans {
+		if err := plan.Validate(); err != nil {
+			return VerificationPlanCoverageInventory{}, apperror.New(apperror.CodeConflict,
+				"verification coverage plan is invalid")
+		}
+		if _, duplicated := planIndex[plan.ID]; duplicated {
+			return VerificationPlanCoverageInventory{}, apperror.New(apperror.CodeConflict,
+				"verification coverage plan identity is duplicated")
+		}
 		if plan.RunID != run.ID || plan.SessionID != linkedSession.ID ||
 			plan.WorkspaceID != mission.WorkspaceID {
 			return VerificationPlanCoverageInventory{}, apperror.New(apperror.CodeConflict,
@@ -262,6 +281,7 @@ func (s *VerificationAssociationService) Coverage(ctx context.Context,
 		planIDs[index] = plan.ID
 		planIndex[plan.ID] = index
 		itemIndex[plan.ID] = make(map[int]int, len(plan.Items))
+		countIndex[plan.ID] = make(map[int]struct{}, len(plan.Items))
 		projected := VerificationPlanCoverage{PlanID: plan.ID,
 			PlanSHA256: plan.PlanSHA256, ItemCount: len(plan.Items),
 			Items: make([]VerificationPlanItemCoverage, len(plan.Items))}
@@ -273,11 +293,15 @@ func (s *VerificationAssociationService) Coverage(ctx context.Context,
 		result.PlanItemCount += len(plan.Items)
 		result.Plans[index] = projected
 	}
-	counts, err := s.store.ListVerificationPlanCoverageCounts(ctx, run.ID, planIDs)
+	counts, err := store.ListVerificationPlanCoverageCounts(ctx, run.ID, planIDs)
 	if err != nil {
 		return VerificationPlanCoverageInventory{}, apperror.Normalize(err)
 	}
 	for _, count := range counts {
+		if err := count.Validate(); err != nil {
+			return VerificationPlanCoverageInventory{}, apperror.New(apperror.CodeConflict,
+				"verification coverage count is invalid")
+		}
 		planPosition, exists := planIndex[count.PlanID]
 		itemPosition, itemExists := itemIndex[count.PlanID][count.PlanItemOrdinal]
 		if !exists || !itemExists ||
@@ -285,6 +309,11 @@ func (s *VerificationAssociationService) Coverage(ctx context.Context,
 			return VerificationPlanCoverageInventory{}, apperror.New(apperror.CodeConflict,
 				"verification coverage escaped its exact plan item binding")
 		}
+		if _, duplicated := countIndex[count.PlanID][count.PlanItemOrdinal]; duplicated {
+			return VerificationPlanCoverageInventory{}, apperror.New(apperror.CodeConflict,
+				"verification coverage count is duplicated")
+		}
+		countIndex[count.PlanID][count.PlanItemOrdinal] = struct{}{}
 		item := &result.Plans[planPosition].Items[itemPosition]
 		item.AssociatedEvidenceCount = count.AssociatedEvidenceCount
 		item.PassCount = count.PassCount
@@ -303,7 +332,7 @@ func (s *VerificationAssociationService) Coverage(ctx context.Context,
 		result.ObservedPlanItemCount++
 		result.AssociatedEvidenceCount += count.AssociatedEvidenceCount
 	}
-	associations, err := s.store.ListVerificationPlanEvidenceAssociations(ctx, run.ID,
+	associations, err := store.ListVerificationPlanEvidenceAssociations(ctx, run.ID,
 		verification.MaxCoverageAssociations+1)
 	if err != nil {
 		return VerificationPlanCoverageInventory{}, apperror.Normalize(err)
@@ -333,30 +362,35 @@ func (s *VerificationAssociationService) Coverage(ctx context.Context,
 	return result, nil
 }
 
-func (s *VerificationAssociationService) loadBinding(ctx context.Context, runID string,
-	requireActiveSession bool,
+func loadVerificationCoverageBinding(ctx context.Context, store VerificationCoverageStore,
+	runID string,
 ) (domain.Run, domain.Mission, session.Session, session.WorkspaceInfo, error) {
+	if store == nil {
+		return domain.Run{}, domain.Mission{}, session.Session{}, session.WorkspaceInfo{},
+			apperror.New(apperror.CodeFailedPrecondition,
+				"verification coverage store is required")
+	}
 	if runID == "" || runID != strings.TrimSpace(runID) || !domain.ValidAgentID(runID) {
 		return domain.Run{}, domain.Mission{}, session.Session{}, session.WorkspaceInfo{},
 			apperror.New(apperror.CodeInvalidArgument,
 				"verification association Run identity is invalid")
 	}
-	run, err := s.store.GetRun(ctx, runID)
+	run, err := store.GetRun(ctx, runID)
 	if err != nil {
 		return domain.Run{}, domain.Mission{}, session.Session{}, session.WorkspaceInfo{},
 			apperror.Normalize(err)
 	}
-	mission, err := s.store.GetMission(ctx, run.MissionID)
+	mission, err := store.GetMission(ctx, run.MissionID)
 	if err != nil {
 		return domain.Run{}, domain.Mission{}, session.Session{}, session.WorkspaceInfo{},
 			apperror.Normalize(err)
 	}
-	mode, err := s.store.GetRunMode(ctx, run.ID)
+	mode, err := store.GetRunMode(ctx, run.ID)
 	if err != nil {
 		return domain.Run{}, domain.Mission{}, session.Session{}, session.WorkspaceInfo{},
 			apperror.Normalize(err)
 	}
-	linkedSession, err := s.store.GetSession(ctx, run.SessionID)
+	linkedSession, err := store.GetSession(ctx, run.SessionID)
 	if err != nil {
 		return domain.Run{}, domain.Mission{}, session.Session{}, session.WorkspaceInfo{},
 			apperror.Normalize(err)
@@ -364,13 +398,12 @@ func (s *VerificationAssociationService) loadBinding(ctx context.Context, runID 
 	if run.ID != runID || run.SessionID == "" || mission.ID != run.MissionID ||
 		mission.WorkspaceID == "" || mode.RunID != run.ID ||
 		mode.Surface != domain.ExecutionSurfaceCode || linkedSession.ID != run.SessionID ||
-		linkedSession.WorkspaceID != mission.WorkspaceID ||
-		(requireActiveSession && linkedSession.Status != session.StatusActive) {
+		linkedSession.WorkspaceID != mission.WorkspaceID {
 		return domain.Run{}, domain.Mission{}, session.Session{}, session.WorkspaceInfo{},
 			apperror.New(apperror.CodeConflict,
 				"verification association requires an exact Code Run, Session, and Workspace binding")
 	}
-	registered, err := s.store.GetWorkspaceInfo(ctx, mission.WorkspaceID)
+	registered, err := store.GetWorkspaceInfo(ctx, mission.WorkspaceID)
 	if err != nil {
 		return domain.Run{}, domain.Mission{}, session.Session{}, session.WorkspaceInfo{},
 			apperror.Normalize(err)
@@ -379,6 +412,23 @@ func (s *VerificationAssociationService) loadBinding(ctx context.Context, runID 
 		return domain.Run{}, domain.Mission{}, session.Session{}, session.WorkspaceInfo{},
 			apperror.New(apperror.CodeConflict,
 				"verification association registered Workspace identity changed")
+	}
+	return run, mission, linkedSession, registered, nil
+}
+
+func (s *VerificationAssociationService) loadBinding(ctx context.Context, runID string,
+	requireActiveSession bool,
+) (domain.Run, domain.Mission, session.Session, session.WorkspaceInfo, error) {
+	run, mission, linkedSession, registered, err := loadVerificationCoverageBinding(
+		ctx, s.store, runID)
+	if err != nil {
+		return domain.Run{}, domain.Mission{}, session.Session{}, session.WorkspaceInfo{},
+			err
+	}
+	if requireActiveSession && linkedSession.Status != session.StatusActive {
+		return domain.Run{}, domain.Mission{}, session.Session{}, session.WorkspaceInfo{},
+			apperror.New(apperror.CodeConflict,
+				"verification association requires an exact Code Run, Session, and Workspace binding")
 	}
 	return run, mission, linkedSession, registered, nil
 }

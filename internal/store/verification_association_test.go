@@ -118,6 +118,47 @@ func TestVerificationAssociationIsCausalImmutableAndCoverageDoesNotInferResult(t
 		coverage.RecordRewritten || coverage.Approval || coverage.AuthorityGranted {
 		t.Fatalf("coverage inferred or widened explicit facts: %#v", coverage)
 	}
+	handoff, err := application.NewCodeHandoffService(state).Build(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected := handoff.VerificationCoverage
+	if projected.ProtocolVersion != verification.PlanCoverageProtocolVersion ||
+		projected.PlanCount != 1 || projected.PlanItemCount != 2 ||
+		projected.ObservedPlanItemCount != 1 || projected.UnobservedPlanItemCount != 1 ||
+		projected.AssociatedEvidenceCount != 2 || projected.ContradictoryItemCount != 1 ||
+		projected.ReturnedItemCount != 2 || len(projected.Items) != 2 || projected.Truncated ||
+		projected.Items[0].PlanID != planResult.Plan.ID ||
+		projected.Items[0].PassCount != 1 || projected.Items[0].FailCount != 1 ||
+		projected.Items[0].UnknownCount != 0 ||
+		projected.Items[1].AssociatedEvidenceCount != 0 || !projected.MetadataOnly ||
+		!projected.ReadOnly || projected.ResultInferred || projected.PrivateBodiesIncluded {
+		t.Fatalf("handoff coverage lost contradictions or widened authority: %#v", projected)
+	}
+	for _, format := range []string{application.CodeHandoffExportFormatMarkdown,
+		application.CodeHandoffExportFormatJSON} {
+		exported, err := application.NewCodeHandoffExportService(state).Build(ctx, run.ID, format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(exported.Content, "Release checks") ||
+			strings.Contains(exported.Content, "Focused suite") ||
+			strings.Contains(exported.Content, "later explicit observation") ||
+			!strings.Contains(exported.Content, planResult.Plan.ID) {
+			t.Fatalf("%s handoff coverage exposed private text or lost identity: %s",
+				format, exported.Content)
+		}
+		if format == application.CodeHandoffExportFormatMarkdown &&
+			!strings.Contains(exported.Content,
+				"1/2 items observed, 2 explicit associations, 1 contradictory items") {
+			t.Fatalf("Markdown handoff omitted explicit contradiction counts: %s", exported.Content)
+		}
+		if format == application.CodeHandoffExportFormatJSON &&
+			(!strings.Contains(exported.Content, `"contradictory_item_count": 1`) ||
+				strings.Contains(exported.Content, `"aggregate_result"`)) {
+			t.Fatalf("JSON handoff inferred or omitted coverage: %s", exported.Content)
+		}
+	}
 	if _, err := state.db.ExecContext(ctx,
 		`UPDATE operator_verification_plan_evidence_associations SET plan_item_ordinal = 2
 		WHERE id = ?`, associated.Association.ID); err == nil {

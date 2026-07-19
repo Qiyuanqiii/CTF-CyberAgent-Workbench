@@ -95,6 +95,9 @@ func TestVerificationEvidenceHTTPIsImmutableRedactedAndFeedsCodeHandoff(t *testi
 		!strings.Contains(handoffBody, `"pass_count":1`) ||
 		!strings.Contains(handoffBody, `"regenerable":true`) ||
 		!strings.Contains(handoffBody, `"durable_sources":true`) ||
+		!strings.Contains(handoffBody,
+			`"verification_coverage":{"protocol_version":"operator_verification_plan_coverage.v1"`) ||
+		!strings.Contains(handoffBody, `"result_inferred":false`) ||
 		!strings.Contains(handoffBody, `"private_bodies_included":false`) ||
 		!strings.Contains(handoffBody, `"composite_mutation":false`) ||
 		!strings.Contains(handoffBody, `"resume_authorized":false`) ||
@@ -222,7 +225,8 @@ func TestVerificationPlanHTTPPersistsGuidanceWithoutResultAuthority(t *testing.T
 		exported.Data.ReportAcceptance || exported.Data.ExecutionStarted ||
 		strings.Contains(exported.Data.Content, "Release checks") ||
 		strings.Contains(exported.Data.Content, "Focused tests") ||
-		strings.Contains(exported.Data.Content, secret) {
+		strings.Contains(exported.Data.Content, secret) ||
+		!strings.Contains(exported.Data.Content, "Coverage: 0/2 items observed") {
 		t.Fatalf("unsafe handoff export: %#v", exported.Data)
 	}
 	invalidExport := performSessionMessageRequest(t, api, http.MethodGet,
@@ -352,6 +356,33 @@ func TestVerificationAssociationHTTPPreservesExplicitCausalityAndMetadataOnlyCov
 		strings.Contains(coverage.Body.String(), "Release checks") ||
 		strings.Contains(coverage.Body.String(), "Observed a passing suite") {
 		t.Fatalf("coverage inferred or exposed private text: %#v", projected)
+	}
+	handoffPath := strings.ReplaceAll(CodeHandoffPathTemplate, "{run_id}", run.ID)
+	handoff := performSessionMessageRequest(t, api, http.MethodGet, handoffPath,
+		testAccessToken, "", "", nil)
+	if handoff.Code != http.StatusOK {
+		t.Fatalf("coverage handoff status=%d body=%s", handoff.Code, handoff.Body.String())
+	}
+	var handoffEnvelope struct {
+		Data CodeHandoffView `json:"data"`
+	}
+	if err := json.Unmarshal(handoff.Body.Bytes(), &handoffEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	handoffCoverage := handoffEnvelope.Data.VerificationCoverage
+	if handoffCoverage.ProtocolVersion != verification.PlanCoverageProtocolVersion ||
+		handoffCoverage.PlanCount != 1 || handoffCoverage.PlanItemCount != 1 ||
+		handoffCoverage.ObservedPlanItemCount != 1 ||
+		handoffCoverage.UnobservedPlanItemCount != 0 ||
+		handoffCoverage.AssociatedEvidenceCount != 1 ||
+		handoffCoverage.ContradictoryItemCount != 0 ||
+		handoffCoverage.ReturnedItemCount != 1 || len(handoffCoverage.Items) != 1 ||
+		handoffCoverage.Items[0].PassCount != 1 || !handoffCoverage.MetadataOnly ||
+		!handoffCoverage.ReadOnly || handoffCoverage.ResultInferred ||
+		handoffCoverage.PrivateBodiesIncluded ||
+		strings.Contains(handoff.Body.String(), "Release checks") ||
+		strings.Contains(handoff.Body.String(), "Observed a passing suite") {
+		t.Fatalf("handoff coverage widened or lost explicit metadata: %#v", handoffCoverage)
 	}
 
 	changed := strings.Replace(body, evidenceResult.Evidence.ID, planResult.Plan.ID, 1)

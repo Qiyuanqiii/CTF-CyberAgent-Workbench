@@ -405,9 +405,15 @@ td code { font-size: 11px; }
 .repository-commit-detail > header > span { min-width: 0; display: flex; align-items: center; gap: 8px; }
 .repository-commit-detail > header strong { min-width: 0; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .repository-commit-change-list { display: grid; }
-.repository-commit-change-list > div { min-width: 0; display: grid; grid-template-columns: 76px minmax(180px, 1fr) 170px 70px; align-items: center; gap: 9px; min-height: 36px; border-top: 1px solid var(--border); font-size: 10px; }
+.repository-commit-change-list > div { min-width: 0; display: grid; grid-template-columns: 76px minmax(180px, 1fr) 170px 70px 32px; align-items: center; gap: 9px; min-height: 36px; border-top: 1px solid var(--border); font-size: 10px; }
 .repository-commit-change-list code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repository-commit-change-list > div > span:not(.status-badge) { color: var(--muted); }
+.repository-preview-placeholder { width: 32px; height: 32px; }
+.repository-commit-file-preview { min-width: 0; border-top: 1px solid var(--border); }
+.repository-commit-file-preview > header { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.repository-commit-file-preview > header code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-commit-file-preview > header span { display: flex; align-items: center; gap: 6px; }
+.repository-commit-file-preview pre { max-height: 360px; margin: 0 0 10px; padding: 10px 12px; overflow: auto; border: 1px solid var(--border); background: var(--surface-subtle); color: var(--text); font: 11px/1.55 var(--mono); white-space: pre; }
 .repository-diff-summary { min-height: 38px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 10px; }
 .repository-diff-list { display: grid; }
 .repository-diff-list > article { min-width: 0; border-bottom: 1px solid var(--border); }
@@ -458,6 +464,7 @@ td code { font-size: 11px; }
 .handoff-export-actions > span { margin-right: auto; color: var(--muted); font-size: 10px; }
 .handoff-reference-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding-top: 18px; }
 .handoff-reference-columns > section { min-width: 0; }
+.handoff-reference-columns > .handoff-coverage { grid-column: 1 / -1; }
 .handoff-reference-columns h3 { margin: 0 0 8px; font-size: 12px; }
 .handoff-reference-list { display: grid; }
 .handoff-reference-list > div { min-height: 48px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; border-bottom: 1px solid var(--border); }
@@ -675,8 +682,9 @@ td code { font-size: 11px; }
 	.repository-commit-flags { min-width: 0; justify-content: flex-start; }
 	.repository-commit-list .icon-button { grid-column: 3; grid-row: 1 / span 2; }
 	.repository-commit-detail > header { align-items: flex-start; flex-direction: column; padding: 8px 0; }
-	.repository-commit-change-list > div { grid-template-columns: 76px minmax(0, 1fr); padding: 6px 0; }
+	.repository-commit-change-list > div { grid-template-columns: 76px minmax(0, 1fr) 32px; padding: 6px 0; }
 	.repository-commit-change-list > div > span:not(.status-badge) { grid-column: 2; }
+	.repository-commit-change-list > div > .icon-button, .repository-preview-placeholder { grid-column: 3; grid-row: 1 / span 2; }
 	.verification-plan-items fieldset { grid-template-columns: minmax(0, 1fr); }
 	.verification-plan-actions { align-items: stretch; flex-direction: column; }
 	.verification-plan-actions .command-button, .verification-plan-actions .compact-command { width: 100%; justify-content: center; }

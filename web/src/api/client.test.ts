@@ -953,6 +953,12 @@ describe("CyberAgentClient", () => {
         truncated: false, references: [{ id: item.id, outcome: "pass", redacted: false,
           recorded_at: item.recorded_at }] },
       verification_plans: { returned_count: 0, truncated: false, references: [] },
+      verification_coverage: { protocol_version: "operator_verification_plan_coverage.v1",
+        plan_count: 0, plan_item_count: 0, observed_plan_item_count: 0,
+        unobserved_plan_item_count: 0, associated_evidence_count: 0,
+        contradictory_item_count: 0, returned_item_count: 0, truncated: false, items: [],
+        metadata_only: true, read_only: true, result_inferred: false,
+        private_bodies_included: false },
       pending_action_count: 0, pending_actions_truncated: false, pending_actions: [],
       report_references_truncated: false, report_references: [], regenerable: true,
       durable_sources: true, private_bodies_included: false, composite_mutation: false,
@@ -1027,7 +1033,7 @@ describe("CyberAgentClient", () => {
       })),
     };
     const recorded = { ...plan, replayed: false };
-    const content = "{\n  \"protocol_version\": \"code_handoff.v1\",\n  \"run_id\": \"run-1\",\n  \"source_event_sequence\": 42\n}\n";
+    const content = "{\n  \"protocol_version\": \"code_handoff.v1\",\n  \"run_id\": \"run-1\",\n  \"source_event_sequence\": 42,\n  \"verification_coverage\": {\n    \"protocol_version\": \"operator_verification_plan_coverage.v1\",\n    \"result_inferred\": false\n  }\n}\n";
     const bytes = new TextEncoder().encode(content);
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
     const contentSHA256 = [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -1077,6 +1083,23 @@ describe("CyberAgentClient", () => {
       file_content_included: false, patch_included: false, remote_config_included: false,
       checkout_performed: false, reference_updated: false, process_started: false,
       network_used: false, hooks_executed: false };
+    const previewContent = "SESSION_SECRET=[REDACTED:secret]\nsafe preview\n";
+    const previewDigest = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256",
+      new TextEncoder().encode(previewContent)));
+    const previewSHA256 = [...previewDigest]
+      .map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    const preview = { protocol_version: "repository_commit_file_preview.v1",
+      workspace_id: "workspace-1", object_id: objectID, hash: objectID.slice(0, 12),
+      path: "internal/check.go", kind: "regular", content: previewContent,
+      total_bytes: 52, returned_bytes: new TextEncoder().encode(previewContent).length,
+      redaction_count: 1, redacted: true,
+      provenance: { version: "context_provenance.v1", source_kind: "repository_commit_file",
+        source_ref: "internal/check.go", content_sha256: previewSHA256,
+        instruction_authorized: false },
+      read_only: true, mutation_supported: false, authority_granted: false,
+      root_path_exposed: false, raw_blob_included: false, redacted_content_included: true,
+      remote_config_included: false, checkout_performed: false, reference_updated: false,
+      process_started: false, network_used: false, hooks_executed: false };
     const itemSHA = "b".repeat(64);
     const coverage = { protocol_version: "operator_verification_plan_coverage.v1",
       run_id: "run-1", session_id: "session-1", workspace_id: "workspace-1",
@@ -1109,6 +1132,7 @@ describe("CyberAgentClient", () => {
     }), { status, headers: { "Content-Type": "application/json" } });
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(envelope(commit))
+      .mockResolvedValueOnce(envelope(preview))
       .mockResolvedValueOnce(envelope(coverage))
       .mockResolvedValueOnce(envelope(associated, 202))
       .mockResolvedValueOnce(envelope({ ...coverage, result_inferred: true }));
@@ -1117,6 +1141,8 @@ describe("CyberAgentClient", () => {
       verificationEvidenceEnabled: true,
     });
     await expect(client.repositoryCommit("workspace-1", objectID)).resolves.toEqual(commit);
+    await expect(client.repositoryCommitFilePreview("workspace-1", objectID,
+      "internal/check.go")).resolves.toEqual(preview);
     await expect(client.verificationPlanCoverage("run-1")).resolves.toEqual(coverage);
     await expect(client.associateVerificationEvidence("run-1", {
       version: "operator_verification_plan_evidence_association.v1",
@@ -1124,7 +1150,9 @@ describe("CyberAgentClient", () => {
     }, "web-verification-association-operation-0001")).resolves.toEqual(associated);
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       `/api/v1/workspaces/workspace-1/repository-commits/${objectID}`);
-    const [associationURL, associationInit] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      `/api/v1/workspaces/workspace-1/repository-commits/${objectID}/file-preview?path=internal%2Fcheck.go`);
+    const [associationURL, associationInit] = fetchMock.mock.calls[3] as [string, RequestInit];
     expect(associationURL).toBe("/api/v1/runs/run-1/verification-plan-associations");
     expect(associationInit.headers).toMatchObject({ Authorization: "Bearer control-secret",
       "Idempotency-Key": "web-verification-association-operation-0001" });

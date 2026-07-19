@@ -38,6 +38,8 @@ export function CodeHandoffPanel({ client, runID }: {
         <KeyValue label="Changes" value={`${query.data.change_set.returned_count} / ${formatBytes(query.data.change_set.total_diff_bytes)}`} />
         <KeyValue label="Verification" value={`${query.data.verification.pass_count} pass / ${query.data.verification.fail_count} fail`} />
         <KeyValue label="Checklists" value={query.data.verification_plans.returned_count} />
+        <KeyValue label="Coverage" value={`${query.data.verification_coverage.observed_plan_item_count} / ${query.data.verification_coverage.plan_item_count}`} />
+        <KeyValue label="Contradictions" value={query.data.verification_coverage.contradictory_item_count} />
         <KeyValue label="Actions" value={query.data.pending_action_count} />
         <KeyValue label="Event high-water" value={query.data.source_event_sequence} />
         <KeyValue label="Generated" value={formatDate(query.data.generated_at)} />
@@ -65,6 +67,18 @@ export function CodeHandoffPanel({ client, runID }: {
               <div key={item.id}><span><strong>{shortID(item.id)}</strong>
                 <small>{item.finding_count} findings</small></span>
                 <StatusBadge status={item.status} /></div>)}</div>}
+        </section>
+        <section className="handoff-coverage"><h3>Verification coverage</h3>
+          {query.data.verification_coverage.items.length === 0 ?
+            <EmptyState>No checklist items</EmptyState> :
+            <div className="handoff-reference-list">{query.data.verification_coverage.items.map((item) => {
+              const contradictory = item.pass_count > 0 && item.fail_count > 0;
+              return <div key={`${item.plan_id}:${item.ordinal}`}><span>
+                <strong>{shortID(item.plan_id)} / item {item.ordinal}</strong>
+                <small>{item.pass_count} pass / {item.fail_count} fail / {item.unknown_count} unknown</small>
+              </span><StatusBadge status={contradictory ? "conflict" :
+                item.associated_evidence_count > 0 ? "observed" : "unobserved"} /></div>;
+            })}</div>}
         </section>
       </div>
     </>}

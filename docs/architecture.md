@@ -638,3 +638,24 @@ React consumes the first three through strict Go/OpenAPI contracts. R1 remains i
 - Arbitrary project documents are not automatically loaded as instructions. Selected Skills and persisted memory remain separate Go-owned context sources, and external text keeps user-role untrusted provenance.
 
 ADR 0052 records the limits and migration behavior.
+
+## Exact Commit Preview, Handoff Coverage, And OS Conformance
+
+- `repository_commit_file_preview.v1` reads one exact regular/executable UTF-8 file
+  from one exact commit at the registered Workspace root. Its 64 KiB input is
+  secret-redacted before projection, bound to a projected-content SHA-256, and marked
+  as non-authorizing evidence. Raw blobs, links, binary/oversized content, roots,
+  remotes, checkout/ref mutation, processes, network, and hooks remain absent.
+- `code_handoff.v1` now carries at most 100 flat verification coverage references.
+  They contain plan/item digests and explicit pass/fail/unknown counts, not private
+  guidance/evidence bodies or an inferred aggregate result. Contradictions remain
+  visible instead of being flattened into pass or fail.
+- `runner_lifecycle_contract.v1` accepts only `NonProductOnly` backends. Production
+  still has deterministic simulation only. Windows Job Object and Unix process-group
+  adapters exist exclusively in `_test.go` and start only the current Go test binary
+  to prove cooperative termination, forced kill, and parent-first orphan cleanup.
+
+React consumes the first two through strict Go/OpenAPI and TypeScript revalidation.
+No CLI, HTTP, Desktop, Agent, Sandbox, LocalRunner, Docker, approval, profile, or
+capability path can construct the OS conformance adapters. ADR 0053 records the full
+boundary and evidence.

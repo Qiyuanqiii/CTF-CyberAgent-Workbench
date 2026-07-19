@@ -9,7 +9,6 @@ import (
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/fileedit"
 	"cyberagent-workbench/internal/operatoraction"
-	"cyberagent-workbench/internal/session"
 	"cyberagent-workbench/internal/verification"
 )
 
@@ -19,15 +18,14 @@ const (
 	MaxCodeHandoffReportReferences = 20
 	MaxCodeHandoffVerifyReferences = 20
 	MaxCodeHandoffVerifyPlanRefs   = 20
+	MaxCodeHandoffCoverageItemRefs = 100
 	maxCodeHandoffSnapshotAttempts = 4
 )
 
 type CodeHandoffStore interface {
 	OperatorActionCenterStore
-	GetRunMode(context.Context, string) (domain.RunModeSnapshot, error)
+	VerificationCoverageStore
 	LatestRunEventSequence(context.Context, string) (int64, error)
-	GetSession(context.Context, string) (session.Session, error)
-	GetWorkspaceInfo(context.Context, string) (session.WorkspaceInfo, error)
 	ListPlanDeliveryProposals(context.Context, string, int) ([]domain.PlanDeliveryProposal, error)
 	GetPlanDeliveryProposal(context.Context, string) (domain.PlanDeliveryProposal, error)
 	GetPlanDeliverySelectionByRun(context.Context, string) (domain.PlanDeliverySelection, bool, error)
@@ -35,7 +33,6 @@ type CodeHandoffStore interface {
 	GetOperatorSteeringQueueSummary(context.Context, string) (domain.OperatorSteeringQueueSummary, error)
 	ListFileEditPreviewsPage(context.Context, fileedit.ListFilter, int, int) ([]fileedit.Preview, error)
 	ListVerificationEvidence(context.Context, string, int) ([]verification.Evidence, error)
-	ListVerificationPlans(context.Context, string, int) ([]verification.Plan, error)
 	ListFindingReportSummariesPage(context.Context, string, int, int) ([]domain.FindingReportSummary, error)
 }
 
@@ -106,6 +103,35 @@ type CodeHandoffVerificationPlans struct {
 	References    []CodeHandoffVerificationPlanReference `json:"references"`
 }
 
+type CodeHandoffVerificationCoverageItem struct {
+	PlanID                         string `json:"plan_id"`
+	PlanSHA256                     string `json:"plan_sha256"`
+	Ordinal                        int    `json:"ordinal"`
+	ItemSHA256                     string `json:"item_sha256"`
+	AssociatedEvidenceCount        int    `json:"associated_evidence_count"`
+	PassCount                      int    `json:"pass_count"`
+	FailCount                      int    `json:"fail_count"`
+	UnknownCount                   int    `json:"unknown_count"`
+	LatestAssociationEventSequence int64  `json:"latest_association_event_sequence"`
+}
+
+type CodeHandoffVerificationCoverage struct {
+	ProtocolVersion         string                                `json:"protocol_version"`
+	PlanCount               int                                   `json:"plan_count"`
+	PlanItemCount           int                                   `json:"plan_item_count"`
+	ObservedPlanItemCount   int                                   `json:"observed_plan_item_count"`
+	UnobservedPlanItemCount int                                   `json:"unobserved_plan_item_count"`
+	AssociatedEvidenceCount int                                   `json:"associated_evidence_count"`
+	ContradictoryItemCount  int                                   `json:"contradictory_item_count"`
+	ReturnedItemCount       int                                   `json:"returned_item_count"`
+	Truncated               bool                                  `json:"truncated"`
+	Items                   []CodeHandoffVerificationCoverageItem `json:"items"`
+	MetadataOnly            bool                                  `json:"metadata_only"`
+	ReadOnly                bool                                  `json:"read_only"`
+	ResultInferred          bool                                  `json:"result_inferred"`
+	PrivateBodiesIncluded   bool                                  `json:"private_bodies_included"`
+}
+
 type CodeHandoffActionReference struct {
 	ID          string                     `json:"id"`
 	Kind        operatoraction.Kind        `json:"kind"`
@@ -123,33 +149,34 @@ type CodeHandoffReportReference struct {
 }
 
 type CodeHandoff struct {
-	ProtocolVersion           string                       `json:"protocol_version"`
-	RunID                     string                       `json:"run_id"`
-	MissionID                 string                       `json:"mission_id"`
-	SessionID                 string                       `json:"session_id"`
-	WorkspaceID               string                       `json:"workspace_id"`
-	RunStatus                 domain.RunStatus             `json:"run_status"`
-	Surface                   domain.ExecutionSurface      `json:"surface"`
-	Phase                     domain.ExecutionPhase        `json:"phase"`
-	ModeRevision              int64                        `json:"mode_revision"`
-	SourceEventSequence       int64                        `json:"source_event_sequence"`
-	GeneratedAt               time.Time                    `json:"generated_at"`
-	Plan                      CodeHandoffPlan              `json:"plan"`
-	Queue                     CodeHandoffQueue             `json:"queue"`
-	ChangeSet                 CodeHandoffChangeSet         `json:"change_set"`
-	Verification              CodeHandoffVerification      `json:"verification"`
-	VerificationPlans         CodeHandoffVerificationPlans `json:"verification_plans"`
-	PendingActionCount        int                          `json:"pending_action_count"`
-	PendingActionsTruncated   bool                         `json:"pending_actions_truncated"`
-	PendingActions            []CodeHandoffActionReference `json:"pending_actions"`
-	ReportReferencesTruncated bool                         `json:"report_references_truncated"`
-	ReportReferences          []CodeHandoffReportReference `json:"report_references"`
-	Regenerable               bool                         `json:"regenerable"`
-	DurableSources            bool                         `json:"durable_sources"`
-	PrivateBodiesIncluded     bool                         `json:"private_bodies_included"`
-	CompositeMutation         bool                         `json:"composite_mutation"`
-	ResumeAuthorized          bool                         `json:"resume_authorized"`
-	ExecutionStarted          bool                         `json:"execution_started"`
+	ProtocolVersion           string                          `json:"protocol_version"`
+	RunID                     string                          `json:"run_id"`
+	MissionID                 string                          `json:"mission_id"`
+	SessionID                 string                          `json:"session_id"`
+	WorkspaceID               string                          `json:"workspace_id"`
+	RunStatus                 domain.RunStatus                `json:"run_status"`
+	Surface                   domain.ExecutionSurface         `json:"surface"`
+	Phase                     domain.ExecutionPhase           `json:"phase"`
+	ModeRevision              int64                           `json:"mode_revision"`
+	SourceEventSequence       int64                           `json:"source_event_sequence"`
+	GeneratedAt               time.Time                       `json:"generated_at"`
+	Plan                      CodeHandoffPlan                 `json:"plan"`
+	Queue                     CodeHandoffQueue                `json:"queue"`
+	ChangeSet                 CodeHandoffChangeSet            `json:"change_set"`
+	Verification              CodeHandoffVerification         `json:"verification"`
+	VerificationPlans         CodeHandoffVerificationPlans    `json:"verification_plans"`
+	VerificationCoverage      CodeHandoffVerificationCoverage `json:"verification_coverage"`
+	PendingActionCount        int                             `json:"pending_action_count"`
+	PendingActionsTruncated   bool                            `json:"pending_actions_truncated"`
+	PendingActions            []CodeHandoffActionReference    `json:"pending_actions"`
+	ReportReferencesTruncated bool                            `json:"report_references_truncated"`
+	ReportReferences          []CodeHandoffReportReference    `json:"report_references"`
+	Regenerable               bool                            `json:"regenerable"`
+	DurableSources            bool                            `json:"durable_sources"`
+	PrivateBodiesIncluded     bool                            `json:"private_bodies_included"`
+	CompositeMutation         bool                            `json:"composite_mutation"`
+	ResumeAuthorized          bool                            `json:"resume_authorized"`
+	ExecutionStarted          bool                            `json:"execution_started"`
 }
 
 func NewCodeHandoffService(store CodeHandoffStore) *CodeHandoffService {
@@ -249,6 +276,9 @@ func (s *CodeHandoffService) buildOnce(ctx context.Context, runID string) (CodeH
 	if err := s.addVerificationPlans(ctx, run, mission, &result); err != nil {
 		return CodeHandoff{}, err
 	}
+	if err := s.addVerificationCoverage(ctx, run, mission, &result); err != nil {
+		return CodeHandoff{}, err
+	}
 	if err := s.addActions(ctx, &result); err != nil {
 		return CodeHandoff{}, err
 	}
@@ -256,6 +286,92 @@ func (s *CodeHandoffService) buildOnce(ctx context.Context, runID string) (CodeH
 		return CodeHandoff{}, err
 	}
 	return result, nil
+}
+
+func (s *CodeHandoffService) addVerificationCoverage(ctx context.Context, run domain.Run,
+	mission domain.Mission, result *CodeHandoff,
+) error {
+	inventory, err := buildVerificationCoverage(ctx, s.store, run.ID)
+	if err != nil {
+		return err
+	}
+	if inventory.ProtocolVersion != verification.PlanCoverageProtocolVersion ||
+		inventory.RunID != run.ID || inventory.SessionID != run.SessionID ||
+		inventory.WorkspaceID != mission.WorkspaceID || !inventory.MetadataOnly ||
+		!inventory.ReadOnly || inventory.ResultInferred || inventory.CommandExecuted ||
+		inventory.ModelAssertion || inventory.RecordRewritten || inventory.Approval ||
+		inventory.AuthorityGranted || inventory.PlanCount != len(inventory.Plans) ||
+		inventory.PlanItemCount < inventory.ObservedPlanItemCount {
+		return apperror.New(apperror.CodeConflict,
+			"Code handoff verification coverage widened authority or escaped its binding")
+	}
+	coverage := CodeHandoffVerificationCoverage{
+		ProtocolVersion: inventory.ProtocolVersion, PlanCount: inventory.PlanCount,
+		PlanItemCount:           inventory.PlanItemCount,
+		ObservedPlanItemCount:   inventory.ObservedPlanItemCount,
+		UnobservedPlanItemCount: inventory.PlanItemCount - inventory.ObservedPlanItemCount,
+		AssociatedEvidenceCount: inventory.AssociatedEvidenceCount,
+		Truncated:               inventory.PlansTruncated, MetadataOnly: true, ReadOnly: true,
+		Items: make([]CodeHandoffVerificationCoverageItem, 0,
+			min(inventory.PlanItemCount, MaxCodeHandoffCoverageItemRefs)),
+	}
+	planItems, observedItems, associatedEvidence := 0, 0, 0
+	for _, plan := range inventory.Plans {
+		if plan.PlanID == "" || !validSHA256Digest(plan.PlanSHA256) ||
+			plan.ItemCount != len(plan.Items) || plan.ObservedItemCount > plan.ItemCount {
+			return apperror.New(apperror.CodeConflict,
+				"Code handoff verification coverage plan is inconsistent")
+		}
+		planObserved, planAssociated := 0, 0
+		for _, item := range plan.Items {
+			if item.Ordinal < 1 || item.Ordinal > verification.MaxPlanItems ||
+				!validSHA256Digest(item.ItemSHA256) || item.AssociatedEvidenceCount < 0 ||
+				item.PassCount < 0 || item.FailCount < 0 || item.UnknownCount < 0 ||
+				int64(item.PassCount)+int64(item.FailCount)+int64(item.UnknownCount) !=
+					int64(item.AssociatedEvidenceCount) ||
+				item.LatestAssociationEventSequence < 0 ||
+				(item.AssociatedEvidenceCount == 0) !=
+					(item.LatestAssociationEventSequence == 0) {
+				return apperror.New(apperror.CodeConflict,
+					"Code handoff verification coverage item is inconsistent")
+			}
+			planItems++
+			if item.AssociatedEvidenceCount > 0 {
+				planObserved++
+				observedItems++
+			}
+			planAssociated += item.AssociatedEvidenceCount
+			associatedEvidence += item.AssociatedEvidenceCount
+			if item.PassCount > 0 && item.FailCount > 0 {
+				coverage.ContradictoryItemCount++
+			}
+			if len(coverage.Items) < MaxCodeHandoffCoverageItemRefs {
+				coverage.Items = append(coverage.Items, CodeHandoffVerificationCoverageItem{
+					PlanID: plan.PlanID, PlanSHA256: plan.PlanSHA256, Ordinal: item.Ordinal,
+					ItemSHA256:              item.ItemSHA256,
+					AssociatedEvidenceCount: item.AssociatedEvidenceCount,
+					PassCount:               item.PassCount, FailCount: item.FailCount,
+					UnknownCount:                   item.UnknownCount,
+					LatestAssociationEventSequence: item.LatestAssociationEventSequence,
+				})
+			} else {
+				coverage.Truncated = true
+			}
+		}
+		if planObserved != plan.ObservedItemCount ||
+			planAssociated != plan.AssociatedEvidenceCount {
+			return apperror.New(apperror.CodeConflict,
+				"Code handoff verification coverage plan totals are inconsistent")
+		}
+	}
+	if planItems != inventory.PlanItemCount || observedItems != inventory.ObservedPlanItemCount ||
+		associatedEvidence != inventory.AssociatedEvidenceCount {
+		return apperror.New(apperror.CodeConflict,
+			"Code handoff verification coverage totals are inconsistent")
+	}
+	coverage.ReturnedItemCount = len(coverage.Items)
+	result.VerificationCoverage = coverage
+	return nil
 }
 
 func (s *CodeHandoffService) addVerificationPlans(ctx context.Context, run domain.Run,

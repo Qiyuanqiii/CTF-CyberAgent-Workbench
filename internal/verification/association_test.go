@@ -38,6 +38,17 @@ func TestPlanItemCoverageCountRejectsInferredOrOverflowingCounts(t *testing.T) {
 		t.Fatal("coverage accepted outcome counts that exceed explicit associations")
 	}
 	value = PlanItemCoverageCount{PlanID: "plan-1", PlanItemOrdinal: 1,
+		PlanItemSHA256: digest, AssociatedEvidenceCount: 1, PassCount: 1,
+		LatestAssociationEventSequence: -1}
+	if err := value.Validate(); err == nil {
+		t.Fatal("coverage accepted a negative latest event sequence")
+	}
+	value = PlanItemCoverageCount{PlanID: "plan-1", PlanItemOrdinal: 1,
+		PlanItemSHA256: digest}
+	if err := value.Validate(); err == nil {
+		t.Fatal("coverage accepted an unobserved aggregate row")
+	}
+	value = PlanItemCoverageCount{PlanID: "plan-1", PlanItemOrdinal: 1,
 		PlanItemSHA256: digest, AssociatedEvidenceCount: MaxSafeCoverageCount + 1,
 		PassCount: MaxSafeCoverageCount + 1, LatestAssociationEventSequence: 4}
 	if err := value.Validate(); err == nil {

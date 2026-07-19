@@ -39,6 +39,7 @@ import type {
   RepositoryDiffView,
   RepositoryHistoryView,
   RepositoryCommitDetailView,
+  RepositoryCommitFilePreviewView,
   RunCreationControlRequestView,
   RunCreationControlView,
   RunExecutionControlRequestView,
@@ -1268,6 +1269,55 @@ function parseRepositoryCommitDetail(value: unknown, workspaceID: string,
   return { ...value, changes } as unknown as RepositoryCommitDetailView;
 }
 
+async function parseRepositoryCommitFilePreview(value: unknown, workspaceID: string,
+  objectID: string, path: string): Promise<RepositoryCommitFilePreviewView> {
+  const keys = ["authority_granted", "checkout_performed", "content", "hash",
+    "hooks_executed", "kind", "mutation_supported", "network_used", "object_id", "path",
+    "process_started", "protocol_version", "provenance", "raw_blob_included", "read_only",
+    "redacted", "redacted_content_included", "redaction_count", "reference_updated",
+    "remote_config_included", "returned_bytes", "root_path_exposed", "total_bytes",
+    "workspace_id"];
+  if (!hasExactKeys(value, keys) ||
+    value.protocol_version !== "repository_commit_file_preview.v1" ||
+    value.workspace_id !== workspaceID || value.object_id !== objectID || value.path !== path ||
+    !/^[0-9a-f]{40}$/u.test(String(value.object_id)) ||
+    typeof value.hash !== "string" || !/^[0-9a-f]{12}$/u.test(value.hash) ||
+    !objectID.startsWith(value.hash) || !validWorkspaceRelativePath(value.path) ||
+    value.path === "." || !["regular", "executable"].includes(String(value.kind)) ||
+    typeof value.content !== "string" ||
+    /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value.content) ||
+    !safeBoundedCount(value.total_bytes, 64 * 1024) ||
+    !safeBoundedCount(value.returned_bytes, 128 * 1024) ||
+    !safeBoundedCount(value.redaction_count, 64 * 1024) ||
+    typeof value.redacted !== "boolean" || value.redacted !== (value.redaction_count > 0) ||
+    value.read_only !== true || value.mutation_supported !== false ||
+    value.authority_granted !== false || value.root_path_exposed !== false ||
+    value.raw_blob_included !== false || value.redacted_content_included !== true ||
+    value.remote_config_included !== false || value.checkout_performed !== false ||
+    value.reference_updated !== false || value.process_started !== false ||
+    value.network_used !== false || value.hooks_executed !== false ||
+    !hasExactKeys(value.provenance, ["content_sha256", "instruction_authorized", "source_kind",
+      "source_ref", "version"]) || value.provenance.version !== "context_provenance.v1" ||
+    value.provenance.source_kind !== "repository_commit_file" ||
+    value.provenance.source_ref !== path || !isSHA256(value.provenance.content_sha256) ||
+    value.provenance.instruction_authorized !== false) {
+    throw new APIRequestError("Repository commit preview violated its redacted evidence contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const encoded = new TextEncoder().encode(value.content);
+  if (encoded.length !== value.returned_bytes) {
+    throw new APIRequestError("Repository commit preview byte count is inconsistent",
+      "INVALID_RESPONSE", 502);
+  }
+  const digest = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", encoded));
+  const digestHex = [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  if (digestHex !== value.provenance.content_sha256) {
+    throw new APIRequestError("Repository commit preview digest verification failed",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as RepositoryCommitFilePreviewView;
+}
+
 function validVerificationText(value: unknown, maximum: number, multiline: boolean): value is string {
   if (typeof value !== "string" || value === "" || value.trim() !== value ||
     [...value].length > maximum || value.includes("\0")) {
@@ -1555,7 +1605,7 @@ function parseCodeHandoff(value: unknown, runID: string): CodeHandoffView {
     "pending_actions_truncated", "phase", "plan", "private_bodies_included", "protocol_version",
     "queue", "regenerable", "report_references", "report_references_truncated",
     "resume_authorized", "run_id", "run_status", "session_id", "source_event_sequence",
-    "surface", "verification", "verification_plans", "workspace_id"];
+    "surface", "verification", "verification_coverage", "verification_plans", "workspace_id"];
   if (!hasExactKeys(value, keys) || value.protocol_version !== "code_handoff.v1" ||
     value.run_id !== runID || !boundedIdentity(value.mission_id) || !boundedIdentity(value.session_id) ||
     !boundedIdentity(value.workspace_id) || value.surface !== "code" ||
@@ -1568,6 +1618,7 @@ function parseCodeHandoff(value: unknown, runID: string): CodeHandoffView {
     value.resume_authorized !== false || value.execution_started !== false ||
     !isRecord(value.plan) || !isRecord(value.queue) || !isRecord(value.change_set) ||
     !isRecord(value.verification) || !isRecord(value.verification_plans) ||
+    !isRecord(value.verification_coverage) ||
     !Array.isArray(value.pending_actions) ||
     value.pending_actions.length > 20 || !Array.isArray(value.report_references) ||
     value.report_references.length > 20 || !safeBoundedCount(value.pending_action_count, 100) ||
@@ -1661,6 +1712,71 @@ function parseCodeHandoff(value: unknown, runID: string): CodeHandoffView {
     }
     verificationPlanIDs.add(String(reference.id));
   }
+  const coverage = value.verification_coverage;
+  const coverageKeys = ["associated_evidence_count", "contradictory_item_count", "items",
+    "metadata_only", "observed_plan_item_count", "plan_count", "plan_item_count",
+    "private_bodies_included", "protocol_version", "read_only", "result_inferred",
+    "returned_item_count", "truncated", "unobserved_plan_item_count"];
+  if (!hasExactKeys(coverage, coverageKeys) ||
+    coverage.protocol_version !== "operator_verification_plan_coverage.v1" ||
+    !safeBoundedCount(coverage.plan_count, 50) ||
+    !safeBoundedCount(coverage.plan_item_count, 50 * 32) ||
+    !safeBoundedCount(coverage.observed_plan_item_count, 50 * 32) ||
+    !safeBoundedCount(coverage.unobserved_plan_item_count, 50 * 32) ||
+    coverage.observed_plan_item_count + coverage.unobserved_plan_item_count !==
+      coverage.plan_item_count ||
+    !safeBoundedCount(coverage.associated_evidence_count, 1_000_000_000) ||
+    !safeBoundedCount(coverage.contradictory_item_count, 50 * 32) ||
+    coverage.contradictory_item_count > coverage.observed_plan_item_count ||
+    !safeBoundedCount(coverage.returned_item_count, 100) || !Array.isArray(coverage.items) ||
+    coverage.items.length !== coverage.returned_item_count || coverage.items.length > 100 ||
+    coverage.returned_item_count !== Math.min(Number(coverage.plan_item_count), 100) ||
+    typeof coverage.truncated !== "boolean" ||
+    (coverage.plan_item_count > 100 && !coverage.truncated) ||
+    coverage.metadata_only !== true || coverage.read_only !== true ||
+    coverage.result_inferred !== false || coverage.private_bodies_included !== false) {
+    throw new APIRequestError("Code handoff verification coverage widened result authority",
+      "INVALID_RESPONSE", 502);
+  }
+  const coverageItems = new Set<string>();
+  let returnedObserved = 0;
+  let returnedEvidence = 0;
+  let returnedContradictory = 0;
+  for (const item of coverage.items) {
+    if (!hasExactKeys(item, ["associated_evidence_count", "fail_count", "item_sha256",
+      "latest_association_event_sequence", "ordinal", "pass_count", "plan_id", "plan_sha256",
+      "unknown_count"]) || !boundedIdentity(item.plan_id) || !isSHA256(item.plan_sha256) ||
+      !safePositiveInteger(item.ordinal) || item.ordinal > 32 || !isSHA256(item.item_sha256) ||
+      !safeBoundedCount(item.associated_evidence_count, 1_000_000_000) ||
+      !safeBoundedCount(item.pass_count, 1_000_000_000) ||
+      !safeBoundedCount(item.fail_count, 1_000_000_000) ||
+      !safeBoundedCount(item.unknown_count, 1_000_000_000) ||
+      item.pass_count + item.fail_count + item.unknown_count !== item.associated_evidence_count ||
+      !safeBoundedCount(item.latest_association_event_sequence, Number.MAX_SAFE_INTEGER) ||
+      (item.associated_evidence_count === 0) !==
+        (item.latest_association_event_sequence === 0)) {
+      throw new APIRequestError("Code handoff verification coverage item is inconsistent",
+        "INVALID_RESPONSE", 502);
+    }
+    const key = `${String(item.plan_id)}:${String(item.ordinal)}`;
+    if (coverageItems.has(key)) {
+      throw new APIRequestError("Code handoff verification coverage duplicated a plan item",
+        "INVALID_RESPONSE", 502);
+    }
+    coverageItems.add(key);
+    returnedObserved += item.associated_evidence_count > 0 ? 1 : 0;
+    returnedEvidence += Number(item.associated_evidence_count);
+    returnedContradictory += item.pass_count > 0 && item.fail_count > 0 ? 1 : 0;
+  }
+  if (returnedObserved > coverage.observed_plan_item_count ||
+    returnedEvidence > coverage.associated_evidence_count ||
+    returnedContradictory > coverage.contradictory_item_count ||
+    (!coverage.truncated && (returnedObserved !== coverage.observed_plan_item_count ||
+      returnedEvidence !== coverage.associated_evidence_count ||
+      returnedContradictory !== coverage.contradictory_item_count))) {
+    throw new APIRequestError("Code handoff verification coverage totals are inconsistent",
+      "INVALID_RESPONSE", 502);
+  }
   const actionMapping = {
     steering_pending: ["pending", "queue"], approval_pending: ["pending", "approvals"],
     file_edit_review: ["proposed", "diffs"], file_edit_apply: ["approved", "diffs"],
@@ -1747,12 +1863,17 @@ async function parseCodeHandoffExport(value: unknown, runID: string,
       throw new APIRequestError("Code handoff JSON export is invalid", "INVALID_RESPONSE", 502);
     }
     if (!isRecord(document) || document.protocol_version !== "code_handoff.v1" ||
-      document.run_id !== runID || document.source_event_sequence !== value.source_event_sequence) {
+      document.run_id !== runID || document.source_event_sequence !== value.source_event_sequence ||
+      !isRecord(document.verification_coverage) ||
+      document.verification_coverage.protocol_version !==
+        "operator_verification_plan_coverage.v1" ||
+      document.verification_coverage.result_inferred !== false) {
       throw new APIRequestError("Code handoff JSON export escaped its source binding",
         "INVALID_RESPONSE", 502);
     }
   } else if (!value.content.startsWith("# CyberAgent Code Handoff\n") ||
-    !value.content.includes(`Source event high-water: \`${value.source_event_sequence}\``)) {
+    !value.content.includes(`Source event high-water: \`${value.source_event_sequence}\``) ||
+    !value.content.includes("Coverage:")) {
     throw new APIRequestError("Code handoff Markdown export omitted its source binding",
       "INVALID_RESPONSE", 502);
   }
@@ -2092,6 +2213,18 @@ export class CyberAgentClient {
     return parseRepositoryCommitDetail(await this.get<unknown>(
       `/workspaces/${encodeURIComponent(workspaceID)}/repository-commits/${objectID}`, {}, signal,
     ), workspaceID, objectID);
+  }
+
+  async repositoryCommitFilePreview(workspaceID: string, objectID: string, path: string,
+    signal?: AbortSignal): Promise<RepositoryCommitFilePreviewView> {
+    if (!boundedIdentity(workspaceID) || workspaceID.trim() !== workspaceID ||
+      !/^[0-9a-f]{40}$/u.test(objectID) || !validWorkspaceRelativePath(path) || path === ".") {
+      throw new Error("A normalized Workspace, exact commit object, and canonical file path are required");
+    }
+    return parseRepositoryCommitFilePreview(await this.get<unknown>(
+      `/workspaces/${encodeURIComponent(workspaceID)}/repository-commits/${objectID}/file-preview`,
+      { path }, signal,
+    ), workspaceID, objectID, path);
   }
 
   async operationReceiptHistory(runID = "",

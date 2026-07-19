@@ -65,20 +65,21 @@ Read in this order after a long context break:
 55. `docs/adr/0050-repository-history-verification-plan-handoff-export.md`
 56. `docs/adr/0051-exact-commit-verification-association-runner-lifecycle.md`
 57. `docs/adr/0052-conservative-model-context-cumulative-handoff-memory.md`
-58. `docs/DESKTOP_PLAN.md`
-59. `docs/SKILL_PACKAGE_PLAN.md`
+58. `docs/adr/0053-commit-preview-handoff-coverage-process-conformance.md`
+59. `docs/DESKTOP_PLAN.md`
+60. `docs/SKILL_PACKAGE_PLAN.md`
 
 ## Current Baseline
 
 - Architecture completion: about 99%; the V2 run-centric control plane is about 99% complete.
-- Product usability: about 94-96% for the complete Code + Cyber product.
-- Generic coding-agent workflow usability: about 94%.
+- Product usability: about 95-97% for the complete Code + Cyber product.
+- Generic coding-agent workflow usability: about 95%.
 - Cyber autonomous-workflow usability: about 20%.
 - These are engineering estimates based on tested roadmap slices, not performance benchmarks. Do not reuse the retired single-axis "overall product vision" percentage.
 - Database schema: v82.
 - `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v82` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
 - Main languages: Go control plane, TypeScript React/Vite local console; Rust has not started.
-- Desktop status: D0-A/D0-B and D1-R1 through D1-G4/V3 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, read-only Repository state/redacted Diff/local history/exact-commit metadata, independent multi-file review, separate immutable verification plans/results plus explicit associations, digest-bound Code Handoff export, a Code-only Journey, generation-safe Windows Credential Manager Provider controls, and a default-off one-concurrent/one-step wake worker. Schema v79 protects the shared Go runtime with Tool deadlines, a synchronous wait graph, and a durable no-progress pause; schema v80 adds immutable verification checklists; schema v81 adds immutable plan-item/evidence associations; schema v82 adds the shared conservative model-context gate and cumulative handoff memory. R1 remains a simulation-only Runner lifecycle contract with no product execution wiring. Capability-only launches cannot reach sibling routes. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, terminal, real Shell/Local/Docker process execution, or install-time Skill execution. See ADR 0033 through ADR 0052 and `docs/DESKTOP_PLAN.md`.
+- Desktop status: D0-A/D0-B and D1-R1 through D1-G5/V4 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, read-only Repository state/redacted Diff/local history/exact-commit metadata and redacted file preview, independent multi-file review, separate immutable verification plans/results/associations plus Handoff coverage, digest-bound Code Handoff export, a Code-only Journey, generation-safe Windows Credential Manager Provider controls, and a default-off one-concurrent/one-step wake worker. Schema v79 protects the shared Go runtime with Tool deadlines, a synchronous wait graph, and a durable no-progress pause; schema v80 adds immutable verification checklists; schema v81 adds immutable plan-item/evidence associations; schema v82 adds the shared conservative model-context gate and cumulative handoff memory. R2 adds Windows/Unix process-tree conformance only in tests and has no product execution wiring. Capability-only launches cannot reach sibling routes. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, terminal, real Shell/Local/Docker process execution, or install-time Skill execution. See ADR 0033 through ADR 0053 and `docs/DESKTOP_PLAN.md`.
 - Custom Skill status: the five embedded `skill.v1` guides and explicitly selected external packages are Run-loadable through separate protocols. Schema v69 adds persistent content-addressed import/history; schema v70 adds a second explicitly confirmed exact Run selection and redacted user-role root/Specialist context; schema v71 adds bounded read-only provenance across HTTP/TUI/Web. D1-A adds a pathless, one-time-handle preview boundary; D1-B1 adds explicit HTTP/Desktop registration through the same inert Registry. External packages remain untrusted and grant no declared tools. Installation executes no content and still does not select a package for a Run. See ADR 0024, ADR 0031 through ADR 0033, ADR 0041, and `docs/SKILL_PACKAGE_PLAN.md`.
 - Protected-delete status: explicit recursive, absolute/traversing/wildcard, environment-derived, command-substituted, current-home, PowerShell/`cmd`, and common interpreter deletion intents are permanently denied before approval across Shell, ScriptProcess, and Sandbox Policy. This is defense in depth; Local/container process execution remains disabled and a future executor still requires OS/container isolation. See ADR 0025.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
@@ -1033,18 +1034,49 @@ initialized zero-value Router maps, corrected v81 downgrade-fixture ordering, bo
 known. No real key, Provider, Shell, LocalRunner, Docker, hook, attack traffic, or
 external network was used. ADR 0052 is authoritative.
 
+## Completed Exact Preview, Handoff Coverage, And Process Conformance (D1-G5/V4/R2)
+
+D1-G5 adds `repository_commit_file_preview.v1`: exact registered root, exact lowercase
+commit ID, exact canonical path, regular/executable UTF-8 only, 64 KiB input, 128 KiB
+redacted projection, projected-content SHA-256, and non-authorizing provenance. It
+returns no raw blob or root and performs no checkout, ref mutation, process, network,
+remote, or hook action.
+
+D1-V4 adds bounded verification coverage to Code Handoff and Markdown/JSON export. At
+most 100 flat references expose only plan/item digests, explicit outcome counts, and
+latest association sequence. Private bodies and aggregate result inference remain
+absent; contradictions stay visible. Go and TypeScript both validate all totals,
+digests, bindings, and false-authority fields.
+
+R2 renames the lifecycle marker to `NonProductOnly` and adds Windows Job Object plus
+Unix process-group conformance in `_test.go` only. Tests start the current Go test
+binary and prove cooperative termination, forced kill, and child cleanup after parent
+exit. Product CLI/HTTP/Desktop/Agent/Sandbox/Local/Docker paths cannot construct these
+adapters.
+
+The full six-slice gate passed ordinary Go in 380 seconds, race in 411.2 seconds,
+post-audit focused ordinary/race regressions, ordinary/secure-Desktop checks,
+vet/staticcheck/module/govulncheck, all 127 Web tests, strict TypeScript, deterministic
+API generation, Vite, zero npm vulnerabilities, isolated mock-only CLI, privacy and
+process-entry scans, Linux cross-compilation, and a reproducible Windows build. The
+final unsigned GUI SHA-256 is
+`44d54bf9d50b7cd99b89f5089833823ce0337bb0e0158ec16ef6aa9a5b415614` and remains
+`release_ready=false`. The audit fixed platform-width count addition, negative/empty
+aggregate event facts, and duplicate plan/count acceptance. No enabled path has a
+known unresolved high/medium issue. ADR 0053 is authoritative.
+
 ## Next Slice
 
-The recommended next three-slice batch completes the current six-slice cycle:
+The recommended first batch of the next six-slice cycle is:
 
-1. D1-G5: add a bounded redacted exact-commit file preview. It must reuse exact-root/object/path binding, refuse links/binary/oversized/unavailable objects, and expose no raw unredacted blob, checkout, ref update, remote, or hook authority.
-2. D1-V4: project explicit verification coverage into Code Handoff/export as metadata only. It must preserve contradictory observations, omit private summaries, and never infer aggregate pass.
-3. R2: add platform-specific process-tree lifecycle conformance adapters behind test-only, non-product build boundaries. They may validate start/wait/TERM/KILL/orphan behavior but must not map Local/Docker or any CLI/HTTP/Desktop/Agent capability to real execution.
-4. Run the ordinary integrated gate plus the full race/staticcheck/govulncheck/dependency/privacy/build robustness gate after these three slices; the manual Windows 10 matrix, signed distribution, real Sandbox release gate, Rust analyzers, xterm input, and CTF solving remain separate.
+1. D1-G6: bounded exact-file history with no raw blob, root, process, network, or Git mutation.
+2. D1-V5: read-only verification coverage drill-down that keeps private guidance/evidence bodies and aggregate result inference closed.
+3. R3: bounded output and exit-evidence contract that remains non-product and grants no process-start capability.
+4. Run the ordinary integrated gate after these three slices. The manual Windows 10 matrix, signed distribution, real Sandbox release gate, Rust analyzers, xterm input, and CTF solving remain separate.
 
 ## Local Machine Note
 
-The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v82 and D1-Q2 through D1-G4/V3 plus H1-H3/R1/C1-C3 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the repository's ignored build root or the OS temporary root.
+The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v82 and D1-Q2 through D1-G5/V4 plus H1-H3/R2/C1-C3 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the repository's ignored build root or the OS temporary root.
 
 ## Delivery Loop
 

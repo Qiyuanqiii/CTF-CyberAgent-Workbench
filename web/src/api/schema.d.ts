@@ -417,7 +417,7 @@ export interface paths {
         };
         /**
          * Build a resumable Code handoff
-         * @description Regenerates a metadata-only Code Run handoff from durable Plan, queue, change-set, verification, pending-action, and report records. It returns no private body, performs no composite mutation, starts no execution, and grants no resume authority.
+         * @description Regenerates a metadata-only Code Run handoff from durable Plan, queue, change-set, verification, explicit per-item coverage, pending-action, and report records. Coverage preserves pass/fail/unknown counts without private summaries or an inferred aggregate result. The handoff performs no composite mutation, starts no execution, and grants no resume authority.
          */
         get: operations["getCodeHandoff"];
         put?: never;
@@ -1308,6 +1308,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/repository-commits/{object_id}/file-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview one redacted file from an exact commit
+         * @description Returns a bounded secret-redacted UTF-8 projection of one regular file from one exact local commit object. Links, binary data, oversized content, missing objects, raw blobs, host roots, remotes, checkout, ref mutation, processes, hooks, and network access are refused or excluded; returned text remains non-authorizing evidence.
+         */
+        get: operations["getWorkspaceRepositoryCommitFilePreview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/repository-diff": {
         parameters: {
             query?: never;
@@ -1628,6 +1648,47 @@ export interface components {
             /** @enum {string} */
             status: "generated";
         };
+        CodeHandoffVerificationCoverageItemView: {
+            /** Format: int32 */
+            associated_evidence_count: number;
+            /** Format: int32 */
+            fail_count: number;
+            item_sha256: string;
+            /** Format: int64 */
+            latest_association_event_sequence: number;
+            /** Format: int32 */
+            ordinal: number;
+            /** Format: int32 */
+            pass_count: number;
+            plan_id: string;
+            plan_sha256: string;
+            /** Format: int32 */
+            unknown_count: number;
+        };
+        CodeHandoffVerificationCoverageView: {
+            /** Format: int32 */
+            associated_evidence_count: number;
+            /** Format: int32 */
+            contradictory_item_count: number;
+            items: components["schemas"]["CodeHandoffVerificationCoverageItemView"][];
+            metadata_only: boolean;
+            /** Format: int32 */
+            observed_plan_item_count: number;
+            /** Format: int32 */
+            plan_count: number;
+            /** Format: int32 */
+            plan_item_count: number;
+            private_bodies_included: boolean;
+            /** @enum {string} */
+            protocol_version: "operator_verification_plan_coverage.v1";
+            read_only: boolean;
+            result_inferred: boolean;
+            /** Format: int32 */
+            returned_item_count: number;
+            truncated: boolean;
+            /** Format: int32 */
+            unobserved_plan_item_count: number;
+        };
         CodeHandoffVerificationPlanReferenceView: {
             /** Format: date-time */
             created_at: string;
@@ -1697,6 +1758,7 @@ export interface components {
             /** @enum {string} */
             surface: "code";
             verification: components["schemas"]["CodeHandoffVerificationView"];
+            verification_coverage: components["schemas"]["CodeHandoffVerificationCoverageView"];
             verification_plans: components["schemas"]["CodeHandoffVerificationPlansView"];
             workspace_id: string;
         };
@@ -2630,6 +2692,46 @@ export interface components {
             mode_changed: boolean;
             path: string;
             previous_kind: string;
+        };
+        RepositoryCommitFilePreviewProvenanceView: {
+            content_sha256: string;
+            instruction_authorized: boolean;
+            /** @enum {string} */
+            source_kind: "repository_commit_file";
+            source_ref: string;
+            /** @enum {string} */
+            version: "context_provenance.v1";
+        };
+        RepositoryCommitFilePreviewView: {
+            authority_granted: boolean;
+            checkout_performed: boolean;
+            content: string;
+            hash: string;
+            hooks_executed: boolean;
+            /** @enum {string} */
+            kind: "regular" | "executable";
+            mutation_supported: boolean;
+            network_used: boolean;
+            object_id: string;
+            path: string;
+            process_started: boolean;
+            /** @enum {string} */
+            protocol_version: "repository_commit_file_preview.v1";
+            provenance: components["schemas"]["RepositoryCommitFilePreviewProvenanceView"];
+            raw_blob_included: boolean;
+            read_only: boolean;
+            redacted: boolean;
+            redacted_content_included: boolean;
+            /** Format: int32 */
+            redaction_count: number;
+            reference_updated: boolean;
+            remote_config_included: boolean;
+            /** Format: int32 */
+            returned_bytes: number;
+            root_path_exposed: boolean;
+            /** Format: int64 */
+            total_bytes: number;
+            workspace_id: string;
         };
         RepositoryDiffItemView: {
             /** Format: int32 */
@@ -6482,6 +6584,46 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["RepositoryCommitDetailView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getWorkspaceRepositoryCommitFilePreview: {
+        parameters: {
+            query: {
+                /** @description Canonical repository-relative file path */
+                path: string;
+            };
+            header?: never;
+            path: {
+                /** @description Workspace identity */
+                workspace_id: string;
+                /** @description Exact lowercase forty-character Git commit object identity */
+                object_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RepositoryCommitFilePreviewView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";

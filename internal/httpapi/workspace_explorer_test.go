@@ -73,7 +73,8 @@ func TestWorkspaceRepositoryStateHTTPIsReadOnlyAndRootBound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte("initial\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "tracked.txt"), []byte(
+		"SESSION_SECRET=workspace-secret-value\ninitial\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	worktree, err := repo.Worktree()
@@ -195,6 +196,32 @@ func TestWorkspaceRepositoryStateHTTPIsReadOnlyAndRootBound(t *testing.T) {
 		strings.TrimSuffix(commitPath, commitID.String())+commitID.String()[:12],
 		testAccessToken, "", "", nil)
 	assertAPIError(t, invalidCommit, http.StatusBadRequest, "INVALID_ARGUMENT")
+
+	previewPath := commitPath + "/file-preview?path=tracked.txt"
+	preview := performSessionMessageRequest(t, api, http.MethodGet, previewPath,
+		testAccessToken, "", "", nil)
+	previewBody := preview.Body.String()
+	if preview.Code != http.StatusOK ||
+		!strings.Contains(previewBody, `"protocol_version":"repository_commit_file_preview.v1"`) ||
+		!strings.Contains(previewBody, `"object_id":"`+commitID.String()+`"`) ||
+		!strings.Contains(previewBody, `"path":"tracked.txt"`) ||
+		!strings.Contains(previewBody, `"source_kind":"repository_commit_file"`) ||
+		!strings.Contains(previewBody, `"instruction_authorized":false`) ||
+		!strings.Contains(previewBody, `"read_only":true`) ||
+		!strings.Contains(previewBody, `"raw_blob_included":false`) ||
+		!strings.Contains(previewBody, `"redacted_content_included":true`) ||
+		!strings.Contains(previewBody, "[REDACTED:secret]") ||
+		!strings.Contains(previewBody, "initial") ||
+		strings.Contains(previewBody, "workspace-secret-value") ||
+		strings.Contains(previewBody, root) {
+		t.Fatalf("repository commit preview status=%d body=%s", preview.Code, previewBody)
+	}
+	duplicatePreview := performSessionMessageRequest(t, api, http.MethodGet,
+		previewPath+"&path=tracked.txt", testAccessToken, "", "", nil)
+	assertAPIError(t, duplicatePreview, http.StatusBadRequest, "INVALID_ARGUMENT")
+	escapePreview := performSessionMessageRequest(t, api, http.MethodGet,
+		commitPath+"/file-preview?path=../outside", testAccessToken, "", "", nil)
+	assertAPIError(t, escapePreview, http.StatusBadRequest, "INVALID_ARGUMENT")
 }
 
 func TestWorkspaceSearchHTTPReturnsOnlyRedactedNonAuthorizingEvidence(t *testing.T) {

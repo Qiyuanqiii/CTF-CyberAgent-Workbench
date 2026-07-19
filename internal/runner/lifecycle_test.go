@@ -15,7 +15,7 @@ type simulationBackend struct {
 	process        *simulationProcess
 	startErr       error
 	startCount     int
-	simulationOnly bool
+	nonProductOnly bool
 }
 
 func (b *simulationBackend) Name() string {
@@ -24,7 +24,7 @@ func (b *simulationBackend) Name() string {
 	}
 	return "deterministic-harness"
 }
-func (b *simulationBackend) SimulationOnly() bool { return b.simulationOnly }
+func (b *simulationBackend) NonProductOnly() bool { return b.nonProductOnly }
 func (b *simulationBackend) Start(ctx context.Context, _ Request) (Process, error) {
 	b.startCount++
 	if err := ctx.Err(); err != nil {
@@ -144,7 +144,7 @@ func (p *simulationProcess) finishLocked(exitCode int, reaped bool) {
 func TestLifecycleHarnessNormalExitRequiresReapedTree(t *testing.T) {
 	process := newSimulationProcess()
 	process.finish(0, true)
-	backend := &simulationBackend{process: process, simulationOnly: true}
+	backend := &simulationBackend{process: process, nonProductOnly: true}
 	harness, err := NewHarness(backend)
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestLifecycleHarnessNormalExitRequiresReapedTree(t *testing.T) {
 
 func TestLifecycleHarnessTimeoutEscalatesTerminateToKillAndReapsTree(t *testing.T) {
 	process := newSimulationProcess()
-	backend := &simulationBackend{process: process, simulationOnly: true}
+	backend := &simulationBackend{process: process, nonProductOnly: true}
 	harness, err := NewHarness(backend)
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +178,7 @@ func TestLifecycleHarnessTimeoutEscalatesTerminateToKillAndReapsTree(t *testing.
 func TestLifecycleHarnessCancellationUsesIndependentCleanupContext(t *testing.T) {
 	process := newSimulationProcess()
 	process.exitOnTerminate = true
-	backend := &simulationBackend{process: process, simulationOnly: true}
+	backend := &simulationBackend{process: process, nonProductOnly: true}
 	harness, err := NewHarness(backend)
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +205,7 @@ func TestLifecycleHarnessFlagsAndCleansDescendantsAfterParentExit(t *testing.T) 
 	process.descendants = 2
 	process.finishLocked(0, false)
 	process.mu.Unlock()
-	backend := &simulationBackend{process: process, simulationOnly: true}
+	backend := &simulationBackend{process: process, nonProductOnly: true}
 	harness, err := NewHarness(backend)
 	if err != nil {
 		t.Fatal(err)
@@ -224,7 +224,7 @@ func TestLifecycleHarnessFlagsAndCleansDescendantsAfterParentExit(t *testing.T) 
 func TestLifecycleHarnessFailsClosedWhenKillLeavesLiveTree(t *testing.T) {
 	process := newSimulationProcess()
 	process.exitOnKill = false
-	backend := &simulationBackend{process: process, simulationOnly: true}
+	backend := &simulationBackend{process: process, nonProductOnly: true}
 	harness, err := NewHarness(backend)
 	if err != nil {
 		t.Fatal(err)
@@ -241,11 +241,11 @@ func TestLifecycleHarnessFailsClosedWhenKillLeavesLiveTree(t *testing.T) {
 
 func TestLifecycleHarnessNeverStartsAcrossClosedBoundaries(t *testing.T) {
 	process := newSimulationProcess()
-	backend := &simulationBackend{process: process, simulationOnly: false}
+	backend := &simulationBackend{process: process, nonProductOnly: false}
 	if _, err := NewHarness(backend); !errors.Is(err, ErrHarnessBoundary) {
 		t.Fatalf("product-like backend was accepted: %v", err)
 	}
-	backend.simulationOnly = true
+	backend.nonProductOnly = true
 	harness, err := NewHarness(backend)
 	if err != nil {
 		t.Fatal(err)
@@ -275,7 +275,7 @@ func TestLifecycleHarnessNeverStartsAcrossClosedBoundaries(t *testing.T) {
 func TestLifecycleHarnessCleansPartialStartAndInvalidIdentity(t *testing.T) {
 	partial := newSimulationProcess()
 	partial.exitOnTerminate = true
-	backend := &simulationBackend{process: partial, simulationOnly: true,
+	backend := &simulationBackend{process: partial, nonProductOnly: true,
 		startErr: errors.New("backend start error")}
 	harness, err := NewHarness(backend)
 	if err != nil {
@@ -293,7 +293,7 @@ func TestLifecycleHarnessCleansPartialStartAndInvalidIdentity(t *testing.T) {
 	invalid := newSimulationProcess()
 	invalid.identity = " invalid-process "
 	invalid.exitOnTerminate = true
-	backend = &simulationBackend{process: invalid, simulationOnly: true}
+	backend = &simulationBackend{process: invalid, nonProductOnly: true}
 	harness, err = NewHarness(backend)
 	if err != nil {
 		t.Fatal(err)
@@ -308,11 +308,11 @@ func TestLifecycleHarnessCleansPartialStartAndInvalidIdentity(t *testing.T) {
 			result, invalid, err)
 	}
 
-	backend = &simulationBackend{name: " invalid-backend ", simulationOnly: true}
+	backend = &simulationBackend{name: " invalid-backend ", nonProductOnly: true}
 	if _, err := NewHarness(backend); !errors.Is(err, ErrHarnessBoundary) {
 		t.Fatalf("non-normalized backend identity was accepted: %v", err)
 	}
-	backend = &simulationBackend{process: newSimulationProcess(), simulationOnly: true}
+	backend = &simulationBackend{process: newSimulationProcess(), nonProductOnly: true}
 	harness, err = NewHarness(backend)
 	if err != nil {
 		t.Fatal(err)

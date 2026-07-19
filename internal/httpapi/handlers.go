@@ -50,7 +50,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
 			"external-skills", "workspaces", "workspace-explorer", "workspace-search", "models",
-			"repository-state", "repository-diff", "repository-history", "repository-commit-detail", "verification-evidence", "verification-plan", "verification-plan-coverage", "code-handoff", "code-handoff-export",
+			"repository-state", "repository-diff", "repository-history", "repository-commit-detail", "repository-commit-file-preview", "verification-evidence", "verification-plan", "verification-plan-coverage", "code-handoff", "code-handoff-export",
 			"operation-receipts", "operator-actions", "evidence-inventory",
 			"event-stream", "event-poll", "capabilities", "openapi"}
 		if a.controlEnabled {
@@ -153,6 +153,10 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		}
 		if len(segments) == 4 && segments[2] == "repository-commits" {
 			return a.workspaceRepositoryCommit(request, segments[1], segments[3])
+		}
+		if len(segments) == 5 && segments[2] == "repository-commits" &&
+			segments[4] == "file-preview" {
+			return a.workspaceRepositoryCommitFilePreview(request, segments[1], segments[3])
 		}
 	case "sessions":
 		return a.routeSessions(request, segments)

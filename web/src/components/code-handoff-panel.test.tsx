@@ -29,6 +29,20 @@ describe("CodeHandoffPanel", () => {
       verification_plans: { returned_count: 1, truncated: false,
         references: [{ id: "verification-plan-1", plan_sha256: "a".repeat(64),
           item_count: 2, redacted: false, created_at: "2026-07-19T10:00:00Z" }] },
+      verification_coverage: { protocol_version: "operator_verification_plan_coverage.v1",
+        plan_count: 1, plan_item_count: 2, observed_plan_item_count: 1,
+        unobserved_plan_item_count: 1, associated_evidence_count: 2,
+        contradictory_item_count: 1, returned_item_count: 2, truncated: false,
+        items: [{ plan_id: "verification-plan-1", plan_sha256: "a".repeat(64), ordinal: 1,
+          item_sha256: "b".repeat(64), associated_evidence_count: 2,
+          pass_count: 1, fail_count: 1, unknown_count: 0,
+          latest_association_event_sequence: 41 },
+        { plan_id: "verification-plan-1", plan_sha256: "a".repeat(64), ordinal: 2,
+          item_sha256: "c".repeat(64), associated_evidence_count: 0,
+          pass_count: 0, fail_count: 0, unknown_count: 0,
+          latest_association_event_sequence: 0 }],
+        metadata_only: true, read_only: true, result_inferred: false,
+        private_bodies_included: false },
       pending_action_count: 1, pending_actions_truncated: false,
       pending_actions: [{ id: "action-opaque-1", kind: "file_edit_review", state: "proposed",
         destination: "diffs", available_at: "2026-07-19T11:30:00Z" }],
@@ -48,6 +62,8 @@ describe("CodeHandoffPanel", () => {
     expect(await screen.findByText("selected")).toBeInTheDocument();
     expect(screen.getByText("file edit review")).toBeInTheDocument();
     expect(screen.getByText("2 findings")).toBeInTheDocument();
+    expect(screen.getByText("1 pass / 1 fail / 0 unknown")).toBeInTheDocument();
+    expect(screen.getByText("conflict")).toBeInTheDocument();
     expect(screen.getByText("42")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Markdown" }));
     expect(codeHandoffExport).toHaveBeenCalledWith("run-1", "markdown");

@@ -22,7 +22,7 @@ const (
 )
 
 var (
-	ErrHarnessBoundary = errors.New("runner lifecycle backend is not simulation-only")
+	ErrHarnessBoundary = errors.New("runner lifecycle backend is not non-product-only")
 	ErrStartFailed     = errors.New("runner process start failed")
 	ErrWaitFailed      = errors.New("runner process wait failed")
 	ErrTerminateFailed = errors.New("runner process-tree termination failed")
@@ -109,12 +109,12 @@ type Process interface {
 	InspectTree(context.Context) (TreeState, error)
 }
 
-// Backend is intentionally narrower than a product Runner. R1 accepts only a
-// simulation backend, so implementing this interface cannot enable Local or
-// Docker execution in any CLI, HTTP, Desktop, or Agent path.
+// Backend is intentionally narrower than a product Runner. It accepts only
+// deterministic simulations or test-only conformance adapters, so implementing
+// this interface cannot enable Local or Docker execution in a product path.
 type Backend interface {
 	Name() string
-	SimulationOnly() bool
+	NonProductOnly() bool
 	Start(context.Context, Request) (Process, error)
 }
 
@@ -147,7 +147,7 @@ func NewHarness(backend Backend) (*Harness, error) {
 	}
 	name := backend.Name()
 	if name != strings.TrimSpace(name) || !validIdentity(name) ||
-		!backend.SimulationOnly() {
+		!backend.NonProductOnly() {
 		return nil, ErrHarnessBoundary
 	}
 	return &Harness{backend: backend, waitGraph: waitgraph.Default()}, nil
@@ -165,7 +165,7 @@ func (h *Harness) WithWaitGraph(graph *waitgraph.Graph) *Harness {
 func (h *Harness) Run(ctx context.Context, request Request) (Result, error) {
 	result := Result{ProtocolVersion: LifecycleProtocolVersion,
 		ProductExecutionEnabled: false}
-	if h == nil || h.backend == nil || h.waitGraph == nil || !h.backend.SimulationOnly() {
+	if h == nil || h.backend == nil || h.waitGraph == nil || !h.backend.NonProductOnly() {
 		return result, ErrHarnessBoundary
 	}
 	backendName := h.backend.Name()

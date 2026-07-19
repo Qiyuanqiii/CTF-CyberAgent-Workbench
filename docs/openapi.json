@@ -1912,7 +1912,7 @@
       "get": {
         "operationId": "getCodeHandoff",
         "summary": "Build a resumable Code handoff",
-        "description": "Regenerates a metadata-only Code Run handoff from durable Plan, queue, change-set, verification, pending-action, and report records. It returns no private body, performs no composite mutation, starts no execution, and grants no resume authority.",
+        "description": "Regenerates a metadata-only Code Run handoff from durable Plan, queue, change-set, verification, explicit per-item coverage, pending-action, and report records. Coverage preserves pass/fail/unknown counts without private summaries or an inferred aggregate result. The handoff performs no composite mutation, starts no execution, and grants no resume authority.",
         "tags": [
           "Runs"
         ],
@@ -6934,6 +6934,107 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/workspaces/{workspace_id}/repository-commits/{object_id}/file-preview": {
+      "get": {
+        "operationId": "getWorkspaceRepositoryCommitFilePreview",
+        "summary": "Preview one redacted file from an exact commit",
+        "description": "Returns a bounded secret-redacted UTF-8 projection of one regular file from one exact local commit object. Links, binary data, oversized content, missing objects, raw blobs, host roots, remotes, checkout, ref mutation, processes, hooks, and network access are refused or excluded; returned text remains non-authorizing evidence.",
+        "tags": [
+          "Workspaces"
+        ],
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "Workspace identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "object_id",
+            "in": "path",
+            "description": "Exact lowercase forty-character Git commit object identity",
+            "required": true,
+            "schema": {
+              "maxLength": 40,
+              "minLength": 40,
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "description": "Canonical repository-relative file path",
+            "required": true,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RepositoryCommitFilePreviewView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/repository-diff": {
       "get": {
         "operationId": "getWorkspaceRepositoryDiff",
@@ -8178,6 +8279,163 @@
         ],
         "type": "object"
       },
+      "CodeHandoffVerificationCoverageItemView": {
+        "additionalProperties": false,
+        "properties": {
+          "associated_evidence_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "fail_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "item_sha256": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "latest_association_event_sequence": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ordinal": {
+            "format": "int32",
+            "maximum": 32,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "pass_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "plan_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_sha256": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "unknown_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "plan_id",
+          "plan_sha256",
+          "ordinal",
+          "item_sha256",
+          "associated_evidence_count",
+          "pass_count",
+          "fail_count",
+          "unknown_count",
+          "latest_association_event_sequence"
+        ],
+        "type": "object"
+      },
+      "CodeHandoffVerificationCoverageView": {
+        "additionalProperties": false,
+        "properties": {
+          "associated_evidence_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "contradictory_item_count": {
+            "format": "int32",
+            "maximum": 1600,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CodeHandoffVerificationCoverageItemView"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "metadata_only": {
+            "type": "boolean"
+          },
+          "observed_plan_item_count": {
+            "format": "int32",
+            "maximum": 1600,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "plan_count": {
+            "format": "int32",
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "plan_item_count": {
+            "format": "int32",
+            "maximum": 1600,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "private_bodies_included": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "operator_verification_plan_coverage.v1"
+            ],
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "result_inferred": {
+            "type": "boolean"
+          },
+          "returned_item_count": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "unobserved_plan_item_count": {
+            "format": "int32",
+            "maximum": 1600,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "plan_count",
+          "plan_item_count",
+          "observed_plan_item_count",
+          "unobserved_plan_item_count",
+          "associated_evidence_count",
+          "contradictory_item_count",
+          "returned_item_count",
+          "truncated",
+          "items",
+          "metadata_only",
+          "read_only",
+          "result_inferred",
+          "private_bodies_included"
+        ],
+        "type": "object"
+      },
       "CodeHandoffVerificationPlanReferenceView": {
         "additionalProperties": false,
         "properties": {
@@ -8433,6 +8691,9 @@
           "verification": {
             "$ref": "#/components/schemas/CodeHandoffVerificationView"
           },
+          "verification_coverage": {
+            "$ref": "#/components/schemas/CodeHandoffVerificationCoverageView"
+          },
           "verification_plans": {
             "$ref": "#/components/schemas/CodeHandoffVerificationPlansView"
           },
@@ -8459,6 +8720,7 @@
           "change_set",
           "verification",
           "verification_plans",
+          "verification_coverage",
           "pending_action_count",
           "pending_actions_truncated",
           "pending_actions",
@@ -12095,6 +12357,169 @@
           "current_kind",
           "content_changed",
           "mode_changed"
+        ],
+        "type": "object"
+      },
+      "RepositoryCommitFilePreviewProvenanceView": {
+        "additionalProperties": false,
+        "properties": {
+          "content_sha256": {
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "instruction_authorized": {
+            "type": "boolean"
+          },
+          "source_kind": {
+            "enum": [
+              "repository_commit_file"
+            ],
+            "type": "string"
+          },
+          "source_ref": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "version": {
+            "enum": [
+              "context_provenance.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "source_kind",
+          "source_ref",
+          "content_sha256",
+          "instruction_authorized"
+        ],
+        "type": "object"
+      },
+      "RepositoryCommitFilePreviewView": {
+        "additionalProperties": false,
+        "properties": {
+          "authority_granted": {
+            "type": "boolean"
+          },
+          "checkout_performed": {
+            "type": "boolean"
+          },
+          "content": {
+            "maxLength": 131072,
+            "type": "string"
+          },
+          "hash": {
+            "maxLength": 12,
+            "type": "string"
+          },
+          "hooks_executed": {
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "regular",
+              "executable"
+            ],
+            "type": "string"
+          },
+          "mutation_supported": {
+            "type": "boolean"
+          },
+          "network_used": {
+            "type": "boolean"
+          },
+          "object_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 512,
+            "type": "string"
+          },
+          "process_started": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "repository_commit_file_preview.v1"
+            ],
+            "type": "string"
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/RepositoryCommitFilePreviewProvenanceView"
+          },
+          "raw_blob_included": {
+            "type": "boolean"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "redacted": {
+            "type": "boolean"
+          },
+          "redacted_content_included": {
+            "type": "boolean"
+          },
+          "redaction_count": {
+            "format": "int32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reference_updated": {
+            "type": "boolean"
+          },
+          "remote_config_included": {
+            "type": "boolean"
+          },
+          "returned_bytes": {
+            "format": "int32",
+            "maximum": 131072,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "root_path_exposed": {
+            "type": "boolean"
+          },
+          "total_bytes": {
+            "format": "int64",
+            "maximum": 65536,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "workspace_id",
+          "object_id",
+          "hash",
+          "path",
+          "kind",
+          "content",
+          "total_bytes",
+          "returned_bytes",
+          "redaction_count",
+          "redacted",
+          "provenance",
+          "read_only",
+          "mutation_supported",
+          "authority_granted",
+          "root_path_exposed",
+          "raw_blob_included",
+          "redacted_content_included",
+          "remote_config_included",
+          "checkout_performed",
+          "reference_updated",
+          "process_started",
+          "network_used",
+          "hooks_executed"
         ],
         "type": "object"
       },

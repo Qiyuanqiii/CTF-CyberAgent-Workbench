@@ -1,6 +1,6 @@
 # CyberAgent Workbench Desktop Plan
 
-状态：Desktop D0-A、D0-B 与 D1-R1 至 schema-v78 D1-G2/V1/F2 自动化核心已完成。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill、受控 Run/Session/Plan/审批、安全恢复的 Monaco FileEdit、只读 Repository/脱敏 Diff、多文件独立审阅、不可变操作者验证、可恢复 Code Handoff、Code Journey、generation-safe Windows Credential Manager Provider reload，以及默认关闭的有界 wake worker 已经落地；Windows 10 实机矩阵、xterm、安装包、签名正式发行、注册表、自启动、更新和高权限执行仍未实现。
+状态：Desktop D0-A、D0-B 与 D1-R1 至 D1-G5/V4 自动化核心已完成，数据库 schema 为 v82。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill、受控 Run/Session/Plan/审批、安全恢复的 Monaco FileEdit、只读 Repository/脱敏 Diff/本地历史/精确提交预览、多文件独立审阅、不可变操作者验证与覆盖率、可恢复 Code Handoff、Code Journey、generation-safe Windows Credential Manager Provider reload，以及默认关闭的有界 wake worker 已经落地。R2 只在测试中验证 Windows/Unix 进程树终止与回收，不提供产品执行入口；Windows 10 实机矩阵、xterm、安装包、签名正式发行、注册表、自启动、更新和高权限执行仍未实现。
 
 ## 目标
 
@@ -150,7 +150,7 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D0-B 增加精确 renderer origin、规范 `RequestURI`、外部 navigation/form/popup 阻断、secure build-tag 门禁、Windows CI 和 Windows 11 实机恢复记录；仍不增加业务 mutation。
 - [ ] 在正式便携或签名发行前补齐 Windows 10 x64 实机启动、第二实例、强制结束/重开和 WebView2 缺失路径矩阵。
 
-### D1：日常工作台（产品可用度约 94-96%）
+### D1：日常工作台（产品可用度约 95-97%）
 
 - [x] D1-R1 / schema v72：Go API 受控创建 Mission/Run/Session，严格注册 Workspace、Scope、默认预算、幂等 operation、事务事件和关闭 execution profile；React 可选择 Workspace/Profile/Surface/Phase 并在成功后刷新、选中新 Run。
 - [x] D1-R1 capability 与 `--enable-profile-control` 独立；creation-only token 不能访问旧控制 route，Wails native bridge 不增加方法。
@@ -211,7 +211,11 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D1-V3 / schema v81：Verify 增加 plan-item/evidence 不可变显式关联与 per-item coverage；矛盾观察保留，不生成整体 pass。
 - [x] Runtime R1：simulation-only Runner lifecycle contract 已覆盖 start/wait/cancel/timeout、wait graph、TERM/KILL、inspect/reap、partial/invalid start 与 orphan cleanup；无产品执行接线。
 - [x] D1-G4/V3/R1 后累计六片完整 robustness gate 通过：final Go/race 509/341 秒、ordinary/secure-Desktop test/vet、staticcheck/govulncheck/module、127 React、strict TypeScript、确定性契约、Vite/npm、Chrome、隐私/产物和 Windows 可复现构建全部为绿色；OpenAPI 68/74/163，GUI SHA-256 `77fb4d6fede1c1e3a0c3f3e9d39581e28f7a6880e0e25b222dcf0d3c701d1213`，边界见 ADR 0051。
-- [ ] 下一批候选 D1-G5 bounded redacted exact-commit file preview、D1-V4 Handoff/export coverage metadata 与 R2 test-only non-product process-tree conformance adapters；Local/Docker 产品执行继续关闭。
+- [x] D1-G5：增加 exact-object/exact-path 的有界脱敏提交文件预览；仅接受 regular/executable UTF-8 blob，拒绝链接、二进制、缺失项和超过 64 KiB 的原文，renderer 不获得仓库根目录、remote、checkout、进程或网络权限。
+- [x] D1-V4：Code Handoff 与 Markdown/JSON 导出增加 verification coverage metadata；逐计划/逐条目计数和摘要哈希可复核，但不暴露私有正文，也不把覆盖率推导成整体 pass。
+- [x] Runtime R2：Windows Job Object 与 Unix process group 适配器仅在测试二进制内验证 cooperative terminate、forced kill 和 orphan cleanup；产品 Runner 接线仍不存在。
+- [x] D1-G5/V4/R2 后累计六片完整 robustness gate 通过：uncached Go/race、ordinary/secure-Desktop test/vet、staticcheck/govulncheck/module、37 文件 127 项 React、strict TypeScript、确定性契约、Vite/npm、隐私/产物和 Windows 可复现构建全部为绿色；OpenAPI 69/75/167，GUI SHA-256 `44d54bf9d50b7cd99b89f5089833823ce0337bb0e0158ec16ef6aa9a5b415614`，边界见 ADR 0053。
+- [ ] 下一批候选 D1-G6 exact-file history、D1-V5 verification coverage drilldown 与 R3 bounded output/exit-evidence conformance；Local/Docker 产品执行继续关闭。
 - [ ] 所有状态 mutation 使用独立 control capability、Origin/Host 校验、稳定 operation key 和 typed errors；显式 Provider 诊断每次只允许一次有界无正文请求。CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。
 
@@ -243,4 +247,4 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - 安装、升级和卸载不会静默删除 Workspace、数据库、凭证或用户创建文件。
 - 未签名开发产物不得伪装成正式发布；正式包必须有可核验签名和哈希。
 
-ADR 0034 至 ADR 0051 依次记录桌面壳与生命周期、受控 Run/Session/Plan/审批/Provider/FileEdit/wake/Skill/Workspace/Repository/Verification/Handoff 能力、运行时防死锁/活锁，以及 exact commit、显式验证关联和 simulation-only Runner 生命周期边界。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。
+ADR 0034 至 ADR 0053 依次记录桌面壳与生命周期、受控 Run/Session/Plan/审批/Provider/FileEdit/wake/Skill/Workspace/Repository/Verification/Handoff 能力、运行时防死锁/活锁，以及 exact commit preview、显式验证覆盖率和 test-only process-tree conformance 边界。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。

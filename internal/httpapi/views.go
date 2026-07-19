@@ -242,6 +242,41 @@ type RepositoryCommitDetailView struct {
 	HooksExecuted          bool                             `json:"hooks_executed"`
 }
 
+type RepositoryCommitFilePreviewProvenanceView struct {
+	Version               string `json:"version"`
+	SourceKind            string `json:"source_kind"`
+	SourceRef             string `json:"source_ref"`
+	ContentSHA256         string `json:"content_sha256"`
+	InstructionAuthorized bool   `json:"instruction_authorized"`
+}
+
+type RepositoryCommitFilePreviewView struct {
+	ProtocolVersion         string                                    `json:"protocol_version"`
+	WorkspaceID             string                                    `json:"workspace_id"`
+	ObjectID                string                                    `json:"object_id"`
+	Hash                    string                                    `json:"hash"`
+	Path                    string                                    `json:"path"`
+	Kind                    string                                    `json:"kind"`
+	Content                 string                                    `json:"content"`
+	TotalBytes              int64                                     `json:"total_bytes"`
+	ReturnedBytes           int                                       `json:"returned_bytes"`
+	RedactionCount          int                                       `json:"redaction_count"`
+	Redacted                bool                                      `json:"redacted"`
+	Provenance              RepositoryCommitFilePreviewProvenanceView `json:"provenance"`
+	ReadOnly                bool                                      `json:"read_only"`
+	MutationSupported       bool                                      `json:"mutation_supported"`
+	AuthorityGranted        bool                                      `json:"authority_granted"`
+	RootPathExposed         bool                                      `json:"root_path_exposed"`
+	RawBlobIncluded         bool                                      `json:"raw_blob_included"`
+	RedactedContentIncluded bool                                      `json:"redacted_content_included"`
+	RemoteConfigIncluded    bool                                      `json:"remote_config_included"`
+	CheckoutPerformed       bool                                      `json:"checkout_performed"`
+	ReferenceUpdated        bool                                      `json:"reference_updated"`
+	ProcessStarted          bool                                      `json:"process_started"`
+	NetworkUsed             bool                                      `json:"network_used"`
+	HooksExecuted           bool                                      `json:"hooks_executed"`
+}
+
 type RepositoryHistoryBranchView struct {
 	Name    string `json:"name"`
 	Head    string `json:"head"`

@@ -153,6 +153,23 @@ func renderCodeHandoffMarkdown(value CodeHandoff) string {
 		}
 		output.WriteByte('\n')
 	}
+	coverage := value.VerificationCoverage
+	fmt.Fprintf(&output,
+		"Coverage: %d/%d items observed, %d explicit associations, %d contradictory items%s.\n\n",
+		coverage.ObservedPlanItemCount, coverage.PlanItemCount,
+		coverage.AssociatedEvidenceCount, coverage.ContradictoryItemCount,
+		markdownTruncation(coverage.Truncated))
+	if len(coverage.Items) > 0 {
+		output.WriteString("| Plan | Item | Evidence | Pass | Fail | Unknown | Latest association |\n")
+		output.WriteString("| --- | ---: | ---: | ---: | ---: | ---: | ---: |\n")
+		for _, item := range coverage.Items {
+			fmt.Fprintf(&output, "| `%s` | %d | %d | %d | %d | %d | %d |\n",
+				markdownCell(item.PlanID), item.Ordinal, item.AssociatedEvidenceCount,
+				item.PassCount, item.FailCount, item.UnknownCount,
+				item.LatestAssociationEventSequence)
+		}
+		output.WriteByte('\n')
+	}
 
 	output.WriteString("## Pending Actions\n\n")
 	if len(value.PendingActions) == 0 {

@@ -33,7 +33,21 @@ describe("RepositoryHistoryPanel", () => {
       file_content_included: false, patch_included: false, checkout_performed: false,
       reference_updated: false, process_started: false, network_used: false, hooks_executed: false,
     });
-    const client = { repositoryHistory, repositoryCommit } as unknown as CyberAgentClient;
+    const repositoryCommitFilePreview = vi.fn().mockResolvedValue({
+      protocol_version: "repository_commit_file_preview.v1", workspace_id: "workspace-1",
+      object_id: "abcdef1234567890abcdef1234567890abcdef12", hash: "abcdef123456",
+      path: "internal/example.go", kind: "regular", content: "safe preview\n",
+      total_bytes: 13, returned_bytes: 13, redaction_count: 0, redacted: false,
+      provenance: { version: "context_provenance.v1", source_kind: "repository_commit_file",
+        source_ref: "internal/example.go", content_sha256: "a".repeat(64),
+        instruction_authorized: false }, read_only: true, mutation_supported: false,
+      authority_granted: false, root_path_exposed: false, raw_blob_included: false,
+      redacted_content_included: true, remote_config_included: false,
+      checkout_performed: false, reference_updated: false, process_started: false,
+      network_used: false, hooks_executed: false,
+    });
+    const client = { repositoryHistory, repositoryCommit,
+      repositoryCommitFilePreview } as unknown as CyberAgentClient;
     const user = userEvent.setup();
     const queryClient = new QueryClient();
     const { rerender } = render(<QueryClientProvider client={queryClient}>
@@ -46,6 +60,13 @@ describe("RepositoryHistoryPanel", () => {
     expect(await screen.findByText("internal/example.go")).toBeInTheDocument();
     expect(repositoryCommit).toHaveBeenCalledWith("workspace-1",
       "abcdef1234567890abcdef1234567890abcdef12", expect.any(AbortSignal));
+    await user.click(screen.getByRole("button", {
+      name: "Preview internal/example.go at abcdef123456",
+    }));
+    expect(await screen.findByText("safe preview")).toBeInTheDocument();
+    expect(repositoryCommitFilePreview).toHaveBeenCalledWith("workspace-1",
+      "abcdef1234567890abcdef1234567890abcdef12", "internal/example.go",
+      expect.any(AbortSignal));
     rerender(<QueryClientProvider client={queryClient}>
       <RepositoryHistoryPanel client={client} workspaceID="workspace-2" />
     </QueryClientProvider>);

@@ -485,6 +485,8 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 		}
 		if spec.OperationID == "searchWorkspace" {
 			requestPath += "?query=README"
+		} else if spec.OperationID == "getWorkspaceRepositoryCommitFilePreview" {
+			requestPath += "?path=README.md"
 		} else if spec.OperationID == "issueFileEditProposalSource" {
 			requestPath += "?path=README.md"
 		} else if spec.OperationID == "exportCodeHandoff" {
@@ -495,6 +497,8 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 			expectedStatus := http.StatusOK
 			if spec.OperationID == "getRunFindingReport" {
 				expectedStatus = http.StatusNotFound
+			} else if spec.OperationID == "getWorkspaceRepositoryCommitFilePreview" {
+				expectedStatus = http.StatusPreconditionFailed
 			}
 			if spec.Control {
 				body := `{"profile":"docker"}`

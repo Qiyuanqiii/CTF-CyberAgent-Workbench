@@ -76,13 +76,13 @@ type PlanItemCoverageCount struct {
 
 func (c PlanItemCoverageCount) Validate() error {
 	if !validIdentity(c.PlanID) || c.PlanItemOrdinal < 1 || c.PlanItemOrdinal > MaxPlanItems ||
-		!validDigest(c.PlanItemSHA256) || c.AssociatedEvidenceCount < 0 ||
+		!validDigest(c.PlanItemSHA256) || c.AssociatedEvidenceCount < 1 ||
 		c.AssociatedEvidenceCount > MaxSafeCoverageCount || c.PassCount < 0 ||
 		c.FailCount < 0 || c.UnknownCount < 0 || c.PassCount > MaxSafeCoverageCount ||
 		c.FailCount > MaxSafeCoverageCount || c.UnknownCount > MaxSafeCoverageCount ||
 		int64(c.PassCount)+int64(c.FailCount)+int64(c.UnknownCount) !=
 			int64(c.AssociatedEvidenceCount) ||
-		(c.AssociatedEvidenceCount == 0) != (c.LatestAssociationEventSequence == 0) {
+		c.LatestAssociationEventSequence <= 0 {
 		return errors.New("verification plan coverage count is invalid")
 	}
 	return nil

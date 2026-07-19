@@ -193,6 +193,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/skills/packages/inst
 | `GET` | `/api/v1/workspaces/{workspace_id}/repository-diff` | At most 50 secret-redacted exact-root patches; 64 KiB each/512 KiB total, no raw body, process, remote, network, hook, or mutation |
 | `GET` | `/api/v1/workspaces/{workspace_id}/repository-history` | At most 50 first-parent commits and 64 local branches; no author/email/body/remote/root/process/network/hook |
 | `GET` | `/api/v1/workspaces/{workspace_id}/repository-commits/{object_id}` | One exact lowercase SHA-1 commit's bounded changed-path/mode metadata; no blob body, checkout, ref mutation, remote, process, network, or hook |
+| `GET` | `/api/v1/workspaces/{workspace_id}/repository-commits/{object_id}/file-preview?path={canonical_path}` | One bounded redacted regular/executable UTF-8 file from the exact commit; no raw blob, root, checkout, mutation, process, network, or hook |
 | `GET` | `/api/v1/operation-receipts` | At most 100 terminal metadata-only receipts; optional exact `run_id`, no operation key/path/private lease |
 | `GET` | `/api/v1/models` | Redacted Provider/model-route availability with one Registry generation; no key, Base URL, environment name, probe, or model call |
 | `GET` | `/api/v1/models/credentials` | Supported Provider system-store and Registry generation status only; fixed `plaintext_returned=false` |
@@ -237,8 +238,8 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/skills/packages/inst
 | `POST` | `/api/v1/runs/{run_id}/verification-plan` | Record one exact-bound 1-32 item operator checklist; no command/model/execution/authority |
 | `GET` | `/api/v1/runs/{run_id}/verification-plan-coverage` | Per-item explicit pass/fail/unknown association counts and unobserved state; no aggregate pass |
 | `POST` | `/api/v1/runs/{run_id}/verification-plan-associations` | Immutably associate one later evidence record with one earlier plan item; no reassignment, execution, approval, or inference |
-| `GET` | `/api/v1/runs/{run_id}/code-handoff` | Regenerable Code-only Plan/queue/change/verification/action/report summary; no private body, resume, execution, or composite mutation |
-| `GET` | `/api/v1/runs/{run_id}/code-handoff/export` | Digest-bound Markdown/JSON export of one stable Handoff; no import, resume, mutation, acceptance, or execution |
+| `GET` | `/api/v1/runs/{run_id}/code-handoff` | Regenerable Code-only Plan/queue/change/verification/coverage/action/report summary; no private body, inferred aggregate result, resume, execution, or composite mutation |
+| `GET` | `/api/v1/runs/{run_id}/code-handoff/export` | Digest-bound Markdown/JSON export of one stable Handoff including explicit coverage metadata; no import, result inference, resume, mutation, acceptance, or execution |
 | `GET` | `/api/v1/runs/{run_id}/wake-intent` | Bounded public wake state without owner/lease identity |
 | `POST` | `/api/v1/runs/{run_id}/wake-intent` | Schedule bounded digest-idempotent wake intent; no execution |
 | `POST` | `/api/v1/runs/{run_id}/wake-intent/cancel` | Cancel the exact active intent without running it |
@@ -444,6 +445,14 @@ observation items. Go and SQLite exact-bind the active Code Session and keep
 and authority are always false. Results remain on the separate verification-evidence
 route.
 
+`GET /api/v1/workspaces/{workspace_id}/repository-commits/{object_id}/file-preview`
+requires exactly one `path` query value. The object must be an exact lowercase SHA-1
+identity and the path must be canonical, relative, and present in that commit as a
+regular or executable file. Binary, linked, missing, and over-64-KiB files fail closed.
+The response is secret-redacted, capped at 128 KiB, and carries a SHA-256 over the
+projected UTF-8 bytes plus `instruction_authorized=false`. It never returns the raw
+blob or host root and performs no checkout, ref update, process, network, or hook.
+
 `POST /api/v1/runs/{run_id}/verification-plan-associations` records one immutable
 `operator_verification_plan_evidence_association.v1`. The request contains only exact
 plan, item, and evidence IDs plus an in-memory idempotency key. Go and SQLite require
@@ -457,7 +466,10 @@ remain visible and there is no aggregate pass field.
 `code_handoff_export.v1` envelope with at most 256 KiB of content, source event
 high-water, UTF-8 byte count, SHA-256, safe filename, and fixed MIME type. It uses the
 same stable Handoff assembly and cannot resume, apply, accept a report, mutate, or
-execute. The React client recomputes the digest before creating a local download.
+execute. Handoff and export include at most 100 metadata-only verification coverage
+items with explicit pass/fail/unknown counts and contradiction totals. They omit plan
+and evidence bodies and never infer an aggregate result. The React client recomputes
+the export digest before creating a local download.
 
 ## Envelopes
 
@@ -505,4 +517,4 @@ Pagination is a bounded live SQLite projection, not a multi-request snapshot. Ap
 - No Artifact content route. Use the authenticated local CLI `artifact read` when content is explicitly required.
 - No real Shell, LocalSandbox, or Docker process execution. Schema v64 profile selection records intent only; HTTP exposes no runner start, Sandbox execution, approval, output-export, or Artifact-commit route. Existing approvals still resolve to audited dry-run results.
 - No per-resource authorization below the process token. Future remote or multi-user use requires a separate identity and authorization design.
-- Repository history and exact commit detail have no checkout/fetch/push/ref-update or raw-blob endpoint. Verification plans and associations do not run checks or imply aggregate outcomes. Handoff exports have no import/resume endpoint.
+- Repository history, exact commit detail, and redacted commit-file preview have no checkout/fetch/push/ref-update or raw-blob endpoint. Verification plans, associations, and Handoff coverage do not run checks or imply aggregate outcomes. Handoff exports have no import/resume endpoint.
