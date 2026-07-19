@@ -59,26 +59,27 @@ Read in this order after a long context break:
 49. `docs/adr/0044-operator-action-center-evidence-inventory-command-palette.md`
 50. `docs/adr/0045-go-issued-editor-system-credentials-bounded-wake-worker.md`
 51. `docs/adr/0046-safe-editor-recovery-provider-generation-worker-health.md`
-52. `docs/DESKTOP_PLAN.md`
-53. `docs/SKILL_PACKAGE_PLAN.md`
+52. `docs/adr/0047-read-only-repository-change-set-code-journey.md`
+53. `docs/DESKTOP_PLAN.md`
+54. `docs/SKILL_PACKAGE_PLAN.md`
 
 ## Current Baseline
 
 - Architecture completion: about 99%; the V2 run-centric control plane is about 99% complete.
-- Product usability: about 87-90% for the complete Code + Cyber product.
-- Generic coding-agent workflow usability: about 84%.
+- Product usability: about 89-92% for the complete Code + Cyber product.
+- Generic coding-agent workflow usability: about 88%.
 - Cyber autonomous-workflow usability: about 20%.
 - These are engineering estimates based on tested roadmap slices, not performance benchmarks. Do not reuse the retired single-axis "overall product vision" percentage.
 - Database schema: v77.
 - `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v77` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
 - Main languages: Go control plane, TypeScript React/Vite local console; Rust has not started.
-- Desktop status: D0-A/D0-B and D1-R1 through D1-I2/M4/J2 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, generation-safe Windows Credential Manager Provider controls with status-only readback, and a default-off one-concurrent/one-step wake worker with read-only health/drain. Existing receipt, Workspace Files/search, evidence, action-center, and command-palette controls remain. Capability-only launches cannot reach sibling routes. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, terminal, real Shell/Local/Docker process execution, or install-time Skill execution. See ADR 0033 through ADR 0046 and `docs/DESKTOP_PLAN.md`.
+- Desktop status: D0-A/D0-B and D1-R1 through D1-G1/I3/F1 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, read-only Repository state, independent multi-file review, a Code-only Journey, generation-safe Windows Credential Manager Provider controls, and a default-off one-concurrent/one-step wake worker. Capability-only launches cannot reach sibling routes. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, terminal, real Shell/Local/Docker process execution, or install-time Skill execution. See ADR 0033 through ADR 0047 and `docs/DESKTOP_PLAN.md`.
 - Custom Skill status: the five embedded `skill.v1` guides and explicitly selected external packages are Run-loadable through separate protocols. Schema v69 adds persistent content-addressed import/history; schema v70 adds a second explicitly confirmed exact Run selection and redacted user-role root/Specialist context; schema v71 adds bounded read-only provenance across HTTP/TUI/Web. D1-A adds a pathless, one-time-handle preview boundary; D1-B1 adds explicit HTTP/Desktop registration through the same inert Registry. External packages remain untrusted and grant no declared tools. Installation executes no content and still does not select a package for a Run. See ADR 0024, ADR 0031 through ADR 0033, ADR 0041, and `docs/SKILL_PACKAGE_PLAN.md`.
 - Protected-delete status: explicit recursive, absolute/traversing/wildcard, environment-derived, command-substituted, current-home, PowerShell/`cmd`, and common interpreter deletion intents are permanently denied before approval across Shell, ScriptProcess, and Sandbox Policy. This is defense in depth; Local/container process execution remains disabled and a future executor still requires OS/container isolation. See ADR 0025.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
 - Canonical remote: `Qiyuanqiii/CTF-CyberAgent-Workbench`.
 
-Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, one Go Provider Registry with persisted routes, redacted availability, and environment/system-credential sources, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, parent-selected minimal Specialist Skill context, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with explicit operator selection and separate Deliver transition, safe-boundary operator steering with pending-only cancellation and explicit drain, controlled HTTP/Desktop submission into that existing queue, constrained metadata-only approval decisions, embedded Skills, strict external-package validation, a content-addressed inert user Skill Registry, explicitly confirmed external-Skill Run pinning with redacted root/Specialist delivery, pathless Desktop Skill preview plus confirmed inert registration, Go-issued Monaco FileEdit proposals followed by independently authorized review/apply, explicit foreground wake consumption plus a default-off 1 x 1-step worker, a bounded operator action center, metadata-only attached-evidence inventory, navigation/refresh-only command palette, a Windows Wails shell with embedded React, an in-process Go API, same-database lifecycle recovery, shared SSE/poll high-water cursors, fail-closed WebView2/origin handling, and idempotent closed Run creation, plus the existing non-authorizing Sandbox/Docker evidence architecture, loopback API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and React/Vite console.
+Implemented foundations include resumable RunSupervisor turns, SQLite checkpoints and execution leases, model streaming/retry/cancellation, one Go Provider Registry with persisted routes, redacted availability, and environment/system-credential sources, WorkItems/Notes/context compaction, Tool Gateway and durable approvals, source-bound Artifacts, a stable root Agent, review-gated two-child Specialist scheduling, parent-selected minimal Specialist Skill context, separate 1/2/4/6 read-only Fan-out, immutable Finding/Evidence/Report lifecycles, SARIF/CI output, Go-owned Code/Cyber plus Plan/Deliver modes, strict three-direction Plan proposals with explicit operator selection and separate Deliver transition, safe-boundary operator steering with pending-only cancellation and explicit drain, controlled HTTP/Desktop submission into that existing queue, constrained metadata-only approval decisions, embedded Skills, strict external-package validation, a content-addressed inert user Skill Registry, explicitly confirmed external-Skill Run pinning with redacted root/Specialist delivery, pathless Desktop Skill preview plus confirmed inert registration, Go-issued Monaco FileEdit proposals followed by independently authorized review/apply, read-only Git repository state and bounded multi-file summaries, a Code-only Journey over existing capabilities, explicit foreground wake consumption plus a default-off 1 x 1-step worker, a bounded operator action center, metadata-only attached-evidence inventory, navigation/refresh-only command palette, a Windows Wails shell with embedded React, an in-process Go API, same-database lifecycle recovery, shared SSE/poll high-water cursors, fail-closed WebView2/origin handling, and idempotent closed Run creation, plus the existing non-authorizing Sandbox/Docker evidence architecture, loopback API/SSE/OpenAPI, Headless NDJSON, Run-first Bubble Tea TUI, and React/Vite console.
 
 Schema v73 and non-schema D1-S2 additionally complete independent pending-only HTTP/Desktop steering cancellation, digest-idempotent Run start/pause/resume, and an at-most-eight-item frozen execution handoff through the existing RunSupervisor. These controls add no Desktop-native worker and no Local/Docker/Shell process authority; ADR 0038 records the boundary.
 
@@ -756,18 +757,60 @@ ADR 0046 is authoritative.
 GitHub Actions run `29674460349` passed implementation commit `7d5736e`: TypeScript
 console 38s, Windows Desktop shell 2m49s, and Go control plane 3m43s.
 
+## Completed Repository State, Change Sets, And Code Journey (D1-G1/I3/F1)
+
+D1-G1 adds pure-Go `repository_state.v1` for the exact registered Workspace root.
+It uses `go-git/v5` without parent discovery, subprocesses, network, remotes, or hooks.
+A redirected `.git` file and every symbolic link below real `.git` metadata fail
+closed. The cancellable metadata walk is capped at 50,000 entries, status processing
+at 10,000 entries, and output at 200 canonical relative paths. Secret-looking path or
+branch data is omitted; host roots, bodies, remote configuration, and command output
+never enter the projection.
+
+D1-I3 adds exact-bound `file_edit_change_set.v1` over at most 100 existing FileEdit
+previews. It returns metadata and Diff byte counts, not Diff content. Review and apply
+remain independent per-file operations, atomic/batch mutation is explicitly false,
+and mixed completion remains visible as partial state. D1-F1 adds a Code-only Journey
+for Scope, Plan, Queue and execute, Review, and Verify and report. Its buttons navigate
+existing Go-owned views; the component has no API client or composite mutation and is
+not injected into Cyber mode.
+
+The cumulative six-slice gate is green. The ordinary full suite passed in 321.7s
+before audit hardening; the final-code full race suite passed in 490.4s, followed by
+ten normal repository repetitions. Vet, zero-warning staticcheck, module verification,
+zero reachable/imported-package govulncheck findings, secure Desktop tags, strict
+TypeScript, 114 React tests across 31 files, deterministic OpenAPI/TypeScript, Vite,
+zero-vulnerability npm audit, isolated mock-only CLI smoke, and a reproducible Windows
+double build passed. OpenAPI has 59 paths, 63 operations, and 129 schemas. The unsigned
+Desktop SHA-256 is `145757cb1a8bbafc9080fdc29f4ada69d34b850ca64f702310ea44578ca677a9`
+and remains `release_ready=false`.
+
+Govulncheck retains one module-only residual, `GO-2026-5932`, because the transitive
+`golang.org/x/crypto/openpgp` package is unmaintained and has no fixed version. The
+application neither imports nor calls it. The audit fixed nested Git-metadata link
+reads and a strict-client false rejection when a terminal Run exposes a proposed
+FileEdit with zero allowed actions. Browser desktop/mobile checks found no page-level
+overflow or console error. No unresolved high/medium issue is known. No real API key,
+Provider request, Shell, LocalRunner, Docker, Git hook, attack traffic, or external
+network operation was used. Current estimates are architecture about 99% (V2 about
+99%), complete-product usability about 89-92%, generic Coding Agent usability about
+88%, and Cyber automation about 20%. ADR 0047 is authoritative.
+
+GitHub Actions run `29678257802` passed implementation commit `d69a812`: TypeScript
+console 43s, Go control plane 5m32s, and Windows Desktop shell 5m29s.
+
 ## Next Slice
 
 The recommended next three-slice batch keeps the general Coding Agent ahead of CTF:
 
-1. D1-G1: add a Go-owned, read-only repository-state projection for a registered Workspace. Prefer a deterministic library boundary over renderer or model shell execution; expose bounded relative paths and status/diff metadata without host roots, credentials, hooks, or process authority.
-2. D1-I3: group multiple independently validated FileEdit proposals into a bounded change-set review. Every file retains its own source hash, review, Policy, and apply operation; grouping must not create an all-powerful renderer write or silently make partial apply look atomic.
-3. D1-F1: connect New Run, Session input, Plan/Delivery, explicit bounded execution, recovery, action center, and terminal report into one tested Code-mode journey. UI composition must call existing Go capabilities and may not introduce a composite authority endpoint.
-4. Run the ordinary three-slice functional gate, browser desktop/mobile checks, and combined audit. The manual Windows 10 matrix, signed/package distribution, real Sandbox/host processes, Rust analyzers, xterm, and CTF solving remain separate work requiring dedicated gates and, where noted, operator hardware/signing input.
+1. D1-G2: add a bounded, secret-redacted repository Diff projection over the exact registered root. It remains read-only/non-authorizing, follows no links, returns no host roots, and does not execute `git` or expose remote/hook authority.
+2. D1-V1: persist operator-supplied verification evidence and closed pass/fail/unknown results without running a command. Evidence must bind one Run/Session/Workspace and remain distinct from model claims, approvals, or execution authority.
+3. D1-F2: add a Go-owned resumable Code handoff summary that compacts current Plan, queue, change-set, verification, pending actions, and terminal report references without copying private bodies or creating a composite mutation.
+4. Run the ordinary three-slice functional gate, browser desktop/mobile checks, and combined audit. The following batch owns the next six-slice robustness gate. The manual Windows 10 matrix, signed/package distribution, real Sandbox/host processes, Rust analyzers, xterm, and CTF solving remain separate work requiring dedicated gates and, where noted, operator hardware/signing input.
 
 ## Local Machine Note
 
-The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v77 and D1-Q2 through D1-I2/M4/J2 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the OS temporary root.
+The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v77 and D1-Q2 through D1-G1/I3/F1 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the OS temporary root.
 
 ## Delivery Loop
 

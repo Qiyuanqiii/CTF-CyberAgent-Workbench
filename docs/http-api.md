@@ -1,8 +1,8 @@
 # 本地 HTTP API / Local HTTP API
 
-CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`，用于检查 SQLite 持久状态并投影可恢复 Run events。独立 capability 允许受控 Run/Session/Plan/审批、Provider 诊断/路由/系统凭证、FileEdit 提案/只读恢复/审阅/apply、wake 意图/前台消费，以及惰性 Skill 安装。D1-J2 提供只读 capability/worker health；进程仍只能在启动时显式开启一个单并发、单步 wake worker，没有 HTTP route 能在运行中开启它。API 不编辑/重排消息、不执行 Skill、不启动通用宿主/容器进程，也不替代 Policy、Tool Gateway 或 Sandbox 门禁。
+CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`，用于检查 SQLite 持久状态并投影可恢复 Run events。独立 capability 允许受控 Run/Session/Plan/审批、Provider 诊断/路由/系统凭证、FileEdit 提案/只读恢复/审阅/apply、wake 意图/前台消费，以及惰性 Skill 安装。只读面还提供 capability/worker health、exact-root Repository 状态和非原子的多文件 FileEdit 汇总。API 不编辑/重排消息、不执行 Skill、不启动 Git/通用宿主/容器进程，也不替代 Policy、Tool Gateway 或 Sandbox 门禁。
 
-CyberAgent Workbench exposes a Go-controlled local `api.v1` for durable SQLite state and resumable Run-event projections. Independent capabilities permit controlled Run/Session/Plan/approval operations, Provider diagnostics/routes/system credentials, FileEdit propose/read-only recovery/review/apply, wake intent/foreground consumption, and inert Skill installation. D1-J2 exposes read-only capabilities and worker health; the one-concurrent, one-step worker still requires explicit process-start enablement and no HTTP route can enable it at runtime. The API cannot edit/reorder messages, execute a Skill, start a general host/container process, or replace Policy, the Tool Gateway, or Sandbox gates.
+CyberAgent Workbench exposes a Go-controlled local `api.v1` for durable SQLite state and resumable Run-event projections. Independent capabilities permit controlled Run/Session/Plan/approval operations, Provider diagnostics/routes/system credentials, FileEdit propose/read-only recovery/review/apply, wake intent/foreground consumption, and inert Skill installation. Read-only surfaces also expose capabilities/worker health, exact-root Repository state, and non-atomic multi-file FileEdit summaries. The API cannot edit/reorder messages, execute a Skill, start Git or a general host/container process, or replace Policy, the Tool Gateway, or Sandbox gates.
 
 ## 启动 / Start
 
@@ -15,7 +15,7 @@ $env:CYBERAGENT_API_TOKEN = "<a-random-token-of-at-least-32-bytes>"
 $env:CYBERAGENT_API_CONTROL_TOKEN = "<a-different-random-token-of-at-least-32-bytes>"
 go run ./cmd/cyberagent api serve --listen 127.0.0.1:8765 --ui-dir web/dist
 
-# Optional independent controls completed through D1-I2/M4/J2.
+# Optional independent controls completed through D1-G1/I3/F1.
 go run ./cmd/cyberagent api serve --listen 127.0.0.1:8765 --ui-dir web/dist --enable-file-edit-proposals --enable-provider-credentials --enable-wake-worker
 ```
 
@@ -52,9 +52,9 @@ route still requires the control token and its corresponding Go gate independent
 
 ### Windows Desktop 进程内传输 / Windows Desktop In-Process Transport
 
-Desktop 至 D1-I2/M4/J2 复用同一 `api.v1` Handler，但不调用 `ListenAndServe`，也不绑定回环端口。Wails AssetServer 在同一进程内把 React 请求交给 Go；适配层只接受精确 `http://wails.localhost`。默认只生成内存 read token；十八个独立 flag 开放各自窄 route 或 process-start worker。任一 control capability 会生成同一个不同于 read token 的内存 control token，未启用 route 仍返回 404。模型/凭证/capability/worker 状态、行动中心和证据清单读取走 read token；两个 token 都不写磁盘、日志、Local Storage 或注册表。Provider 明文仅在显式请求与 Windows Credential Manager/候选 Registry 构建中短暂存在，不进入响应。
+Desktop 至 D1-G1/I3/F1 复用同一 `api.v1` Handler，但不调用 `ListenAndServe`，也不绑定回环端口。Wails AssetServer 在同一进程内把 React 请求交给 Go；适配层只接受精确 `http://wails.localhost`。默认只生成内存 read token；十八个独立 flag 开放各自窄 route 或 process-start worker。Repository/change-set/Journey 不增加 flag 或 control route；它们只读取既有状态或导航。任一 control capability 会生成同一个不同于 read token 的内存 control token，未启用 route 仍返回 404。两个 token 都不写磁盘、日志、Local Storage 或注册表。
 
-Desktop through D1-I2/M4/J2 reuses the same `api.v1` Handler without calling `ListenAndServe` or binding a loopback port. The Wails AssetServer passes React requests to Go in process, and a narrow adapter accepts only exact `http://wails.localhost`. Eighteen independent flags expose narrow routes or the process-start worker. Any control capability creates one in-memory control token distinct from the read token, while disabled routes remain 404. Model/credential/capability/worker status, operator actions, and evidence inventory use the read token; neither token is written to disk, logs, browser storage, or the registry. Provider plaintext exists only transiently during an explicit request, Windows Credential Manager call, and candidate Registry construction and never enters a response.
+Desktop through D1-G1/I3/F1 reuses the same `api.v1` Handler without calling `ListenAndServe` or binding a loopback port. The Wails AssetServer passes React requests to Go in process, and a narrow adapter accepts only exact `http://wails.localhost`. Eighteen independent flags expose narrow routes or the process-start worker. Repository/change-set/Journey adds no flag or control route and only reads existing state or navigates. Any control capability creates one in-memory control token distinct from the read token, while disabled routes remain 404; neither token is written to disk, logs, browser storage, or the registry.
 
 普通浏览器继续使用 `/events/stream` SSE。Wails v2 在 Windows 上不支持 AssetServer response streaming，因此 Desktop 使用 `GET /runs/{run_id}/events/poll` 做一秒有界轮询。该 endpoint 与 SSE 共用同一个绑定 Run 与 sequence 的高水位 cursor，单次最多返回 100 帧并明确给出 `has_more`；poll cursor 可续接 SSE，SSE cursor 也可续接 poll。Renderer 最多在模块内存保存 16 个 Run、每个 500 帧，重挂载继续最后 cursor，失效 cursor 每次挂载最多回退一次；不写 Local/Session Storage，也不再生成伪 cursor。它不会建立新的事件真源。原生 Wails bridge 不是通用业务 API 旁路：前三项只提供 connection bootstrap 和路径隔离 Skill 选择/预览，第四项只消费 Go 发放的一次性确认句柄并调用惰性 Registry。
 
@@ -114,6 +114,8 @@ $source = Invoke-RestMethod "http://127.0.0.1:8765/api/v1/runs/<run-id>/file-edi
 $proposalBody = @{ version = "file_edit_proposal.v1"; source_handle = $source.data.source_handle; proposed_text = "replacement text" } | ConvertTo-Json
 Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/runs/<run-id>/file-edit-proposals -Headers $controlHeaders -ContentType application/json -Body $proposalBody
 Invoke-RestMethod http://127.0.0.1:8765/api/v1/runs/<run-id>/file-edits -Headers $headers
+Invoke-RestMethod http://127.0.0.1:8765/api/v1/runs/<run-id>/file-edit-change-set -Headers $headers
+Invoke-RestMethod http://127.0.0.1:8765/api/v1/workspaces/<workspace-id>/repository-state -Headers $headers
 Invoke-RestMethod http://127.0.0.1:8765/api/v1/runs/<run-id>/file-edit-proposal-recovery/<edit-id> -Headers $headers
 $controlHeaders["Idempotency-Key"] = "review-edit-<stable-operation-id>"
 $reviewBody = @{ version = "file_edit_review.v1"; action = "approve_intent" } | ConvertTo-Json
@@ -181,6 +183,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/skills/packages/inst
 | `GET` | `/api/v1/workspaces` | Bounded Workspace ID/name/creation metadata; no host root path |
 | `GET` | `/api/v1/workspaces/{workspace_id}/explore` | One bounded directory level or redacted UTF-8 file evidence; canonical relative path only, no host root |
 | `GET` | `/api/v1/workspaces/{workspace_id}/search` | One bounded deterministic filename/redacted-text search; canonical evidence references only, no indexer |
+| `GET` | `/api/v1/workspaces/{workspace_id}/repository-state` | Bounded exact-root Git metadata only; no parent discovery, host root, body, remote, process, network, or hook |
 | `GET` | `/api/v1/operation-receipts` | At most 100 terminal metadata-only receipts; optional exact `run_id`, no operation key/path/private lease |
 | `GET` | `/api/v1/models` | Redacted Provider/model-route availability with one Registry generation; no key, Base URL, environment name, probe, or model call |
 | `GET` | `/api/v1/models/credentials` | Supported Provider system-store and Registry generation status only; fixed `plaintext_returned=false` |
@@ -213,6 +216,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/skills/packages/inst
 | `POST` | `/api/v1/runs/{run_id}/file-edit-proposals` | Create one pending FileEdit from a Go-issued handle and proposed text; never writes the file |
 | `GET` | `/api/v1/runs/{run_id}/file-edit-proposal-recovery/{edit_id}` | Exact durable pending original/proposed bodies as a read-only Diff; reports stale and returns no source handle or mutation authority |
 | `GET` | `/api/v1/runs/{run_id}/file-edits` | At most 100 metadata-only FileEdit previews with bounded redacted Diffs |
+| `GET` | `/api/v1/runs/{run_id}/file-edit-change-set` | At most 100 exact-bound FileEdit summaries; per-file authority, partial state, no batch/atomic mutation |
 | `GET` | `/api/v1/runs/{run_id}/file-edits/{edit_id}` | One exact metadata-only FileEdit preview; no original/proposed body |
 | `POST` | `/api/v1/runs/{run_id}/file-edits/{edit_id}/review` | Exact `approve_intent|deny`; review never writes the file |
 | `POST` | `/api/v1/runs/{run_id}/file-edits/{edit_id}/apply` | Separately authorized current-Policy/hash-checked apply; renderer submits no path/body |
@@ -267,6 +271,16 @@ and starts no background loop. Schema v76 adds `file_edit_apply.v1`, independent
 review, with exact Run/Workspace/approval/current-Policy/original-and-target-hash checks.
 The client submits only protocol version and idempotency key, never a path or file body.
 Run-bound legacy approval cannot call this route indirectly.
+
+Non-schema D1-G1 adds read-only `repository_state.v1` at the exact registered
+Workspace root. Pure-Go inspection accepts only a real `.git` directory, rejects
+parent discovery, redirected worktrees and every nested metadata symlink, caps the
+metadata/status/output sets, and returns canonical relative status only. Host roots,
+file bodies, remote configuration, subprocesses, network, and hooks are absent.
+D1-I3 adds `file_edit_change_set.v1`, a metadata-only summary of at most 100 FileEdits
+bound to one Run/Session/Workspace. It fixes review/apply independent, atomic/batch
+mutation false, and partial state visible; existing per-file routes remain the only
+mutation paths.
 
 D1-B1 `skill_package_installation.v1` accepts one archive of at most 64 KiB encoded as
 strict whitespace-free canonical standard base64, an exact Code/Cyber surface, explicit

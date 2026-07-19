@@ -214,12 +214,12 @@ Use these files first when resuming:
 ## Progress Review
 
 - Architecture completion: about 99%; the V2 run-centric control plane is about 99% complete.
-- Product usability: about 87-90% for the complete Code + Cyber product.
-- Generic coding-agent workflow usability: about 84%.
+- Product usability: about 89-92% for the complete Code + Cyber product.
+- Generic coding-agent workflow usability: about 88%.
 - Cyber autonomous-workflow usability: about 20%.
 - These values are engineering estimates derived from tested roadmap slices, not performance benchmarks. The retired single-axis "overall product vision" percentage must not be used for current status.
 
-Latest implemented batch: non-schema D1-I2/M4/J2. It adds hash-bound source rotation and read-only durable FileEdit recovery, generation-safe Provider Registry reload, and authenticated metadata-only capabilities plus wake-worker health/drain. The cumulative six-slice robustness gate is green and no unresolved high/medium issue is known. ADR 0046 is authoritative.
+Latest implemented batch: non-schema D1-G1/I3/F1. It adds exact-root read-only Repository state, independent bounded multi-file summaries, and a Code-only Journey over existing Go capabilities. The cumulative six-slice robustness gate is green and no unresolved high/medium issue is known. ADR 0047 is authoritative.
 
 Completed:
 
@@ -1229,16 +1229,54 @@ authoritative.
 GitHub Actions run `29674460349` passed implementation commit `7d5736e`: TypeScript
 console 38s, Windows Desktop shell 2m49s, and Go control plane 3m43s.
 
+## Non-Schema D1-G1/I3/F1 Repository And Code Delivery Batch
+
+D1-G1 adds pure-Go `repository_state.v1` for one exact registered Workspace root.
+Parent discovery, redirected `.git`, nested Git-metadata links, subprocesses, network,
+remotes, and hooks are rejected or unused. The cancellable metadata walk is capped at
+50,000 entries, status at 10,000 entries, and output at 200 canonical relative paths.
+Secret-looking path/reference data, host roots, file bodies, and remote configuration
+do not enter the DTO.
+
+D1-I3 adds `file_edit_change_set.v1` over at most 100 exact-bound previews. It returns
+status and Diff-size metadata while preserving independent per-file review/apply,
+explicitly denying batch/atomic mutation, and exposing mixed partial state. D1-F1 adds
+a Code-only five-stage Journey that navigates existing Repository, Overview, Actions,
+Diffs, and Findings surfaces. It owns no API client or composite mutation and does not
+change Cyber mode.
+
+The cumulative six-slice gate passed ordinary Go in 321.7s before audit hardening and
+the final-code full race suite in 490.4s, followed by ten repository repetitions.
+Vet, zero-warning staticcheck, module verification, zero reachable/imported-package
+govulncheck findings, secure Desktop tags, 114 React tests across 31 files, strict
+TypeScript, deterministic OpenAPI/TypeScript, Vite, zero-vulnerability npm audit,
+isolated mock CLI smoke, and a reproducible Windows double build passed. OpenAPI has
+59 paths, 63 operations, and 129 schemas. The unsigned GUI SHA-256 is
+`145757cb1a8bbafc9080fdc29f4ada69d34b850ca64f702310ea44578ca677a9` and remains
+`release_ready=false`.
+
+The module graph retains no-fix, uncalled `GO-2026-5932` for the transitive openpgp
+package; the application does not import or call it. The audit added nested Git
+metadata-link rejection and fixed strict-client handling of terminal proposed edits
+with zero allowed actions. Desktop/mobile browser checks found no page overflow or
+console error. No unresolved high/medium issue is known; no real key, Provider,
+Shell, LocalRunner, Docker, hook, attack traffic, or external network was used. Current
+estimates are architecture about 99% (V2 about 99%), complete-product usability about
+89-92%, generic Coding Agent workflow about 88%, and Cyber automation about 20%.
+ADR 0047 records the boundary.
+
+GitHub Actions run `29678257802` passed implementation commit `d69a812`: TypeScript
+console 43s, Go control plane 5m32s, and Windows Desktop shell 5m29s.
+
 ## Recommended Next Batch
 
-Complete D1-G1 Go-owned read-only repository-state projection, D1-I3 bounded multi-file
-change-set review, and D1-F1 one tested Code-mode journey across New Run, Session input,
-Plan/Delivery, explicit bounded execution, recovery, actions, and terminal reporting.
-These slices must not introduce renderer/model shell execution, expose host roots or
-hooks, merge per-file review/apply authority, or add a composite mutation endpoint.
-The manual Windows 10 matrix, signed ZIP/MSIX distribution, Local OS sandboxing,
-Docker process lifecycle, Rust analyzers, xterm, network grants, and CTF solving remain
-separately gated work.
+Complete D1-G2 bounded secret-redacted repository Diff projection, D1-V1 immutable
+operator-supplied verification evidence, and D1-F2 one Go-owned resumable Code handoff
+summary. These slices must remain read-only or independently controlled, must not run
+verification commands, and must not let model/repository text become approval or a
+composite mutation. The manual Windows 10 matrix, signed ZIP/MSIX distribution, Local
+OS sandboxing, Docker process lifecycle, Rust analyzers, xterm, network grants, and CTF
+solving remain separately gated work.
 
 Keep the Local profile disabled until a real OS sandbox makes protected host roots unavailable or read-only; never map it to unrestricted `os/exec`. Runtime verification and the Docker start/wait/TERM/KILL/orphan lifecycle still require a later independent release gate. Broader HTTP/Desktop mutations, Rust analyzers, network/secret support, end-user process execution, and CTF solving remain deferred.
 
