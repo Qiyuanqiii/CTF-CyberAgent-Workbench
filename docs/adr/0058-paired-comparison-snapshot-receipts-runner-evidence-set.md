@@ -82,7 +82,8 @@ starter imports the harness.
 - Focused domain, application, schema-v83 Store, HTTP/OpenAPI, React, and Runner tests
   passed, including tamper, stale-snapshot, idempotent replay, immutable update/delete,
   v82 upgrade, absent comparison side, and no-partial-replacement cases.
-- Uncached `go test ./... -count=1` passed in 404.1 seconds; `go vet ./...` passed.
+- Uncached `go test ./... -count=1` passed in 394.1 seconds with its exit code
+  explicitly propagated; `go vet ./...` passed.
 - Desktop boundary tests with `desktop,wv2runtime.error` and reproducible Windows dual
   build passed. The unsigned GUI SHA-256 is
   `d5e37e193223a41939598edceb77a92637430b0c87c52233cdafb9c2fda10bb5`;
@@ -93,10 +94,14 @@ starter imports the harness.
   `7E50A343391F167989E871828B1494F45E3A02581198D5B880C3FC3E795B521D` and
   `A693C4E62D65B7D39A5E5668EA319F57E97613AA61234B0658ABC9CBF80F9334`.
 
-Combined review found and fixed two low-risk generated-contract issues before delivery:
-the reflection generator does not flatten an embedded control DTO, so receipt control
-fields are now explicit; the inventory protocol is now constrained to its sole v1
-enum. No known unresolved high or medium issue remains on an enabled path. No real
+Combined review found and fixed three low-risk contract/verification issues before
+delivery: the reflection generator does not flatten an embedded control DTO, so receipt
+control fields are now explicit; the inventory protocol is constrained to its sole v1
+enum; and the authenticated OpenAPI live-route fixture now builds one exact valid
+snapshot-receipt request. The first remote Go run exposed the missing fixture body.
+After correction the focused route passed five consecutive runs and the full local
+suite returned exit code 0. No known unresolved high or medium issue remains on an
+enabled path. No real
 Provider/key, Shell, LocalRunner, Docker, Git hook, attack traffic, installer, registry
 mutation, or product process start was used.
 

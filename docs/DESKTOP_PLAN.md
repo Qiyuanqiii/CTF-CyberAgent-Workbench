@@ -234,7 +234,7 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D1-G10：comparison 增加 Workspace/base/head/path 精确绑定的成对脱敏预览与 explicit absent side；复用既有两次 exact preview，无新 Git/raw content/mutation/process/network/hook。
 - [x] D1-V9 / schema v83：增加 deterministic snapshot export 重建、写锁后二次复核、event+metadata receipt 原子提交、immutable 100 条 record-only 历史；snapshot/result acceptance 与全部 authority/execution 语义固定 false。
 - [x] Runtime R7：`NonProductOnly` 对固定六份 post-reap evidence 生成 bounded map-free canonical SHA-256 receipt，规范正文不保留且无 wall-clock/raw-output/process/OS/product claim。
-- [x] D1-G10/V9/R7 三切片普通功能门通过：uncached Go 404.1 秒、vet、Desktop boundary、129 React、strict TypeScript、确定性契约、Vite 与 Windows 可复现双构建全绿；OpenAPI 74/81/176，GUI SHA-256 `d5e37e193223a41939598edceb77a92637430b0c87c52233cdafb9c2fda10bb5`；边界见 ADR 0058。
+- [x] D1-G10/V9/R7 三切片普通功能门通过：uncached Go 394.1 秒、vet、Desktop boundary、129 React、strict TypeScript、确定性契约、Vite 与 Windows 可复现双构建全绿；OpenAPI 74/81/176，GUI SHA-256 `d5e37e193223a41939598edceb77a92637430b0c87c52233cdafb9c2fda10bb5`；live-route 有效回执请求修复后本地全仓真实传播退出码通过，边界见 ADR 0058。
 - [ ] 下一批候选 D1-G11 synchronized paired-preview navigation、D1-V10 explicit non-authorizing receipt review 与 R8 cross-platform receipt golden vectors；完成后跑累计六切片完整健壮性门，Local/Docker 产品执行继续关闭。
 - [ ] 所有状态 mutation 使用独立 control capability、Origin/Host 校验、稳定 operation key 和 typed errors；显式 Provider 诊断每次只允许一次有界无正文请求。CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。

@@ -1251,7 +1251,7 @@ protocol list, SHA-256, bytes, and explicit false claims for wall-clock ordering
 output, process identity, OS enforcement, and product execution. All records plus the
 receipt validate before atomic assignment; product wiring remains absent.
 
-The three-slice functional gate passed uncached Go in 404.1 seconds, full vet, focused
+The three-slice functional gate passed uncached Go in 394.1 seconds, full vet, focused
 tamper/migration/HTTP/UI/Runner regressions, Desktop boundary tests, 37 files/129 Web
 tests, strict TypeScript, Vite, deterministic OpenAPI/TypeScript, and reproducible
 Windows build. OpenAPI is 74/81/176 with hashes
@@ -1261,9 +1261,12 @@ The unsigned GUI SHA-256 is
 `d5e37e193223a41939598edceb77a92637430b0c87c52233cdafb9c2fda10bb5` and remains
 `release_ready=false`.
 
-Audit fixed two low-risk contract-generation issues: an embedded control DTO was made
-explicit for the reflection generator, and the inventory protocol gained its exact v1
-enum. No known unresolved high/medium issue remains on an enabled path. No real
+Audit fixed three low-risk contract/verification issues: an embedded control DTO was
+made explicit for the reflection generator, the inventory protocol gained its exact v1
+enum, and the authenticated live-route fixture now builds an exact valid receipt
+request. The first remote Go run exposed the fixture omission; the corrected local full
+suite explicitly propagated `go test` exit code 0 and the focused route passed five
+times. No known unresolved high/medium issue remains on an enabled path. No real
 Provider/key, Shell, LocalRunner, Docker, hook, attack traffic, installer, registry
 mutation, or product process start was used. ADR 0058 is authoritative.
 

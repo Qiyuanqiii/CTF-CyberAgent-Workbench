@@ -219,7 +219,7 @@ Use these files first when resuming:
 - Cyber autonomous-workflow usability: about 20%.
 - These values are engineering estimates derived from tested roadmap slices, not performance benchmarks. The retired single-axis "overall product vision" percentage must not be used for current status.
 
-Latest implemented batch: D1-G10/V9/R7 on schema v83. It adds one bounded paired exact-redacted base/head workspace, append-only digest-bound verification snapshot receipt history with every acceptance/authority semantic false, and one canonical digest over the six-record `NonProductOnly` evidence tuple. The three-slice functional gate is green after two low-risk generated-contract fixes, with no known unresolved high/medium issue on an enabled path. ADR 0058 is authoritative.
+Latest implemented batch: D1-G10/V9/R7 on schema v83. It adds one bounded paired exact-redacted base/head workspace, append-only digest-bound verification snapshot receipt history with every acceptance/authority semantic false, and one canonical digest over the six-record `NonProductOnly` evidence tuple. The three-slice functional gate is green after three low-risk contract/verification fixes, including the valid authenticated live-route receipt fixture exposed by the first remote Go run, with no known unresolved high/medium issue on an enabled path. ADR 0058 is authoritative.
 
 Completed:
 
@@ -1697,7 +1697,7 @@ SHA-256, bytes, and closed semantics remain. All six records plus receipt valida
 before atomic assignment; no cross-record wall-clock order, raw output, process
 identity, OS-limit verification, or product execution is claimed.
 
-The three-slice functional gate passed uncached Go in 404.1 seconds, full vet, Desktop
+The three-slice functional gate passed uncached Go in 394.1 seconds, full vet, Desktop
 boundary tests, 37 files/129 Web tests, strict TypeScript, Vite, deterministic OpenAPI/
 TypeScript, and reproducible Windows build. OpenAPI is 74/81/176 with hashes
 `7E50A343391F167989E871828B1494F45E3A02581198D5B880C3FC3E795B521D` and
@@ -1706,9 +1706,11 @@ The unsigned GUI SHA-256 is
 `d5e37e193223a41939598edceb77a92637430b0c87c52233cdafb9c2fda10bb5` with
 `release_ready=false`.
 
-Audit fixed two low-risk generated-contract issues: control fields are explicit rather
-than relying on unsupported embedding, and inventory protocol has an exact v1 enum. No
-known unresolved high/medium issue exists on an enabled path. No real Provider/key,
+Audit fixed three low-risk contract/verification issues: control fields are explicit
+rather than relying on unsupported embedding, inventory protocol has an exact v1 enum,
+and authenticated live-route coverage constructs the exact valid receipt request. The
+focused route passed five times and the final full-suite wrapper propagated exit code 0.
+No known unresolved high/medium issue exists on an enabled path. No real Provider/key,
 Shell, LocalRunner, Docker, hook, attack traffic, installer, registry mutation, or
 product process start was used. ADR 0058 is authoritative.
 

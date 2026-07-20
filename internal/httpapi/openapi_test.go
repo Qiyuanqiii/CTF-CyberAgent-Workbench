@@ -579,6 +579,20 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 						`"plan_id":"` + verificationPlan.Plan.ID + `",` +
 						`"plan_item_ordinal":1,"evidence_id":"` +
 						verificationEvidence.Evidence.ID + `"}`
+				} else if spec.Path == VerificationSnapshotReceiptPathTemplate {
+					snapshot, err := application.NewVerificationSnapshotExportService(
+						fixture.store).Build(t.Context(), fixture.run.ID,
+						verificationPlan.Plan.ID, 1, application.VerificationSnapshotExportFormatJSON)
+					if err != nil {
+						t.Fatal(err)
+					}
+					body = `{"version":"operator_verification_plan_item_snapshot_receipt.v1",` +
+						`"plan_id":"` + verificationPlan.Plan.ID + `",` +
+						`"plan_item_ordinal":1,"format":"json",` +
+						`"snapshot_high_water_event_sequence":` +
+						fmt.Sprint(snapshot.SnapshotHighWaterEventSequence) + `,` +
+						`"content_sha256":"` + snapshot.ContentSHA256 + `",` +
+						`"confirm_metadata_snapshot":true}`
 				} else if spec.Path != RunExecutionProfileControlPathTemplate {
 					attemptID := fixture.checkpoint.AttemptID
 					modelAttempt := 1
