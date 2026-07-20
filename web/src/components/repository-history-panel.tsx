@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Columns2, FileClock, FileCode2, FileDiff, FileInput, FileOutput, GitCommitHorizontal,
-  GitCompareArrows, RefreshCw } from "lucide-react";
+import { ChevronLeft, ChevronRight, Columns2, FileClock, FileCode2, FileDiff, FileInput,
+  FileOutput, GitCommitHorizontal, GitCompareArrows, RefreshCw } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import { formatDate } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
@@ -73,6 +73,27 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
       activeComparisonPreview?.headObjectID ?? "", activeComparisonPreview?.path ?? "", signal),
     enabled: Boolean(workspaceID && activeComparisonPreview?.headAvailable),
   });
+  const pairedPreviewCandidates = (comparisonQuery.data?.changes ?? []).filter((change) =>
+    ["regular", "executable"].includes(change.previous_kind) ||
+    ["regular", "executable"].includes(change.current_kind));
+  const pairedPreviewIndex = activeComparisonPreview ? pairedPreviewCandidates.findIndex(
+    (change) => change.path === activeComparisonPreview.path) : -1;
+  const selectPairedPreview = (index: number, toggle = false) => {
+    const comparison = comparisonQuery.data;
+    const change = pairedPreviewCandidates[index];
+    if (!comparison || !change) return;
+    if (toggle && activeComparisonPreview?.path === change.path) {
+      setComparisonPreview({ workspaceID: "", baseObjectID: "", baseHash: "",
+        baseAvailable: false, headObjectID: "", headHash: "", headAvailable: false, path: "" });
+      return;
+    }
+    setComparisonPreview({ workspaceID, baseObjectID: comparison.base_object_id,
+      baseHash: comparison.base_hash,
+      baseAvailable: ["regular", "executable"].includes(change.previous_kind),
+      headObjectID: comparison.head_object_id, headHash: comparison.head_hash,
+      headAvailable: ["regular", "executable"].includes(change.current_kind),
+      path: change.path });
+  };
   if (!workspaceID) return null;
   return <section aria-label="Repository history" className="repository-history-panel">
     <header className="projection-heading">
@@ -229,20 +250,9 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
                     ["regular", "executable"].includes(change.current_kind) ?
                     <button aria-label={`Compare redacted previews for ${change.path} between ${comparisonQuery.data.base_hash} and ${comparisonQuery.data.head_hash}`}
                       aria-pressed={activeComparisonPreview?.path === change.path}
-                      className="icon-button" onClick={() => setComparisonPreview((current) =>
-                        current.workspaceID === workspaceID &&
-                          current.baseObjectID === comparisonQuery.data.base_object_id &&
-                          current.headObjectID === comparisonQuery.data.head_object_id &&
-                          current.path === change.path ?
-                          { workspaceID: "", baseObjectID: "", baseHash: "", baseAvailable: false,
-                            headObjectID: "", headHash: "", headAvailable: false, path: "" } :
-                          { workspaceID, baseObjectID: comparisonQuery.data.base_object_id,
-                            baseHash: comparisonQuery.data.base_hash,
-                            baseAvailable: ["regular", "executable"].includes(change.previous_kind),
-                            headObjectID: comparisonQuery.data.head_object_id,
-                            headHash: comparisonQuery.data.head_hash,
-                            headAvailable: ["regular", "executable"].includes(change.current_kind),
-                            path: change.path })}
+                      className="icon-button" onClick={() => selectPairedPreview(
+                        pairedPreviewCandidates.findIndex((candidate) => candidate.path === change.path),
+                        true)}
                       title="Open paired redacted previews" type="button">
                       <Columns2 aria-hidden="true" size={14} />
                     </button> : <span aria-hidden="true" className="repository-preview-placeholder" />}
@@ -257,7 +267,23 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
               className="repository-comparison-preview-workspace">
               <header><span><Columns2 aria-hidden="true" size={14} />
                 <code title={activeComparisonPreview.path}>{activeComparisonPreview.path}</code></span>
-                <StatusBadge status="read-only" /></header>
+                <div className="repository-comparison-preview-controls">
+                  <span aria-live="polite">{pairedPreviewIndex + 1} of {pairedPreviewCandidates.length}</span>
+                  <button aria-label="Previous paired redacted preview" className="icon-button"
+                    disabled={pairedPreviewIndex <= 0}
+                    onClick={() => selectPairedPreview(pairedPreviewIndex - 1)}
+                    title="Previous changed file" type="button">
+                    <ChevronLeft aria-hidden="true" size={14} />
+                  </button>
+                  <button aria-label="Next paired redacted preview" className="icon-button"
+                    disabled={pairedPreviewIndex < 0 ||
+                      pairedPreviewIndex >= pairedPreviewCandidates.length - 1}
+                    onClick={() => selectPairedPreview(pairedPreviewIndex + 1)}
+                    title="Next changed file" type="button">
+                    <ChevronRight aria-hidden="true" size={14} />
+                  </button>
+                  <StatusBadge status="read-only" />
+                </div></header>
               <div>
                 <section aria-label="Base redacted file preview">
                   <header><strong>Base</strong><code>{activeComparisonPreview.baseHash}</code></header>

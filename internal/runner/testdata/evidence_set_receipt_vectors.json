@@ -1,0 +1,15 @@
+{
+  "protocol_version": "runner_evidence_set_receipt_golden_vectors.v1",
+  "vectors": [
+    {
+      "name": "normal_empty_exit",
+      "canonical_bytes": 3684,
+      "canonical_sha256": "95ca7cc407dd151c41dc4142d85c2117dfd03cf3046698f2a7da749f90c650dc"
+    },
+    {
+      "name": "forced_timeout_bounded_metadata",
+      "canonical_bytes": 3684,
+      "canonical_sha256": "f1b09fe936823870ad9cb348ac7e9aa8f544df3d9368653b422d750633a6ff70"
+    }
+  ]
+}

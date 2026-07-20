@@ -140,10 +140,16 @@ describe("VerificationPlan", () => {
     const recordVerificationSnapshotReceipt = vi.fn().mockResolvedValue({
       id: "snapshot-receipt-2", replayed: false,
     });
+    const verificationSnapshotReceiptReviews = vi.fn().mockResolvedValue({ items: [] });
+    const recordVerificationSnapshotReceiptReview = vi.fn().mockResolvedValue({
+      id: "snapshot-receipt-review-1", receipt_id: "snapshot-receipt-1",
+      decision: "metadata_confirmed", replayed: false,
+    });
     const client = { hasVerificationEvidence: true, verificationPlans,
       verificationPlanCoverage, verificationPlanItemCoveragePage,
       verificationPlanItemSnapshotExport, verificationSnapshotReceipts,
-      recordVerificationSnapshotReceipt,
+      recordVerificationSnapshotReceipt, verificationSnapshotReceiptReviews,
+      recordVerificationSnapshotReceiptReview,
       recordVerificationPlan: vi.fn() } as unknown as CyberAgentClient;
     const user = userEvent.setup();
     render(<QueryClientProvider client={new QueryClient()}>
@@ -181,6 +187,20 @@ describe("VerificationPlan", () => {
         snapshot_high_water_event_sequence: 8, content_sha256: "d".repeat(64),
         confirm_metadata_snapshot: true }, expect.stringMatching(
         /^web-verification-snapshot-receipt-/u)));
+    await user.click(screen.getByRole("button", {
+      name: "Confirm metadata for snapshot receipt snapshot-receipt-1",
+    }));
+    await waitFor(() => expect(recordVerificationSnapshotReceiptReview).toHaveBeenCalledWith(
+      "run-1", {
+        version: "operator_verification_plan_item_snapshot_receipt_review.v1",
+        receipt_id: "snapshot-receipt-1", receipt_content_sha256: "c".repeat(64),
+        receipt_event_sequence: 9, decision: "metadata_confirmed",
+        confirm_non_authorizing_review: true,
+      }, expect.stringMatching(/^web-verification-snapshot-receipt-review-/u)));
+    expect(await screen.findByText("confirmed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", {
+      name: "Dispute metadata for snapshot receipt snapshot-receipt-1",
+    })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Load older evidence" }));
     await waitFor(() => expect(verificationPlanItemCoveragePage)
       .toHaveBeenCalledWith("run-1", "plan-1", 1, "older-evidence", 25,

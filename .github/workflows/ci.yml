@@ -81,6 +81,8 @@ jobs:
           npm run build
       - name: Test Desktop boundaries
         run: go test -tags "desktop,wv2runtime.error" -count=1 ./cmd/cyberagent-desktop ./internal/desktop ./internal/webui
+      - name: Verify cross-platform Runner receipt vectors
+        run: go test -count=1 ./internal/runner -run TestEvidenceSetReceiptGoldenVectors
       - name: Build and verify portable Desktop shell
         shell: pwsh
         run: ./scripts/build-desktop.ps1 -SkipFrontend -VerifyReproducible

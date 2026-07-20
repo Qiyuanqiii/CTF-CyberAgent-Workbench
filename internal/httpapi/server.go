@@ -161,6 +161,15 @@ type Store interface {
 		[]verification.SnapshotReceipt, error)
 	RecordVerificationSnapshotReceipt(context.Context, verification.SnapshotReceipt) (
 		verification.SnapshotReceipt, bool, error)
+	GetVerificationSnapshotReceipt(context.Context, string) (verification.SnapshotReceipt, error)
+	GetVerificationSnapshotReceiptReviewByOperation(context.Context, string) (
+		verification.SnapshotReceiptReview, bool, error)
+	GetVerificationSnapshotReceiptReviewByReceipt(context.Context, string) (
+		verification.SnapshotReceiptReview, bool, error)
+	ListVerificationSnapshotReceiptReviews(context.Context, string, int) (
+		[]verification.SnapshotReceiptReview, error)
+	RecordVerificationSnapshotReceiptReview(context.Context, verification.SnapshotReceiptReview) (
+		verification.SnapshotReceiptReview, bool, error)
 	ListOperatorActionRecords(context.Context, string, string, string, time.Time, int) (
 		[]operatoraction.Record, error)
 
@@ -595,6 +604,11 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	if runID, matched := matchVerificationSnapshotReceiptPath(request.URL.Path); matched &&
 		request.Method != http.MethodGet {
 		a.serveVerificationSnapshotReceiptControl(tracked, request, requestID, runID)
+		return
+	}
+	if runID, matched := matchVerificationSnapshotReceiptReviewPath(request.URL.Path); matched &&
+		request.Method != http.MethodGet {
+		a.serveVerificationSnapshotReceiptReviewControl(tracked, request, requestID, runID)
 		return
 	}
 	if runID, matched := matchRunExecutionControlPath(request.URL.Path); matched {

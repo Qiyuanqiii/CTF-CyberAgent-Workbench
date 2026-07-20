@@ -402,6 +402,93 @@ type VerificationSnapshotReceiptInventoryView struct {
 	ExecutionStarted bool                              `json:"execution_started"`
 }
 
+type VerificationSnapshotReceiptReviewRequestView struct {
+	Version                     string `json:"version"`
+	ReceiptID                   string `json:"receipt_id"`
+	ReceiptContentSHA256        string `json:"receipt_content_sha256"`
+	ReceiptEventSequence        int64  `json:"receipt_event_sequence"`
+	Decision                    string `json:"decision"`
+	ConfirmNonAuthorizingReview bool   `json:"confirm_non_authorizing_review"`
+}
+
+type VerificationSnapshotReceiptReviewView struct {
+	ProtocolVersion          string    `json:"protocol_version"`
+	ID                       string    `json:"id"`
+	RunID                    string    `json:"run_id"`
+	SessionID                string    `json:"session_id"`
+	WorkspaceID              string    `json:"workspace_id"`
+	ReceiptID                string    `json:"receipt_id"`
+	ReceiptContentSHA256     string    `json:"receipt_content_sha256"`
+	ReceiptEventSequence     int64     `json:"receipt_event_sequence"`
+	Decision                 string    `json:"decision"`
+	ReviewEventSequence      int64     `json:"review_event_sequence"`
+	ReviewedAt               time.Time `json:"reviewed_at"`
+	Immutable                bool      `json:"immutable"`
+	OperatorReviewed         bool      `json:"operator_reviewed"`
+	MetadataOnly             bool      `json:"metadata_only"`
+	ReadOnly                 bool      `json:"read_only"`
+	ReviewNonAuthorizing     bool      `json:"review_non_authorizing"`
+	ContentIncluded          bool      `json:"content_included"`
+	PrivateBodiesIncluded    bool      `json:"private_bodies_included"`
+	OperatorIdentityIncluded bool      `json:"operator_identity_included"`
+	SnapshotAccepted         bool      `json:"snapshot_accepted"`
+	ResultAccepted           bool      `json:"result_accepted"`
+	ResultInferred           bool      `json:"result_inferred"`
+	RecordRewritten          bool      `json:"record_rewritten"`
+	Approval                 bool      `json:"approval"`
+	AuthorityGranted         bool      `json:"authority_granted"`
+	ExecutionStarted         bool      `json:"execution_started"`
+}
+
+type VerificationSnapshotReceiptReviewControlView struct {
+	ProtocolVersion          string    `json:"protocol_version"`
+	ID                       string    `json:"id"`
+	RunID                    string    `json:"run_id"`
+	SessionID                string    `json:"session_id"`
+	WorkspaceID              string    `json:"workspace_id"`
+	ReceiptID                string    `json:"receipt_id"`
+	ReceiptContentSHA256     string    `json:"receipt_content_sha256"`
+	ReceiptEventSequence     int64     `json:"receipt_event_sequence"`
+	Decision                 string    `json:"decision"`
+	ReviewEventSequence      int64     `json:"review_event_sequence"`
+	ReviewedAt               time.Time `json:"reviewed_at"`
+	Immutable                bool      `json:"immutable"`
+	OperatorReviewed         bool      `json:"operator_reviewed"`
+	MetadataOnly             bool      `json:"metadata_only"`
+	ReadOnly                 bool      `json:"read_only"`
+	ReviewNonAuthorizing     bool      `json:"review_non_authorizing"`
+	ContentIncluded          bool      `json:"content_included"`
+	PrivateBodiesIncluded    bool      `json:"private_bodies_included"`
+	OperatorIdentityIncluded bool      `json:"operator_identity_included"`
+	SnapshotAccepted         bool      `json:"snapshot_accepted"`
+	ResultAccepted           bool      `json:"result_accepted"`
+	ResultInferred           bool      `json:"result_inferred"`
+	RecordRewritten          bool      `json:"record_rewritten"`
+	Approval                 bool      `json:"approval"`
+	AuthorityGranted         bool      `json:"authority_granted"`
+	ExecutionStarted         bool      `json:"execution_started"`
+	Replayed                 bool      `json:"replayed"`
+}
+
+type VerificationSnapshotReceiptReviewInventoryView struct {
+	ProtocolVersion      string                                  `json:"protocol_version"`
+	RunID                string                                  `json:"run_id"`
+	SessionID            string                                  `json:"session_id"`
+	WorkspaceID          string                                  `json:"workspace_id"`
+	Items                []VerificationSnapshotReceiptReviewView `json:"items"`
+	Truncated            bool                                    `json:"truncated"`
+	MetadataOnly         bool                                    `json:"metadata_only"`
+	ReadOnly             bool                                    `json:"read_only"`
+	ReviewNonAuthorizing bool                                    `json:"review_non_authorizing"`
+	SnapshotAccepted     bool                                    `json:"snapshot_accepted"`
+	ResultAccepted       bool                                    `json:"result_accepted"`
+	ResultInferred       bool                                    `json:"result_inferred"`
+	RecordRewritten      bool                                    `json:"record_rewritten"`
+	Approval             bool                                    `json:"approval"`
+	AuthorityGranted     bool                                    `json:"authority_granted"`
+	ExecutionStarted     bool                                    `json:"execution_started"`
+}
+
 type CodeHandoffPlanView struct {
 	State             string `json:"state"`
 	ProposalID        string `json:"proposal_id"`

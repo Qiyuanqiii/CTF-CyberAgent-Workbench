@@ -221,6 +221,22 @@ func VerificationSnapshotReceiptRequestFingerprint(runID string, sessionID strin
 		strconv.FormatInt(highWater, 10), contentSHA256, recordedBy)
 }
 
+func VerificationSnapshotReceiptReviewOperationDigest(runID string,
+	operationKey string,
+) string {
+	return Fingerprint("operator_verification_plan_item_snapshot_receipt_review_operation.v1",
+		runID, operationKey)
+}
+
+func VerificationSnapshotReceiptReviewRequestFingerprint(runID string, sessionID string,
+	workspaceID string, receiptID string, receiptContentSHA256 string,
+	receiptEventSequence int64, decision string, reviewedBy string,
+) string {
+	return Fingerprint("operator_verification_plan_item_snapshot_receipt_review_request.v1",
+		runID, sessionID, workspaceID, receiptID, receiptContentSHA256,
+		strconv.FormatInt(receiptEventSequence, 10), decision, reviewedBy)
+}
+
 func SupervisorToolOperationKey(runID string, turn int, toolName string, payloadJSON string) string {
 	return Fingerprint("supervisor_structured_tool.v1", strings.TrimSpace(runID), strconv.Itoa(turn),
 		strings.TrimSpace(toolName), strings.TrimSpace(payloadJSON))

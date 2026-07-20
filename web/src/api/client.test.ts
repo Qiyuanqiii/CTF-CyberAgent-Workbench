@@ -1296,6 +1296,58 @@ describe("CyberAgentClient", () => {
       .rejects.toThrow("read-only boundary");
   });
 
+  it("keeps snapshot receipt reviews immutable and non-authorizing", async () => {
+    const review = {
+      protocol_version: "operator_verification_plan_item_snapshot_receipt_review.v1",
+      id: "snapshot-review-1", run_id: "run-1", session_id: "session-1",
+      workspace_id: "workspace-1", receipt_id: "snapshot-receipt-1",
+      receipt_content_sha256: "a".repeat(64), receipt_event_sequence: 9,
+      decision: "metadata_confirmed", review_event_sequence: 10,
+      reviewed_at: "2026-07-20T01:12:00Z", immutable: true, operator_reviewed: true,
+      metadata_only: true, read_only: true, review_non_authorizing: true,
+      content_included: false, private_bodies_included: false,
+      operator_identity_included: false, snapshot_accepted: false, result_accepted: false,
+      result_inferred: false, record_rewritten: false, approval: false,
+      authority_granted: false, execution_started: false,
+    } as const;
+    const inventory = {
+      protocol_version:
+        "operator_verification_plan_item_snapshot_receipt_review_inventory.v1",
+      run_id: "run-1", session_id: "session-1", workspace_id: "workspace-1",
+      items: [review], truncated: false, metadata_only: true, read_only: true,
+      review_non_authorizing: true, snapshot_accepted: false, result_accepted: false,
+      result_inferred: false, record_rewritten: false, approval: false,
+      authority_granted: false, execution_started: false,
+    } as const;
+    const envelope = (data: unknown, status = 200) => new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-snapshot-review", data,
+    }), { status, headers: { "Content-Type": "application/json" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(envelope(inventory))
+      .mockResolvedValueOnce(envelope({ ...review, replayed: false }, 202))
+      .mockResolvedValueOnce(envelope({ ...review, replayed: false, result_accepted: true }, 202));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
+      verificationEvidenceEnabled: true,
+    });
+    await expect(client.verificationSnapshotReceiptReviews("run-1"))
+      .resolves.toEqual(inventory);
+    const request = {
+      version: "operator_verification_plan_item_snapshot_receipt_review.v1" as const,
+      receipt_id: "snapshot-receipt-1", receipt_content_sha256: "a".repeat(64),
+      receipt_event_sequence: 9, decision: "metadata_confirmed" as const,
+      confirm_non_authorizing_review: true,
+    };
+    await expect(client.recordVerificationSnapshotReceiptReview("run-1", request,
+      "web-snapshot-review-operation-0001")).resolves.toEqual({ ...review, replayed: false });
+    const [reviewURL, reviewInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    expect(reviewURL).toBe("/api/v1/runs/run-1/verification-snapshot-receipt-reviews");
+    expect(reviewInit.headers).toMatchObject({ Authorization: "Bearer control-secret",
+      "Idempotency-Key": "web-snapshot-review-operation-0001" });
+    await expect(client.recordVerificationSnapshotReceiptReview("run-1", request,
+      "web-snapshot-review-operation-0002")).rejects.toThrow("widened acceptance or authority");
+  });
+
   it("accepts only bounded metadata-only exact commit comparisons", async () => {
     const baseObjectID = "a".repeat(40);
     const headObjectID = "b".repeat(40);

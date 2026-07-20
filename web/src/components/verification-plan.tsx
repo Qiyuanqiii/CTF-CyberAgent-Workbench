@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ClipboardList, Download, FileCheck2, ListTree, LoaderCircle, Plus, RefreshCw,
-  Trash2 } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ClipboardList, Download, FileCheck2, ListTree,
+  LoaderCircle, Plus, RefreshCw, Trash2 } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import type { VerificationPlanItemCoveragePage, VerificationPlanRequestView } from "../api/types";
 import { downloadTextFile } from "../lib/download";
@@ -71,6 +71,7 @@ export function VerificationPlan({ client, runID }: {
   const queryClient = useQueryClient();
   const operationKey = useRef("");
   const receiptOperationKeys = useRef(new Map<string, string>());
+  const receiptReviewOperationKeys = useRef(new Map<string, string>());
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [items, setItems] = useState<DraftItem[]>([emptyItem()]);
@@ -105,6 +106,11 @@ export function VerificationPlan({ client, runID }: {
     queryFn: ({ signal }) => client.verificationSnapshotReceipts(runID, signal),
     enabled: Boolean(runID && coverageSelection),
   });
+  const receiptReviewQuery = useQuery({
+    queryKey: ["run", runID, "verification-snapshot-receipt-reviews"],
+    queryFn: ({ signal }) => client.verificationSnapshotReceiptReviews(runID, signal),
+    enabled: Boolean(runID && coverageSelection),
+  });
   const mergedCoverage = mergeCoveragePages(coverageDetailQuery.data?.pages ?? []);
   const exportSnapshot = useMutation({
     mutationFn: ({ planID, ordinal, format }: { planID: string; ordinal: number;
@@ -136,6 +142,32 @@ export function VerificationPlan({ client, runID }: {
       receiptOperationKeys.current.delete(intent);
       void queryClient.invalidateQueries({
         queryKey: ["run", runID, "verification-snapshot-receipts"],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["run", runID, "events"] });
+    },
+  });
+  const reviewSnapshotReceipt = useMutation({
+    mutationFn: ({ receiptID, contentSHA256, eventSequence, decision }: {
+      receiptID: string; contentSHA256: string; eventSequence: number;
+      decision: "metadata_confirmed" | "metadata_disputed";
+    }) => {
+      const intent = `${receiptID}:${decision}`;
+      let key = receiptReviewOperationKeys.current.get(intent);
+      if (!key) {
+        key = `web-verification-snapshot-receipt-review-${globalThis.crypto.randomUUID()}`;
+        receiptReviewOperationKeys.current.set(intent, key);
+      }
+      return client.recordVerificationSnapshotReceiptReview(runID, {
+        version: "operator_verification_plan_item_snapshot_receipt_review.v1",
+        receipt_id: receiptID, receipt_content_sha256: contentSHA256,
+        receipt_event_sequence: eventSequence, decision,
+        confirm_non_authorizing_review: true,
+      }, key).then((review) => ({ intent, review }));
+    },
+    onSuccess: ({ intent }) => {
+      receiptReviewOperationKeys.current.delete(intent);
+      void queryClient.invalidateQueries({
+        queryKey: ["run", runID, "verification-snapshot-receipt-reviews"],
       });
       void queryClient.invalidateQueries({ queryKey: ["run", runID, "events"] });
     },
@@ -181,20 +213,24 @@ export function VerificationPlan({ client, runID }: {
         {coverageQuery.data && <StatusBadge
           status={`${coverageQuery.data.observed_plan_item_count}/${coverageQuery.data.plan_item_count} observed`} />}
         {receiptQuery.data && <StatusBadge status={`${receiptQuery.data.items.length} receipts`} />}
+        {receiptReviewQuery.data &&
+          <StatusBadge status={`${receiptReviewQuery.data.items.length} receipt reviews`} />}
         <button aria-label="Refresh verification plans" className="icon-button"
           disabled={query.isFetching || coverageQuery.isFetching || coverageDetailQuery.isFetching ||
-            receiptQuery.isFetching}
+            receiptQuery.isFetching || receiptReviewQuery.isFetching}
           onClick={() => {
             void query.refetch();
             void coverageQuery.refetch();
             if (coverageSelection) {
               void coverageDetailQuery.refetch();
               void receiptQuery.refetch();
+              void receiptReviewQuery.refetch();
             }
           }}
           title="Refresh" type="button"><RefreshCw aria-hidden="true"
             className={query.isFetching || coverageQuery.isFetching ||
-              coverageDetailQuery.isFetching || receiptQuery.isFetching ? "spin" : ""}
+              coverageDetailQuery.isFetching || receiptQuery.isFetching ||
+              receiptReviewQuery.isFetching ? "spin" : ""}
             size={15} /></button></div>
     </header>
     {client.hasVerificationEvidence && <form className="verification-plan-form" onSubmit={submit}>
@@ -299,16 +335,43 @@ export function VerificationPlan({ client, runID }: {
                 </header>
                 {exportSnapshot.error && <ErrorState error={exportSnapshot.error} />}
                 {recordSnapshotReceipt.error && <ErrorState error={recordSnapshotReceipt.error} />}
+                {reviewSnapshotReceipt.error && <ErrorState error={reviewSnapshotReceipt.error} />}
                 {receiptQuery.isError && <ErrorState error={receiptQuery.error} />}
+                {receiptReviewQuery.isError && <ErrorState error={receiptReviewQuery.error} />}
                 {snapshotReceipts.length > 0 &&
                   <div className="verification-snapshot-receipts"><strong>Snapshot receipts</strong>
-                    <ul>{snapshotReceipts.map((receipt) => <li key={receipt.id}>
-                      <StatusBadge status={receipt.format} />
-                      <code title={receipt.content_sha256}>{receipt.content_sha256.slice(0, 12)}</code>
-                      <span>events {receipt.snapshot_high_water_event_sequence} / {receipt.receipt_event_sequence}</span>
-                      <time dateTime={receipt.recorded_at}>{formatDate(receipt.recorded_at)}</time>
-                      <StatusBadge status="record only" />
-                    </li>)}</ul>
+                    <ul>{snapshotReceipts.map((receipt) => {
+                      const review = receiptReviewQuery.data?.items.find((entry) =>
+                        entry.receipt_id === receipt.id) ??
+                        (reviewSnapshotReceipt.data?.review.receipt_id === receipt.id ?
+                          reviewSnapshotReceipt.data.review : undefined);
+                      return <li key={receipt.id}>
+                        <StatusBadge status={receipt.format} />
+                        <code title={receipt.content_sha256}>{receipt.content_sha256.slice(0, 12)}</code>
+                        <span>events {receipt.snapshot_high_water_event_sequence} / {receipt.receipt_event_sequence}</span>
+                        <time dateTime={receipt.recorded_at}>{formatDate(receipt.recorded_at)}</time>
+                        <div className="verification-snapshot-review-actions">
+                          <StatusBadge status="record only" />
+                          {review ? <StatusBadge status={review.decision.replace("metadata_", "")} /> :
+                            client.hasVerificationEvidence && <>
+                              <button aria-label={`Confirm metadata for snapshot receipt ${receipt.id}`}
+                                className="compact-command" disabled={reviewSnapshotReceipt.isPending}
+                                onClick={() => reviewSnapshotReceipt.mutate({ receiptID: receipt.id,
+                                  contentSHA256: receipt.content_sha256,
+                                  eventSequence: receipt.receipt_event_sequence,
+                                  decision: "metadata_confirmed" })} type="button">
+                                <Check aria-hidden="true" size={12} />Confirm metadata</button>
+                              <button aria-label={`Dispute metadata for snapshot receipt ${receipt.id}`}
+                                className="compact-command" disabled={reviewSnapshotReceipt.isPending}
+                                onClick={() => reviewSnapshotReceipt.mutate({ receiptID: receipt.id,
+                                  contentSHA256: receipt.content_sha256,
+                                  eventSequence: receipt.receipt_event_sequence,
+                                  decision: "metadata_disputed" })} type="button">
+                                <AlertTriangle aria-hidden="true" size={12} />Dispute</button>
+                            </>}
+                        </div>
+                      </li>;
+                    })}</ul>
                   </div>}
                 {mergedCoverage.associations.length === 0 ?
                   <span className="verification-coverage-empty">No explicit evidence associated</span> :

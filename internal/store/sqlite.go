@@ -306,6 +306,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 81, Name: "immutable verification plan evidence associations", Statements: operatorVerificationPlanEvidenceAssociationStatements},
 		{Version: 82, Name: "immutable cumulative context handoff memory", Statements: cumulativeHandoffMemoryStatements},
 		{Version: 83, Name: "immutable verification snapshot receipt history", Statements: operatorVerificationSnapshotReceiptStatements},
+		{Version: 84, Name: "immutable non-authorizing verification snapshot receipt reviews", Statements: operatorVerificationSnapshotReceiptReviewStatements},
 	})
 }
 

@@ -483,6 +483,23 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 					Required: true, Schema: map[string]any{"type": "string",
 						"minLength": domain.MinAgentOperationKeyBytes,
 						"maxLength": domain.MaxAgentOperationKeyBytes, "pattern": `^\S+$`}}}},
+		{Path: VerificationSnapshotReceiptReviewPathTemplate,
+			OperationID: "listRunVerificationSnapshotReceiptReviews",
+			Summary:     "List immutable verification snapshot receipt reviews", Tag: "Runs",
+			Description: "Returns bounded metadata-only operator decisions about exact snapshot receipt metadata. A review is explicitly non-authorizing and never accepts a snapshot or verification result, rewrites a record, approves work, grants authority, or starts execution.",
+			DataType:    reflect.TypeOf(VerificationSnapshotReceiptReviewInventoryView{}),
+			NotFound:    true, Parameters: []openAPIParameter{runID}},
+		{Path: VerificationSnapshotReceiptReviewPathTemplate, Method: http.MethodPost,
+			OperationID: "recordRunVerificationSnapshotReceiptReview",
+			Summary:     "Record one non-authorizing snapshot receipt review", Tag: "Control",
+			Description: "Binds one immutable metadata_confirmed or metadata_disputed operator fact to an exact receipt digest and event sequence. Each receipt can be reviewed once. The decision does not accept the snapshot or result, expose private bodies or identity, rewrite records, approve work, grant authority, or start execution.",
+			DataType:    reflect.TypeOf(VerificationSnapshotReceiptReviewControlView{}),
+			RequestType: reflect.TypeOf(VerificationSnapshotReceiptReviewRequestView{}),
+			Control:     true, NotFound: true, Parameters: []openAPIParameter{runID,
+				{Name: "Idempotency-Key", In: "header", Description: "Opaque retry key; only a domain-separated digest is persisted",
+					Required: true, Schema: map[string]any{"type": "string",
+						"minLength": domain.MinAgentOperationKeyBytes,
+						"maxLength": domain.MaxAgentOperationKeyBytes, "pattern": `^\S+$`}}}},
 		{Path: CodeHandoffPathTemplate, OperationID: "getCodeHandoff",
 			Summary: "Build a resumable Code handoff", Tag: "Runs",
 			Description: "Regenerates a metadata-only Code Run handoff from durable Plan, queue, change-set, verification, explicit per-item coverage, pending-action, and report records. Coverage preserves pass/fail/unknown counts without private summaries or an inferred aggregate result. The handoff performs no composite mutation, starts no execution, and grants no resume authority.",
@@ -1879,6 +1896,33 @@ func init() {
 	openAPIFieldMaxLengths["VerificationSnapshotReceiptRequestView.content_sha256"] = 64
 	openAPIFieldEnums["VerificationSnapshotReceiptInventoryView.protocol_version"] =
 		[]string{verification.SnapshotReceiptInventoryProtocolVersion}
+
+	for _, typeName := range []string{"VerificationSnapshotReceiptReviewView",
+		"VerificationSnapshotReceiptReviewControlView"} {
+		openAPIFieldEnums[typeName+".protocol_version"] =
+			[]string{verification.SnapshotReceiptReviewProtocolVersion}
+		openAPIFieldEnums[typeName+".decision"] = []string{
+			string(verification.SnapshotReceiptReviewMetadataConfirmed),
+			string(verification.SnapshotReceiptReviewMetadataDisputed),
+		}
+		openAPIFieldMinimums[typeName+".receipt_event_sequence"] = 1
+		openAPIFieldMaximums[typeName+".receipt_event_sequence"] = float64(1<<53 - 1)
+		openAPIFieldMinimums[typeName+".review_event_sequence"] = 1
+		openAPIFieldMaximums[typeName+".review_event_sequence"] = float64(1<<53 - 1)
+		openAPIFieldMaxLengths[typeName+".receipt_content_sha256"] = 64
+	}
+	openAPIFieldEnums["VerificationSnapshotReceiptReviewRequestView.version"] =
+		[]string{verification.SnapshotReceiptReviewProtocolVersion}
+	openAPIFieldEnums["VerificationSnapshotReceiptReviewRequestView.decision"] = []string{
+		string(verification.SnapshotReceiptReviewMetadataConfirmed),
+		string(verification.SnapshotReceiptReviewMetadataDisputed),
+	}
+	openAPIFieldMinimums["VerificationSnapshotReceiptReviewRequestView.receipt_event_sequence"] = 1
+	openAPIFieldMaximums["VerificationSnapshotReceiptReviewRequestView.receipt_event_sequence"] =
+		float64(1<<53 - 1)
+	openAPIFieldMaxLengths["VerificationSnapshotReceiptReviewRequestView.receipt_content_sha256"] = 64
+	openAPIFieldEnums["VerificationSnapshotReceiptReviewInventoryView.protocol_version"] =
+		[]string{verification.SnapshotReceiptReviewInventoryProtocolVersion}
 }
 
 func runStatuses() []string {

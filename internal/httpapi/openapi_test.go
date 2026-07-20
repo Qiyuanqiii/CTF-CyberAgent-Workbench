@@ -121,7 +121,9 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				(path == VerificationAssociationPathTemplate &&
 					item.Post.OperationID == "associateRunVerificationEvidence") ||
 				(path == VerificationSnapshotReceiptPathTemplate &&
-					item.Post.OperationID == "recordRunVerificationSnapshotReceipt")
+					item.Post.OperationID == "recordRunVerificationSnapshotReceipt") ||
+				(path == VerificationSnapshotReceiptReviewPathTemplate &&
+					item.Post.OperationID == "recordRunVerificationSnapshotReceiptReview")
 			if !validControl ||
 				item.Post.ReadOnly || item.Post.Responses["202"] == nil || item.Post.RequestBody == nil ||
 				len(item.Post.Security) != 1 || item.Post.Security[0]["ControlBearerAuth"] == nil {
@@ -133,7 +135,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 		if path == RunCreationControlPath || path == SessionMessageControlPathTemplate ||
 			path == RunWakeIntentPathTemplate || path == EvidenceAttachmentPathTemplate ||
 			path == VerificationEvidencePathTemplate || path == VerificationPlanPathTemplate ||
-			path == VerificationSnapshotReceiptPathTemplate {
+			path == VerificationSnapshotReceiptPathTemplate ||
+			path == VerificationSnapshotReceiptReviewPathTemplate {
 			expectedOperations = 2
 		}
 		if len(operations) != expectedOperations {
@@ -182,7 +185,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				path == VerificationEvidencePathTemplate ||
 				path == VerificationPlanPathTemplate ||
 				path == VerificationAssociationPathTemplate ||
-				path == VerificationSnapshotReceiptPathTemplate) &&
+				path == VerificationSnapshotReceiptPathTemplate ||
+				path == VerificationSnapshotReceiptReviewPathTemplate) &&
 				method == "post") {
 				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
 			}
@@ -445,6 +449,24 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	openAPISnapshot, err := application.NewVerificationSnapshotExportService(fixture.store).Build(
+		t.Context(), fixture.run.ID, verificationPlan.Plan.ID, 1,
+		application.VerificationSnapshotExportFormatJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	openAPIReceipt, err := application.NewVerificationSnapshotReceiptService(fixture.store).Record(
+		t.Context(), application.RecordVerificationSnapshotReceiptRequest{
+			Version: verification.SnapshotReceiptProtocolVersion, RunID: fixture.run.ID,
+			PlanID: verificationPlan.Plan.ID, PlanItemOrdinal: 1,
+			Format:                         openAPISnapshot.Format,
+			SnapshotHighWaterEventSequence: openAPISnapshot.SnapshotHighWaterEventSequence,
+			ContentSHA256:                  openAPISnapshot.ContentSHA256, ConfirmMetadataSnapshot: true,
+			OperationKey: "openapi-snapshot-review-receipt-0001", RecordedBy: "operator",
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
 	replacements := map[string]string{
 		"{run_id}":       fixture.run.ID,
 		"{workspace_id}": fixture.workspace.ID,
@@ -593,6 +615,14 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 						fmt.Sprint(snapshot.SnapshotHighWaterEventSequence) + `,` +
 						`"content_sha256":"` + snapshot.ContentSHA256 + `",` +
 						`"confirm_metadata_snapshot":true}`
+				} else if spec.Path == VerificationSnapshotReceiptReviewPathTemplate {
+					body = `{"version":"operator_verification_plan_item_snapshot_receipt_review.v1",` +
+						`"receipt_id":"` + openAPIReceipt.Receipt.ID + `",` +
+						`"receipt_content_sha256":"` + openAPIReceipt.Receipt.ContentSHA256 + `",` +
+						`"receipt_event_sequence":` +
+						fmt.Sprint(openAPIReceipt.Receipt.EventSequence) + `,` +
+						`"decision":"metadata_confirmed",` +
+						`"confirm_non_authorizing_review":true}`
 				} else if spec.Path != RunExecutionProfileControlPathTemplate {
 					attemptID := fixture.checkpoint.AttemptID
 					modelAttempt := 1

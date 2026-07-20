@@ -22,6 +22,17 @@ const verificationSnapshotReceiptSelect = `SELECT id, protocol_version, operatio
 	recorded_by, event_sequence, created_at
 	FROM operator_verification_snapshot_receipts`
 
+func (s *SQLiteStore) GetVerificationSnapshotReceipt(ctx context.Context,
+	id string,
+) (verification.SnapshotReceipt, error) {
+	if id != strings.TrimSpace(id) || !domain.ValidAgentID(id) {
+		return verification.SnapshotReceipt{}, apperror.New(apperror.CodeInvalidArgument,
+			"verification snapshot receipt identity is invalid")
+	}
+	return scanVerificationSnapshotReceipt(s.db.QueryRowContext(ctx,
+		verificationSnapshotReceiptSelect+` WHERE id = ?`, id))
+}
+
 func (s *SQLiteStore) GetVerificationSnapshotReceiptByOperation(ctx context.Context,
 	keyDigest string,
 ) (verification.SnapshotReceipt, bool, error) {
@@ -254,6 +265,13 @@ func getVerificationSnapshotReceiptByOperationTx(ctx context.Context, tx *sql.Tx
 		return verification.SnapshotReceipt{}, false, nil
 	}
 	return value, err == nil, err
+}
+
+func getVerificationSnapshotReceiptTx(ctx context.Context, tx *sql.Tx,
+	id string,
+) (verification.SnapshotReceipt, error) {
+	return scanVerificationSnapshotReceipt(tx.QueryRowContext(ctx,
+		verificationSnapshotReceiptSelect+` WHERE id = ?`, id))
 }
 
 func sameVerificationSnapshotReceiptIntent(left verification.SnapshotReceipt,

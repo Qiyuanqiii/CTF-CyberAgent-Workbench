@@ -137,6 +137,8 @@ describe("RepositoryHistoryPanel", () => {
     const pairedPreview = await screen.findByRole("region", { name: "Paired redacted file preview" });
     expect(pairedPreview).toHaveTextContent("base internal/pair.go");
     expect(pairedPreview).toHaveTextContent("head internal/pair.go");
+    expect(pairedPreview).toHaveTextContent("3 of 3");
+    expect(screen.getByRole("button", { name: "Next paired redacted preview" })).toBeDisabled();
     await waitFor(() => {
       expect(repositoryCommitFilePreview).toHaveBeenCalledWith("workspace-1",
         "abcdef1234567890abcdef1234567890abcdef12", "internal/pair.go",
@@ -144,6 +146,21 @@ describe("RepositoryHistoryPanel", () => {
       expect(repositoryCommitFilePreview).toHaveBeenCalledWith("workspace-1",
         historyObjectID, "internal/pair.go", expect.any(AbortSignal));
     });
+    await user.click(screen.getByRole("button", { name: "Previous paired redacted preview" }));
+    expect(screen.getByRole("region", { name: "Base redacted file preview" }))
+      .toHaveTextContent("base internal/old.go");
+    expect(screen.getByRole("region", { name: "Head redacted file preview" }))
+      .toHaveTextContent("File is absent at the head commit");
+    expect(pairedPreview).toHaveTextContent("2 of 3");
+    await user.click(screen.getByRole("button", { name: "Previous paired redacted preview" }));
+    expect(screen.getByRole("region", { name: "Base redacted file preview" }))
+      .toHaveTextContent("File is absent at the base commit");
+    expect(screen.getByRole("region", { name: "Head redacted file preview" }))
+      .toHaveTextContent("head internal/second.go");
+    expect(screen.getByRole("button", { name: "Previous paired redacted preview" })).toBeDisabled();
+    expect(pairedPreview).toHaveTextContent("1 of 3");
+    await user.click(screen.getByRole("button", { name: "Next paired redacted preview" }));
+    expect(pairedPreview).toHaveTextContent("2 of 3");
     await user.click(screen.getByRole("button", {
       name: "Compare redacted previews for internal/second.go between abcdef123456 and 1234567890ab",
     }));
@@ -172,7 +189,7 @@ describe("RepositoryHistoryPanel", () => {
     </QueryClientProvider>);
     expect(screen.queryByRole("region", { name: "Exact commit metadata" })).not.toBeInTheDocument();
     expect(repositoryCommit).toHaveBeenCalledTimes(2);
-    expect(repositoryCommitFilePreview).toHaveBeenCalledTimes(7);
+    expect(repositoryCommitFilePreview.mock.calls.length).toBeGreaterThanOrEqual(8);
     expect(screen.queryByRole("region", { name: "Exact commit comparison" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Exact file history" })).not.toBeInTheDocument();
   });

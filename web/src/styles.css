@@ -423,6 +423,8 @@ td code { font-size: 11px; }
 .repository-comparison-preview-workspace > header { min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .repository-comparison-preview-workspace > header > span { min-width: 0; display: flex; align-items: center; gap: 7px; }
 .repository-comparison-preview-workspace > header code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-comparison-preview-controls { flex: 0 0 auto; display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
+.repository-comparison-preview-controls > span:first-child { min-width: 42px; text-align: right; }
 .repository-comparison-preview-workspace > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .repository-comparison-preview-workspace > div > section { min-width: 0; border-top: 1px solid var(--border); }
 .repository-comparison-preview-workspace > div > section > header { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -482,9 +484,11 @@ td code { font-size: 11px; }
 .verification-snapshot-receipts { margin: 7px 0; border-top: 1px solid var(--border); }
 .verification-snapshot-receipts > strong { display: block; padding: 7px 0 4px; font-size: 10px; }
 .verification-snapshot-receipts > ul { display: grid; margin: 0; padding: 0; list-style: none; }
-.verification-snapshot-receipts > ul > li { min-width: 0; display: grid; grid-template-columns: 76px 92px minmax(130px, 1fr) 138px 82px; align-items: center; gap: 7px; min-height: 32px; border-top: 1px solid var(--border); font-size: 10px; }
+.verification-snapshot-receipts > ul > li { min-width: 0; display: grid; grid-template-columns: 76px 92px minmax(130px, 1fr) 138px minmax(220px, auto); align-items: center; gap: 7px; min-height: 38px; border-top: 1px solid var(--border); font-size: 10px; }
 .verification-snapshot-receipts code, .verification-snapshot-receipts span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .verification-snapshot-receipts time { color: var(--muted); }
+.verification-snapshot-review-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.verification-snapshot-review-actions .compact-command { min-height: 26px; padding: 0 7px; font-size: 9px; }
 .verification-coverage-detail > ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
 .verification-coverage-detail > ul > li { min-width: 0; display: grid; grid-template-columns: auto minmax(100px, 1fr) 112px 138px; align-items: center; gap: 7px; padding: 5px 0; border-top: 1px solid var(--border); }
 .verification-coverage-detail > ul > li code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -741,6 +745,8 @@ td code { font-size: 11px; }
 	.repository-commit-comparison-list > div { grid-template-columns: 76px minmax(0, 1fr) 104px; padding: 6px 0; }
 	.repository-commit-comparison-list > div > span:not(.status-badge) { grid-column: 2; }
 	.repository-commit-comparison-actions { grid-column: 3 !important; grid-row: 1 / span 3; }
+	.repository-comparison-preview-workspace > header { align-items: flex-start; flex-direction: column; padding: 7px 0; }
+	.repository-comparison-preview-controls { width: 100%; justify-content: flex-end; }
 	.repository-comparison-preview-workspace > div { grid-template-columns: minmax(0, 1fr); }
 	.repository-file-history-list > div { grid-template-columns: 76px 88px minmax(0, 1fr) 72px; padding: 6px 0; }
 	.repository-file-history-list time, .repository-file-history-list > div > span:not(.status-badge) { grid-column: 3; }
@@ -756,6 +762,7 @@ td code { font-size: 11px; }
 	.verification-snapshot-actions .compact-command { flex: 1 1 120px; justify-content: center; }
 	.verification-snapshot-receipts > ul > li { grid-template-columns: 76px minmax(0, 1fr) 82px; padding: 5px 0; }
 	.verification-snapshot-receipts span, .verification-snapshot-receipts time { grid-column: 2; }
+	.verification-snapshot-review-actions { grid-column: 1 / -1; justify-content: flex-start; flex-wrap: wrap; }
 	.verification-form { grid-template-columns: 1fr; align-items: stretch; }
 	.verification-form .command-button { width: 100%; }
 	.verification-list article > header { grid-template-columns: auto minmax(0, 1fr); }

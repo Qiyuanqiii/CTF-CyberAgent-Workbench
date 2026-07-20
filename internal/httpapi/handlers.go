@@ -453,6 +453,8 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 			return a.runVerificationPlanCoverage(request, segments[1])
 		case "verification-snapshot-receipts":
 			return a.runVerificationSnapshotReceipts(request, segments[1])
+		case "verification-snapshot-receipt-reviews":
+			return a.runVerificationSnapshotReceiptReviews(request, segments[1])
 		case "code-handoff":
 			return a.runCodeHandoff(request, segments[1])
 		}

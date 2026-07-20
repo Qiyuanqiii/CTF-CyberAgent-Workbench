@@ -105,6 +105,10 @@ export type VerificationSnapshotReceiptRequestView = components["schemas"]["Veri
 export type VerificationSnapshotReceiptView = components["schemas"]["VerificationSnapshotReceiptView"];
 export type VerificationSnapshotReceiptControlView = components["schemas"]["VerificationSnapshotReceiptControlView"];
 export type VerificationSnapshotReceiptInventoryView = components["schemas"]["VerificationSnapshotReceiptInventoryView"];
+export type VerificationSnapshotReceiptReviewRequestView = components["schemas"]["VerificationSnapshotReceiptReviewRequestView"];
+export type VerificationSnapshotReceiptReviewView = components["schemas"]["VerificationSnapshotReceiptReviewView"];
+export type VerificationSnapshotReceiptReviewControlView = components["schemas"]["VerificationSnapshotReceiptReviewControlView"];
+export type VerificationSnapshotReceiptReviewInventoryView = components["schemas"]["VerificationSnapshotReceiptReviewInventoryView"];
 export type CodeHandoffView = components["schemas"]["CodeHandoffView"];
 export type CodeHandoffExportView = components["schemas"]["CodeHandoffExportView"];
 

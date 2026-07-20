@@ -1080,6 +1080,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/verification-snapshot-receipt-reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List immutable verification snapshot receipt reviews
+         * @description Returns bounded metadata-only operator decisions about exact snapshot receipt metadata. A review is explicitly non-authorizing and never accepts a snapshot or verification result, rewrites a record, approves work, grants authority, or starts execution.
+         */
+        get: operations["listRunVerificationSnapshotReceiptReviews"];
+        put?: never;
+        /**
+         * Record one non-authorizing snapshot receipt review
+         * @description Binds one immutable metadata_confirmed or metadata_disputed operator fact to an exact receipt digest and event sequence. Each receipt can be reviewed once. The decision does not accept the snapshot or result, expose private bodies or identity, rewrite records, approve work, grant authority, or start execution.
+         */
+        post: operations["recordRunVerificationSnapshotReceiptReview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/verification-snapshot-receipts": {
         parameters: {
             query?: never;
@@ -3982,6 +4006,103 @@ export interface components {
             /** @enum {string} */
             version: "operator_verification_plan_item_snapshot_receipt.v1";
         };
+        VerificationSnapshotReceiptReviewControlView: {
+            approval: boolean;
+            authority_granted: boolean;
+            content_included: boolean;
+            /** @enum {string} */
+            decision: "metadata_confirmed" | "metadata_disputed";
+            execution_started: boolean;
+            id: string;
+            immutable: boolean;
+            metadata_only: boolean;
+            operator_identity_included: boolean;
+            operator_reviewed: boolean;
+            private_bodies_included: boolean;
+            /** @enum {string} */
+            protocol_version: "operator_verification_plan_item_snapshot_receipt_review.v1";
+            read_only: boolean;
+            receipt_content_sha256: string;
+            /** Format: int64 */
+            receipt_event_sequence: number;
+            receipt_id: string;
+            record_rewritten: boolean;
+            replayed: boolean;
+            result_accepted: boolean;
+            result_inferred: boolean;
+            /** Format: int64 */
+            review_event_sequence: number;
+            review_non_authorizing: boolean;
+            /** Format: date-time */
+            reviewed_at: string;
+            run_id: string;
+            session_id: string;
+            snapshot_accepted: boolean;
+            workspace_id: string;
+        };
+        VerificationSnapshotReceiptReviewInventoryView: {
+            approval: boolean;
+            authority_granted: boolean;
+            execution_started: boolean;
+            items: components["schemas"]["VerificationSnapshotReceiptReviewView"][];
+            metadata_only: boolean;
+            /** @enum {string} */
+            protocol_version: "operator_verification_plan_item_snapshot_receipt_review_inventory.v1";
+            read_only: boolean;
+            record_rewritten: boolean;
+            result_accepted: boolean;
+            result_inferred: boolean;
+            review_non_authorizing: boolean;
+            run_id: string;
+            session_id: string;
+            snapshot_accepted: boolean;
+            truncated: boolean;
+            workspace_id: string;
+        };
+        VerificationSnapshotReceiptReviewRequestView: {
+            confirm_non_authorizing_review: boolean;
+            /** @enum {string} */
+            decision: "metadata_confirmed" | "metadata_disputed";
+            receipt_content_sha256: string;
+            /** Format: int64 */
+            receipt_event_sequence: number;
+            receipt_id: string;
+            /** @enum {string} */
+            version: "operator_verification_plan_item_snapshot_receipt_review.v1";
+        };
+        VerificationSnapshotReceiptReviewView: {
+            approval: boolean;
+            authority_granted: boolean;
+            content_included: boolean;
+            /** @enum {string} */
+            decision: "metadata_confirmed" | "metadata_disputed";
+            execution_started: boolean;
+            id: string;
+            immutable: boolean;
+            metadata_only: boolean;
+            operator_identity_included: boolean;
+            operator_reviewed: boolean;
+            private_bodies_included: boolean;
+            /** @enum {string} */
+            protocol_version: "operator_verification_plan_item_snapshot_receipt_review.v1";
+            read_only: boolean;
+            receipt_content_sha256: string;
+            /** Format: int64 */
+            receipt_event_sequence: number;
+            receipt_id: string;
+            record_rewritten: boolean;
+            result_accepted: boolean;
+            result_inferred: boolean;
+            /** Format: int64 */
+            review_event_sequence: number;
+            review_non_authorizing: boolean;
+            /** Format: date-time */
+            reviewed_at: string;
+            run_id: string;
+            session_id: string;
+            snapshot_accepted: boolean;
+            workspace_id: string;
+        };
         VerificationSnapshotReceiptView: {
             approval: boolean;
             /** Format: int32 */
@@ -6490,6 +6611,87 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listRunVerificationSnapshotReceiptReviews: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["VerificationSnapshotReceiptReviewInventoryView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    recordRunVerificationSnapshotReceiptReview: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerificationSnapshotReceiptReviewRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["VerificationSnapshotReceiptReviewControlView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];
         };

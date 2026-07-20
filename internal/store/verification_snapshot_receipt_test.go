@@ -13,7 +13,7 @@ import (
 )
 
 func removeSchemaV83ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV84ForTestStatements(), []string{
 		`DROP TRIGGER trg_operator_verification_snapshot_receipt_delete_immutable`,
 		`DROP TRIGGER trg_operator_verification_snapshot_receipt_update_immutable`,
 		`DROP TRIGGER trg_operator_verification_snapshot_receipt_insert`,
@@ -21,7 +21,7 @@ func removeSchemaV83ForTestStatements() []string {
 		`DROP INDEX idx_operator_verification_snapshot_receipts_run_event`,
 		`DROP TABLE operator_verification_snapshot_receipts`,
 		`DELETE FROM schema_migrations WHERE version = 83`,
-	}
+	}...)
 }
 
 func TestVerificationSnapshotReceiptIsImmutableIdempotentAndRejectsStaleSnapshot(t *testing.T) {

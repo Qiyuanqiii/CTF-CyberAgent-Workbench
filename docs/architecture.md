@@ -804,3 +804,35 @@ validate before atomic assignment, and drift leaves the old Result untouched. It
 no wall-clock ordering, raw output, process identity, verified OS limits, or product
 execution. Test-only adapters and the no-product-starter boundary remain unchanged.
 ADR 0058 records these bounds.
+
+## Paired Navigation, Receipt Review, And Golden Compatibility
+
+Paired-preview navigation is renderer-only state over the already bounded
+`repository_commit_comparison.v1` response. Candidate files must have at least one
+regular or executable side. Previous/next replaces the exact Workspace/base/head/path
+selection and reuses `repository_commit_file_preview.v1` for each available side.
+Absent sides produce no request. The Go Repository authority, accepted object/path
+syntax, redaction, byte bounds, and no-process/network/hook guarantees are unchanged.
+
+Schema v84 adds
+`operator_verification_plan_item_snapshot_receipt_review.v1` as a protocol separate
+from both the v83 record-only receipt and any future result-acceptance decision. Its
+closed decision set is `metadata_confirmed|metadata_disputed`. New writes require an
+active Code Session, explicit non-authorizing confirmation, exact receipt ID/content
+SHA-256/event sequence, and one normalized operation key. Exact committed intent may
+replay before current-state checks; a different intent cannot reuse that key.
+
+Store serializes review creation on the Run, rechecks Run/Session/Workspace/latest Code
+mode/receipt chronology in one transaction, appends the event, then inserts the row.
+SQLite verifies the exact receipt and event payload, permits only one review per
+receipt, and rejects update/delete. Reviewer identity is private Store data. Public
+inventory is bounded to 100 and fixes content/identity inclusion, snapshot/result
+acceptance or inference, rewrite, approval, authority, and execution to false.
+TypeScript requires exact response keys and these same false semantics before rendering.
+
+R8 does not add a protocol or product execution path. It adds versioned golden
+descriptors for two existing `runner_evidence_set_receipt.v1` canonical inputs. Windows
+and Linux reconstruct the typed six-record tuple and compare exact byte count and
+SHA-256 while rechecking protocol order and closed claims. Raw output, environment,
+process identity, canonical runtime bytes, and a product process starter remain absent.
+ADR 0059 records these bounds.
