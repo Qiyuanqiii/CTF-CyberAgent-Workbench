@@ -144,6 +144,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "clap",
+ "rawzip",
  "serde",
  "serde_json",
  "sha2",
@@ -222,6 +223,12 @@ checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "rawzip"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75a2b2577f5fd7e26caabd4aa7bba1ef18653ff32204eea251c1136db1a549f3"
 
 [[package]]
 name = "serde"

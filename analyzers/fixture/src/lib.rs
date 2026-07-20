@@ -1,4 +1,7 @@
-use std::io::{self, Read, Write};
+use std::{
+    collections::{BTreeSet, HashSet},
+    io::{self, Read, Write},
+};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
@@ -8,6 +11,8 @@ pub const REQUEST_PROTOCOL_VERSION: &str = "analyzer_protocol.v1";
 pub const RESULT_PROTOCOL_VERSION: &str = "analyzer_result.v1";
 pub const ERROR_PROTOCOL_VERSION: &str = "analyzer_error.v1";
 pub const FIXTURE_ANALYZER_NAME: &str = "fixture.digest.v1";
+pub const ARCHIVE_INVENTORY_PROTOCOL_VERSION: &str = "archive.inventory.v1";
+pub const ARCHIVE_ANALYZER_NAME: &str = "archive.zip.inventory.v1";
 
 pub const MAX_REQUEST_ENVELOPE_BYTES: usize = 96 * 1024;
 pub const MAX_DECODED_INPUT_BYTES: usize = 64 * 1024;
@@ -17,6 +22,14 @@ pub const MIN_TIMEOUT_MILLISECONDS: i64 = 100;
 pub const MAX_TIMEOUT_MILLISECONDS: i64 = 30_000;
 pub const MAX_REQUEST_ID_BYTES: usize = 128;
 pub const MAX_MEDIA_TYPE_BYTES: usize = 128;
+
+pub const MAX_ARCHIVE_ENTRIES: usize = 32;
+pub const MAX_ARCHIVE_ENTRY_NAME_BYTES: usize = 128;
+pub const MAX_ARCHIVE_TOTAL_NAME_BYTES: usize = 2 * 1024;
+pub const MAX_ARCHIVE_DECLARED_ENTRY_BYTES: u64 = 8 * 1024 * 1024;
+pub const MAX_ARCHIVE_DECLARED_TOTAL_BYTES: u64 = 32 * 1024 * 1024;
+pub const MAX_ARCHIVE_COMPRESSION_RATIO_MILLI: u64 = 100_000;
+pub const MAX_ARCHIVE_REPORTED_RATIO_MILLI: u64 = 1_000_000_000;
 
 pub const EXIT_SUCCESS: u8 = 0;
 pub const EXIT_REJECTED: u8 = 2;
@@ -116,6 +129,66 @@ pub struct ResultEnvelope {
     pub capabilities_used: Capabilities,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveRiskCode {
+    AbsolutePath,
+    BackslashSeparator,
+    CompressionRatio,
+    DeclaredEntrySize,
+    DeclaredTotalSize,
+    DirectoryHasData,
+    DuplicateName,
+    ParentTraversal,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveInventoryLimits {
+    pub max_entries: usize,
+    pub max_entry_name_bytes: usize,
+    pub max_total_name_bytes: usize,
+    pub max_declared_entry_bytes: u64,
+    pub max_declared_total_bytes: u64,
+    pub max_compression_ratio_milli: u64,
+    pub max_reported_ratio_milli: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveEntry {
+    pub index: usize,
+    pub name: String,
+    pub kind: String,
+    pub compressed_bytes: u64,
+    pub uncompressed_bytes: u64,
+    pub compression_ratio_milli: u64,
+    pub declared_crc32: String,
+    pub risk_codes: Vec<ArchiveRiskCode>,
+}
+
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArchiveInventory {
+    pub protocol_version: String,
+    pub request_id: String,
+    pub analyzer: String,
+    pub status: String,
+    pub format: String,
+    pub entry_count: usize,
+    pub total_compressed_bytes: u64,
+    pub total_uncompressed_bytes: u64,
+    pub limits: ArchiveInventoryLimits,
+    pub entries: Vec<ArchiveEntry>,
+    pub risk_entry_count: usize,
+    pub risk_codes: Vec<ArchiveRiskCode>,
+    pub metadata_only: bool,
+    pub central_directory_only: bool,
+    pub entry_contents_read: bool,
+    pub extraction_performed: bool,
+    pub capabilities_used: Capabilities,
+}
+
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ErrorEnvelope {
@@ -155,7 +228,14 @@ pub fn evaluate(raw: &[u8]) -> Evaluation {
         Ok(value) => value,
         Err(code) => return rejection(&request.request_id, code),
     };
-    let text = std::str::from_utf8(&content).is_ok();
+    if request.analyzer == ARCHIVE_ANALYZER_NAME {
+        return evaluate_archive(request, &content);
+    }
+    evaluate_fixture(request, &content)
+}
+
+fn evaluate_fixture(request: Request, content: &[u8]) -> Evaluation {
+    let text = std::str::from_utf8(content).is_ok();
     let result = ResultEnvelope {
         protocol_version: RESULT_PROTOCOL_VERSION.to_owned(),
         request_id: request.request_id.clone(),
@@ -164,9 +244,9 @@ pub fn evaluate(raw: &[u8]) -> Evaluation {
         summary: Summary {
             media_type: request.input.media_type,
             input_bytes: content.len(),
-            sha256: format!("{:x}", Sha256::digest(&content)),
+            sha256: format!("{:x}", Sha256::digest(content)),
             utf8: text,
-            line_count: logical_line_count(&content, text),
+            line_count: logical_line_count(content, text),
         },
         metadata_only: true,
         capabilities_used: disabled_capabilities(),
@@ -184,6 +264,205 @@ pub fn evaluate(raw: &[u8]) -> Evaluation {
         stdout: encoded,
         exit_code: EXIT_SUCCESS,
     }
+}
+
+fn evaluate_archive(request: Request, content: &[u8]) -> Evaluation {
+    let inventory = match inventory_zip(&request.request_id, content) {
+        Ok(value) => value,
+        Err(code) => return rejection(&request.request_id, code),
+    };
+    let encoded = match serde_json::to_vec(&inventory) {
+        Ok(value) => value,
+        Err(_) => return rejection(&request.request_id, ErrorCode::InternalError),
+    };
+    if encoded.len() > request.limits.max_output_bytes as usize
+        || encoded.len() > MAX_RESULT_ENVELOPE_BYTES
+    {
+        return rejection(&request.request_id, ErrorCode::OutputLimitExceeded);
+    }
+    Evaluation {
+        stdout: encoded,
+        exit_code: EXIT_SUCCESS,
+    }
+}
+
+fn inventory_zip(request_id: &str, content: &[u8]) -> Result<ArchiveInventory, ErrorCode> {
+    let archive = rawzip::ZipArchive::from_slice(content).map_err(|_| ErrorCode::InvalidContent)?;
+    if archive.entries_hint() > MAX_ARCHIVE_ENTRIES as u64 {
+        return Err(ErrorCode::InputLimitExceeded);
+    }
+    let mut entries = Vec::with_capacity(archive.entries_hint() as usize);
+    for (index, record) in archive.entries().enumerate() {
+        if index >= MAX_ARCHIVE_ENTRIES {
+            return Err(ErrorCode::InputLimitExceeded);
+        }
+        let record = record.map_err(|_| ErrorCode::InvalidContent)?;
+        let name = std::str::from_utf8(record.file_path().as_bytes())
+            .map_err(|_| ErrorCode::InvalidContent)?
+            .to_owned();
+        entries.push(ArchiveEntry {
+            index,
+            kind: archive_entry_kind(&name).to_owned(),
+            name,
+            compressed_bytes: record.compressed_size_hint(),
+            uncompressed_bytes: record.uncompressed_size_hint(),
+            compression_ratio_milli: archive_ratio_milli(
+                record.uncompressed_size_hint(),
+                record.compressed_size_hint(),
+            ),
+            declared_crc32: format!("{:08x}", record.crc32()),
+            risk_codes: Vec::new(),
+        });
+    }
+    if entries.len() as u64 != archive.entries_hint() {
+        return Err(ErrorCode::InvalidContent);
+    }
+    build_archive_inventory(request_id, entries)
+}
+
+fn build_archive_inventory(
+    request_id: &str,
+    mut entries: Vec<ArchiveEntry>,
+) -> Result<ArchiveInventory, ErrorCode> {
+    if entries.len() > MAX_ARCHIVE_ENTRIES {
+        return Err(ErrorCode::InputLimitExceeded);
+    }
+    let mut seen_names = HashSet::with_capacity(entries.len());
+    let mut aggregate_risks = BTreeSet::new();
+    let mut total_names = 0usize;
+    let mut total_compressed = 0u64;
+    let mut total_uncompressed = 0u64;
+    let mut risk_entry_count = 0usize;
+    for (index, entry) in entries.iter_mut().enumerate() {
+        if entry.index != index {
+            return Err(ErrorCode::InputLimitExceeded);
+        }
+        if !valid_archive_entry_name(&entry.name) {
+            return Err(ErrorCode::InvalidContent);
+        }
+        if entry.name.len() > MAX_ARCHIVE_ENTRY_NAME_BYTES {
+            return Err(ErrorCode::InputLimitExceeded);
+        }
+        total_names = total_names.saturating_add(entry.name.len());
+        if total_names > MAX_ARCHIVE_TOTAL_NAME_BYTES {
+            return Err(ErrorCode::InputLimitExceeded);
+        }
+        entry.kind = archive_entry_kind(&entry.name).to_owned();
+        entry.compression_ratio_milli =
+            archive_ratio_milli(entry.uncompressed_bytes, entry.compressed_bytes);
+        if !valid_crc32(&entry.declared_crc32) {
+            return Err(ErrorCode::InvalidContent);
+        }
+        entry.risk_codes = archive_entry_risks(entry, &seen_names);
+        if !entry.risk_codes.is_empty() {
+            risk_entry_count += 1;
+        }
+        aggregate_risks.extend(entry.risk_codes.iter().copied());
+        seen_names.insert(entry.name.clone());
+        total_compressed = total_compressed.saturating_add(entry.compressed_bytes);
+        total_uncompressed = total_uncompressed.saturating_add(entry.uncompressed_bytes);
+    }
+    if total_uncompressed > MAX_ARCHIVE_DECLARED_TOTAL_BYTES {
+        aggregate_risks.insert(ArchiveRiskCode::DeclaredTotalSize);
+    }
+    Ok(ArchiveInventory {
+        protocol_version: ARCHIVE_INVENTORY_PROTOCOL_VERSION.to_owned(),
+        request_id: request_id.to_owned(),
+        analyzer: ARCHIVE_ANALYZER_NAME.to_owned(),
+        status: "succeeded".to_owned(),
+        format: "zip".to_owned(),
+        entry_count: entries.len(),
+        total_compressed_bytes: total_compressed,
+        total_uncompressed_bytes: total_uncompressed,
+        limits: archive_inventory_limits(),
+        entries,
+        risk_entry_count,
+        risk_codes: aggregate_risks.into_iter().collect(),
+        metadata_only: true,
+        central_directory_only: true,
+        entry_contents_read: false,
+        extraction_performed: false,
+        capabilities_used: disabled_capabilities(),
+    })
+}
+
+fn archive_inventory_limits() -> ArchiveInventoryLimits {
+    ArchiveInventoryLimits {
+        max_entries: MAX_ARCHIVE_ENTRIES,
+        max_entry_name_bytes: MAX_ARCHIVE_ENTRY_NAME_BYTES,
+        max_total_name_bytes: MAX_ARCHIVE_TOTAL_NAME_BYTES,
+        max_declared_entry_bytes: MAX_ARCHIVE_DECLARED_ENTRY_BYTES,
+        max_declared_total_bytes: MAX_ARCHIVE_DECLARED_TOTAL_BYTES,
+        max_compression_ratio_milli: MAX_ARCHIVE_COMPRESSION_RATIO_MILLI,
+        max_reported_ratio_milli: MAX_ARCHIVE_REPORTED_RATIO_MILLI,
+    }
+}
+
+fn archive_entry_risks(entry: &ArchiveEntry, seen_names: &HashSet<String>) -> Vec<ArchiveRiskCode> {
+    let mut risks = BTreeSet::new();
+    if archive_absolute_path(&entry.name) {
+        risks.insert(ArchiveRiskCode::AbsolutePath);
+    }
+    if entry.name.contains('\\') {
+        risks.insert(ArchiveRiskCode::BackslashSeparator);
+    }
+    if archive_parent_traversal(&entry.name) {
+        risks.insert(ArchiveRiskCode::ParentTraversal);
+    }
+    if seen_names.contains(&entry.name) {
+        risks.insert(ArchiveRiskCode::DuplicateName);
+    }
+    if entry.uncompressed_bytes > MAX_ARCHIVE_DECLARED_ENTRY_BYTES {
+        risks.insert(ArchiveRiskCode::DeclaredEntrySize);
+    }
+    if entry.compression_ratio_milli > MAX_ARCHIVE_COMPRESSION_RATIO_MILLI {
+        risks.insert(ArchiveRiskCode::CompressionRatio);
+    }
+    if entry.kind == "directory" && (entry.compressed_bytes != 0 || entry.uncompressed_bytes != 0) {
+        risks.insert(ArchiveRiskCode::DirectoryHasData);
+    }
+    risks.into_iter().collect()
+}
+
+fn archive_entry_kind(name: &str) -> &'static str {
+    if name.ends_with('/') || name.ends_with('\\') {
+        "directory"
+    } else {
+        "file"
+    }
+}
+
+fn valid_archive_entry_name(name: &str) -> bool {
+    !name.is_empty() && name.bytes().all(|byte| byte >= 0x20 && byte != 0x7f)
+}
+
+fn archive_absolute_path(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    name.starts_with('/')
+        || name.starts_with('\\')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+}
+
+fn archive_parent_traversal(name: &str) -> bool {
+    name.split(['/', '\\']).any(|part| part == "..")
+}
+
+fn archive_ratio_milli(uncompressed: u64, compressed: u64) -> u64 {
+    if uncompressed == 0 {
+        return 0;
+    }
+    if compressed == 0 {
+        return MAX_ARCHIVE_REPORTED_RATIO_MILLI;
+    }
+    let scaled = (u128::from(uncompressed) * 1000) / u128::from(compressed);
+    scaled.min(u128::from(MAX_ARCHIVE_REPORTED_RATIO_MILLI)) as u64
+}
+
+fn valid_crc32(value: &str) -> bool {
+    value.len() == 8
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 pub fn run_io<R: Read, W: Write>(reader: R, mut writer: W) -> io::Result<u8> {
@@ -208,7 +487,7 @@ fn validate_request(request: &Request) -> Option<ErrorCode> {
     if !valid_request_id(&request.request_id) {
         return Some(ErrorCode::InvalidRequest);
     }
-    if request.analyzer != FIXTURE_ANALYZER_NAME {
+    if request.analyzer != FIXTURE_ANALYZER_NAME && request.analyzer != ARCHIVE_ANALYZER_NAME {
         return Some(ErrorCode::UnsupportedAnalyzer);
     }
     if capabilities_enabled(&request.capabilities) {
@@ -222,6 +501,8 @@ fn validate_request(request: &Request) -> Option<ErrorCode> {
         || request.limits.timeout_ms < MIN_TIMEOUT_MILLISECONDS
         || request.limits.timeout_ms > MAX_TIMEOUT_MILLISECONDS
         || !valid_media_type(&request.input.media_type)
+        || (request.analyzer == ARCHIVE_ANALYZER_NAME
+            && request.input.media_type != "application/zip")
     {
         return Some(ErrorCode::InvalidRequest);
     }
@@ -519,5 +800,62 @@ mod tests {
         let error: ErrorEnvelope = serde_json::from_slice(&evaluation.stdout).unwrap();
         assert_eq!(error.code, ErrorCode::InvalidRequest);
         assert!(error.request_id.is_empty());
+    }
+
+    #[test]
+    fn rejects_wrong_archive_media_type_and_malformed_zip() {
+        let mut value = request();
+        value.analyzer = ARCHIVE_ANALYZER_NAME.to_owned();
+        value.input.media_type = "text/plain".to_owned();
+        value.input.content_base64 = STANDARD.encode(b"not a zip");
+        let evaluation = evaluate(&serde_json::to_vec(&value).unwrap());
+        let error: ErrorEnvelope = serde_json::from_slice(&evaluation.stdout).unwrap();
+        assert_eq!(error.code, ErrorCode::InvalidRequest);
+
+        value.input.media_type = "application/zip".to_owned();
+        let evaluation = evaluate(&serde_json::to_vec(&value).unwrap());
+        let error: ErrorEnvelope = serde_json::from_slice(&evaluation.stdout).unwrap();
+        assert_eq!(error.code, ErrorCode::InvalidContent);
+    }
+
+    #[test]
+    fn saturates_hostile_archive_size_metadata() {
+        let inventory = build_archive_inventory(
+            "archive-overflow",
+            vec![
+                ArchiveEntry {
+                    index: 0,
+                    name: "first.bin".to_owned(),
+                    kind: String::new(),
+                    compressed_bytes: 1,
+                    uncompressed_bytes: u64::MAX,
+                    compression_ratio_milli: 0,
+                    declared_crc32: "00000000".to_owned(),
+                    risk_codes: Vec::new(),
+                },
+                ArchiveEntry {
+                    index: 1,
+                    name: "second.bin".to_owned(),
+                    kind: String::new(),
+                    compressed_bytes: u64::MAX,
+                    uncompressed_bytes: 1,
+                    compression_ratio_milli: 0,
+                    declared_crc32: "00000000".to_owned(),
+                    risk_codes: Vec::new(),
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(inventory.total_compressed_bytes, u64::MAX);
+        assert_eq!(inventory.total_uncompressed_bytes, u64::MAX);
+        assert_eq!(
+            archive_ratio_milli(u64::MAX, 1),
+            MAX_ARCHIVE_REPORTED_RATIO_MILLI
+        );
+        assert!(
+            inventory
+                .risk_codes
+                .contains(&ArchiveRiskCode::DeclaredTotalSize)
+        );
     }
 }

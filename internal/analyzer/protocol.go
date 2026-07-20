@@ -129,7 +129,8 @@ func ValidateRequest(request Request) ErrorCode {
 	if !validRequestID(request.RequestID) {
 		return CodeInvalidRequest
 	}
-	if request.Analyzer != FixtureAnalyzerName {
+	descriptor, ok := BuiltinRegistry().Lookup(request.Analyzer)
+	if !ok {
 		return CodeUnsupportedAnalyzer
 	}
 	if capabilitiesEnabled(request.Capabilities) {
@@ -141,15 +142,16 @@ func ValidateRequest(request Request) ErrorCode {
 		request.Limits.MaxOutputBytes > MaxResultEnvelopeBytes ||
 		request.Limits.TimeoutMilliseconds < MinTimeoutMilliseconds ||
 		request.Limits.TimeoutMilliseconds > MaxTimeoutMilliseconds ||
-		!validMediaType(request.Input.MediaType) {
+		!validMediaType(request.Input.MediaType) ||
+		!descriptorAcceptsMediaType(descriptor, request.Input.MediaType) {
 		return CodeInvalidRequest
 	}
 	_, code := decodeContent(request)
 	return code
 }
 
-// EvaluateFixture is a pure protocol reference. It does not start a process or read files.
-func EvaluateFixture(raw []byte) ([]byte, int) {
+// Evaluate is a pure protocol reference. It does not start a process or read files.
+func Evaluate(raw []byte) ([]byte, int) {
 	request, code := DecodeRequest(raw)
 	if code != "" {
 		return encodeError(safeRequestID(request.RequestID), code), ExitRejected
@@ -157,6 +159,9 @@ func EvaluateFixture(raw []byte) ([]byte, int) {
 	content, code := decodeContent(request)
 	if code != "" {
 		return encodeError(request.RequestID, code), ExitRejected
+	}
+	if request.Analyzer == ArchiveAnalyzerName {
+		return evaluateArchiveRequest(request, content)
 	}
 	digest := sha256.Sum256(content)
 	text := utf8.Valid(content)
@@ -180,6 +185,11 @@ func EvaluateFixture(raw []byte) ([]byte, int) {
 		return encodeError(request.RequestID, CodeOutputLimitExceeded), ExitRejected
 	}
 	return encoded, ExitSuccess
+}
+
+// EvaluateFixture preserves the original development-fixture API.
+func EvaluateFixture(raw []byte) ([]byte, int) {
+	return Evaluate(raw)
 }
 
 func DecodeResult(raw []byte) (Result, ErrorCode) {

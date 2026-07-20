@@ -1,12 +1,12 @@
 # Project Status
 
-Last updated: 2026-07-20
+Last updated: 2026-07-21
 
 ## Resume Context
 
-Current database schema is v84. Schemas v78-v81 add immutable operator verification evidence, livelock recovery, verification plans, and explicit plan-item/evidence associations; schema v82 adds conservative complete-request model-context planning and immutable cumulative handoff memory; schema v83 adds immutable metadata-only verification snapshot receipt history; schema v84 adds one immutable non-authorizing metadata review per exact receipt. Code/Desktop work now reaches D1-G13/V12. R9 strictly rejects malformed, future, digest-mismatched, or authority-widening receipt envelopes, while R10 pins accepted envelope bytes/SHA only behind the internal `NonProductOnly` Runner boundary. P10-A1/A2/A3 establish the first Go/Rust analyzer boundary: Go owns a strict bounded request/result/error protocol, Rust implements only a deterministic metadata fixture, and both languages independently verify shared semantic and byte/SHA vectors. There is no analyzer Registry, Go-to-Rust product process bridge, file/path input, result persistence, or Artifact commit. Root and Specialist requests use a 32K conservative fallback with explicit output/safety reservations, repeated compaction preserves a predecessor-bound cumulative handoff chain, and arbitrary repository documents remain untrusted evidence instead of instructions. Operators can compare any two exact local commit trees, use focus-safe keyboard navigation in the paired redacted preview, page through one frozen verification-item snapshot, download a deterministic metadata-only Markdown/JSON representation, record an immutable digest receipt, separately confirm or dispute only its metadata, carry bounded review metadata into a regenerable Code Handoff/Journey audit, and navigate only after Verify independently matches exact review/receipt/plan/item digests. R9/R10 and P10 do not claim wall-clock order, raw output, process identity, CPU/memory enforcement, verified OS quotas, signal identity, or product execution. None grants general Shell, LocalRunner, Docker, child scheduling, install hooks, renderer host-path authority, credential readback, document instruction authority, automatic Skill selection, result acceptance, or product process execution.
+Current database schema is v84. Schemas v78-v81 add immutable operator verification evidence, livelock recovery, verification plans, and explicit plan-item/evidence associations; schema v82 adds conservative complete-request model-context planning and immutable cumulative handoff memory; schema v83 adds immutable metadata-only verification snapshot receipt history; schema v84 adds one immutable non-authorizing metadata review per exact receipt. Code/Desktop work now reaches D1-G13/V12. R9 strictly rejects malformed, future, digest-mismatched, or authority-widening receipt envelopes, while R10 pins accepted envelope bytes/SHA only behind the internal `NonProductOnly` Runner boundary. P10-A1 through P10-B3 establish a Go-owned analyzer boundary: a strict bounded request/result/error protocol, a fixed inert two-entry descriptor Registry, deterministic digest and in-memory ZIP central-directory functions, strict no-extraction archive result validation, and two independent Go/Rust five-vector suites. There is no Go-to-Rust product process bridge, file/path input, Run/Event/SQLite persistence, or Artifact commit. Root and Specialist requests use a 32K conservative fallback with explicit output/safety reservations, repeated compaction preserves a predecessor-bound cumulative handoff chain, and arbitrary repository documents remain untrusted evidence instead of instructions. Operators can compare any two exact local commit trees, use focus-safe keyboard navigation in the paired redacted preview, page through one frozen verification-item snapshot, download a deterministic metadata-only Markdown/JSON representation, record an immutable digest receipt, separately confirm or dispute only its metadata, carry bounded review metadata into a regenerable Code Handoff/Journey audit, and navigate only after Verify independently matches exact review/receipt/plan/item digests. R9/R10 and P10 do not claim wall-clock order, raw output, process identity, CPU/memory enforcement, verified OS quotas, signal identity, or product execution. None grants general Shell, LocalRunner, Docker, child scheduling, install hooks, renderer host-path authority, credential readback, document instruction authority, automatic Skill selection, result acceptance, or product process execution.
 
-Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No product path starts a Runner, container, Shell, host process, or Rust analyzer. ADR 0024 through ADR 0062 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/recovery/review/apply, Provider credential/generation, inert-install, receipt, Explorer/search, Repository, Verification, Handoff, process-conformance, portable-build, and analyzer-protocol boundaries.
+Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No product path starts a Runner, container, Shell, host process, or Rust analyzer. ADR 0024 through ADR 0063 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/recovery/review/apply, Provider credential/generation, inert-install, receipt, Explorer/search, Repository, Verification, Handoff, process-conformance, portable-build, and analyzer boundaries.
 
 CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The CLI-first implementation has resumable Runs, a durable root Agent Coordinator, bounded review-gated Specialist delegation, a separate read-only 1/2/4/6 Fan-out pool, persisted sessions and model calls, context compaction, WorkItems/Notes/Artifacts, a unified Tool Gateway, embedded and inert user Skills, Finding/Evidence/Report lifecycles with SARIF/CI output, loopback HTTP/SSE/OpenAPI, a Run-first TUI, a React/Vite console, and a Windows Wails shell with independently gated Run/Session/Plan/approval, FileEdit proposal/review/apply, Provider credentials, foreground/bounded wake, inert Skills, actions/evidence, and navigation. Core delegation remains capped at two children and only the original application operator can schedule it; models, ordinary tools, HTTP, and the Desktop native bridge cannot autonomously spawn or schedule children.
 
@@ -219,7 +219,7 @@ Use these files first when resuming:
 - Cyber autonomous-workflow usability: about 20%.
 - These values are engineering estimates derived from tested roadmap slices, not performance benchmarks. The retired single-axis "overall product vision" percentage must not be used for current status.
 
-Latest implemented batch: D1-G13/V12/R10 on schema v84. It adds exact fail-closed Handoff/Journey-to-Verify receipt-review navigation, at most three metadata-only/non-authorizing Journey audit facts, and two internal accepted-envelope byte/SHA golden vectors with strict round-trip validation. The cumulative six-slice robustness gate is green after five low-risk state/diagnostic fixes, with no known unresolved high/medium issue on an enabled path. ADR 0061 is authoritative.
+Latest implemented batch: P10-B1/B2/B3 on unchanged schema v84. It adds a fixed inert analyzer descriptor Registry, strict in-memory/no-extraction ZIP central-directory inventory, a deterministic Rust implementation, and five exact cross-language adversarial vectors. The cumulative six-slice gate passed, including a RustSec scan of 42 locked crate dependencies against 1,166 official advisories with zero known vulnerabilities; no known unresolved high/medium issue exists on an enabled path. ADR 0063 is authoritative.
 
 Completed:
 
@@ -1855,14 +1855,47 @@ audit, and RustSec. The unsigned GUI SHA-256 is
 unresolved high/medium issue exists on an enabled path. Schema/OpenAPI remain v84 and
 75/83/182. ADR 0062 is authoritative.
 
+## P10-B1/B2/B3: Inert Registry, ZIP Inventory, And Adversarial Vectors
+
+P10-B1 adds a fixed Go-owned `analyzer_descriptor.v1` Registry. Its two descriptors are
+sorted and clone-isolated; all capability and product-authority values are false. There
+is no dynamic registration API and no executable, command, path, URL, or starter field.
+
+P10-B2 adds strict `archive.inventory.v1` generation and validation. Only the existing
+maximum-64-KiB inline payload is accepted. Go parses at most 32 central-directory entries,
+128 bytes per name, and 2,048 aggregate name bytes without calling `File.Open`. Declared
+entry/total sizes and integer compression ratios are bounded risk metadata, never
+allocation or extraction instructions. Eight sorted path/duplicate/size/ratio risks and
+all metadata-only/no-read/no-extraction/false-capability claims are independently
+recomputed during result validation.
+
+P10-B3 pins `rawzip 0.5.1` and mirrors the same pure function in Rust. It uses in-memory
+central-record iteration only; `rawzip` has no transitive crate and forbids unsafe code.
+Go and Rust independently verify five exact benign/traversal/duplicate/oversized/ratio
+ZIP vectors plus output JSON bytes and SHA-256. CI explicitly names both Go vector suites.
+
+The cumulative six-slice gate passed full ordinary/race Go in 380.2/401.5 seconds,
+twenty additional analyzer race repetitions, about 12.99 million fuzz evaluations,
+full vet/staticcheck/govulncheck,
+module verify/tidy, seven Rust unit plus two shared-vector tests, fmt/clippy, 37 files/134
+Web tests, strict TypeScript, deterministic 75/83/182 OpenAPI, Vite/npm, secure Desktop,
+and a reproducible Windows dual build. The unsigned GUI SHA-256 is
+`871c6270de44f3d6aecd31064127cdbfb400c5d6e6936e44698bcc30b0c611db`, with
+`release_ready=false`. RustSec loaded 1,166 official advisories and scanned 42 locked
+crate dependencies with zero known vulnerabilities. Review fixed low-risk strict-array,
+hostile-size/name-classification, warning/deprecation, and declared-CRC evidence-label
+issues. No known
+unresolved high/medium issue exists on an enabled path. Schema/OpenAPI remain v84 and
+75/83/182. ADR 0063 is authoritative.
+
 ## Recommended Next Batch
 
-Candidate slices are P10-B1 an inert Go-owned `analyzer_descriptor.v1` Registry with no
-executable path or starter, P10-B2 a bounded `archive.inventory.v1` contract for memory-only
-ZIP central-directory inspection without extraction, and P10-B3 a deterministic Rust ZIP
-inventory implementation plus benign and malicious shared vectors. Product invocation,
-result persistence, and Artifact commit remain unwired. This is the second three-slice batch
-in the current six-slice cycle, so its gate must include the complete robustness review. Keep
+Candidate slices are P10-C1 a non-starting `analyzer_invocation.v1` candidate bound to an
+exact descriptor/request/input digest, P10-C2 Go-only `DisabledTransport` and deterministic
+`FakeTransport` enforcement of deadline/stdout/exit/result rules, and P10-C3 fake crash,
+timeout, cancellation, malformed/future/wrong-analyzer/oversized-output conformance vectors.
+Product invocation, process startup, result persistence, and Artifact commit remain unwired.
+Keep
 the Local profile disabled until a real
 OS sandbox makes protected host roots unavailable or read-only; never map it to
 unrestricted `os/exec`. Product Docker start/wait/TERM/KILL/orphan behavior still

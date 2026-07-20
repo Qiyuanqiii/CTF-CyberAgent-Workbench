@@ -192,6 +192,16 @@ func FuzzEvaluateFixtureProducesBoundedStrictEnvelope(f *testing.F) {
 		f.Fatal(err)
 	}
 	f.Add(valid)
+	archiveRequest := testRequest()
+	archiveRequest.Analyzer = ArchiveAnalyzerName
+	archiveRequest.Input.MediaType = "application/zip"
+	archiveRequest.Input.ContentBase64 = base64.StdEncoding.EncodeToString(testZIP(f,
+		[]testZIPEntry{{name: "seed.txt", content: []byte("seed")}}))
+	archiveValid, err := json.Marshal(archiveRequest)
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(archiveValid)
 	f.Add([]byte(`{"protocol_version":"analyzer_protocol.v1"}`))
 	f.Add([]byte(`{"duplicate":false,"duplicate":true}`))
 	f.Add([]byte{0xff, 0x00, '{'})
@@ -202,8 +212,11 @@ func FuzzEvaluateFixtureProducesBoundedStrictEnvelope(f *testing.F) {
 		}
 		switch exitCode {
 		case ExitSuccess:
-			if _, code := DecodeResult(output); code != "" {
-				t.Fatalf("success output failed strict decode: %s output=%s", code, output)
+			if _, fixtureCode := DecodeResult(output); fixtureCode != "" {
+				if _, archiveCode := DecodeArchiveInventory(output); archiveCode != "" {
+					t.Fatalf("success output failed strict decode: fixture=%s archive=%s output=%s",
+						fixtureCode, archiveCode, output)
+				}
 			}
 		case ExitRejected:
 			if _, code := DecodeError(output); code != "" {

@@ -908,3 +908,20 @@ JSON output, byte count, and SHA-256; neither implementation shells out to the o
 Rust CI job runs fmt, locked tests, and clippy with warnings denied. No Registry, executable
 path, product process adapter, file reader, Run/Event/SQLite writer, result persistence, or
 Artifact commit exists. ADR 0062 records the complete boundary.
+
+P10-B1 adds a fixed `analyzer_descriptor.v1` Registry owned by Go. It exposes only sorted
+list and clone-isolated lookup for the digest and ZIP analyzers. All capability and
+product-authority values are false, and there is no dynamic registration, executable,
+command, path, URL, or starter field.
+
+P10-B2 adds `archive.inventory.v1` as a bounded pure function. Go parses only a maximum-
+64-KiB inline ZIP central directory and never opens entry data. Entry count/name bytes,
+declared sizes, integer compression ratios, result size, path risks, and false semantic
+claims are fixed and independently recomputed during strict result decoding. No declared
+archive size is used for allocation or extraction.
+
+P10-B3 pins `rawzip 0.5.1` for the Rust equivalent. It iterates only in-memory central
+records, has no filesystem/process/network API, and is checked against the same five exact
+ZIP/result byte-and-SHA vectors as Go. The Registry and pure functions are still not a
+product bridge: CLI, HTTP, Desktop, Tool Gateway, Runner, Run/Event/SQLite, persistence,
+and Artifact flows cannot invoke them. ADR 0063 records these bounds.

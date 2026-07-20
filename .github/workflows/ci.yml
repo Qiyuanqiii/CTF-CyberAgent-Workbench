@@ -23,8 +23,8 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go mod verify
-      - name: Verify Go analyzer protocol vectors
-        run: go test -count=1 ./internal/analyzer -run TestAnalyzerProtocolSharedGoldenVectors
+      - name: Verify Go analyzer compatibility vectors
+        run: go test -count=1 ./internal/analyzer -run 'Test(AnalyzerProtocol|ArchiveInventory)SharedGoldenVectors'
       - run: go test -count=1 ./...
       - run: go vet ./...
       - uses: golang/govulncheck-action@v1

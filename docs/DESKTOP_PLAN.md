@@ -1,6 +1,6 @@
 # CyberAgent Workbench Desktop Plan
 
-状态：Desktop D0-A、D0-B 与 D1-R1 至 D1-G13/V12 自动化核心已完成，数据库 schema 为 v84。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill、受控 Run/Session/Plan/审批、安全恢复的 Monaco FileEdit、只读 Repository/脱敏 Diff/本地历史/精确提交预览/可导航精确文件历史/精确提交比较与键盘可访问的成对 base/head 预览、多文件独立审阅、不可变操作者验证、snapshot-keyset 逐检查项下钻/快照下载/record-only 回执历史/不授权复核、带有界复核元数据和精确 Verify 导航的可恢复 Code Handoff、带有界审计事实的 Code Journey、generation-safe Windows Credential Manager Provider reload，以及默认关闭的有界 wake worker 已经落地。R10 只在内部 `NonProductOnly` 测试边界固定接受信封的 bytes/SHA；P10-A1/A2/A3 只增加 Go-owned analyzer 协议、开发期 Rust metadata fixture 和共享向量，没有 Desktop surface 或产品进程入口。Windows 10 实机矩阵、xterm、安装包、签名正式发行、注册表、自启动、更新和高权限执行仍未实现。
+状态：Desktop D0-A、D0-B 与 D1-R1 至 D1-G13/V12 自动化核心已完成，数据库 schema 为 v84。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill、受控 Run/Session/Plan/审批、安全恢复的 Monaco FileEdit、只读 Repository/脱敏 Diff/本地历史/精确提交预览/可导航精确文件历史/精确提交比较与键盘可访问的成对 base/head 预览、多文件独立审阅、不可变操作者验证、snapshot-keyset 逐检查项下钻/快照下载/record-only 回执历史/不授权复核、带有界复核元数据和精确 Verify 导航的可恢复 Code Handoff、带有界审计事实的 Code Journey、generation-safe Windows Credential Manager Provider reload，以及默认关闭的有界 wake worker 已经落地。R10 只在内部 `NonProductOnly` 测试边界固定接受信封的 bytes/SHA；P10-A1 至 P10-B3 只增加 Go-owned analyzer 协议/惰性 Registry、开发期 Rust digest/内存 ZIP 中央目录函数和共享向量，没有 Desktop surface 或产品进程入口。Windows 10 实机矩阵、xterm、安装包、签名正式发行、注册表、自启动、更新和高权限执行仍未实现。
 
 ## 目标
 
@@ -248,7 +248,8 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] Runtime R10：两组 accepted receipt-envelope 固定 660 bytes/SHA-256，strict decode/typed compatibility/byte-identical re-encode 全通过；无产品 import/subprocess/network/Runner starter。
 - [x] D1-G13/V12/R10 后累计六切片完整健壮性门：ordinary/race 421.0/509.5 秒、vet/staticcheck/双路径 govulncheck/module、134 React、strict TypeScript、确定性 75/83/182 契约、Vite/npm、secure Desktop 与 Windows 可复现双构建全绿；GUI SHA-256 `7ae75f36c2291fbf9e7d9e72071ae8d8534f4e27dd56c6d34bd04dc064f47a19`；五项低风险审计修复后无已知未解决高/中风险，边界见 ADR 0061。
 - [x] P10-A1/A2/A3：完成 Go-owned analyzer request/result/error 协议、无 LLM/网络/密钥/路径的 Rust metadata fixture 和 Go/Rust shared golden vectors；未增加 Desktop surface、产品 invocation 或 Artifact commit。secure Desktop 与可复现双构建通过，GUI SHA-256 `69ed40aede0cfc23e075df824fecf6c1ef7b4b0586a8f4b685b7d8aa95dde3b4`，`release_ready=false`；边界见 ADR 0062。
-- [ ] P10-B1/B2/B3：惰性 analyzer descriptor Registry、memory-only/no-extraction ZIP inventory 协议及 Rust/shared adversarial vectors；产品 invocation、Desktop analyzer UI 和 Local/Docker 执行继续关闭。
+- [x] P10-B1/B2/B3：完成惰性 analyzer descriptor Registry、memory-only/no-extraction ZIP inventory 协议及 Rust/shared adversarial vectors；未增加 Desktop analyzer UI、产品 invocation 或 Local/Docker 执行。secure Desktop 与可复现双构建通过，GUI SHA-256 `871c6270de44f3d6aecd31064127cdbfb400c5d6e6936e44698bcc30b0c611db`，`release_ready=false`；边界见 ADR 0063。
+- [ ] P10-C1/C2/C3：只增加无启动 invocation candidate、Disabled/Fake Transport 和失败向量；Desktop surface 与真实 analyzer process 继续关闭。
 - [ ] 所有状态 mutation 使用独立 control capability、Origin/Host 校验、稳定 operation key 和 typed errors；显式 Provider 诊断每次只允许一次有界无正文请求。CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。
 
