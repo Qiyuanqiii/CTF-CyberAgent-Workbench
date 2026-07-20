@@ -42,7 +42,7 @@ type VerificationAssociationStore interface {
 type VerificationCoverageDetailStore interface {
 	VerificationCoverageStore
 	GetVerificationPlan(context.Context, string) (verification.Plan, error)
-	ListVerificationPlanItemEvidenceAssociations(context.Context, string, string, int, int) (
+	ListVerificationPlanItemEvidenceAssociations(context.Context, string, string, int, int, int) (
 		[]verification.PlanEvidenceAssociation, error)
 }
 
@@ -155,12 +155,20 @@ func NewVerificationCoverageDetailService(
 func (s *VerificationCoverageDetailService) Detail(ctx context.Context, runID string,
 	planID string, ordinal int,
 ) (VerificationPlanItemCoverageDetail, error) {
+	return s.DetailPage(ctx, runID, planID, ordinal, verification.MaxCoverageAssociations, 0)
+}
+
+func (s *VerificationCoverageDetailService) DetailPage(ctx context.Context, runID string,
+	planID string, ordinal int, limit int, offset int,
+) (VerificationPlanItemCoverageDetail, error) {
 	if s == nil || s.store == nil {
 		return VerificationPlanItemCoverageDetail{}, apperror.New(
 			apperror.CodeFailedPrecondition, "verification coverage detail store is required")
 	}
 	if planID != strings.TrimSpace(planID) || !domain.ValidAgentID(planID) ||
-		ordinal < 1 || ordinal > verification.MaxPlanItems {
+		ordinal < 1 || ordinal > verification.MaxPlanItems || limit < 1 ||
+		limit > verification.MaxCoverageAssociations || offset < 0 ||
+		offset > verification.MaxCoveragePageOffset {
 		return VerificationPlanItemCoverageDetail{}, apperror.New(
 			apperror.CodeInvalidArgument, "verification coverage detail binding is invalid")
 	}
@@ -219,19 +227,25 @@ func (s *VerificationCoverageDetailService) Detail(ctx context.Context, runID st
 		result.LatestAssociationEventSequence = count.LatestAssociationEventSequence
 	}
 	associations, err := s.store.ListVerificationPlanItemEvidenceAssociations(ctx, run.ID,
-		plan.ID, ordinal, verification.MaxCoverageAssociations+1)
+		plan.ID, ordinal, limit+1, offset)
 	if err != nil {
 		return VerificationPlanItemCoverageDetail{}, apperror.Normalize(err)
 	}
-	result.AssociationsTruncated = len(associations) > verification.MaxCoverageAssociations
+	result.AssociationsTruncated = len(associations) > limit
 	if result.AssociationsTruncated {
-		associations = associations[:verification.MaxCoverageAssociations]
+		associations = associations[:limit]
 	}
-	if (!countFound && len(associations) != 0) ||
-		(countFound && result.AssociatedEvidenceCount <= verification.MaxCoverageAssociations &&
-			len(associations) != result.AssociatedEvidenceCount) ||
-		(countFound && result.AssociatedEvidenceCount > verification.MaxCoverageAssociations &&
-			!result.AssociationsTruncated) {
+	expectedReturned := 0
+	expectedMore := false
+	if countFound && offset < result.AssociatedEvidenceCount {
+		expectedReturned = result.AssociatedEvidenceCount - offset
+		if expectedReturned > limit {
+			expectedReturned = limit
+			expectedMore = true
+		}
+	}
+	if (!countFound && len(associations) != 0) || len(associations) != expectedReturned ||
+		result.AssociationsTruncated != expectedMore {
 		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
 			"verification coverage detail association count is inconsistent")
 	}
@@ -245,6 +259,7 @@ func (s *VerificationCoverageDetailService) Detail(ctx context.Context, runID st
 			association.SessionID != linkedSession.ID || association.WorkspaceID != mission.WorkspaceID ||
 			association.PlanID != plan.ID || association.PlanItemOrdinal != ordinal ||
 			association.PlanItemSHA256 != item.ItemSHA256 ||
+			association.EventSequence > result.LatestAssociationEventSequence ||
 			(index > 0 && association.EventSequence >= previousSequence) {
 			return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
 				"verification coverage detail association is invalid")
@@ -276,14 +291,14 @@ func (s *VerificationCoverageDetailService) Detail(ctx context.Context, runID st
 			AssociationSequence:   association.EventSequence, CreatedAt: association.CreatedAt,
 		}
 	}
-	if countFound && len(associations) > 0 &&
+	if countFound && offset == 0 && len(associations) > 0 &&
 		associations[0].EventSequence != result.LatestAssociationEventSequence {
 		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
 			"verification coverage detail latest sequence is inconsistent")
 	}
 	if returnedPass > result.PassCount || returnedFail > result.FailCount ||
 		returnedUnknown > result.UnknownCount ||
-		(!result.AssociationsTruncated && (returnedPass != result.PassCount ||
+		(offset == 0 && !result.AssociationsTruncated && (returnedPass != result.PassCount ||
 			returnedFail != result.FailCount || returnedUnknown != result.UnknownCount)) {
 		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
 			"verification coverage detail outcomes are inconsistent")

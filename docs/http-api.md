@@ -15,7 +15,7 @@ $env:CYBERAGENT_API_TOKEN = "<a-random-token-of-at-least-32-bytes>"
 $env:CYBERAGENT_API_CONTROL_TOKEN = "<a-different-random-token-of-at-least-32-bytes>"
 go run ./cmd/cyberagent api serve --listen 127.0.0.1:8765 --ui-dir web/dist
 
-# Optional independent controls completed through D1-G2/V1/F2.
+# Representative optional independent controls in the current v82 API surface.
 go run ./cmd/cyberagent api serve --listen 127.0.0.1:8765 --ui-dir web/dist --enable-file-edit-proposals --enable-provider-credentials --enable-wake-worker
 ```
 
@@ -52,9 +52,9 @@ route still requires the control token and its corresponding Go gate independent
 
 ### Windows Desktop 进程内传输 / Windows Desktop In-Process Transport
 
-Desktop 至 D1-G2/V1/F2 复用同一 `api.v1` Handler，但不调用 `ListenAndServe`，也不绑定回环端口。Wails AssetServer 在同一进程内把 React 请求交给 Go；适配层只接受精确 `http://wails.localhost`。默认只生成内存 read token；十九个独立 flag 开放各自窄 route 或 process-start worker。Repository state/Diff、change-set、Journey 与 Handoff 不增加 flag 或 control route；verification evidence 使用自己的默认关闭 flag。任一 control capability 会生成同一个不同于 read token 的内存 control token，未启用 route 仍返回 404。两个 token 都不写磁盘、日志、Local Storage 或注册表。
+Desktop 至 D1-G7/V6 复用同一 `api.v1` Handler，但不调用 `ListenAndServe`，也不绑定回环端口。Wails AssetServer 在同一进程内把 React 请求交给 Go；适配层只接受精确 `http://wails.localhost`。默认只生成内存 read token；十九个独立 flag 开放各自窄 route 或进程生命周期内的 wake worker。Repository state/Diff、history、change-set、Journey、Handoff 与验证分页不增加 flag 或 control route；verification evidence 使用自己的默认关闭 flag。任一 control capability 会生成同一个不同于 read token 的内存 control token，未启用 route 仍返回 404。两个 token 都不写磁盘、日志、Local Storage 或注册表。
 
-Desktop through D1-G2/V1/F2 reuses the same `api.v1` Handler without calling `ListenAndServe` or binding a loopback port. The Wails AssetServer passes React requests to Go in process, and a narrow adapter accepts only exact `http://wails.localhost`. Nineteen independent flags expose narrow routes or the process-start worker. Repository state/Diff, change-set, Journey, and Handoff add no flag or control route; verification evidence has its own default-off flag. Any control capability creates one in-memory control token distinct from the read token, while disabled routes remain 404; neither token is written to disk, logs, browser storage, or the registry.
+Desktop through D1-G7/V6 reuses the same `api.v1` Handler without calling `ListenAndServe` or binding a loopback port. The Wails AssetServer passes React requests to Go in process, and a narrow adapter accepts only exact `http://wails.localhost`. Nineteen independent flags expose narrow routes or the process-lifetime wake worker. Repository state/Diff/history, change-set, Journey, Handoff, and verification pagination add no flag or control route; verification evidence has its own default-off flag. Any control capability creates one in-memory control token distinct from the read token, while disabled routes remain 404; neither token is written to disk, logs, browser storage, or the registry.
 
 普通浏览器继续使用 `/events/stream` SSE。Wails v2 在 Windows 上不支持 AssetServer response streaming，因此 Desktop 使用 `GET /runs/{run_id}/events/poll` 做一秒有界轮询。该 endpoint 与 SSE 共用同一个绑定 Run 与 sequence 的高水位 cursor，单次最多返回 100 帧并明确给出 `has_more`；poll cursor 可续接 SSE，SSE cursor 也可续接 poll。Renderer 最多在模块内存保存 16 个 Run、每个 500 帧，重挂载继续最后 cursor，失效 cursor 每次挂载最多回退一次；不写 Local/Session Storage，也不再生成伪 cursor。它不会建立新的事件真源。原生 Wails bridge 不是通用业务 API 旁路：前三项只提供 connection bootstrap 和路径隔离 Skill 选择/预览，第四项只消费 Go 发放的一次性确认句柄并调用惰性 Registry。
 
@@ -480,12 +480,20 @@ flags. It returns no raw blob, patch, identity/body, remote/root, rename inferen
 authority, and performs no checkout, ref mutation, process, network, or hook action.
 
 `GET /api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}` returns
-`operator_verification_plan_item_coverage.v1` for one exact Run, immutable plan, and
-1-based item ordinal. It returns the item digest/counts and at most 100 exact
-association records in descending evidence-event order. Associations contain only
-opaque evidence/association IDs, explicit pass/fail/unknown outcome, event sequence,
-and time. Private plan/evidence bodies, operator identity, aggregate verdicts,
-mutation, command/model execution, approval, and authority remain absent.
+one page of `operator_verification_plan_item_coverage.v1` for one exact Run, immutable
+plan, and 1-based item ordinal. It accepts only shared `limit` and opaque `cursor`
+parameters. Each page returns the immutable item digest/aggregate counts and up to the
+requested number of exact association records in descending association-event order.
+The cursor is bound to the exact route, and the starting offset is capped at 100,000.
+Duplicate/blank/unknown query parameters and cross-item cursor reuse fail closed.
+
+Associations contain only opaque evidence/association IDs, explicit pass/fail/unknown
+outcome, evidence/association event sequences, and time. Private plan/evidence bodies,
+operator identity, aggregate verdicts, mutation, command/model execution, approval,
+and authority remain absent. This is a bounded live projection rather than a snapshot;
+clients should compare the repeated aggregate/latest-event facts across pages and
+restart from page one when they change. The React client performs that check and loads
+25 older references only after an explicit operator action.
 
 ## Envelopes
 

@@ -10,6 +10,7 @@ const (
 	PlanCoverageProtocolVersion            = "operator_verification_plan_coverage.v1"
 	PlanItemCoverageProtocolVersion        = "operator_verification_plan_item_coverage.v1"
 	MaxCoverageAssociations                = 100
+	MaxCoveragePageOffset                  = 100_000
 	MaxSafeCoverageCount                   = 1_000_000_000
 )
 

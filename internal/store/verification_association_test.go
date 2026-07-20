@@ -119,7 +119,7 @@ func TestVerificationAssociationIsCausalImmutableAndCoverageDoesNotInferResult(t
 		t.Fatalf("coverage inferred or widened explicit facts: %#v", coverage)
 	}
 	itemAssociations, err := state.ListVerificationPlanItemEvidenceAssociations(ctx, run.ID,
-		planResult.Plan.ID, 1, verification.MaxCoverageAssociations+1)
+		planResult.Plan.ID, 1, verification.MaxCoverageAssociations+1, 0)
 	if err != nil || len(itemAssociations) != 2 ||
 		itemAssociations[0].EventSequence <= itemAssociations[1].EventSequence ||
 		itemAssociations[0].PlanItemOrdinal != 1 || itemAssociations[1].PlanItemOrdinal != 1 {
@@ -127,10 +127,15 @@ func TestVerificationAssociationIsCausalImmutableAndCoverageDoesNotInferResult(t
 			itemAssociations, err)
 	}
 	emptyItemAssociations, err := state.ListVerificationPlanItemEvidenceAssociations(ctx,
-		run.ID, planResult.Plan.ID, 2, verification.MaxCoverageAssociations+1)
+		run.ID, planResult.Plan.ID, 2, verification.MaxCoverageAssociations+1, 0)
 	if err != nil || len(emptyItemAssociations) != 0 {
 		t.Fatalf("exact item association projection escaped ordinal: %#v err=%v",
 			emptyItemAssociations, err)
+	}
+	secondPage, err := state.ListVerificationPlanItemEvidenceAssociations(ctx, run.ID,
+		planResult.Plan.ID, 1, 1, 1)
+	if err != nil || len(secondPage) != 1 || secondPage[0].ID != itemAssociations[1].ID {
+		t.Fatalf("exact item association offset diverged: %#v err=%v", secondPage, err)
 	}
 	handoff, err := application.NewCodeHandoffService(state).Build(ctx, run.ID)
 	if err != nil {

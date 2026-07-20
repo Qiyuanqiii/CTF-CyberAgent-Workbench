@@ -40,32 +40,35 @@ func (b *simulationBackend) Start(ctx context.Context, _ Request) (Process, erro
 }
 
 type simulationProcess struct {
-	mu              sync.Mutex
-	done            chan struct{}
-	doneOnce        sync.Once
-	running         bool
-	descendants     int
-	reaped          bool
-	exitCode        int
-	exitOnTerminate bool
-	exitOnKill      bool
-	terminateErr    error
-	killErr         error
-	terminateCount  int
-	killCount       int
-	waitCount       int
-	inspectCount    int
-	identity        string
-	stdoutEvidence  OutputEvidence
-	stderrEvidence  OutputEvidence
-	evidenceErr     error
+	mu                 sync.Mutex
+	done               chan struct{}
+	doneOnce           sync.Once
+	running            bool
+	descendants        int
+	reaped             bool
+	exitCode           int
+	exitOnTerminate    bool
+	exitOnKill         bool
+	terminateErr       error
+	killErr            error
+	terminateCount     int
+	killCount          int
+	waitCount          int
+	inspectCount       int
+	identity           string
+	stdoutEvidence     OutputEvidence
+	stderrEvidence     OutputEvidence
+	evidenceErr        error
+	runtimeEvidence    RuntimeEvidence
+	runtimeEvidenceErr error
 }
 
 func newSimulationProcess() *simulationProcess {
 	return &simulationProcess{done: make(chan struct{}), running: true,
 		exitOnKill: true, exitCode: 137,
-		stdoutEvidence: testOutputEvidence(nil, 0),
-		stderrEvidence: testOutputEvidence(nil, 0)}
+		stdoutEvidence:  testOutputEvidence(nil, 0),
+		stderrEvidence:  testOutputEvidence(nil, 0),
+		runtimeEvidence: testRuntimeEvidence()}
 }
 
 func (p *simulationProcess) Identity() string {
@@ -103,6 +106,21 @@ func (p *simulationProcess) ExitEvidence(ctx context.Context) (ExitEvidence, err
 		return ExitEvidence{}, p.evidenceErr
 	}
 	return testExitEvidence(p.exitCode, p.reaped, p.stdoutEvidence, p.stderrEvidence), nil
+}
+
+func (p *simulationProcess) RuntimeEvidence(ctx context.Context) (RuntimeEvidence, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return RuntimeEvidence{}, err
+	}
+	if p.running || !p.reaped {
+		return RuntimeEvidence{}, errors.New("simulated process tree is not reaped")
+	}
+	if p.runtimeEvidenceErr != nil {
+		return RuntimeEvidence{}, p.runtimeEvidenceErr
+	}
+	return p.runtimeEvidence, nil
 }
 
 func (p *simulationProcess) TerminateTree(ctx context.Context) error {
@@ -179,6 +197,16 @@ func testExitEvidence(exitCode int, reaped bool, stdout OutputEvidence,
 		MetadataOnly: true, RawOutputIncluded: false, ProductExecutionEnabled: false}
 }
 
+func testRuntimeEvidence() RuntimeEvidence {
+	return RuntimeEvidence{ProtocolVersion: RuntimeEvidenceProtocolVersion, TreeReaped: true,
+		Stdin: StdinEvidence{ContentSHA256: EmptyOutputSHA256, Closed: true},
+		Descriptors: DescriptorEvidence{StandardInputClosed: true,
+			StandardOutputCaptured: true, StandardErrorCaptured: true},
+		Resources: ResourceEvidence{WallTimeMilliseconds: 1}, MetadataOnly: true,
+		EnvironmentIncluded: false, DescriptorIdentityIncluded: false,
+		ProductExecutionEnabled: false}
+}
+
 func TestLifecycleHarnessNormalExitRequiresReapedTree(t *testing.T) {
 	process := newSimulationProcess()
 	process.finish(0, true)
@@ -190,9 +218,70 @@ func TestLifecycleHarnessNormalExitRequiresReapedTree(t *testing.T) {
 	result, err := harness.WithWaitGraph(waitgraph.New()).Run(t.Context(), Request{ID: "normal-exit"})
 	if err != nil || !result.Started || result.StopReason != StopExited || result.ExitCode != 0 ||
 		!result.TreeReaped || result.TerminateRequested || result.KillRequested ||
-		!result.ExitEvidenceAvailable || result.RawOutputIncluded ||
+		!result.ExitEvidenceAvailable || !result.RuntimeEvidenceAvailable ||
+		result.RawOutputIncluded ||
 		result.ProductExecutionEnabled {
 		t.Fatalf("normal lifecycle result=%#v err=%v", result, err)
+	}
+}
+
+func TestLifecycleHarnessRejectsRuntimeEvidenceThatWidensMetadataBoundary(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*RuntimeEvidence)
+	}{
+		{name: "inherited descriptor", mutate: func(e *RuntimeEvidence) {
+			e.Descriptors.InheritedDescriptorCount = 1
+		}},
+		{name: "raw stdin", mutate: func(e *RuntimeEvidence) {
+			e.Stdin.RawInputIncluded = true
+		}},
+		{name: "negative resource", mutate: func(e *RuntimeEvidence) {
+			e.Resources.WallTimeMilliseconds = -1
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			process := newSimulationProcess()
+			test.mutate(&process.runtimeEvidence)
+			process.finish(0, true)
+			harness, err := NewHarness(&simulationBackend{process: process, nonProductOnly: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := harness.WithWaitGraph(waitgraph.New()).Run(t.Context(),
+				Request{ID: "invalid-runtime-evidence"})
+			if !errors.Is(err, ErrRuntimeEvidence) || result.StopReason != StopEvidenceFailed ||
+				!result.TreeReaped || result.ExitEvidenceAvailable ||
+				result.RuntimeEvidenceAvailable || result.ProductExecutionEnabled {
+				t.Fatalf("invalid runtime evidence result=%#v err=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestLifecycleHarnessRequiresStableRepeatedEvidence(t *testing.T) {
+	process := newSimulationProcess()
+	process.finish(0, true)
+	harness, err := NewHarness(&simulationBackend{process: process, nonProductOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := Result{}
+	status := ExitStatus{Exited: true, ExitCode: 0, Reaped: true}
+	if err := harness.collectEvidence(t.Context(), process, status, time.Second, &result); err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.collectEvidence(t.Context(), process, status, time.Second, &result); err != nil {
+		t.Fatalf("stable repeated evidence: %v", err)
+	}
+	original := result.RuntimeEvidence
+	process.mu.Lock()
+	process.runtimeEvidence.Resources.WallTimeMilliseconds++
+	process.mu.Unlock()
+	if err := harness.collectEvidence(t.Context(), process, status, time.Second, &result); !errors.Is(err, ErrRuntimeEvidence) || result.StopReason != StopEvidenceFailed ||
+		result.RuntimeEvidence != original {
+		t.Fatalf("changed repeated evidence result=%#v err=%v", result, err)
 	}
 }
 

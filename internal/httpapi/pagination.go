@@ -143,14 +143,18 @@ func trimPage[T any](items []T, request pageRequest) ([]T, *Page) {
 	if hasMore {
 		items = items[:request.Limit]
 	}
+	return items, pageFromMore(request, len(items), hasMore)
+}
+
+func pageFromMore(request pageRequest, returned int, hasMore bool) *Page {
 	page := &Page{Limit: request.Limit}
 	if hasMore {
-		nextOffset := request.Offset + request.Limit
+		nextOffset := request.Offset + returned
 		if nextOffset <= maxStoreCursorOffset {
 			page.NextCursor = encodeCursor(request.Scope, nextOffset)
 		} else {
 			page.Truncated = true
 		}
 	}
-	return items, page
+	return page
 }

@@ -141,7 +141,31 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
               <code>{entry.hash}</code><span>{entry.subject}</span>
               <time dateTime={entry.committed_at}>{formatDate(entry.committed_at)}</time>
               <span>{entry.previous_kind || "none"} to {entry.current_kind || "none"}</span>
-              {entry.redacted && <StatusBadge status="redacted" />}</div>)}</div>}
+              <span className="repository-file-history-flags">
+                {entry.redacted && <StatusBadge status="redacted" />}
+              </span>
+              <span className="repository-file-history-actions">
+                <button aria-label={`Open commit ${entry.hash} from history for ${fileHistoryQuery.data.path}`}
+                  aria-pressed={selectedObjectID === entry.object_id} className="icon-button"
+                  onClick={() => {
+                    setSelection({ workspaceID, objectID: entry.object_id });
+                    setFileSelection({ workspaceID: "", objectID: "", path: "" });
+                  }} title="Open exact commit" type="button">
+                  <FileDiff aria-hidden="true" size={14} />
+                </button>
+                {["regular", "executable"].includes(entry.current_kind) ?
+                  <button aria-label={`Preview ${fileHistoryQuery.data.path} at history commit ${entry.hash}`}
+                    aria-pressed={selectedObjectID === entry.object_id &&
+                      selectedFilePath === fileHistoryQuery.data.path} className="icon-button"
+                    onClick={() => {
+                      setSelection({ workspaceID, objectID: entry.object_id });
+                      setFileSelection({ workspaceID, objectID: entry.object_id,
+                        path: fileHistoryQuery.data.path });
+                    }} title="Preview redacted file at exact commit" type="button">
+                    <FileCode2 aria-hidden="true" size={14} />
+                  </button> : <span aria-hidden="true" className="repository-preview-placeholder" />}
+              </span>
+            </div>)}</div>}
       </>}
     </section>}
   </section>;

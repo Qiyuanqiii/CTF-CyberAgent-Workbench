@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
@@ -46,11 +46,12 @@ describe("RepositoryHistoryPanel", () => {
       checkout_performed: false, reference_updated: false, process_started: false,
       network_used: false, hooks_executed: false,
     });
+    const historyObjectID = "1234567890abcdef1234567890abcdef12345678";
     const repositoryFileHistory = vi.fn().mockResolvedValue({
       protocol_version: "repository_file_history.v1", workspace_id: "workspace-1",
       kind: "git", available: true, head: "abcdef123456", path: "internal/example.go",
-      entries: [{ object_id: "abcdef1234567890abcdef1234567890abcdef12",
-        hash: "abcdef123456", subject: "file changed", committed_at: "2026-07-19T01:00:00Z",
+      entries: [{ object_id: historyObjectID,
+        hash: "1234567890ab", subject: "file changed", committed_at: "2026-07-18T01:00:00Z",
         change: "modified", previous_kind: "regular", current_kind: "regular",
         content_changed: true, mode_changed: false, redacted: false, subject_bounded: false }],
       scanned_commit_count: 1, returned_entry_count: 1, redaction_count: 0,
@@ -86,11 +87,22 @@ describe("RepositoryHistoryPanel", () => {
     expect(await screen.findByText("file changed")).toBeInTheDocument();
     expect(repositoryFileHistory).toHaveBeenCalledWith("workspace-1", "internal/example.go",
       expect.any(AbortSignal));
+    await user.click(screen.getByRole("button", {
+      name: "Open commit 1234567890ab from history for internal/example.go",
+    }));
+    await waitFor(() => expect(repositoryCommit).toHaveBeenCalledWith("workspace-1",
+      historyObjectID, expect.any(AbortSignal)));
+    await user.click(screen.getByRole("button", {
+      name: "Preview internal/example.go at history commit 1234567890ab",
+    }));
+    await waitFor(() => expect(repositoryCommitFilePreview).toHaveBeenCalledWith("workspace-1",
+      historyObjectID, "internal/example.go", expect.any(AbortSignal)));
     rerender(<QueryClientProvider client={queryClient}>
       <RepositoryHistoryPanel client={client} workspaceID="workspace-2" />
     </QueryClientProvider>);
     expect(screen.queryByRole("region", { name: "Exact commit metadata" })).not.toBeInTheDocument();
-    expect(repositoryCommit).toHaveBeenCalledTimes(1);
+    expect(repositoryCommit).toHaveBeenCalledTimes(2);
+    expect(repositoryCommitFilePreview).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("region", { name: "Exact file history" })).not.toBeInTheDocument();
   });
 });

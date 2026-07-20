@@ -683,3 +683,32 @@ React uses the two read-only Code projections through strict Go/OpenAPI contract
 R3 has no product process starter and is unreachable from CLI, HTTP, Desktop, Agent,
 Sandbox profiles, approvals, LocalRunner, or Docker. ADR 0054 records the complete
 limits and verification evidence.
+
+## History Navigation, Verification Pagination, And Runtime Evidence
+
+`repository_file_history.v1` rows are now addressable navigation facts. React may send
+an already projected Workspace/object/path tuple back through the existing exact-commit
+detail and redacted-preview contracts. It does not construct a new Git reader. Preview
+remains limited to regular/executable content; deleted, symlink, and submodule history
+rows are metadata-only.
+
+`operator_verification_plan_item_coverage.v1` now uses the shared strict pagination
+envelope. The Store reads immutable association event/ID order with a one-row lookahead;
+the application layer independently compares aggregate counts and exact requested
+offset/limit; HTTP binds an opaque cursor to the exact route; TypeScript validates each
+page and React validates aggregate identity, latest-event high-water, uniqueness, and
+strict ordering across pages. The 100,000-row starting-offset cap prevents unbounded
+scans. Pagination is a live projection, not a snapshot, so detected drift fails visibly
+and requires a first-page refresh.
+
+`runner_runtime_evidence.v1` is a second internal post-reap protocol beside
+`runner_exit_evidence.v1`. It carries only bounded stdin count/digest, closed and
+non-inherited stdio descriptor facts, and bounded wall/parent-CPU/optional peak-resident
+metadata. Raw input, environment values or names, descriptor identities or paths,
+network telemetry, and product authority are structurally rejected. Exit and runtime
+evidence use separate bounded collection contexts but are assigned atomically after
+both validate; repeated collection must remain byte-for-byte stable.
+
+The only concrete OS lifecycle implementations remain in `_test.go` and run the current
+Go test binary. R4 adds no CLI, HTTP, Desktop, Agent, Sandbox, approval, profile,
+LocalRunner, Docker, or product process-start dependency. ADR 0055 records these bounds.

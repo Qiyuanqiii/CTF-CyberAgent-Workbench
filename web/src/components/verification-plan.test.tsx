@@ -95,7 +95,7 @@ describe("VerificationPlan", () => {
           pass_count: 1, fail_count: 1, unknown_count: 0,
           latest_association_event_sequence: 8 }] }],
     });
-    const verificationPlanItemCoverage = vi.fn().mockResolvedValue({
+    const coverageDetail = {
       protocol_version: "operator_verification_plan_item_coverage.v1", run_id: "run-1",
       session_id: "session-1", workspace_id: "workspace-1", plan_id: "plan-1",
       plan_sha256: "a".repeat(64), plan_item_ordinal: 1, plan_item_sha256: "b".repeat(64),
@@ -104,19 +104,24 @@ describe("VerificationPlan", () => {
       associations: [{ id: "association-1", plan_id: "plan-1", plan_item_ordinal: 1,
         plan_item_sha256: "b".repeat(64), evidence_id: "verification-1",
         evidence_outcome: "pass", evidence_event_sequence: 7,
-        association_event_sequence: 8, associated_at: "2026-07-20T01:10:00Z" },
-      { id: "association-2", plan_id: "plan-1", plan_item_ordinal: 1,
-        plan_item_sha256: "b".repeat(64), evidence_id: "verification-2",
-        evidence_outcome: "fail", evidence_event_sequence: 5,
-        association_event_sequence: 6, associated_at: "2026-07-20T01:05:00Z" }],
-      associations_truncated: false, metadata_only: true, read_only: true,
+        association_event_sequence: 8, associated_at: "2026-07-20T01:10:00Z" }],
+      associations_truncated: true, metadata_only: true, read_only: true,
       private_plan_body_included: false, private_evidence_bodies_included: false,
       operator_identity_included: false, result_inferred: false, command_executed: false,
       model_assertion: false, record_rewritten: false, approval: false,
       authority_granted: false,
-    });
+    };
+    const verificationPlanItemCoveragePage = vi.fn()
+      .mockResolvedValueOnce({ detail: coverageDetail,
+        page: { limit: 25, next_cursor: "older-evidence" }, requestID: "request-1" })
+      .mockResolvedValueOnce({ detail: { ...coverageDetail,
+        associations: [{ id: "association-2", plan_id: "plan-1", plan_item_ordinal: 1,
+          plan_item_sha256: "b".repeat(64), evidence_id: "verification-2",
+          evidence_outcome: "fail", evidence_event_sequence: 5,
+          association_event_sequence: 6, associated_at: "2026-07-20T01:05:00Z" }],
+        associations_truncated: false }, page: { limit: 25 }, requestID: "request-2" });
     const client = { hasVerificationEvidence: true, verificationPlans,
-      verificationPlanCoverage, verificationPlanItemCoverage,
+      verificationPlanCoverage, verificationPlanItemCoveragePage,
       recordVerificationPlan: vi.fn() } as unknown as CyberAgentClient;
     const user = userEvent.setup();
     render(<QueryClientProvider client={new QueryClient()}>
@@ -126,9 +131,15 @@ describe("VerificationPlan", () => {
     expect(screen.getByText("1 fail")).toBeInTheDocument();
     expect(screen.queryByText("overall pass", { exact: false })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Inspect evidence for check 1" }));
-    await waitFor(() => expect(verificationPlanItemCoverage)
-      .toHaveBeenCalledWith("run-1", "plan-1", 1, expect.any(AbortSignal)));
+    await waitFor(() => expect(verificationPlanItemCoveragePage)
+      .toHaveBeenCalledWith("run-1", "plan-1", 1, "", 25, expect.any(AbortSignal)));
     expect(await screen.findByText("verification-1")).toBeInTheDocument();
     expect(screen.getByText("events 7 / 8")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Load older evidence" }));
+    await waitFor(() => expect(verificationPlanItemCoveragePage)
+      .toHaveBeenCalledWith("run-1", "plan-1", 1, "older-evidence", 25,
+        expect.any(AbortSignal)));
+    expect(await screen.findByText("verification-2")).toBeInTheDocument();
+    expect(screen.getByText("2 of 2")).toBeInTheDocument();
   });
 });

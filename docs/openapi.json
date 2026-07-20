@@ -5397,7 +5397,7 @@
       "get": {
         "operationId": "getRunVerificationPlanItemCoverage",
         "summary": "Inspect evidence associations for one verification plan item",
-        "description": "Returns exact metadata-only evidence references and explicit pass, fail, and unknown counts for one immutable plan item. Private plan guidance, evidence bodies, operator identity, aggregate result inference, mutation, approval, commands, models, and authority are excluded.",
+        "description": "Returns one opaque, route-scoped page of exact metadata-only evidence references plus explicit pass, fail, and unknown counts for one immutable plan item. Private plan guidance, evidence bodies, operator identity, aggregate result inference, mutation, approval, commands, models, and authority are excluded.",
         "tags": [
           "Runs"
         ],
@@ -5436,6 +5436,27 @@
               "minimum": 1,
               "type": "integer"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size from 1 to 100; defaults to 50",
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor bound to this route and exact filter set",
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -5448,6 +5469,9 @@
                   "properties": {
                     "data": {
                       "$ref": "#/components/schemas/VerificationPlanItemCoverageDetailView"
+                    },
+                    "page": {
+                      "$ref": "#/components/schemas/Page"
                     },
                     "request_id": {
                       "maxLength": 256,
@@ -5462,7 +5486,8 @@
                   "required": [
                     "version",
                     "request_id",
-                    "data"
+                    "data",
+                    "page"
                   ],
                   "type": "object"
                 }

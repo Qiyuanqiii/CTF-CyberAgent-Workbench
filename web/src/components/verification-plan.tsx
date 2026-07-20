@@ -1,14 +1,67 @@
 import { useRef, useState, type FormEvent } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, ListTree, LoaderCircle, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown, ClipboardList, ListTree, LoaderCircle, Plus, RefreshCw,
+  Trash2 } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
-import type { VerificationPlanRequestView } from "../api/types";
+import type { VerificationPlanItemCoveragePage, VerificationPlanRequestView } from "../api/types";
 import { formatDate } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
 
 type DraftItem = VerificationPlanRequestView["items"][number];
 
 const emptyItem = (): DraftItem => ({ title: "", expected_observation: "" });
+const coveragePageSize = 25;
+
+function mergeCoveragePages(pages: VerificationPlanItemCoveragePage[]) {
+  const first = pages[0]?.detail;
+  if (!first) return { detail: undefined, associations: [], error: undefined };
+  const associations: VerificationPlanItemCoveragePage["detail"]["associations"] = [];
+  const associationIDs = new Set<string>();
+  const evidenceIDs = new Set<string>();
+  let previousSequence = Number.MAX_SAFE_INTEGER;
+  let passCount = 0;
+  let failCount = 0;
+  let unknownCount = 0;
+  for (const page of pages) {
+    const detail = page.detail;
+    if (page.page.limit !== pages[0]?.page.limit || detail.run_id !== first.run_id ||
+      detail.session_id !== first.session_id || detail.workspace_id !== first.workspace_id ||
+      detail.plan_id !== first.plan_id || detail.plan_sha256 !== first.plan_sha256 ||
+      detail.plan_item_ordinal !== first.plan_item_ordinal ||
+      detail.plan_item_sha256 !== first.plan_item_sha256 ||
+      detail.associated_evidence_count !== first.associated_evidence_count ||
+      detail.pass_count !== first.pass_count || detail.fail_count !== first.fail_count ||
+      detail.unknown_count !== first.unknown_count ||
+      detail.latest_association_event_sequence !== first.latest_association_event_sequence) {
+      return { detail: first, associations: [],
+        error: new Error("Evidence pages changed while loading; refresh the verification plan") };
+    }
+    for (const association of detail.associations) {
+      if (associationIDs.has(association.id) || evidenceIDs.has(association.evidence_id) ||
+        association.association_event_sequence >= previousSequence) {
+        return { detail: first, associations: [],
+          error: new Error("Evidence pages changed while loading; refresh the verification plan") };
+      }
+      associationIDs.add(association.id);
+      evidenceIDs.add(association.evidence_id);
+      previousSequence = association.association_event_sequence;
+      if (association.evidence_outcome === "pass") passCount += 1;
+      if (association.evidence_outcome === "fail") failCount += 1;
+      if (association.evidence_outcome === "unknown") unknownCount += 1;
+      associations.push(association);
+    }
+  }
+  const finalPage = pages.at(-1)?.page;
+  if (associations.length > first.associated_evidence_count || passCount > first.pass_count ||
+    failCount > first.fail_count || unknownCount > first.unknown_count ||
+    (!finalPage?.next_cursor && !finalPage?.truncated &&
+      (associations.length !== first.associated_evidence_count || passCount !== first.pass_count ||
+        failCount !== first.fail_count || unknownCount !== first.unknown_count))) {
+    return { detail: first, associations: [],
+      error: new Error("Evidence pages changed while loading; refresh the verification plan") };
+  }
+  return { detail: first, associations, error: undefined };
+}
 
 export function VerificationPlan({ client, runID }: {
   client: CyberAgentClient;
@@ -33,16 +86,19 @@ export function VerificationPlan({ client, runID }: {
     queryFn: ({ signal }) => client.verificationPlanCoverage(runID, signal),
     enabled: Boolean(runID),
   });
-  const coverageDetailQuery = useQuery({
+  const coverageDetailQuery = useInfiniteQuery({
     queryKey: ["run", runID, "verification-plan-coverage", coverageSelection?.planID,
       coverageSelection?.ordinal],
-    queryFn: ({ signal }) => {
+    initialPageParam: "",
+    queryFn: ({ signal, pageParam }) => {
       if (!coverageSelection) throw new Error("A verification plan item is required");
-      return client.verificationPlanItemCoverage(runID, coverageSelection.planID,
-        coverageSelection.ordinal, signal);
+      return client.verificationPlanItemCoveragePage(runID, coverageSelection.planID,
+        coverageSelection.ordinal, pageParam, coveragePageSize, signal);
     },
+    getNextPageParam: (lastPage) => lastPage.page.next_cursor || undefined,
     enabled: Boolean(runID && coverageSelection),
   });
+  const mergedCoverage = mergeCoveragePages(coverageDetailQuery.data?.pages ?? []);
   const record = useMutation({
     mutationFn: (body: VerificationPlanRequestView) => {
       if (!operationKey.current) {
@@ -161,19 +217,30 @@ export function VerificationPlan({ client, runID }: {
               className="verification-coverage-detail">
               {coverageDetailQuery.isLoading && <LoadingState label="Loading evidence references" />}
               {coverageDetailQuery.isError && <ErrorState error={coverageDetailQuery.error} />}
-              {coverageDetailQuery.data && <>
+              {mergedCoverage.error && <ErrorState error={mergedCoverage.error} />}
+              {mergedCoverage.detail && !mergedCoverage.error && <>
                 <header><strong>Evidence references</strong>
-                  <span>{coverageDetailQuery.data.associations.length} of {coverageDetailQuery.data.associated_evidence_count}</span>
-                  {coverageDetailQuery.data.associations_truncated && <StatusBadge status="truncated" />}
+                  <span>{mergedCoverage.associations.length} of {mergedCoverage.detail.associated_evidence_count}</span>
+                  {coverageDetailQuery.data?.pages.at(-1)?.page.truncated &&
+                    <StatusBadge status="page limit reached" />}
                 </header>
-                {coverageDetailQuery.data.associations.length === 0 ?
+                {mergedCoverage.associations.length === 0 ?
                   <span className="verification-coverage-empty">No explicit evidence associated</span> :
-                  <ul>{coverageDetailQuery.data.associations.map((association) =>
+                  <ul>{mergedCoverage.associations.map((association) =>
                     <li key={association.id}><StatusBadge status={association.evidence_outcome} />
                       <code title={association.evidence_id}>{association.evidence_id}</code>
                       <span>events {association.evidence_event_sequence} / {association.association_event_sequence}</span>
                       <time dateTime={association.associated_at}>{formatDate(association.associated_at)}</time>
                     </li>)}</ul>}
+                {coverageDetailQuery.hasNextPage && <div className="verification-coverage-pagination">
+                  <button className="compact-command" disabled={coverageDetailQuery.isFetchingNextPage}
+                    onClick={() => void coverageDetailQuery.fetchNextPage()} type="button">
+                    {coverageDetailQuery.isFetchingNextPage ?
+                      <LoaderCircle aria-hidden="true" className="spin" size={14} /> :
+                      <ChevronDown aria-hidden="true" size={14} />}
+                    Load older evidence
+                  </button>
+                </div>}
               </>}
             </div>}
           </li>;

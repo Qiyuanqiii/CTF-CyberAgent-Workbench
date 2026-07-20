@@ -65,7 +65,7 @@ func (s *SQLiteStore) ListVerificationPlanEvidenceAssociations(ctx context.Conte
 }
 
 func (s *SQLiteStore) ListVerificationPlanItemEvidenceAssociations(ctx context.Context,
-	runID string, planID string, ordinal int, limit int,
+	runID string, planID string, ordinal int, limit int, offset int,
 ) ([]verification.PlanEvidenceAssociation, error) {
 	if runID != strings.TrimSpace(runID) || !domain.ValidAgentID(runID) ||
 		planID != strings.TrimSpace(planID) || !domain.ValidAgentID(planID) ||
@@ -77,9 +77,14 @@ func (s *SQLiteStore) ListVerificationPlanItemEvidenceAssociations(ctx context.C
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"verification plan item association limit is invalid")
 	}
+	if offset < 0 || offset > verification.MaxCoveragePageOffset {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"verification plan item association offset is invalid")
+	}
 	rows, err := s.db.QueryContext(ctx, verificationAssociationSelect+
 		` WHERE run_id = ? AND plan_id = ? AND plan_item_ordinal = ?
-		 ORDER BY event_sequence DESC, id DESC LIMIT ?`, runID, planID, ordinal, limit)
+		 ORDER BY event_sequence DESC, id DESC LIMIT ? OFFSET ?`, runID, planID, ordinal,
+		limit, offset)
 	if err != nil {
 		return nil, err
 	}

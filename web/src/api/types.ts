@@ -120,3 +120,9 @@ export interface PageResult<T> {
   page: Page;
   requestID: string;
 }
+
+export interface VerificationPlanItemCoveragePage {
+  detail: VerificationPlanItemCoverageDetailView;
+  page: Page;
+  requestID: string;
+}

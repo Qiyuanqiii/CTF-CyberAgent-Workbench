@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -330,6 +331,23 @@ func TestVerificationAssociationHTTPPreservesExplicitCausalityAndMetadataOnlyCov
 	if !recorded.Data.Replayed || recorded.Data.ID != value.ID {
 		t.Fatalf("association replay diverged: %#v", recorded.Data)
 	}
+	failedEvidence, err := application.NewVerificationEvidenceService(st).Record(t.Context(),
+		application.RecordVerificationEvidenceRequest{Version: verification.EvidenceProtocolVersion,
+			RunID: run.ID, Outcome: string(verification.OutcomeFail), Title: "Focused tests",
+			Summary:      "Observed a failing suite",
+			OperationKey: "http-association-evidence-operation-0002", RecordedBy: "operator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	failedAssociation, err := application.NewVerificationAssociationService(st).Record(t.Context(),
+		application.RecordVerificationAssociationRequest{
+			Version: verification.PlanEvidenceAssociationProtocolVersion, RunID: run.ID,
+			PlanID: planResult.Plan.ID, PlanItemOrdinal: 1,
+			EvidenceID:   failedEvidence.Evidence.ID,
+			OperationKey: "http-verification-association-0002", AssociatedBy: "operator"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	coveragePath := strings.ReplaceAll(VerificationCoveragePathTemplate, "{run_id}", run.ID)
 	coverage := performSessionMessageRequest(t, api, http.MethodGet, coveragePath,
@@ -346,21 +364,22 @@ func TestVerificationAssociationHTTPPreservesExplicitCausalityAndMetadataOnlyCov
 	projected := inventory.Data
 	if projected.ProtocolVersion != verification.PlanCoverageProtocolVersion ||
 		projected.PlanCount != 1 || projected.PlanItemCount != 1 ||
-		projected.ObservedPlanItemCount != 1 || projected.AssociatedEvidenceCount != 1 ||
+		projected.ObservedPlanItemCount != 1 || projected.AssociatedEvidenceCount != 2 ||
 		len(projected.Plans) != 1 || len(projected.Plans[0].Items) != 1 ||
 		projected.Plans[0].Items[0].PassCount != 1 ||
-		projected.Plans[0].Items[0].FailCount != 0 ||
-		len(projected.Associations) != 1 || !projected.MetadataOnly || !projected.ReadOnly ||
+		projected.Plans[0].Items[0].FailCount != 1 ||
+		len(projected.Associations) != 2 || !projected.MetadataOnly || !projected.ReadOnly ||
 		projected.ResultInferred || projected.CommandExecuted || projected.ModelAssertion ||
 		projected.RecordRewritten || projected.Approval || projected.AuthorityGranted ||
 		strings.Contains(coverage.Body.String(), "Release checks") ||
-		strings.Contains(coverage.Body.String(), "Observed a passing suite") {
+		strings.Contains(coverage.Body.String(), "Observed a passing suite") ||
+		strings.Contains(coverage.Body.String(), "Observed a failing suite") {
 		t.Fatalf("coverage inferred or exposed private text: %#v", projected)
 	}
 	detailPath := strings.ReplaceAll(VerificationCoverageDetailPathTemplate, "{run_id}", run.ID)
 	detailPath = strings.ReplaceAll(detailPath, "{plan_id}", planResult.Plan.ID)
 	detailPath = strings.ReplaceAll(detailPath, "{ordinal}", "1")
-	detailResponse := performSessionMessageRequest(t, api, http.MethodGet, detailPath,
+	detailResponse := performSessionMessageRequest(t, api, http.MethodGet, detailPath+"?limit=1",
 		testAccessToken, "", "", nil)
 	if detailResponse.Code != http.StatusOK {
 		t.Fatalf("coverage detail status=%d body=%s", detailResponse.Code,
@@ -368,6 +387,7 @@ func TestVerificationAssociationHTTPPreservesExplicitCausalityAndMetadataOnlyCov
 	}
 	var detailEnvelope struct {
 		Data VerificationPlanItemCoverageDetailView `json:"data"`
+		Page *Page                                  `json:"page"`
 	}
 	if err := json.Unmarshal(detailResponse.Body.Bytes(), &detailEnvelope); err != nil {
 		t.Fatal(err)
@@ -378,20 +398,47 @@ func TestVerificationAssociationHTTPPreservesExplicitCausalityAndMetadataOnlyCov
 		detail.WorkspaceID != workspace.ID || detail.PlanID != planResult.Plan.ID ||
 		detail.PlanSHA256 != planResult.Plan.PlanSHA256 || detail.PlanItemOrdinal != 1 ||
 		detail.PlanItemSHA256 != planResult.Plan.Items[0].ItemSHA256 ||
-		detail.AssociatedEvidenceCount != 1 || detail.PassCount != 1 || detail.FailCount != 0 ||
+		detail.AssociatedEvidenceCount != 2 || detail.PassCount != 1 || detail.FailCount != 1 ||
 		detail.UnknownCount != 0 || len(detail.Associations) != 1 ||
-		detail.Associations[0].EvidenceID != evidenceResult.Evidence.ID ||
-		detail.Associations[0].AssociationEventSequence != value.AssociationEventSequence ||
-		detail.AssociationsTruncated || !detail.MetadataOnly || !detail.ReadOnly ||
+		detail.Associations[0].EvidenceID != failedEvidence.Evidence.ID ||
+		detail.Associations[0].AssociationEventSequence !=
+			failedAssociation.Association.EventSequence ||
+		!detail.AssociationsTruncated || detailEnvelope.Page == nil ||
+		detailEnvelope.Page.Limit != 1 || detailEnvelope.Page.NextCursor == "" ||
+		detailEnvelope.Page.Truncated || !detail.MetadataOnly || !detail.ReadOnly ||
 		detail.PrivatePlanBodyIncluded || detail.PrivateEvidenceBodiesIncluded ||
 		detail.OperatorIdentityIncluded || detail.ResultInferred || detail.CommandExecuted ||
 		detail.ModelAssertion || detail.RecordRewritten || detail.Approval || detail.AuthorityGranted ||
 		strings.Contains(detailResponse.Body.String(), "Release checks") ||
 		strings.Contains(detailResponse.Body.String(), "Observed a passing suite") ||
+		strings.Contains(detailResponse.Body.String(), "Observed a failing suite") ||
 		strings.Contains(detailResponse.Body.String(), "associated_by") ||
 		strings.Contains(detailResponse.Body.String(), "authored_by") ||
 		strings.Contains(detailResponse.Body.String(), "recorded_by") {
 		t.Fatalf("coverage detail widened private data or authority: %#v", detail)
+	}
+	olderResponse := performSessionMessageRequest(t, api, http.MethodGet,
+		detailPath+"?limit=1&cursor="+url.QueryEscape(detailEnvelope.Page.NextCursor),
+		testAccessToken, "", "", nil)
+	if olderResponse.Code != http.StatusOK {
+		t.Fatalf("older coverage detail status=%d body=%s", olderResponse.Code,
+			olderResponse.Body.String())
+	}
+	var olderEnvelope struct {
+		Data VerificationPlanItemCoverageDetailView `json:"data"`
+		Page *Page                                  `json:"page"`
+	}
+	if err := json.Unmarshal(olderResponse.Body.Bytes(), &olderEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	if len(olderEnvelope.Data.Associations) != 1 ||
+		olderEnvelope.Data.Associations[0].EvidenceID != evidenceResult.Evidence.ID ||
+		olderEnvelope.Data.Associations[0].AssociationEventSequence != value.AssociationEventSequence ||
+		olderEnvelope.Data.AssociationsTruncated || olderEnvelope.Page == nil ||
+		olderEnvelope.Page.Limit != 1 || olderEnvelope.Page.NextCursor != "" ||
+		olderEnvelope.Page.Truncated {
+		t.Fatalf("older coverage page diverged: data=%#v page=%#v",
+			olderEnvelope.Data, olderEnvelope.Page)
 	}
 	invalidDetail := performSessionMessageRequest(t, api, http.MethodGet,
 		strings.TrimSuffix(detailPath, "1")+"0", testAccessToken, "", "", nil)
@@ -399,6 +446,14 @@ func TestVerificationAssociationHTTPPreservesExplicitCausalityAndMetadataOnlyCov
 	detailQuery := performSessionMessageRequest(t, api, http.MethodGet, detailPath+"?full=true",
 		testAccessToken, "", "", nil)
 	assertAPIError(t, detailQuery, http.StatusBadRequest, "INVALID_ARGUMENT")
+	duplicateLimit := performSessionMessageRequest(t, api, http.MethodGet,
+		detailPath+"?limit=1&limit=2", testAccessToken, "", "", nil)
+	assertAPIError(t, duplicateLimit, http.StatusBadRequest, "INVALID_ARGUMENT")
+	crossPlanPath := strings.Replace(detailPath, planResult.Plan.ID, "other-plan", 1)
+	crossPlanCursor := performSessionMessageRequest(t, api, http.MethodGet,
+		crossPlanPath+"?limit=1&cursor="+url.QueryEscape(detailEnvelope.Page.NextCursor),
+		testAccessToken, "", "", nil)
+	assertAPIError(t, crossPlanCursor, http.StatusBadRequest, "INVALID_ARGUMENT")
 	handoffPath := strings.ReplaceAll(CodeHandoffPathTemplate, "{run_id}", run.ID)
 	handoff := performSessionMessageRequest(t, api, http.MethodGet, handoffPath,
 		testAccessToken, "", "", nil)
@@ -416,10 +471,11 @@ func TestVerificationAssociationHTTPPreservesExplicitCausalityAndMetadataOnlyCov
 		handoffCoverage.PlanCount != 1 || handoffCoverage.PlanItemCount != 1 ||
 		handoffCoverage.ObservedPlanItemCount != 1 ||
 		handoffCoverage.UnobservedPlanItemCount != 0 ||
-		handoffCoverage.AssociatedEvidenceCount != 1 ||
-		handoffCoverage.ContradictoryItemCount != 0 ||
+		handoffCoverage.AssociatedEvidenceCount != 2 ||
+		handoffCoverage.ContradictoryItemCount != 1 ||
 		handoffCoverage.ReturnedItemCount != 1 || len(handoffCoverage.Items) != 1 ||
-		handoffCoverage.Items[0].PassCount != 1 || !handoffCoverage.MetadataOnly ||
+		handoffCoverage.Items[0].PassCount != 1 || handoffCoverage.Items[0].FailCount != 1 ||
+		!handoffCoverage.MetadataOnly ||
 		!handoffCoverage.ReadOnly || handoffCoverage.ResultInferred ||
 		handoffCoverage.PrivateBodiesIncluded ||
 		strings.Contains(handoff.Body.String(), "Release checks") ||

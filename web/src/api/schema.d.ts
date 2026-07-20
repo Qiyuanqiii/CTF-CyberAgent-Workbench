@@ -1049,7 +1049,7 @@ export interface paths {
         };
         /**
          * Inspect evidence associations for one verification plan item
-         * @description Returns exact metadata-only evidence references and explicit pass, fail, and unknown counts for one immutable plan item. Private plan guidance, evidence bodies, operator identity, aggregate result inference, mutation, approval, commands, models, and authority are excluded.
+         * @description Returns one opaque, route-scoped page of exact metadata-only evidence references plus explicit pass, fail, and unknown counts for one immutable plan item. Private plan guidance, evidence bodies, operator identity, aggregate result inference, mutation, approval, commands, models, and authority are excluded.
          */
         get: operations["getRunVerificationPlanItemCoverage"];
         put?: never;
@@ -6114,7 +6114,12 @@ export interface operations {
     };
     getRunVerificationPlanItemCoverage: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Page size from 1 to 100; defaults to 50 */
+                limit?: number;
+                /** @description Opaque cursor bound to this route and exact filter set */
+                cursor?: string;
+            };
             header?: never;
             path: {
                 /** @description Run identity */
@@ -6136,6 +6141,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["VerificationPlanItemCoverageDetailView"];
+                        page: components["schemas"]["Page"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";

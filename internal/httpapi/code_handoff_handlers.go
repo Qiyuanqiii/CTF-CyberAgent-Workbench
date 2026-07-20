@@ -383,7 +383,12 @@ func (a *API) runVerificationPlanCoverage(request *http.Request,
 func (a *API) runVerificationPlanItemCoverage(request *http.Request, runID string,
 	planID string, ordinalText string,
 ) (any, *Page, error) {
-	if err := rejectQuery(request.URL.Query()); err != nil {
+	values := request.URL.Query()
+	if err := validateSingleQueryValues(values, "limit", "cursor"); err != nil {
+		return nil, nil, err
+	}
+	pageRequest, err := parsePage(values, request.URL.Path)
+	if err != nil {
 		return nil, nil, err
 	}
 	ordinal, err := strconv.Atoi(ordinalText)
@@ -391,8 +396,8 @@ func (a *API) runVerificationPlanItemCoverage(request *http.Request, runID strin
 		return nil, nil, apperror.New(apperror.CodeInvalidArgument,
 			"verification coverage item ordinal is invalid")
 	}
-	detail, err := application.NewVerificationCoverageDetailService(a.store).Detail(
-		request.Context(), runID, planID, ordinal)
+	detail, err := application.NewVerificationCoverageDetailService(a.store).DetailPage(
+		request.Context(), runID, planID, ordinal, pageRequest.Limit, pageRequest.Offset)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -425,7 +430,7 @@ func (a *API) runVerificationPlanItemCoverage(request *http.Request, runID strin
 		ResultInferred:                detail.ResultInferred, CommandExecuted: detail.CommandExecuted,
 		ModelAssertion: detail.ModelAssertion, RecordRewritten: detail.RecordRewritten,
 		Approval: detail.Approval, AuthorityGranted: detail.AuthorityGranted,
-	}, nil, nil
+	}, pageFromMore(pageRequest, len(detail.Associations), detail.AssociationsTruncated), nil
 }
 
 func (a *API) runCodeHandoff(request *http.Request, runID string) (any, *Page, error) {

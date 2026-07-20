@@ -97,6 +97,7 @@ func (b *conformanceBackend) Start(ctx context.Context, request Request) (Proces
 	command.Stdin = nil
 	stdout := &conformanceOutputCollector{}
 	stderr := &conformanceOutputCollector{}
+	startedAt := time.Now()
 	command.Stdout = stdout
 	command.Stderr = stderr
 	controller, err := startPlatformConformanceTree(ctx, command, directory)
@@ -106,7 +107,7 @@ func (b *conformanceBackend) Start(ctx context.Context, request Request) (Proces
 	process := &conformanceProcess{
 		identity: request.ID + "-process-tree", command: command, controller: controller,
 		stopMarker: filepath.Join(directory, "stop"), ignoreTerminate: b.ignoreTerminate,
-		stdout: stdout, stderr: stderr, done: make(chan struct{}),
+		stdout: stdout, stderr: stderr, done: make(chan struct{}), startedAt: startedAt,
 	}
 	go process.reap()
 	b.testing.Cleanup(process.forceCleanup)
@@ -124,9 +125,11 @@ type conformanceProcess struct {
 	done            chan struct{}
 	closeOnce       sync.Once
 
-	mu       sync.Mutex
-	exitCode int
-	waitErr  error
+	mu          sync.Mutex
+	exitCode    int
+	waitErr     error
+	startedAt   time.Time
+	completedAt time.Time
 }
 
 func (p *conformanceProcess) Identity() string { return p.identity }
@@ -134,6 +137,7 @@ func (p *conformanceProcess) Identity() string { return p.identity }
 func (p *conformanceProcess) reap() {
 	err := p.command.Wait()
 	p.mu.Lock()
+	p.completedAt = time.Now()
 	if p.command.ProcessState != nil && p.command.ProcessState.Exited() {
 		p.exitCode = p.command.ProcessState.ExitCode()
 	} else {
@@ -141,6 +145,39 @@ func (p *conformanceProcess) reap() {
 	}
 	p.mu.Unlock()
 	close(p.done)
+}
+
+func (p *conformanceProcess) RuntimeEvidence(ctx context.Context) (RuntimeEvidence, error) {
+	select {
+	case <-p.done:
+	case <-ctx.Done():
+		return RuntimeEvidence{}, ctx.Err()
+	}
+	p.mu.Lock()
+	waitErr := p.waitErr
+	startedAt, completedAt := p.startedAt, p.completedAt
+	processState := p.command.ProcessState
+	p.mu.Unlock()
+	if waitErr != nil || processState == nil || completedAt.Before(startedAt) {
+		return RuntimeEvidence{}, errors.New("process runtime evidence is unavailable")
+	}
+	state, err := p.controller.Inspect(ctx)
+	if err != nil {
+		return RuntimeEvidence{}, err
+	}
+	return RuntimeEvidence{ProtocolVersion: RuntimeEvidenceProtocolVersion,
+		TreeReaped: state.Reaped,
+		Stdin:      StdinEvidence{ContentSHA256: EmptyOutputSHA256, Closed: true},
+		Descriptors: DescriptorEvidence{StandardInputClosed: true,
+			StandardOutputCaptured: true, StandardErrorCaptured: true},
+		Resources: ResourceEvidence{
+			WallTimeMilliseconds:            completedAt.Sub(startedAt).Milliseconds(),
+			ParentUserCPUTimeMilliseconds:   processState.UserTime().Milliseconds(),
+			ParentSystemCPUTimeMilliseconds: processState.SystemTime().Milliseconds(),
+		},
+		MetadataOnly: true, EnvironmentIncluded: false,
+		DescriptorIdentityIncluded: false, ProductExecutionEnabled: false,
+	}, nil
 }
 
 func (p *conformanceProcess) Wait(ctx context.Context) (ExitStatus, error) {
@@ -269,7 +306,7 @@ func TestProcessTreeConformanceGracefulTerminationReapsDescendants(t *testing.T)
 		result.OrphanDetected || !result.TreeReaped || result.ProductExecutionEnabled {
 		t.Fatalf("graceful process-tree result=%#v err=%v", result, err)
 	}
-	assertConformanceExitEvidence(t, result)
+	assertConformanceEvidence(t, result)
 }
 
 func TestProcessTreeConformanceForcedKillReapsDescendants(t *testing.T) {
@@ -286,7 +323,7 @@ func TestProcessTreeConformanceForcedKillReapsDescendants(t *testing.T) {
 		result.OrphanDetected || !result.TreeReaped || result.ProductExecutionEnabled {
 		t.Fatalf("forced process-tree result=%#v err=%v", result, err)
 	}
-	assertConformanceExitEvidence(t, result)
+	assertConformanceEvidence(t, result)
 }
 
 func TestProcessTreeConformanceCleansChildAfterParentExit(t *testing.T) {
@@ -304,19 +341,34 @@ func TestProcessTreeConformanceCleansChildAfterParentExit(t *testing.T) {
 		result.ProductExecutionEnabled {
 		t.Fatalf("orphan process-tree result=%#v err=%v", result, err)
 	}
-	assertConformanceExitEvidence(t, result)
+	assertConformanceEvidence(t, result)
 }
 
-func assertConformanceExitEvidence(t *testing.T, result Result) {
+func assertConformanceEvidence(t *testing.T, result Result) {
 	t.Helper()
-	if !result.ExitEvidenceAvailable || result.RawOutputIncluded || result.OutputTruncated ||
+	if !result.ExitEvidenceAvailable || !result.RuntimeEvidenceAvailable ||
+		result.RawOutputIncluded || result.OutputTruncated ||
 		result.ExitEvidence.ProtocolVersion != ExitEvidenceProtocolVersion ||
 		!result.ExitEvidence.MetadataOnly || result.ExitEvidence.RawOutputIncluded ||
 		result.ExitEvidence.ProductExecutionEnabled ||
 		result.ExitEvidence.Stdout.ObservedBytes == 0 ||
 		result.ExitEvidence.Stderr.ObservedBytes == 0 ||
 		result.ExitEvidence.Stdout.CapturedBytes != int(result.ExitEvidence.Stdout.ObservedBytes) ||
-		result.ExitEvidence.Stderr.CapturedBytes != int(result.ExitEvidence.Stderr.ObservedBytes) {
+		result.ExitEvidence.Stderr.CapturedBytes != int(result.ExitEvidence.Stderr.ObservedBytes) ||
+		result.RuntimeEvidence.ProtocolVersion != RuntimeEvidenceProtocolVersion ||
+		!result.RuntimeEvidence.TreeReaped || !result.RuntimeEvidence.MetadataOnly ||
+		result.RuntimeEvidence.EnvironmentIncluded ||
+		result.RuntimeEvidence.DescriptorIdentityIncluded ||
+		result.RuntimeEvidence.ProductExecutionEnabled ||
+		!result.RuntimeEvidence.Stdin.Closed || result.RuntimeEvidence.Stdin.Inherited ||
+		result.RuntimeEvidence.Stdin.RawInputIncluded ||
+		!result.RuntimeEvidence.Descriptors.StandardInputClosed ||
+		!result.RuntimeEvidence.Descriptors.StandardOutputCaptured ||
+		!result.RuntimeEvidence.Descriptors.StandardErrorCaptured ||
+		result.RuntimeEvidence.Descriptors.ExtraDescriptorCount != 0 ||
+		result.RuntimeEvidence.Descriptors.InheritedDescriptorCount != 0 ||
+		result.RuntimeEvidence.Resources.RawTelemetryIncluded ||
+		result.RuntimeEvidence.Resources.NetworkTelemetryIncluded {
 		t.Fatalf("process-tree output evidence widened or was incomplete: %#v", result)
 	}
 }

@@ -14,16 +14,21 @@ import (
 )
 
 const (
-	LifecycleProtocolVersion    = "runner_lifecycle_contract.v1"
-	ExitEvidenceProtocolVersion = "runner_exit_evidence.v1"
-	DefaultRunTimeout           = 30 * time.Second
-	MaxRunTimeout               = 5 * time.Minute
-	DefaultTerminationGrace     = 2 * time.Second
-	DefaultKillGrace            = 2 * time.Second
-	MaxControlGrace             = 10 * time.Second
-	MaxOutputCaptureBytes       = 64 * 1024
-	MaxOutputObservedBytes      = 64 * 1024 * 1024
-	EmptyOutputSHA256           = "e3b0c44298fc1c149afbf4c8996fb924" +
+	LifecycleProtocolVersion       = "runner_lifecycle_contract.v1"
+	ExitEvidenceProtocolVersion    = "runner_exit_evidence.v1"
+	RuntimeEvidenceProtocolVersion = "runner_runtime_evidence.v1"
+	DefaultRunTimeout              = 30 * time.Second
+	MaxRunTimeout                  = 5 * time.Minute
+	DefaultTerminationGrace        = 2 * time.Second
+	DefaultKillGrace               = 2 * time.Second
+	MaxControlGrace                = 10 * time.Second
+	MaxOutputCaptureBytes          = 64 * 1024
+	MaxOutputObservedBytes         = 64 * 1024 * 1024
+	MaxStdinProvidedBytes          = 1024 * 1024
+	MaxRuntimeEvidenceMilliseconds = int64((MaxRunTimeout + 2*MaxControlGrace) / time.Millisecond)
+	MaxCPUTimeEvidenceMilliseconds = int64((24 * time.Hour) / time.Millisecond)
+	MaxPeakResidentBytes           = int64(1 << 40)
+	EmptyOutputSHA256              = "e3b0c44298fc1c149afbf4c8996fb924" +
 		"27ae41e4649b934ca495991b7852b855"
 )
 
@@ -35,6 +40,7 @@ var (
 	ErrKillFailed      = errors.New("runner process-tree kill failed")
 	ErrOrphanedProcess = errors.New("runner process tree was not fully reaped")
 	ErrExitEvidence    = errors.New("runner exit evidence is invalid")
+	ErrRuntimeEvidence = errors.New("runner runtime evidence is invalid")
 )
 
 type StopReason string
@@ -125,6 +131,94 @@ type ExitEvidence struct {
 	ProductExecutionEnabled bool
 }
 
+type StdinEvidence struct {
+	BytesProvided    int64
+	ContentSHA256    string
+	Closed           bool
+	Inherited        bool
+	RawInputIncluded bool
+}
+
+func (e StdinEvidence) validate() error {
+	if e.BytesProvided < 0 || e.BytesProvided > MaxStdinProvidedBytes ||
+		!validSHA256(e.ContentSHA256) || !e.Closed || e.Inherited || e.RawInputIncluded ||
+		(e.BytesProvided == 0 && e.ContentSHA256 != EmptyOutputSHA256) {
+		return errors.New("runner stdin evidence is invalid")
+	}
+	return nil
+}
+
+type DescriptorEvidence struct {
+	StandardInputClosed      bool
+	StandardOutputCaptured   bool
+	StandardErrorCaptured    bool
+	ExtraDescriptorCount     int
+	InheritedDescriptorCount int
+	NamesIncluded            bool
+	PathsIncluded            bool
+}
+
+func (e DescriptorEvidence) validate() error {
+	if !e.StandardInputClosed || !e.StandardOutputCaptured || !e.StandardErrorCaptured ||
+		e.ExtraDescriptorCount != 0 || e.InheritedDescriptorCount != 0 ||
+		e.NamesIncluded || e.PathsIncluded {
+		return errors.New("runner descriptor evidence is invalid")
+	}
+	return nil
+}
+
+type ResourceEvidence struct {
+	WallTimeMilliseconds            int64
+	ParentUserCPUTimeMilliseconds   int64
+	ParentSystemCPUTimeMilliseconds int64
+	PeakResidentBytes               int64
+	PeakResidentMeasured            bool
+	RawTelemetryIncluded            bool
+	NetworkTelemetryIncluded        bool
+}
+
+func (e ResourceEvidence) validate() error {
+	if e.WallTimeMilliseconds < 0 ||
+		e.WallTimeMilliseconds > MaxRuntimeEvidenceMilliseconds ||
+		e.ParentUserCPUTimeMilliseconds < 0 ||
+		e.ParentUserCPUTimeMilliseconds > MaxCPUTimeEvidenceMilliseconds ||
+		e.ParentSystemCPUTimeMilliseconds < 0 ||
+		e.ParentSystemCPUTimeMilliseconds > MaxCPUTimeEvidenceMilliseconds ||
+		e.PeakResidentBytes < 0 || e.PeakResidentBytes > MaxPeakResidentBytes ||
+		(e.PeakResidentMeasured != (e.PeakResidentBytes > 0)) ||
+		e.RawTelemetryIncluded || e.NetworkTelemetryIncluded {
+		return errors.New("runner resource evidence is invalid")
+	}
+	return nil
+}
+
+type RuntimeEvidence struct {
+	ProtocolVersion            string
+	TreeReaped                 bool
+	Stdin                      StdinEvidence
+	Descriptors                DescriptorEvidence
+	Resources                  ResourceEvidence
+	MetadataOnly               bool
+	EnvironmentIncluded        bool
+	DescriptorIdentityIncluded bool
+	ProductExecutionEnabled    bool
+}
+
+func (e RuntimeEvidence) validate(status ExitStatus) error {
+	if e.ProtocolVersion != RuntimeEvidenceProtocolVersion || !e.TreeReaped ||
+		e.TreeReaped != status.Reaped || !e.MetadataOnly || e.EnvironmentIncluded ||
+		e.DescriptorIdentityIncluded || e.ProductExecutionEnabled {
+		return errors.New("runner runtime evidence binding is invalid")
+	}
+	if err := e.Stdin.validate(); err != nil {
+		return err
+	}
+	if err := e.Descriptors.validate(); err != nil {
+		return err
+	}
+	return e.Resources.validate()
+}
+
 func (e ExitEvidence) validate(status ExitStatus) error {
 	if e.ProtocolVersion != ExitEvidenceProtocolVersion || !e.Exited ||
 		e.ExitCode != status.ExitCode || e.Reaped != status.Reaped ||
@@ -164,6 +258,7 @@ type Process interface {
 	Identity() string
 	Wait(context.Context) (ExitStatus, error)
 	ExitEvidence(context.Context) (ExitEvidence, error)
+	RuntimeEvidence(context.Context) (RuntimeEvidence, error)
 	TerminateTree(context.Context) error
 	KillTree(context.Context) error
 	InspectTree(context.Context) (TreeState, error)
@@ -179,25 +274,27 @@ type Backend interface {
 }
 
 type Result struct {
-	ProtocolVersion         string
-	RequestID               string
-	Backend                 string
-	Started                 bool
-	ExitCode                int
-	StopReason              StopReason
-	Cancelled               bool
-	TimedOut                bool
-	TerminateRequested      bool
-	TerminateFailed         bool
-	KillRequested           bool
-	KillFailed              bool
-	OrphanDetected          bool
-	TreeReaped              bool
-	ExitEvidenceAvailable   bool
-	ExitEvidence            ExitEvidence
-	OutputTruncated         bool
-	RawOutputIncluded       bool
-	ProductExecutionEnabled bool
+	ProtocolVersion          string
+	RequestID                string
+	Backend                  string
+	Started                  bool
+	ExitCode                 int
+	StopReason               StopReason
+	Cancelled                bool
+	TimedOut                 bool
+	TerminateRequested       bool
+	TerminateFailed          bool
+	KillRequested            bool
+	KillFailed               bool
+	OrphanDetected           bool
+	TreeReaped               bool
+	ExitEvidenceAvailable    bool
+	ExitEvidence             ExitEvidence
+	RuntimeEvidenceAvailable bool
+	RuntimeEvidence          RuntimeEvidence
+	OutputTruncated          bool
+	RawOutputIncluded        bool
+	ProductExecutionEnabled  bool
 }
 
 type Harness struct {
@@ -299,7 +396,7 @@ func (h *Harness) Run(ctx context.Context, request Request) (Result, error) {
 			result.ExitCode = exit.ExitCode
 			safe, inspectErr := h.inspectReaped(ctx, process, normalized.KillGrace, &result)
 			if inspectErr == nil && safe && exit.Reaped {
-				if evidenceErr := h.collectExitEvidence(ctx, process, exit,
+				if evidenceErr := h.collectEvidence(ctx, process, exit,
 					normalized.KillGrace, &result); evidenceErr != nil {
 					result.StopReason = StopEvidenceFailed
 					return result, evidenceErr
@@ -358,7 +455,7 @@ func (h *Harness) cleanup(parent context.Context, process Process, request Reque
 	if waitErr == nil && exit.validate() == nil {
 		result.ExitCode = exit.ExitCode
 		if safe, inspectErr := h.inspectReaped(base, process, request.KillGrace, result); inspectErr == nil && safe && exit.Reaped {
-			if evidenceErr := h.collectExitEvidence(base, process, exit,
+			if evidenceErr := h.collectEvidence(base, process, exit,
 				request.KillGrace, result); evidenceErr != nil {
 				return evidenceErr
 			}
@@ -387,7 +484,7 @@ func (h *Harness) cleanup(parent context.Context, process Process, request Reque
 		}
 		return ErrOrphanedProcess
 	}
-	if evidenceErr := h.collectExitEvidence(base, process, exit,
+	if evidenceErr := h.collectEvidence(base, process, exit,
 		request.KillGrace, result); evidenceErr != nil {
 		return evidenceErr
 	}
@@ -400,24 +497,44 @@ func (h *Harness) cleanup(parent context.Context, process Process, request Reque
 	return nil
 }
 
-func (h *Harness) collectExitEvidence(parent context.Context, process Process,
+func (h *Harness) collectEvidence(parent context.Context, process Process,
 	status ExitStatus, timeout time.Duration, result *Result,
 ) error {
-	evidenceCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
-	defer cancel()
-	evidence, err := process.ExitEvidence(evidenceCtx)
+	exitCtx, exitCancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
+	exitEvidence, err := process.ExitEvidence(exitCtx)
+	exitCancel()
 	if err != nil {
+		result.StopReason = StopEvidenceFailed
 		return fmt.Errorf("%w: %v", ErrExitEvidence, stableContextError(err))
 	}
-	if err := evidence.validate(status); err != nil {
+	if err := exitEvidence.validate(status); err != nil {
+		result.StopReason = StopEvidenceFailed
 		return fmt.Errorf("%w: contract mismatch", ErrExitEvidence)
 	}
-	if result.ExitEvidenceAvailable && result.ExitEvidence != evidence {
+	runtimeCtx, runtimeCancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
+	runtimeEvidence, err := process.RuntimeEvidence(runtimeCtx)
+	runtimeCancel()
+	if err != nil {
+		result.StopReason = StopEvidenceFailed
+		return fmt.Errorf("%w: %v", ErrRuntimeEvidence, stableContextError(err))
+	}
+	if err := runtimeEvidence.validate(status); err != nil {
+		result.StopReason = StopEvidenceFailed
+		return fmt.Errorf("%w: contract mismatch", ErrRuntimeEvidence)
+	}
+	if result.ExitEvidenceAvailable && result.ExitEvidence != exitEvidence {
+		result.StopReason = StopEvidenceFailed
 		return fmt.Errorf("%w: evidence changed after collection", ErrExitEvidence)
 	}
-	result.ExitEvidence = evidence
+	if result.RuntimeEvidenceAvailable && result.RuntimeEvidence != runtimeEvidence {
+		result.StopReason = StopEvidenceFailed
+		return fmt.Errorf("%w: evidence changed after collection", ErrRuntimeEvidence)
+	}
+	result.ExitEvidence = exitEvidence
 	result.ExitEvidenceAvailable = true
-	result.OutputTruncated = evidence.Stdout.Truncated || evidence.Stderr.Truncated
+	result.RuntimeEvidence = runtimeEvidence
+	result.RuntimeEvidenceAvailable = true
+	result.OutputTruncated = exitEvidence.Stdout.Truncated || exitEvidence.Stderr.Truncated
 	result.RawOutputIncluded = false
 	return nil
 }

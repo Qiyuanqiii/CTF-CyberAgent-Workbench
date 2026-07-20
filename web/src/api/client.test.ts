@@ -1146,6 +1146,13 @@ describe("CyberAgentClient", () => {
       result_inferred: false, command_executed: false, model_assertion: false,
       record_rewritten: false, approval: false, authority_granted: false,
     };
+    const pagedNewestAssociation = { id: "verification-association-3",
+      plan_id: "verification-plan-1", plan_item_ordinal: 1, plan_item_sha256: itemSHA,
+      evidence_id: "verification-3", evidence_outcome: "fail", evidence_event_sequence: 14,
+      association_event_sequence: 15, associated_at: "2026-07-19T12:05:00Z" };
+    const pagedCoverageDetail = { ...coverageDetail, associated_evidence_count: 2,
+      pass_count: 1, fail_count: 1, latest_association_event_sequence: 15,
+      associations: [pagedNewestAssociation], associations_truncated: true };
     const associated = { protocol_version: "operator_verification_plan_evidence_association.v1",
       id: "verification-association-2", run_id: "run-1", session_id: "session-1",
       workspace_id: "workspace-1", plan_id: "verification-plan-1", plan_item_ordinal: 1,
@@ -1155,19 +1162,24 @@ describe("CyberAgentClient", () => {
       metadata_only: true, command_executed: false, model_assertion: false,
       result_inferred: false, record_rewritten: false, approval: false,
       authority_granted: false, replayed: false };
-    const envelope = (data: unknown, status = 200) => new Response(JSON.stringify({
-      version: "api.v1", request_id: "req-exact-metadata", data,
+    const envelope = (data: unknown, status = 200, page?: unknown) => new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-exact-metadata", data, ...(page ? { page } : {}),
     }), { status, headers: { "Content-Type": "application/json" } });
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(envelope(commit))
       .mockResolvedValueOnce(envelope(fileHistory))
       .mockResolvedValueOnce(envelope(preview))
       .mockResolvedValueOnce(envelope(coverage))
-      .mockResolvedValueOnce(envelope(coverageDetail))
+      .mockResolvedValueOnce(envelope(coverageDetail, 200, { limit: 50 }))
+      .mockResolvedValueOnce(envelope(pagedCoverageDetail, 200,
+        { limit: 1, next_cursor: "older-evidence" }))
+      .mockResolvedValueOnce(envelope({ ...pagedCoverageDetail,
+        associations: coverage.associations, associations_truncated: false }, 200, { limit: 1 }))
       .mockResolvedValueOnce(envelope(associated, 202))
       .mockResolvedValueOnce(envelope({ ...coverage, result_inferred: true }))
       .mockResolvedValueOnce(envelope({ ...fileHistory, authority_granted: true }))
-      .mockResolvedValueOnce(envelope({ ...coverageDetail, operator_identity_included: true }));
+      .mockResolvedValueOnce(envelope({ ...coverageDetail, operator_identity_included: true },
+        200, { limit: 50 }));
     vi.stubGlobal("fetch", fetchMock);
     const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
       verificationEvidenceEnabled: true,
@@ -1180,6 +1192,17 @@ describe("CyberAgentClient", () => {
     await expect(client.verificationPlanCoverage("run-1")).resolves.toEqual(coverage);
     await expect(client.verificationPlanItemCoverage("run-1", "verification-plan-1", 1))
       .resolves.toEqual(coverageDetail);
+    await expect(client.verificationPlanItemCoveragePage(
+      "run-1", "verification-plan-1", 1, "", 1)).resolves.toEqual({
+        detail: pagedCoverageDetail, page: { limit: 1, next_cursor: "older-evidence" },
+        requestID: "req-exact-metadata",
+      });
+    await expect(client.verificationPlanItemCoveragePage(
+      "run-1", "verification-plan-1", 1, "older-evidence", 1)).resolves.toEqual({
+        detail: { ...pagedCoverageDetail, associations: coverage.associations,
+          associations_truncated: false }, page: { limit: 1 },
+        requestID: "req-exact-metadata",
+      });
     await expect(client.associateVerificationEvidence("run-1", {
       version: "operator_verification_plan_evidence_association.v1",
       plan_id: "verification-plan-1", plan_item_ordinal: 1, evidence_id: "verification-2",
@@ -1192,7 +1215,12 @@ describe("CyberAgentClient", () => {
       `/api/v1/workspaces/workspace-1/repository-commits/${objectID}/file-preview?path=internal%2Fcheck.go`);
     expect(String(fetchMock.mock.calls[4]?.[0])).toBe(
       "/api/v1/runs/run-1/verification-plan-coverage/verification-plan-1/items/1");
-    const [associationURL, associationInit] = fetchMock.mock.calls[5] as [string, RequestInit];
+    expect(String(fetchMock.mock.calls[5]?.[0])).toBe(
+      "/api/v1/runs/run-1/verification-plan-coverage/verification-plan-1/items/1?limit=1");
+    expect(String(fetchMock.mock.calls[6]?.[0])).toBe(
+      "/api/v1/runs/run-1/verification-plan-coverage/verification-plan-1/items/1?" +
+      "limit=1&cursor=older-evidence");
+    const [associationURL, associationInit] = fetchMock.mock.calls[7] as [string, RequestInit];
     expect(associationURL).toBe("/api/v1/runs/run-1/verification-plan-associations");
     expect(associationInit.headers).toMatchObject({ Authorization: "Bearer control-secret",
       "Idempotency-Key": "web-verification-association-operation-0001" });

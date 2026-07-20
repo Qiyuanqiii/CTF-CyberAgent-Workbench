@@ -25,6 +25,7 @@ import type {
   OperationReceiptView,
   OperationReceiptHistoryView,
   OperatorActionCenterView,
+  Page,
   PageResult,
   PlanDeliveryTransitionControlRequestView,
   PlanDeliveryTransitionControlView,
@@ -75,6 +76,7 @@ import type {
   VerificationAssociationControlView,
   VerificationPlanCoverageInventoryView,
   VerificationPlanItemCoverageDetailView,
+  VerificationPlanItemCoveragePage,
 } from "./types";
 
 export type QueryValue = boolean | number | string | undefined;
@@ -1674,8 +1676,20 @@ function parseVerificationPlanCoverage(value: unknown,
   return { ...value, plans, associations } as unknown as VerificationPlanCoverageInventoryView;
 }
 
+function parseResponsePage(value: unknown, expectedLimit: number): Page {
+  if (!isRecord(value) || !hasOnlyKeys(value, ["limit", "next_cursor", "truncated"]) ||
+    !safePositiveInteger(value.limit) || value.limit > 100 || value.limit !== expectedLimit ||
+    (value.next_cursor !== undefined && (!boundedText(value.next_cursor, 512) ||
+      value.next_cursor.trim() !== value.next_cursor)) ||
+    (value.truncated !== undefined && typeof value.truncated !== "boolean") ||
+    (Boolean(value.next_cursor) && value.truncated === true)) {
+    throw new APIRequestError("API pagination metadata is invalid", "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as Page;
+}
+
 function parseVerificationPlanItemCoverage(value: unknown, runID: string, planID: string,
-  ordinal: number): VerificationPlanItemCoverageDetailView {
+  ordinal: number, page: Page, firstPage: boolean): VerificationPlanItemCoverageDetailView {
   const keys = ["approval", "associated_evidence_count", "associations",
     "associations_truncated", "authority_granted", "command_executed", "fail_count",
     "latest_association_event_sequence", "metadata_only", "model_assertion",
@@ -1697,7 +1711,7 @@ function parseVerificationPlanItemCoverage(value: unknown, runID: string, planID
     !safeBoundedCount(value.latest_association_event_sequence, Number.MAX_SAFE_INTEGER) ||
     ((value.associated_evidence_count === 0) !==
       (value.latest_association_event_sequence === 0)) ||
-    !Array.isArray(value.associations) || value.associations.length > 100 ||
+    !Array.isArray(value.associations) || value.associations.length > page.limit ||
     typeof value.associations_truncated !== "boolean" || value.metadata_only !== true ||
     value.read_only !== true || value.private_plan_body_included !== false ||
     value.private_evidence_bodies_included !== false ||
@@ -1726,6 +1740,7 @@ function parseVerificationPlanItemCoverage(value: unknown, runID: string, planID
       !safePositiveInteger(association.evidence_event_sequence) ||
       !safePositiveInteger(association.association_event_sequence) ||
       association.association_event_sequence <= association.evidence_event_sequence ||
+      association.association_event_sequence > Number(value.latest_association_event_sequence) ||
       (index > 0 && association.association_event_sequence >= previousSequence) ||
       !validDate(association.associated_at)) {
       throw new APIRequestError("Verification item association escaped its exact binding",
@@ -1739,15 +1754,19 @@ function parseVerificationPlanItemCoverage(value: unknown, runID: string, planID
     if (association.evidence_outcome === "unknown") returnedUnknown += 1;
     return association;
   });
-  if ((associations.length > 0 && associations[0]?.association_event_sequence !==
-      value.latest_association_event_sequence) ||
-    (value.associations_truncated && (associations.length !== 100 ||
-      value.associated_evidence_count <= 100)) ||
-    (!value.associations_truncated && (associations.length !== value.associated_evidence_count ||
+  const pageHasMore = Boolean(page.next_cursor) || page.truncated === true;
+  if ((firstPage && associations.length > 0 &&
+      associations[0]?.association_event_sequence !== value.latest_association_event_sequence) ||
+    value.associations_truncated !== pageHasMore ||
+    (value.associations_truncated && associations.length !== page.limit) ||
+    (firstPage && value.associations_truncated !==
+      (associations.length < Number(value.associated_evidence_count))) ||
+    (firstPage && !value.associations_truncated &&
+      (associations.length !== value.associated_evidence_count ||
       returnedPass !== value.pass_count || returnedFail !== value.fail_count ||
       returnedUnknown !== value.unknown_count)) ||
-    (value.associations_truncated && (returnedPass > value.pass_count ||
-      returnedFail > value.fail_count || returnedUnknown > value.unknown_count))) {
+    returnedPass > value.pass_count || returnedFail > value.fail_count ||
+    returnedUnknown > value.unknown_count) {
     throw new APIRequestError("Verification item coverage counts are inconsistent",
       "INVALID_RESPONSE", 502);
   }
@@ -2485,14 +2504,30 @@ export class CyberAgentClient {
 
   async verificationPlanItemCoverage(runID: string, planID: string, ordinal: number,
     signal?: AbortSignal): Promise<VerificationPlanItemCoverageDetailView> {
+    return (await this.verificationPlanItemCoveragePage(runID, planID, ordinal, "", 50,
+      signal)).detail;
+  }
+
+  async verificationPlanItemCoveragePage(runID: string, planID: string, ordinal: number,
+    cursor = "", limit = 50,
+    signal?: AbortSignal): Promise<VerificationPlanItemCoveragePage> {
     if (!boundedIdentity(runID) || runID.trim() !== runID || !boundedIdentity(planID) ||
-      planID.trim() !== planID || !safePositiveInteger(ordinal) || ordinal > 32) {
+      planID.trim() !== planID || !safePositiveInteger(ordinal) || ordinal > 32 ||
+      !safePositiveInteger(limit) || limit > 100 || typeof cursor !== "string" ||
+      cursor.length > 512 || cursor.trim() !== cursor) {
       throw new Error("Normalized Run, plan, and item identities are required");
     }
-    return parseVerificationPlanItemCoverage(await this.get<unknown>(
+    const envelope = await this.request<unknown>(
       `/runs/${encodeURIComponent(runID)}/verification-plan-coverage/` +
-        `${encodeURIComponent(planID)}/items/${ordinal}`, {}, signal,
-    ), runID, planID, ordinal);
+        `${encodeURIComponent(planID)}/items/${ordinal}`,
+      { limit: limit === 50 ? undefined : limit, cursor: cursor || undefined }, signal);
+    if (!envelope.page) {
+      throw new APIRequestError("Verification coverage page metadata is missing",
+        "INVALID_RESPONSE", 502, envelope.request_id);
+    }
+    const page = parseResponsePage(envelope.page, limit);
+    return { detail: parseVerificationPlanItemCoverage(envelope.data, runID, planID, ordinal,
+      page, cursor === ""), page, requestID: envelope.request_id };
   }
 
   async associateVerificationEvidence(runID: string, body: VerificationAssociationRequestView,
