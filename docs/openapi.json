@@ -5633,6 +5633,199 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/runs/{run_id}/verification-snapshot-receipts": {
+      "get": {
+        "operationId": "listRunVerificationSnapshotReceipts",
+        "summary": "List immutable verification snapshot receipts",
+        "description": "Returns bounded metadata-only history proving that an operator retained exact deterministic verification snapshots. Snapshot/result acceptance, private bodies, operator identity, record rewriting, approval, authority, and execution remain false.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/VerificationSnapshotReceiptInventoryView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      },
+      "post": {
+        "operationId": "recordRunVerificationSnapshotReceipt",
+        "summary": "Record one exact verification snapshot receipt",
+        "description": "Rebuilds and digest-checks one current deterministic item snapshot before appending an immutable metadata-only receipt. Recording does not accept a snapshot or result, expose private bodies or operator identity, rewrite records, approve work, grant authority, or start execution.",
+        "tags": [
+          "Control"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Opaque retry key; only a domain-separated digest is persisted",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 16,
+              "pattern": "^\\S+$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Control request accepted or idempotently replayed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/VerificationSnapshotReceiptControlView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/FailedPrecondition"
+          },
+          "413": {
+            "$ref": "#/components/responses/RequestEntityTooLarge"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "415": {
+            "$ref": "#/components/responses/UnsupportedMediaType"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "ControlBearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationSnapshotReceiptRequestView"
+              }
+            }
+          }
+        },
+        "x-cyberagent-read-only": false
+      }
+    },
     "/api/v1/runs/{run_id}/wake-intent": {
       "get": {
         "operationId": "getRunWakeIntent",
@@ -17170,6 +17363,537 @@
           "approval",
           "authority_granted",
           "mutation_supported",
+          "execution_started"
+        ],
+        "type": "object"
+      },
+      "VerificationSnapshotReceiptControlView": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "type": "boolean"
+          },
+          "associated_evidence_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "associations_truncated": {
+            "type": "boolean"
+          },
+          "authority_granted": {
+            "type": "boolean"
+          },
+          "content_bytes": {
+            "format": "int32",
+            "maximum": 262144,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "content_included": {
+            "type": "boolean"
+          },
+          "content_sha256": {
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "execution_started": {
+            "type": "boolean"
+          },
+          "fail_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "markdown"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "immutable": {
+            "type": "boolean"
+          },
+          "metadata_only": {
+            "type": "boolean"
+          },
+          "operator_identity_included": {
+            "type": "boolean"
+          },
+          "operator_recorded": {
+            "type": "boolean"
+          },
+          "pass_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "plan_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_item_ordinal": {
+            "format": "int32",
+            "maximum": 32,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "plan_item_sha256": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "plan_sha256": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "private_bodies_included": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "operator_verification_plan_item_snapshot_receipt.v1"
+            ],
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "receipt_event_sequence": {
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "record_rewritten": {
+            "type": "boolean"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "replayed": {
+            "type": "boolean"
+          },
+          "result_accepted": {
+            "type": "boolean"
+          },
+          "result_inferred": {
+            "type": "boolean"
+          },
+          "returned_association_count": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "snapshot_accepted": {
+            "type": "boolean"
+          },
+          "snapshot_high_water_event_sequence": {
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unknown_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "id",
+          "run_id",
+          "session_id",
+          "workspace_id",
+          "plan_id",
+          "plan_sha256",
+          "plan_item_ordinal",
+          "plan_item_sha256",
+          "format",
+          "snapshot_high_water_event_sequence",
+          "associated_evidence_count",
+          "pass_count",
+          "fail_count",
+          "unknown_count",
+          "returned_association_count",
+          "associations_truncated",
+          "content_sha256",
+          "content_bytes",
+          "receipt_event_sequence",
+          "recorded_at",
+          "immutable",
+          "operator_recorded",
+          "metadata_only",
+          "read_only",
+          "content_included",
+          "private_bodies_included",
+          "operator_identity_included",
+          "snapshot_accepted",
+          "result_accepted",
+          "result_inferred",
+          "record_rewritten",
+          "approval",
+          "authority_granted",
+          "execution_started",
+          "replayed"
+        ],
+        "type": "object"
+      },
+      "VerificationSnapshotReceiptInventoryView": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "type": "boolean"
+          },
+          "authority_granted": {
+            "type": "boolean"
+          },
+          "execution_started": {
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/VerificationSnapshotReceiptView"
+            },
+            "type": "array"
+          },
+          "metadata_only": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "operator_verification_plan_item_snapshot_receipt_inventory.v1"
+            ],
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "record_rewritten": {
+            "type": "boolean"
+          },
+          "result_accepted": {
+            "type": "boolean"
+          },
+          "result_inferred": {
+            "type": "boolean"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "snapshot_accepted": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "run_id",
+          "session_id",
+          "workspace_id",
+          "items",
+          "truncated",
+          "metadata_only",
+          "read_only",
+          "snapshot_accepted",
+          "result_accepted",
+          "result_inferred",
+          "record_rewritten",
+          "approval",
+          "authority_granted",
+          "execution_started"
+        ],
+        "type": "object"
+      },
+      "VerificationSnapshotReceiptRequestView": {
+        "additionalProperties": false,
+        "properties": {
+          "confirm_metadata_snapshot": {
+            "type": "boolean"
+          },
+          "content_sha256": {
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "markdown"
+            ],
+            "type": "string"
+          },
+          "plan_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_item_ordinal": {
+            "format": "int32",
+            "maximum": 32,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "snapshot_high_water_event_sequence": {
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "version": {
+            "enum": [
+              "operator_verification_plan_item_snapshot_receipt.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "plan_id",
+          "plan_item_ordinal",
+          "format",
+          "snapshot_high_water_event_sequence",
+          "content_sha256",
+          "confirm_metadata_snapshot"
+        ],
+        "type": "object"
+      },
+      "VerificationSnapshotReceiptView": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "type": "boolean"
+          },
+          "associated_evidence_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "associations_truncated": {
+            "type": "boolean"
+          },
+          "authority_granted": {
+            "type": "boolean"
+          },
+          "content_bytes": {
+            "format": "int32",
+            "maximum": 262144,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "content_included": {
+            "type": "boolean"
+          },
+          "content_sha256": {
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "execution_started": {
+            "type": "boolean"
+          },
+          "fail_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "markdown"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "immutable": {
+            "type": "boolean"
+          },
+          "metadata_only": {
+            "type": "boolean"
+          },
+          "operator_identity_included": {
+            "type": "boolean"
+          },
+          "operator_recorded": {
+            "type": "boolean"
+          },
+          "pass_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "plan_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_item_ordinal": {
+            "format": "int32",
+            "maximum": 32,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "plan_item_sha256": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "plan_sha256": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "private_bodies_included": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "operator_verification_plan_item_snapshot_receipt.v1"
+            ],
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "receipt_event_sequence": {
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "record_rewritten": {
+            "type": "boolean"
+          },
+          "recorded_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "result_accepted": {
+            "type": "boolean"
+          },
+          "result_inferred": {
+            "type": "boolean"
+          },
+          "returned_association_count": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "snapshot_accepted": {
+            "type": "boolean"
+          },
+          "snapshot_high_water_event_sequence": {
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unknown_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "id",
+          "run_id",
+          "session_id",
+          "workspace_id",
+          "plan_id",
+          "plan_sha256",
+          "plan_item_ordinal",
+          "plan_item_sha256",
+          "format",
+          "snapshot_high_water_event_sequence",
+          "associated_evidence_count",
+          "pass_count",
+          "fail_count",
+          "unknown_count",
+          "returned_association_count",
+          "associations_truncated",
+          "content_sha256",
+          "content_bytes",
+          "receipt_event_sequence",
+          "recorded_at",
+          "immutable",
+          "operator_recorded",
+          "metadata_only",
+          "read_only",
+          "content_included",
+          "private_bodies_included",
+          "operator_identity_included",
+          "snapshot_accepted",
+          "result_accepted",
+          "result_inferred",
+          "record_rewritten",
+          "approval",
+          "authority_granted",
           "execution_started"
         ],
         "type": "object"

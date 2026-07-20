@@ -1080,6 +1080,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/verification-snapshot-receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List immutable verification snapshot receipts
+         * @description Returns bounded metadata-only history proving that an operator retained exact deterministic verification snapshots. Snapshot/result acceptance, private bodies, operator identity, record rewriting, approval, authority, and execution remain false.
+         */
+        get: operations["listRunVerificationSnapshotReceipts"];
+        put?: never;
+        /**
+         * Record one exact verification snapshot receipt
+         * @description Rebuilds and digest-checks one current deterministic item snapshot before appending an immutable metadata-only receipt. Recording does not accept a snapshot or result, expose private bodies or operator identity, rewrite records, approve work, grant authority, or start execution.
+         */
+        post: operations["recordRunVerificationSnapshotReceipt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/wake-intent": {
         parameters: {
             query?: never;
@@ -3877,6 +3901,136 @@ export interface components {
             unknown_count: number;
             workspace_id: string;
         };
+        VerificationSnapshotReceiptControlView: {
+            approval: boolean;
+            /** Format: int32 */
+            associated_evidence_count: number;
+            associations_truncated: boolean;
+            authority_granted: boolean;
+            /** Format: int32 */
+            content_bytes: number;
+            content_included: boolean;
+            content_sha256: string;
+            execution_started: boolean;
+            /** Format: int32 */
+            fail_count: number;
+            /** @enum {string} */
+            format: "json" | "markdown";
+            id: string;
+            immutable: boolean;
+            metadata_only: boolean;
+            operator_identity_included: boolean;
+            operator_recorded: boolean;
+            /** Format: int32 */
+            pass_count: number;
+            plan_id: string;
+            /** Format: int32 */
+            plan_item_ordinal: number;
+            plan_item_sha256: string;
+            plan_sha256: string;
+            private_bodies_included: boolean;
+            /** @enum {string} */
+            protocol_version: "operator_verification_plan_item_snapshot_receipt.v1";
+            read_only: boolean;
+            /** Format: int64 */
+            receipt_event_sequence: number;
+            record_rewritten: boolean;
+            /** Format: date-time */
+            recorded_at: string;
+            replayed: boolean;
+            result_accepted: boolean;
+            result_inferred: boolean;
+            /** Format: int32 */
+            returned_association_count: number;
+            run_id: string;
+            session_id: string;
+            snapshot_accepted: boolean;
+            /** Format: int64 */
+            snapshot_high_water_event_sequence: number;
+            /** Format: int32 */
+            unknown_count: number;
+            workspace_id: string;
+        };
+        VerificationSnapshotReceiptInventoryView: {
+            approval: boolean;
+            authority_granted: boolean;
+            execution_started: boolean;
+            items: components["schemas"]["VerificationSnapshotReceiptView"][];
+            metadata_only: boolean;
+            /** @enum {string} */
+            protocol_version: "operator_verification_plan_item_snapshot_receipt_inventory.v1";
+            read_only: boolean;
+            record_rewritten: boolean;
+            result_accepted: boolean;
+            result_inferred: boolean;
+            run_id: string;
+            session_id: string;
+            snapshot_accepted: boolean;
+            truncated: boolean;
+            workspace_id: string;
+        };
+        VerificationSnapshotReceiptRequestView: {
+            confirm_metadata_snapshot: boolean;
+            content_sha256: string;
+            /** @enum {string} */
+            format: "json" | "markdown";
+            plan_id: string;
+            /** Format: int32 */
+            plan_item_ordinal: number;
+            /** Format: int64 */
+            snapshot_high_water_event_sequence: number;
+            /** @enum {string} */
+            version: "operator_verification_plan_item_snapshot_receipt.v1";
+        };
+        VerificationSnapshotReceiptView: {
+            approval: boolean;
+            /** Format: int32 */
+            associated_evidence_count: number;
+            associations_truncated: boolean;
+            authority_granted: boolean;
+            /** Format: int32 */
+            content_bytes: number;
+            content_included: boolean;
+            content_sha256: string;
+            execution_started: boolean;
+            /** Format: int32 */
+            fail_count: number;
+            /** @enum {string} */
+            format: "json" | "markdown";
+            id: string;
+            immutable: boolean;
+            metadata_only: boolean;
+            operator_identity_included: boolean;
+            operator_recorded: boolean;
+            /** Format: int32 */
+            pass_count: number;
+            plan_id: string;
+            /** Format: int32 */
+            plan_item_ordinal: number;
+            plan_item_sha256: string;
+            plan_sha256: string;
+            private_bodies_included: boolean;
+            /** @enum {string} */
+            protocol_version: "operator_verification_plan_item_snapshot_receipt.v1";
+            read_only: boolean;
+            /** Format: int64 */
+            receipt_event_sequence: number;
+            record_rewritten: boolean;
+            /** Format: date-time */
+            recorded_at: string;
+            result_accepted: boolean;
+            result_inferred: boolean;
+            /** Format: int32 */
+            returned_association_count: number;
+            run_id: string;
+            session_id: string;
+            snapshot_accepted: boolean;
+            /** Format: int64 */
+            snapshot_high_water_event_sequence: number;
+            /** Format: int32 */
+            unknown_count: number;
+            workspace_id: string;
+        };
         WorkItemView: {
             acceptance_criteria: string[];
             blocked_reason?: string;
@@ -6336,6 +6490,87 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listRunVerificationSnapshotReceipts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["VerificationSnapshotReceiptInventoryView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    recordRunVerificationSnapshotReceipt: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Opaque retry key; only a domain-separated digest is persisted */
+                "Idempotency-Key": string;
+            };
+            path: {
+                /** @description Run identity */
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerificationSnapshotReceiptRequestView"];
+            };
+        };
+        responses: {
+            /** @description Control request accepted or idempotently replayed */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["VerificationSnapshotReceiptControlView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            412: components["responses"]["FailedPrecondition"];
+            413: components["responses"]["RequestEntityTooLarge"];
+            414: components["responses"]["RequestTooLarge"];
+            415: components["responses"]["UnsupportedMediaType"];
             429: components["responses"]["ResourceExhausted"];
             500: components["responses"]["InternalError"];
         };

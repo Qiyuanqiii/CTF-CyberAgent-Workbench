@@ -79,6 +79,10 @@ import type {
   VerificationPlanItemCoverageDetailView,
   VerificationPlanItemCoveragePage,
   VerificationSnapshotExportView,
+  VerificationSnapshotReceiptRequestView,
+  VerificationSnapshotReceiptView,
+  VerificationSnapshotReceiptControlView,
+  VerificationSnapshotReceiptInventoryView,
 } from "./types";
 
 export type QueryValue = boolean | number | string | undefined;
@@ -2010,6 +2014,94 @@ async function parseVerificationSnapshotExport(value: unknown, runID: string, pl
   return value as unknown as VerificationSnapshotExportView;
 }
 
+function parseVerificationSnapshotReceipt(value: unknown, runID: string,
+  sessionID = "", workspaceID = "", control = false): VerificationSnapshotReceiptControlView {
+  const keys = ["approval", "associated_evidence_count", "associations_truncated",
+    "authority_granted", "content_bytes", "content_included", "content_sha256",
+    "execution_started", "fail_count", "format", "id", "immutable", "metadata_only",
+    "operator_identity_included", "operator_recorded", "pass_count", "plan_id",
+    "plan_item_ordinal", "plan_item_sha256", "plan_sha256", "private_bodies_included",
+    "protocol_version", "read_only", "receipt_event_sequence", "record_rewritten",
+    "recorded_at", "result_accepted", "result_inferred", "returned_association_count",
+    "run_id", "session_id", "snapshot_accepted", "snapshot_high_water_event_sequence",
+    "unknown_count", "workspace_id"];
+  if (control) keys.push("replayed");
+  if (!hasExactKeys(value, keys) ||
+    value.protocol_version !== "operator_verification_plan_item_snapshot_receipt.v1" ||
+    value.run_id !== runID || !boundedIdentity(value.id) || !boundedIdentity(value.session_id) ||
+    !boundedIdentity(value.workspace_id) || (sessionID !== "" && value.session_id !== sessionID) ||
+    (workspaceID !== "" && value.workspace_id !== workspaceID) ||
+    !boundedIdentity(value.plan_id) || !isSHA256(value.plan_sha256) ||
+    !safePositiveInteger(value.plan_item_ordinal) || value.plan_item_ordinal > 32 ||
+    !isSHA256(value.plan_item_sha256) || !["json", "markdown"].includes(String(value.format)) ||
+    !safeBoundedCount(value.snapshot_high_water_event_sequence, Number.MAX_SAFE_INTEGER) ||
+    !safeBoundedCount(value.associated_evidence_count, 1_000_000_000) ||
+    !safeBoundedCount(value.pass_count, 1_000_000_000) ||
+    !safeBoundedCount(value.fail_count, 1_000_000_000) ||
+    !safeBoundedCount(value.unknown_count, 1_000_000_000) ||
+    value.pass_count + value.fail_count + value.unknown_count !==
+      value.associated_evidence_count ||
+    (value.associated_evidence_count === 0) !==
+      (value.snapshot_high_water_event_sequence === 0) ||
+    !safeBoundedCount(value.returned_association_count, 100) ||
+    value.returned_association_count !== Math.min(Number(value.associated_evidence_count), 100) ||
+    value.associations_truncated !== (value.associated_evidence_count > 100) ||
+    !isSHA256(value.content_sha256) || !safePositiveInteger(value.content_bytes) ||
+    value.content_bytes > 256 * 1024 || !safePositiveInteger(value.receipt_event_sequence) ||
+    value.receipt_event_sequence <= value.snapshot_high_water_event_sequence ||
+    !validDate(value.recorded_at) || value.immutable !== true ||
+    value.operator_recorded !== true || value.metadata_only !== true || value.read_only !== true ||
+    value.content_included !== false || value.private_bodies_included !== false ||
+    value.operator_identity_included !== false || value.snapshot_accepted !== false ||
+    value.result_accepted !== false || value.result_inferred !== false ||
+    value.record_rewritten !== false || value.approval !== false ||
+    value.authority_granted !== false || value.execution_started !== false ||
+    (control && typeof value.replayed !== "boolean")) {
+    throw new APIRequestError("Verification snapshot receipt widened acceptance or authority",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as VerificationSnapshotReceiptControlView;
+}
+
+function parseVerificationSnapshotReceiptInventory(value: unknown,
+  runID: string): VerificationSnapshotReceiptInventoryView {
+  const keys = ["approval", "authority_granted", "execution_started", "items",
+    "metadata_only", "protocol_version", "read_only", "record_rewritten", "result_accepted",
+    "result_inferred", "run_id", "session_id", "snapshot_accepted", "truncated",
+    "workspace_id"];
+  if (!hasExactKeys(value, keys) ||
+    value.protocol_version !== "operator_verification_plan_item_snapshot_receipt_inventory.v1" ||
+    value.run_id !== runID || !boundedIdentity(value.session_id) ||
+    !boundedIdentity(value.workspace_id) || !Array.isArray(value.items) ||
+    value.items.length > 100 || typeof value.truncated !== "boolean" ||
+    value.metadata_only !== true || value.read_only !== true ||
+    value.snapshot_accepted !== false || value.result_accepted !== false ||
+    value.result_inferred !== false || value.record_rewritten !== false ||
+    value.approval !== false || value.authority_granted !== false ||
+    value.execution_started !== false) {
+    throw new APIRequestError("Verification snapshot receipt history widened its read-only boundary",
+      "INVALID_RESPONSE", 502);
+  }
+  const identities = new Set<string>();
+  let previousSequence = Number.MAX_SAFE_INTEGER;
+  const items = value.items.map((item) => {
+    const parsed = parseVerificationSnapshotReceipt(item, runID, String(value.session_id),
+      String(value.workspace_id));
+    if (identities.has(parsed.id) || parsed.receipt_event_sequence >= previousSequence) {
+      throw new APIRequestError("Verification snapshot receipt history is duplicated or unordered",
+        "INVALID_RESPONSE", 502);
+    }
+    identities.add(parsed.id);
+    previousSequence = parsed.receipt_event_sequence;
+    return parsed as unknown as VerificationSnapshotReceiptView;
+  });
+  if (value.truncated && items.length !== 100) {
+    throw new APIRequestError("Verification snapshot receipt history truncation is inconsistent",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, items } as unknown as VerificationSnapshotReceiptInventoryView;
+}
+
 function parseCodeHandoff(value: unknown, runID: string): CodeHandoffView {
   const keys = ["change_set", "composite_mutation", "durable_sources", "execution_started",
     "generated_at", "mission_id", "mode_revision", "pending_action_count", "pending_actions",
@@ -2790,6 +2882,32 @@ export class CyberAgentClient {
       `/runs/${encodeURIComponent(runID)}/verification-plan-coverage/` +
         `${encodeURIComponent(planID)}/items/${ordinal}/snapshot-export`, { format }, signal,
     ), runID, planID, ordinal, format);
+  }
+
+  async verificationSnapshotReceipts(runID: string,
+    signal?: AbortSignal): Promise<VerificationSnapshotReceiptInventoryView> {
+    if (!boundedIdentity(runID) || runID.trim() !== runID) {
+      throw new Error("A normalized Run identity is required");
+    }
+    return parseVerificationSnapshotReceiptInventory(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/verification-snapshot-receipts`, {}, signal,
+    ), runID);
+  }
+
+  async recordVerificationSnapshotReceipt(runID: string,
+    body: VerificationSnapshotReceiptRequestView, idempotencyKey: string,
+    signal?: AbortSignal): Promise<VerificationSnapshotReceiptControlView> {
+    if (!this.hasVerificationEvidence || !boundedIdentity(runID) ||
+      body.version !== "operator_verification_plan_item_snapshot_receipt.v1" ||
+      !boundedIdentity(body.plan_id) || !safePositiveInteger(body.plan_item_ordinal) ||
+      body.plan_item_ordinal > 32 || !["json", "markdown"].includes(body.format) ||
+      !safeBoundedCount(body.snapshot_high_water_event_sequence, Number.MAX_SAFE_INTEGER) ||
+      !isSHA256(body.content_sha256) || body.confirm_metadata_snapshot !== true) {
+      throw new Error("Verification capability and an exact confirmed snapshot digest are required");
+    }
+    return parseVerificationSnapshotReceipt(await this.sendControl<unknown>(
+      `/runs/${encodeURIComponent(runID)}/verification-snapshot-receipts`, body,
+      idempotencyKey, signal), runID, "", "", true);
   }
 
   async associateVerificationEvidence(runID: string, body: VerificationAssociationRequestView,

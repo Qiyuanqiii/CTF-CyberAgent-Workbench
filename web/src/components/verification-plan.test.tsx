@@ -128,11 +128,22 @@ describe("VerificationPlan", () => {
         format: "json" | "markdown") => Promise.resolve({
         filename: `snapshot.${format === "json" ? "json" : "md"}`,
         mime_type: format === "json" ? "application/json" : "text/markdown; charset=utf-8",
-        content: `snapshot-${format}`,
+        content: `snapshot-${format}`, snapshot_high_water_event_sequence: 8,
+        content_sha256: "d".repeat(64), content_bytes: 13,
       }));
+    const verificationSnapshotReceipts = vi.fn().mockResolvedValue({
+      items: [{ id: "snapshot-receipt-1", plan_id: "plan-1", plan_item_ordinal: 1,
+        format: "json", content_sha256: "c".repeat(64),
+        snapshot_high_water_event_sequence: 8, receipt_event_sequence: 9,
+        recorded_at: "2026-07-20T01:11:00Z" }],
+    });
+    const recordVerificationSnapshotReceipt = vi.fn().mockResolvedValue({
+      id: "snapshot-receipt-2", replayed: false,
+    });
     const client = { hasVerificationEvidence: true, verificationPlans,
       verificationPlanCoverage, verificationPlanItemCoveragePage,
-      verificationPlanItemSnapshotExport,
+      verificationPlanItemSnapshotExport, verificationSnapshotReceipts,
+      recordVerificationSnapshotReceipt,
       recordVerificationPlan: vi.fn() } as unknown as CyberAgentClient;
     const user = userEvent.setup();
     render(<QueryClientProvider client={new QueryClient()}>
@@ -146,6 +157,7 @@ describe("VerificationPlan", () => {
       .toHaveBeenCalledWith("run-1", "plan-1", 1, "", 25, expect.any(AbortSignal)));
     expect(await screen.findByText("verification-1")).toBeInTheDocument();
     expect(screen.getByText("events 7 / 8")).toBeInTheDocument();
+    expect(await screen.findByText("cccccccccccc")).toBeInTheDocument();
     await user.click(screen.getByRole("button", {
       name: "Download check 1 verification snapshot as Markdown",
     }));
@@ -160,6 +172,15 @@ describe("VerificationPlan", () => {
       .toHaveBeenCalledWith("run-1", "plan-1", 1, "json"));
     expect(downloadTextFile).toHaveBeenCalledWith("snapshot.json", "application/json",
       "snapshot-json");
+    await user.click(screen.getByRole("button", {
+      name: "Record check 1 JSON snapshot receipt",
+    }));
+    await waitFor(() => expect(recordVerificationSnapshotReceipt).toHaveBeenCalledWith(
+      "run-1", { version: "operator_verification_plan_item_snapshot_receipt.v1",
+        plan_id: "plan-1", plan_item_ordinal: 1, format: "json",
+        snapshot_high_water_event_sequence: 8, content_sha256: "d".repeat(64),
+        confirm_metadata_snapshot: true }, expect.stringMatching(
+        /^web-verification-snapshot-receipt-/u)));
     await user.click(screen.getByRole("button", { name: "Load older evidence" }));
     await waitFor(() => expect(verificationPlanItemCoveragePage)
       .toHaveBeenCalledWith("run-1", "plan-1", 1, "older-evidence", 25,

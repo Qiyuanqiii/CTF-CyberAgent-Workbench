@@ -33,10 +33,11 @@ describe("RepositoryHistoryPanel", () => {
       file_content_included: false, patch_included: false, checkout_performed: false,
       reference_updated: false, process_started: false, network_used: false, hooks_executed: false,
     });
-    const repositoryCommitFilePreview = vi.fn().mockResolvedValue({
+    const repositoryCommitFilePreview = vi.fn().mockImplementation((_: string, objectID: string,
+      path: string) => Promise.resolve({
       protocol_version: "repository_commit_file_preview.v1", workspace_id: "workspace-1",
-      object_id: "abcdef1234567890abcdef1234567890abcdef12", hash: "abcdef123456",
-      path: "internal/example.go", kind: "regular", content: "safe preview\n",
+      object_id: objectID, hash: objectID === historyObjectID ? "1234567890ab" : "abcdef123456",
+      path, kind: "regular", content: `${objectID === historyObjectID ? "head" : "base"} ${path}\n`,
       total_bytes: 13, returned_bytes: 13, redaction_count: 0, redacted: false,
       provenance: { version: "context_provenance.v1", source_kind: "repository_commit_file",
         source_ref: "internal/example.go", content_sha256: "a".repeat(64),
@@ -45,7 +46,7 @@ describe("RepositoryHistoryPanel", () => {
       redacted_content_included: true, remote_config_included: false,
       checkout_performed: false, reference_updated: false, process_started: false,
       network_used: false, hooks_executed: false,
-    });
+    }));
     const historyObjectID = "1234567890abcdef1234567890abcdef12345678";
     const repositoryCommitComparison = vi.fn().mockResolvedValue({
       protocol_version: "repository_commit_comparison.v1", workspace_id: "workspace-1",
@@ -60,8 +61,10 @@ describe("RepositoryHistoryPanel", () => {
       changes: [{ path: "internal/second.go", change: "added", previous_kind: "",
         current_kind: "regular", content_changed: true, mode_changed: false },
       { path: "internal/old.go", change: "deleted", previous_kind: "executable",
-        current_kind: "", content_changed: true, mode_changed: false }],
-      changed_file_count: 2, returned_change_count: 2, omitted_change_count: 0,
+        current_kind: "", content_changed: true, mode_changed: false },
+      { path: "internal/pair.go", change: "modified", previous_kind: "regular",
+        current_kind: "regular", content_changed: true, mode_changed: false }],
+      changed_file_count: 3, returned_change_count: 3, omitted_change_count: 0,
       redaction_count: 0, truncated: false, metadata_only: true, read_only: true,
       rename_inferred: false, ancestor_required: false, authority_granted: false,
       root_path_exposed: false, author_identity_included: false, commit_body_included: false,
@@ -104,7 +107,7 @@ describe("RepositoryHistoryPanel", () => {
     await user.click(screen.getByRole("button", {
       name: "Preview internal/example.go at abcdef123456",
     }));
-    expect(await screen.findByText("safe preview")).toBeInTheDocument();
+    expect(await screen.findByText("base internal/example.go")).toBeInTheDocument();
     expect(repositoryCommitFilePreview).toHaveBeenCalledWith("workspace-1",
       "abcdef1234567890abcdef1234567890abcdef12", "internal/example.go",
       expect.any(AbortSignal));
@@ -129,6 +132,26 @@ describe("RepositoryHistoryPanel", () => {
       name: "Preview internal/old.go at comparison head 1234567890ab",
     })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", {
+      name: "Compare redacted previews for internal/pair.go between abcdef123456 and 1234567890ab",
+    }));
+    const pairedPreview = await screen.findByRole("region", { name: "Paired redacted file preview" });
+    expect(pairedPreview).toHaveTextContent("base internal/pair.go");
+    expect(pairedPreview).toHaveTextContent("head internal/pair.go");
+    await waitFor(() => {
+      expect(repositoryCommitFilePreview).toHaveBeenCalledWith("workspace-1",
+        "abcdef1234567890abcdef1234567890abcdef12", "internal/pair.go",
+        expect.any(AbortSignal));
+      expect(repositoryCommitFilePreview).toHaveBeenCalledWith("workspace-1",
+        historyObjectID, "internal/pair.go", expect.any(AbortSignal));
+    });
+    await user.click(screen.getByRole("button", {
+      name: "Compare redacted previews for internal/second.go between abcdef123456 and 1234567890ab",
+    }));
+    expect(await screen.findByRole("region", { name: "Base redacted file preview" }))
+      .toHaveTextContent("File is absent at the base commit");
+    expect(screen.getByRole("region", { name: "Head redacted file preview" }))
+      .toHaveTextContent("head internal/second.go");
+    await user.click(screen.getByRole("button", {
       name: "Preview internal/second.go at comparison head 1234567890ab",
     }));
     await waitFor(() => expect(repositoryCommitFilePreview).toHaveBeenCalledWith("workspace-1",
@@ -149,7 +172,7 @@ describe("RepositoryHistoryPanel", () => {
     </QueryClientProvider>);
     expect(screen.queryByRole("region", { name: "Exact commit metadata" })).not.toBeInTheDocument();
     expect(repositoryCommit).toHaveBeenCalledTimes(2);
-    expect(repositoryCommitFilePreview).toHaveBeenCalledTimes(4);
+    expect(repositoryCommitFilePreview).toHaveBeenCalledTimes(7);
     expect(screen.queryByRole("region", { name: "Exact commit comparison" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Exact file history" })).not.toBeInTheDocument();
   });

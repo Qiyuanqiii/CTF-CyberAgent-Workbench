@@ -50,7 +50,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
 			"external-skills", "workspaces", "workspace-explorer", "workspace-search", "models",
-			"repository-state", "repository-diff", "repository-history", "repository-file-history", "repository-commit-detail", "repository-commit-comparison", "repository-commit-file-preview", "verification-evidence", "verification-plan", "verification-plan-coverage", "verification-snapshot-export", "code-handoff", "code-handoff-export",
+			"repository-state", "repository-diff", "repository-history", "repository-file-history", "repository-commit-detail", "repository-commit-comparison", "repository-commit-file-preview", "verification-evidence", "verification-plan", "verification-plan-coverage", "verification-snapshot-export", "verification-snapshot-receipts", "code-handoff", "code-handoff-export",
 			"operation-receipts", "operator-actions", "evidence-inventory",
 			"event-stream", "event-poll", "capabilities", "openapi"}
 		if a.controlEnabled {
@@ -58,7 +58,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 				"specialist-model-cancellation-control", "execution-profile-control")
 		}
 		if a.verificationEvidenceEnabled {
-			resources = append(resources, "verification-evidence-control", "verification-plan-control", "verification-plan-association-control")
+			resources = append(resources, "verification-evidence-control", "verification-plan-control", "verification-plan-association-control", "verification-snapshot-receipt-control")
 		}
 		if a.runCreationEnabled {
 			resources = append(resources, "run-creation-control")
@@ -451,6 +451,8 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 			return a.runVerificationPlans(request, segments[1])
 		case "verification-plan-coverage":
 			return a.runVerificationPlanCoverage(request, segments[1])
+		case "verification-snapshot-receipts":
+			return a.runVerificationSnapshotReceipts(request, segments[1])
 		case "code-handoff":
 			return a.runCodeHandoff(request, segments[1])
 		}

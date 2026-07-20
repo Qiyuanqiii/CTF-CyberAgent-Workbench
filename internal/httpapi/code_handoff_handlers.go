@@ -12,17 +12,19 @@ import (
 )
 
 const (
-	VerificationEvidencePathTemplate       = "/api/v1/runs/{run_id}/verification-evidence"
-	VerificationPlanPathTemplate           = "/api/v1/runs/{run_id}/verification-plan"
-	VerificationAssociationPathTemplate    = "/api/v1/runs/{run_id}/verification-plan-associations"
-	VerificationCoveragePathTemplate       = "/api/v1/runs/{run_id}/verification-plan-coverage"
-	VerificationCoverageDetailPathTemplate = "/api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}"
-	VerificationSnapshotExportPathTemplate = "/api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}/snapshot-export"
-	CodeHandoffPathTemplate                = "/api/v1/runs/{run_id}/code-handoff"
-	CodeHandoffExportPathTemplate          = "/api/v1/runs/{run_id}/code-handoff/export"
-	MaxVerificationEvidenceBodyBytes       = 16 * 1024
-	MaxVerificationPlanBodyBytes           = 64 * 1024
-	MaxVerificationAssociationBodyBytes    = 8 * 1024
+	VerificationEvidencePathTemplate        = "/api/v1/runs/{run_id}/verification-evidence"
+	VerificationPlanPathTemplate            = "/api/v1/runs/{run_id}/verification-plan"
+	VerificationAssociationPathTemplate     = "/api/v1/runs/{run_id}/verification-plan-associations"
+	VerificationCoveragePathTemplate        = "/api/v1/runs/{run_id}/verification-plan-coverage"
+	VerificationCoverageDetailPathTemplate  = "/api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}"
+	VerificationSnapshotExportPathTemplate  = "/api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}/snapshot-export"
+	VerificationSnapshotReceiptPathTemplate = "/api/v1/runs/{run_id}/verification-snapshot-receipts"
+	CodeHandoffPathTemplate                 = "/api/v1/runs/{run_id}/code-handoff"
+	CodeHandoffExportPathTemplate           = "/api/v1/runs/{run_id}/code-handoff/export"
+	MaxVerificationEvidenceBodyBytes        = 16 * 1024
+	MaxVerificationPlanBodyBytes            = 64 * 1024
+	MaxVerificationAssociationBodyBytes     = 8 * 1024
+	MaxVerificationSnapshotReceiptBodyBytes = 8 * 1024
 )
 
 func (a *API) workspaceRepositoryDiff(request *http.Request,
@@ -555,6 +557,32 @@ func (a *API) runVerificationPlanItemSnapshotExport(request *http.Request, runID
 	}, nil, nil
 }
 
+func (a *API) runVerificationSnapshotReceipts(request *http.Request,
+	runID string,
+) (any, *Page, error) {
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		return nil, nil, err
+	}
+	inventory, err := application.NewVerificationSnapshotReceiptService(a.store).Inventory(
+		request.Context(), runID)
+	if err != nil {
+		return nil, nil, err
+	}
+	items := make([]VerificationSnapshotReceiptView, len(inventory.Items))
+	for index, value := range inventory.Items {
+		items[index] = verificationSnapshotReceiptView(value)
+	}
+	return VerificationSnapshotReceiptInventoryView{
+		ProtocolVersion: inventory.ProtocolVersion, RunID: inventory.RunID,
+		SessionID: inventory.SessionID, WorkspaceID: inventory.WorkspaceID,
+		Items: items, Truncated: inventory.Truncated, MetadataOnly: inventory.MetadataOnly,
+		ReadOnly: inventory.ReadOnly, SnapshotAccepted: inventory.SnapshotAccepted,
+		ResultAccepted: inventory.ResultAccepted, ResultInferred: inventory.ResultInferred,
+		RecordRewritten: inventory.RecordRewritten, Approval: inventory.Approval,
+		AuthorityGranted: inventory.AuthorityGranted, ExecutionStarted: inventory.ExecutionStarted,
+	}, nil, nil
+}
+
 func (a *API) runCodeHandoffExport(request *http.Request,
 	runID string,
 ) (any, *Page, error) {
@@ -608,6 +636,16 @@ func matchVerificationPlanPath(requestPath string) (string, bool) {
 func matchVerificationAssociationPath(requestPath string) (string, bool) {
 	const prefix = "/api/v1/runs/"
 	const suffix = "/verification-plan-associations"
+	if !strings.HasPrefix(requestPath, prefix) || !strings.HasSuffix(requestPath, suffix) {
+		return "", false
+	}
+	runID := strings.TrimSuffix(strings.TrimPrefix(requestPath, prefix), suffix)
+	return runID, runID != "" && !strings.Contains(runID, "/")
+}
+
+func matchVerificationSnapshotReceiptPath(requestPath string) (string, bool) {
+	const prefix = "/api/v1/runs/"
+	const suffix = "/verification-snapshot-receipts"
 	if !strings.HasPrefix(requestPath, prefix) || !strings.HasSuffix(requestPath, suffix) {
 		return "", false
 	}
@@ -785,6 +823,117 @@ func (a *API) serveVerificationAssociationControl(writer http.ResponseWriter,
 	a.writeSuccessStatus(writer, requestID,
 		verificationAssociationControlView(result.Association, result.Replayed), nil,
 		http.StatusAccepted)
+}
+
+func (a *API) serveVerificationSnapshotReceiptControl(writer http.ResponseWriter,
+	request *http.Request, requestID string, runID string,
+) {
+	const label = "Verification snapshot receipt"
+	if request.Method != http.MethodPost {
+		a.writeError(writer, requestID,
+			apperror.New(apperror.CodeInvalidArgument, "HTTP method is not supported"),
+			http.StatusMethodNotAllowed)
+		return
+	}
+	if !a.authorizeRunOperation(writer, request, requestID,
+		a.verificationEvidenceEnabled, label) {
+		return
+	}
+	if err := validatePathIdentity(runID); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	if err := validateJSONContentType(request.Header); err != nil {
+		a.writeError(writer, requestID, err, http.StatusUnsupportedMediaType)
+		return
+	}
+	operationKey, err := sessionControlIdempotencyKey(request.Header, label)
+	if err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	if err := rejectQuery(request.URL.Query()); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	body, err := readBoundedRequestBody(request, MaxVerificationSnapshotReceiptBodyBytes)
+	if err != nil {
+		a.writeError(writer, requestID, err, runOperationErrorStatus(err))
+		return
+	}
+	if err := rejectDuplicateJSONObjectFields(body, label); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	var view VerificationSnapshotReceiptRequestView
+	if err := decodeStrictRunOperation(body, &view, label); err != nil {
+		a.writeError(writer, requestID, err, 0)
+		return
+	}
+	result, err := application.NewVerificationSnapshotReceiptService(a.store).Record(
+		request.Context(), application.RecordVerificationSnapshotReceiptRequest{
+			Version: view.Version, RunID: runID, PlanID: view.PlanID,
+			PlanItemOrdinal: view.PlanItemOrdinal, Format: view.Format,
+			SnapshotHighWaterEventSequence: view.SnapshotHighWaterEventSequence,
+			ContentSHA256:                  view.ContentSHA256,
+			ConfirmMetadataSnapshot:        view.ConfirmMetadataSnapshot,
+			OperationKey:                   operationKey, RecordedBy: "http_run_operator",
+		})
+	if err != nil {
+		a.writeError(writer, requestID, apperror.Normalize(err), 0)
+		return
+	}
+	a.writeSuccessStatus(writer, requestID,
+		verificationSnapshotReceiptControlView(result.Receipt, result.Replayed), nil,
+		http.StatusAccepted)
+}
+
+func verificationSnapshotReceiptView(
+	value verification.SnapshotReceipt,
+) VerificationSnapshotReceiptView {
+	return VerificationSnapshotReceiptView{
+		ProtocolVersion: value.ProtocolVersion, ID: value.ID, RunID: value.RunID,
+		SessionID: value.SessionID, WorkspaceID: value.WorkspaceID,
+		PlanID: value.PlanID, PlanSHA256: value.PlanSHA256,
+		PlanItemOrdinal: value.PlanItemOrdinal, PlanItemSHA256: value.PlanItemSHA256,
+		Format:                         value.Format,
+		SnapshotHighWaterEventSequence: value.SnapshotHighWaterEventSequence,
+		AssociatedEvidenceCount:        value.AssociatedEvidenceCount,
+		PassCount:                      value.PassCount, FailCount: value.FailCount, UnknownCount: value.UnknownCount,
+		ReturnedAssociationCount: value.ReturnedAssociationCount,
+		AssociationsTruncated:    value.AssociationsTruncated,
+		ContentSHA256:            value.ContentSHA256, ContentBytes: value.ContentBytes,
+		ReceiptEventSequence: value.EventSequence, RecordedAt: value.CreatedAt,
+		Immutable: true, OperatorRecorded: true, MetadataOnly: true, ReadOnly: true,
+	}
+}
+
+func verificationSnapshotReceiptControlView(value verification.SnapshotReceipt,
+	replayed bool,
+) VerificationSnapshotReceiptControlView {
+	view := verificationSnapshotReceiptView(value)
+	return VerificationSnapshotReceiptControlView{
+		ProtocolVersion: view.ProtocolVersion, ID: view.ID, RunID: view.RunID,
+		SessionID: view.SessionID, WorkspaceID: view.WorkspaceID,
+		PlanID: view.PlanID, PlanSHA256: view.PlanSHA256,
+		PlanItemOrdinal: view.PlanItemOrdinal, PlanItemSHA256: view.PlanItemSHA256,
+		Format:                         view.Format,
+		SnapshotHighWaterEventSequence: view.SnapshotHighWaterEventSequence,
+		AssociatedEvidenceCount:        view.AssociatedEvidenceCount,
+		PassCount:                      view.PassCount, FailCount: view.FailCount, UnknownCount: view.UnknownCount,
+		ReturnedAssociationCount: view.ReturnedAssociationCount,
+		AssociationsTruncated:    view.AssociationsTruncated,
+		ContentSHA256:            view.ContentSHA256, ContentBytes: view.ContentBytes,
+		ReceiptEventSequence: view.ReceiptEventSequence, RecordedAt: view.RecordedAt,
+		Immutable: view.Immutable, OperatorRecorded: view.OperatorRecorded,
+		MetadataOnly: view.MetadataOnly, ReadOnly: view.ReadOnly,
+		ContentIncluded: view.ContentIncluded, PrivateBodiesIncluded: view.PrivateBodiesIncluded,
+		OperatorIdentityIncluded: view.OperatorIdentityIncluded,
+		SnapshotAccepted:         view.SnapshotAccepted, ResultAccepted: view.ResultAccepted,
+		ResultInferred: view.ResultInferred, RecordRewritten: view.RecordRewritten,
+		Approval: view.Approval, AuthorityGranted: view.AuthorityGranted,
+		ExecutionStarted: view.ExecutionStarted, Replayed: replayed,
+	}
 }
 
 func verificationAssociationControlView(value verification.PlanEvidenceAssociation,

@@ -349,6 +349,7 @@ func assertConformanceEvidence(t *testing.T, result Result) {
 	if !result.ExitEvidenceAvailable || !result.RuntimeEvidenceAvailable ||
 		!result.ResourceLimitEvidenceAvailable || !result.TerminationCauseEvidenceAvailable ||
 		!result.LifecycleTimelineEvidenceAvailable || !result.DeadlineBudgetEvidenceAvailable ||
+		!result.EvidenceSetReceiptAvailable ||
 		result.RawOutputIncluded || result.OutputTruncated ||
 		result.ExitEvidence.ProtocolVersion != ExitEvidenceProtocolVersion ||
 		!result.ExitEvidence.MetadataOnly || result.ExitEvidence.RawOutputIncluded ||
@@ -398,7 +399,11 @@ func assertConformanceEvidence(t *testing.T, result Result) {
 		result.DeadlineBudgetEvidence.MemoryLimitClaimed ||
 		result.DeadlineBudgetEvidence.OSResourceLimitsVerified ||
 		!result.DeadlineBudgetEvidence.MetadataOnly ||
-		result.DeadlineBudgetEvidence.ProductExecutionEnabled {
+		result.DeadlineBudgetEvidence.ProductExecutionEnabled ||
+		result.EvidenceSetReceipt.validate(result.ExitEvidence, result.RuntimeEvidence,
+			result.ResourceLimitEvidence, result.TerminationCauseEvidence,
+			result.LifecycleTimelineEvidence, result.DeadlineBudgetEvidence) != nil ||
+		result.EvidenceSetReceipt.ProductExecutionEnabled {
 		t.Fatalf("process-tree output evidence widened or was incomplete: %#v", result)
 	}
 }

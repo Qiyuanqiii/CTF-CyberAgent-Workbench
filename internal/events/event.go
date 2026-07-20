@@ -37,6 +37,7 @@ const (
 	VerificationEvidenceRecordedEvent             = "verification.evidence_recorded"
 	VerificationPlanRecordedEvent                 = "verification.plan_recorded"
 	VerificationPlanEvidenceAssociatedEvent       = "verification.plan_evidence_associated"
+	VerificationSnapshotReceiptRecordedEvent      = "verification.snapshot_receipt_recorded"
 	PolicyDecisionEvent                           = "policy.decision"
 	ToolProposedEvent                             = "tool.proposed"
 	ToolApprovedEvent                             = "tool.approved"

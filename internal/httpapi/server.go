@@ -155,6 +155,12 @@ type Store interface {
 		[]verification.PlanItemCoverageCount, error)
 	RecordVerificationPlanEvidenceAssociation(context.Context,
 		verification.PlanEvidenceAssociation) (verification.PlanEvidenceAssociation, bool, error)
+	GetVerificationSnapshotReceiptByOperation(context.Context, string) (
+		verification.SnapshotReceipt, bool, error)
+	ListVerificationSnapshotReceipts(context.Context, string, int) (
+		[]verification.SnapshotReceipt, error)
+	RecordVerificationSnapshotReceipt(context.Context, verification.SnapshotReceipt) (
+		verification.SnapshotReceipt, bool, error)
 	ListOperatorActionRecords(context.Context, string, string, string, time.Time, int) (
 		[]operatoraction.Record, error)
 
@@ -584,6 +590,11 @@ func (a *API) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	}
 	if runID, matched := matchVerificationAssociationPath(request.URL.Path); matched {
 		a.serveVerificationAssociationControl(tracked, request, requestID, runID)
+		return
+	}
+	if runID, matched := matchVerificationSnapshotReceiptPath(request.URL.Path); matched &&
+		request.Method != http.MethodGet {
+		a.serveVerificationSnapshotReceiptControl(tracked, request, requestID, runID)
 		return
 	}
 	if runID, matched := matchRunExecutionControlPath(request.URL.Path); matched {

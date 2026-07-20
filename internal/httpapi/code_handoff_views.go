@@ -297,6 +297,111 @@ type VerificationSnapshotExportView struct {
 	ExecutionStarted               bool   `json:"execution_started"`
 }
 
+type VerificationSnapshotReceiptRequestView struct {
+	Version                        string `json:"version"`
+	PlanID                         string `json:"plan_id"`
+	PlanItemOrdinal                int    `json:"plan_item_ordinal"`
+	Format                         string `json:"format"`
+	SnapshotHighWaterEventSequence int64  `json:"snapshot_high_water_event_sequence"`
+	ContentSHA256                  string `json:"content_sha256"`
+	ConfirmMetadataSnapshot        bool   `json:"confirm_metadata_snapshot"`
+}
+
+type VerificationSnapshotReceiptView struct {
+	ProtocolVersion                string    `json:"protocol_version"`
+	ID                             string    `json:"id"`
+	RunID                          string    `json:"run_id"`
+	SessionID                      string    `json:"session_id"`
+	WorkspaceID                    string    `json:"workspace_id"`
+	PlanID                         string    `json:"plan_id"`
+	PlanSHA256                     string    `json:"plan_sha256"`
+	PlanItemOrdinal                int       `json:"plan_item_ordinal"`
+	PlanItemSHA256                 string    `json:"plan_item_sha256"`
+	Format                         string    `json:"format"`
+	SnapshotHighWaterEventSequence int64     `json:"snapshot_high_water_event_sequence"`
+	AssociatedEvidenceCount        int       `json:"associated_evidence_count"`
+	PassCount                      int       `json:"pass_count"`
+	FailCount                      int       `json:"fail_count"`
+	UnknownCount                   int       `json:"unknown_count"`
+	ReturnedAssociationCount       int       `json:"returned_association_count"`
+	AssociationsTruncated          bool      `json:"associations_truncated"`
+	ContentSHA256                  string    `json:"content_sha256"`
+	ContentBytes                   int       `json:"content_bytes"`
+	ReceiptEventSequence           int64     `json:"receipt_event_sequence"`
+	RecordedAt                     time.Time `json:"recorded_at"`
+	Immutable                      bool      `json:"immutable"`
+	OperatorRecorded               bool      `json:"operator_recorded"`
+	MetadataOnly                   bool      `json:"metadata_only"`
+	ReadOnly                       bool      `json:"read_only"`
+	ContentIncluded                bool      `json:"content_included"`
+	PrivateBodiesIncluded          bool      `json:"private_bodies_included"`
+	OperatorIdentityIncluded       bool      `json:"operator_identity_included"`
+	SnapshotAccepted               bool      `json:"snapshot_accepted"`
+	ResultAccepted                 bool      `json:"result_accepted"`
+	ResultInferred                 bool      `json:"result_inferred"`
+	RecordRewritten                bool      `json:"record_rewritten"`
+	Approval                       bool      `json:"approval"`
+	AuthorityGranted               bool      `json:"authority_granted"`
+	ExecutionStarted               bool      `json:"execution_started"`
+}
+
+type VerificationSnapshotReceiptControlView struct {
+	ProtocolVersion                string    `json:"protocol_version"`
+	ID                             string    `json:"id"`
+	RunID                          string    `json:"run_id"`
+	SessionID                      string    `json:"session_id"`
+	WorkspaceID                    string    `json:"workspace_id"`
+	PlanID                         string    `json:"plan_id"`
+	PlanSHA256                     string    `json:"plan_sha256"`
+	PlanItemOrdinal                int       `json:"plan_item_ordinal"`
+	PlanItemSHA256                 string    `json:"plan_item_sha256"`
+	Format                         string    `json:"format"`
+	SnapshotHighWaterEventSequence int64     `json:"snapshot_high_water_event_sequence"`
+	AssociatedEvidenceCount        int       `json:"associated_evidence_count"`
+	PassCount                      int       `json:"pass_count"`
+	FailCount                      int       `json:"fail_count"`
+	UnknownCount                   int       `json:"unknown_count"`
+	ReturnedAssociationCount       int       `json:"returned_association_count"`
+	AssociationsTruncated          bool      `json:"associations_truncated"`
+	ContentSHA256                  string    `json:"content_sha256"`
+	ContentBytes                   int       `json:"content_bytes"`
+	ReceiptEventSequence           int64     `json:"receipt_event_sequence"`
+	RecordedAt                     time.Time `json:"recorded_at"`
+	Immutable                      bool      `json:"immutable"`
+	OperatorRecorded               bool      `json:"operator_recorded"`
+	MetadataOnly                   bool      `json:"metadata_only"`
+	ReadOnly                       bool      `json:"read_only"`
+	ContentIncluded                bool      `json:"content_included"`
+	PrivateBodiesIncluded          bool      `json:"private_bodies_included"`
+	OperatorIdentityIncluded       bool      `json:"operator_identity_included"`
+	SnapshotAccepted               bool      `json:"snapshot_accepted"`
+	ResultAccepted                 bool      `json:"result_accepted"`
+	ResultInferred                 bool      `json:"result_inferred"`
+	RecordRewritten                bool      `json:"record_rewritten"`
+	Approval                       bool      `json:"approval"`
+	AuthorityGranted               bool      `json:"authority_granted"`
+	ExecutionStarted               bool      `json:"execution_started"`
+	Replayed                       bool      `json:"replayed"`
+}
+
+type VerificationSnapshotReceiptInventoryView struct {
+	ProtocolVersion  string                            `json:"protocol_version"`
+	RunID            string                            `json:"run_id"`
+	SessionID        string                            `json:"session_id"`
+	WorkspaceID      string                            `json:"workspace_id"`
+	Items            []VerificationSnapshotReceiptView `json:"items"`
+	Truncated        bool                              `json:"truncated"`
+	MetadataOnly     bool                              `json:"metadata_only"`
+	ReadOnly         bool                              `json:"read_only"`
+	SnapshotAccepted bool                              `json:"snapshot_accepted"`
+	ResultAccepted   bool                              `json:"result_accepted"`
+	ResultInferred   bool                              `json:"result_inferred"`
+	RecordRewritten  bool                              `json:"record_rewritten"`
+	Approval         bool                              `json:"approval"`
+	AuthorityGranted bool                              `json:"authority_granted"`
+	ExecutionStarted bool                              `json:"execution_started"`
+}
+
 type CodeHandoffPlanView struct {
 	State             string `json:"state"`
 	ProposalID        string `json:"proposal_id"`

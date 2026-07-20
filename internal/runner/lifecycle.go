@@ -2,7 +2,9 @@ package runner
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -21,6 +23,7 @@ const (
 	TerminationCauseEvidenceProtocolVersion  = "runner_termination_cause_evidence.v1"
 	LifecycleTimelineEvidenceProtocolVersion = "runner_lifecycle_timeline_evidence.v1"
 	DeadlineBudgetEvidenceProtocolVersion    = "runner_deadline_budget_evidence.v1"
+	EvidenceSetReceiptProtocolVersion        = "runner_evidence_set_receipt.v1"
 	DefaultRunTimeout                        = 30 * time.Second
 	MaxRunTimeout                            = 5 * time.Minute
 	DefaultTerminationGrace                  = 2 * time.Second
@@ -32,6 +35,7 @@ const (
 	MaxRuntimeEvidenceMilliseconds           = int64((MaxRunTimeout + 2*MaxControlGrace) / time.Millisecond)
 	MaxCPUTimeEvidenceMilliseconds           = int64((24 * time.Hour) / time.Millisecond)
 	MaxPeakResidentBytes                     = int64(1 << 40)
+	MaxEvidenceSetCanonicalBytes             = 64 * 1024
 	EmptyOutputSHA256                        = "e3b0c44298fc1c149afbf4c8996fb924" +
 		"27ae41e4649b934ca495991b7852b855"
 )
@@ -49,6 +53,7 @@ var (
 	ErrTerminationCauseEvidence  = errors.New("runner termination cause evidence is invalid")
 	ErrLifecycleTimelineEvidence = errors.New("runner lifecycle timeline evidence is invalid")
 	ErrDeadlineBudgetEvidence    = errors.New("runner deadline budget evidence is invalid")
+	ErrEvidenceSetReceipt        = errors.New("runner evidence set receipt is invalid")
 )
 
 type StopReason string
@@ -427,6 +432,74 @@ func (e DeadlineBudgetEvidence) validate(request Request, result Result) error {
 	return nil
 }
 
+// EvidenceSetReceipt binds the six independently validated evidence records to
+// one deterministic digest. The canonical bytes are not retained or exposed.
+type EvidenceSetReceipt struct {
+	ProtocolVersion                  string
+	RecordCount                      int
+	RecordProtocols                  [6]string
+	CanonicalSHA256                  string
+	CanonicalBytes                   int
+	Complete                         bool
+	MetadataOnly                     bool
+	TimelineLogicalSequenceOnly      bool
+	CrossRecordWallClockOrderClaimed bool
+	RawOutputIncluded                bool
+	ProcessIdentityIncluded          bool
+	OSResourceLimitsVerified         bool
+	ProductExecutionEnabled          bool
+}
+
+type evidenceSetCanonical struct {
+	ProtocolVersion          string                    `json:"protocol_version"`
+	ExitEvidence             ExitEvidence              `json:"exit_evidence"`
+	RuntimeEvidence          RuntimeEvidence           `json:"runtime_evidence"`
+	ResourceLimitEvidence    ResourceLimitEvidence     `json:"resource_limit_evidence"`
+	TerminationCauseEvidence TerminationCauseEvidence  `json:"termination_cause_evidence"`
+	LifecycleTimeline        LifecycleTimelineEvidence `json:"lifecycle_timeline_evidence"`
+	DeadlineBudgetEvidence   DeadlineBudgetEvidence    `json:"deadline_budget_evidence"`
+}
+
+func buildEvidenceSetReceipt(exit ExitEvidence, runtime RuntimeEvidence,
+	limits ResourceLimitEvidence, cause TerminationCauseEvidence,
+	timeline LifecycleTimelineEvidence, budget DeadlineBudgetEvidence,
+) (EvidenceSetReceipt, error) {
+	canonical, err := json.Marshal(evidenceSetCanonical{
+		ProtocolVersion: EvidenceSetReceiptProtocolVersion, ExitEvidence: exit,
+		RuntimeEvidence: runtime, ResourceLimitEvidence: limits,
+		TerminationCauseEvidence: cause, LifecycleTimeline: timeline,
+		DeadlineBudgetEvidence: budget,
+	})
+	if err != nil || len(canonical) == 0 || len(canonical) > MaxEvidenceSetCanonicalBytes {
+		return EvidenceSetReceipt{}, errors.New("runner evidence set canonical encoding is invalid")
+	}
+	digest := sha256.Sum256(canonical)
+	return EvidenceSetReceipt{
+		ProtocolVersion: EvidenceSetReceiptProtocolVersion, RecordCount: 6,
+		RecordProtocols: [6]string{ExitEvidenceProtocolVersion, RuntimeEvidenceProtocolVersion,
+			ResourceLimitEvidenceProtocolVersion, TerminationCauseEvidenceProtocolVersion,
+			LifecycleTimelineEvidenceProtocolVersion, DeadlineBudgetEvidenceProtocolVersion},
+		CanonicalSHA256: hex.EncodeToString(digest[:]), CanonicalBytes: len(canonical),
+		Complete: true, MetadataOnly: true, TimelineLogicalSequenceOnly: true,
+	}, nil
+}
+
+func (r EvidenceSetReceipt) validate(exit ExitEvidence, runtime RuntimeEvidence,
+	limits ResourceLimitEvidence, cause TerminationCauseEvidence,
+	timeline LifecycleTimelineEvidence, budget DeadlineBudgetEvidence,
+) error {
+	expected, err := buildEvidenceSetReceipt(exit, runtime, limits, cause, timeline, budget)
+	if err != nil || r != expected || r.ProtocolVersion != EvidenceSetReceiptProtocolVersion ||
+		r.RecordCount != 6 || !validSHA256(r.CanonicalSHA256) || r.CanonicalBytes < 1 ||
+		r.CanonicalBytes > MaxEvidenceSetCanonicalBytes || !r.Complete || !r.MetadataOnly ||
+		!r.TimelineLogicalSequenceOnly || r.CrossRecordWallClockOrderClaimed ||
+		r.RawOutputIncluded || r.ProcessIdentityIncluded || r.OSResourceLimitsVerified ||
+		r.ProductExecutionEnabled {
+		return errors.New("runner evidence set receipt binding is invalid")
+	}
+	return nil
+}
+
 func (e TerminationCauseEvidence) validate(status ExitStatus, result Result) error {
 	trigger, ok := terminationTrigger(result)
 	mechanism := terminationMechanism(result)
@@ -550,6 +623,8 @@ type Result struct {
 	LifecycleTimelineEvidence          LifecycleTimelineEvidence
 	DeadlineBudgetEvidenceAvailable    bool
 	DeadlineBudgetEvidence             DeadlineBudgetEvidence
+	EvidenceSetReceiptAvailable        bool
+	EvidenceSetReceipt                 EvidenceSetReceipt
 	OutputTruncated                    bool
 	RawOutputIncluded                  bool
 	ProductExecutionEnabled            bool
@@ -820,6 +895,15 @@ func (h *Harness) collectEvidence(parent context.Context, process Process,
 		result.StopReason = StopEvidenceFailed
 		return fmt.Errorf("%w: contract mismatch", ErrDeadlineBudgetEvidence)
 	}
+	evidenceSetReceipt, err := buildEvidenceSetReceipt(exitEvidence, runtimeEvidence,
+		resourceLimitEvidence, terminationCauseEvidence, lifecycleTimelineEvidence,
+		deadlineBudgetEvidence)
+	if err != nil || evidenceSetReceipt.validate(exitEvidence, runtimeEvidence,
+		resourceLimitEvidence, terminationCauseEvidence, lifecycleTimelineEvidence,
+		deadlineBudgetEvidence) != nil {
+		result.StopReason = StopEvidenceFailed
+		return fmt.Errorf("%w: contract mismatch", ErrEvidenceSetReceipt)
+	}
 	if result.ExitEvidenceAvailable && result.ExitEvidence != exitEvidence {
 		result.StopReason = StopEvidenceFailed
 		return fmt.Errorf("%w: evidence changed after collection", ErrExitEvidence)
@@ -848,6 +932,10 @@ func (h *Harness) collectEvidence(parent context.Context, process Process,
 		result.StopReason = StopEvidenceFailed
 		return fmt.Errorf("%w: evidence changed after collection", ErrDeadlineBudgetEvidence)
 	}
+	if result.EvidenceSetReceiptAvailable && result.EvidenceSetReceipt != evidenceSetReceipt {
+		result.StopReason = StopEvidenceFailed
+		return fmt.Errorf("%w: evidence changed after collection", ErrEvidenceSetReceipt)
+	}
 	result.ExitEvidence = exitEvidence
 	result.ExitEvidenceAvailable = true
 	result.RuntimeEvidence = runtimeEvidence
@@ -860,6 +948,8 @@ func (h *Harness) collectEvidence(parent context.Context, process Process,
 	result.LifecycleTimelineEvidenceAvailable = true
 	result.DeadlineBudgetEvidence = deadlineBudgetEvidence
 	result.DeadlineBudgetEvidenceAvailable = true
+	result.EvidenceSetReceipt = evidenceSetReceipt
+	result.EvidenceSetReceiptAvailable = true
 	result.OutputTruncated = exitEvidence.Stdout.Truncated || exitEvidence.Stderr.Truncated
 	result.RawOutputIncluded = false
 	return nil

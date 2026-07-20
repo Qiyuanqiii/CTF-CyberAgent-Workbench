@@ -221,6 +221,7 @@ func TestLifecycleHarnessNormalExitRequiresReapedTree(t *testing.T) {
 		!result.ExitEvidenceAvailable || !result.RuntimeEvidenceAvailable ||
 		!result.ResourceLimitEvidenceAvailable || !result.TerminationCauseEvidenceAvailable ||
 		!result.LifecycleTimelineEvidenceAvailable || !result.DeadlineBudgetEvidenceAvailable ||
+		!result.EvidenceSetReceiptAvailable ||
 		result.RawOutputIncluded ||
 		result.ProductExecutionEnabled {
 		t.Fatalf("normal lifecycle result=%#v err=%v", result, err)
@@ -260,6 +261,7 @@ func TestLifecycleHarnessRejectsRuntimeEvidenceThatWidensMetadataBoundary(t *tes
 				result.RuntimeEvidenceAvailable || result.ResourceLimitEvidenceAvailable ||
 				result.TerminationCauseEvidenceAvailable ||
 				result.LifecycleTimelineEvidenceAvailable || result.DeadlineBudgetEvidenceAvailable ||
+				result.EvidenceSetReceiptAvailable ||
 				result.ProductExecutionEnabled {
 				t.Fatalf("invalid runtime evidence result=%#v err=%v", result, err)
 			}
@@ -289,6 +291,7 @@ func TestLifecycleHarnessRequiresStableRepeatedEvidence(t *testing.T) {
 	originalTerminationCause := result.TerminationCauseEvidence
 	originalTimeline := result.LifecycleTimelineEvidence
 	originalDeadlineBudget := result.DeadlineBudgetEvidence
+	originalReceipt := result.EvidenceSetReceipt
 	changedRequest := request
 	changedRequest.Timeout = 2 * time.Second
 	changedResult := result
@@ -298,7 +301,8 @@ func TestLifecycleHarnessRequiresStableRepeatedEvidence(t *testing.T) {
 		changedResult.ResourceLimitEvidence != originalResourceLimit ||
 		changedResult.TerminationCauseEvidence != originalTerminationCause ||
 		changedResult.LifecycleTimelineEvidence != originalTimeline ||
-		changedResult.DeadlineBudgetEvidence != originalDeadlineBudget {
+		changedResult.DeadlineBudgetEvidence != originalDeadlineBudget ||
+		changedResult.EvidenceSetReceipt != originalReceipt {
 		t.Fatalf("changed request partially replaced evidence: result=%#v err=%v",
 			changedResult, err)
 	}
@@ -309,6 +313,7 @@ func TestLifecycleHarnessRequiresStableRepeatedEvidence(t *testing.T) {
 		tamperedTimeline.StopReason != StopEvidenceFailed ||
 		tamperedTimeline.LifecycleTimelineEvidence.StepCount != originalTimeline.StepCount+1 ||
 		tamperedTimeline.DeadlineBudgetEvidence != originalDeadlineBudget ||
+		tamperedTimeline.EvidenceSetReceipt != originalReceipt ||
 		tamperedTimeline.ResourceLimitEvidence != originalResourceLimit ||
 		tamperedTimeline.TerminationCauseEvidence != originalTerminationCause {
 		t.Fatalf("changed timeline partially replaced evidence: result=%#v err=%v",
@@ -321,10 +326,31 @@ func TestLifecycleHarnessRequiresStableRepeatedEvidence(t *testing.T) {
 		tamperedBudget.StopReason != StopEvidenceFailed ||
 		!tamperedBudget.DeadlineBudgetEvidence.CumulativeWallDeadlineClaimed ||
 		tamperedBudget.LifecycleTimelineEvidence != originalTimeline ||
+		tamperedBudget.EvidenceSetReceipt != originalReceipt ||
 		tamperedBudget.ResourceLimitEvidence != originalResourceLimit ||
 		tamperedBudget.TerminationCauseEvidence != originalTerminationCause {
 		t.Fatalf("changed deadline budget partially replaced evidence: result=%#v err=%v",
 			tamperedBudget, err)
+	}
+	tamperedReceipt := result
+	if tamperedReceipt.EvidenceSetReceipt.CanonicalSHA256[0] == '0' {
+		tamperedReceipt.EvidenceSetReceipt.CanonicalSHA256 = "1" +
+			tamperedReceipt.EvidenceSetReceipt.CanonicalSHA256[1:]
+	} else {
+		tamperedReceipt.EvidenceSetReceipt.CanonicalSHA256 = "0" +
+			tamperedReceipt.EvidenceSetReceipt.CanonicalSHA256[1:]
+	}
+	if err := harness.collectEvidence(t.Context(), process, status, request,
+		&tamperedReceipt); !errors.Is(err, ErrEvidenceSetReceipt) ||
+		tamperedReceipt.StopReason != StopEvidenceFailed ||
+		tamperedReceipt.RuntimeEvidence != original ||
+		tamperedReceipt.ResourceLimitEvidence != originalResourceLimit ||
+		tamperedReceipt.TerminationCauseEvidence != originalTerminationCause ||
+		tamperedReceipt.LifecycleTimelineEvidence != originalTimeline ||
+		tamperedReceipt.DeadlineBudgetEvidence != originalDeadlineBudget ||
+		tamperedReceipt.EvidenceSetReceipt == originalReceipt {
+		t.Fatalf("changed evidence-set receipt was replaced: result=%#v err=%v",
+			tamperedReceipt, err)
 	}
 	process.mu.Lock()
 	process.runtimeEvidence.Resources.WallTimeMilliseconds++
@@ -333,7 +359,8 @@ func TestLifecycleHarnessRequiresStableRepeatedEvidence(t *testing.T) {
 		result.RuntimeEvidence != original || result.ResourceLimitEvidence != originalResourceLimit ||
 		result.TerminationCauseEvidence != originalTerminationCause ||
 		result.LifecycleTimelineEvidence != originalTimeline ||
-		result.DeadlineBudgetEvidence != originalDeadlineBudget {
+		result.DeadlineBudgetEvidence != originalDeadlineBudget ||
+		result.EvidenceSetReceipt != originalReceipt {
 		t.Fatalf("changed repeated evidence result=%#v err=%v", result, err)
 	}
 }
@@ -373,6 +400,7 @@ func TestLifecycleHarnessBoundsOutputAndRejectsInvalidExitEvidence(t *testing.T)
 		result.KillRequested || result.ExitEvidenceAvailable ||
 		result.ResourceLimitEvidenceAvailable || result.TerminationCauseEvidenceAvailable ||
 		result.LifecycleTimelineEvidenceAvailable || result.DeadlineBudgetEvidenceAvailable ||
+		result.EvidenceSetReceiptAvailable ||
 		result.RawOutputIncluded {
 		t.Fatalf("invalid output evidence result=%#v err=%v", result, err)
 	}
@@ -564,8 +592,10 @@ func assertLifecycleControlEvidence(t *testing.T, result Result, runTimeout time
 	cause := result.TerminationCauseEvidence
 	timeline := result.LifecycleTimelineEvidence
 	deadline := result.DeadlineBudgetEvidence
+	receipt := result.EvidenceSetReceipt
 	if !result.ResourceLimitEvidenceAvailable || !result.TerminationCauseEvidenceAvailable ||
 		!result.LifecycleTimelineEvidenceAvailable || !result.DeadlineBudgetEvidenceAvailable ||
+		!result.EvidenceSetReceiptAvailable ||
 		resource.ProtocolVersion != ResourceLimitEvidenceProtocolVersion ||
 		resource.RunTimeoutMilliseconds != runTimeout.Milliseconds() ||
 		resource.TerminationGraceMilliseconds != terminationGrace.Milliseconds() ||
@@ -615,7 +645,15 @@ func assertLifecycleControlEvidence(t *testing.T, result Result, runTimeout time
 		!deadline.IndependentContextBudgets || deadline.CumulativeWallDeadlineClaimed ||
 		deadline.CPUTimeLimitClaimed || deadline.MemoryLimitClaimed ||
 		deadline.OSResourceLimitsVerified || !deadline.MetadataOnly ||
-		deadline.ProductExecutionEnabled {
+		deadline.ProductExecutionEnabled ||
+		receipt.validate(result.ExitEvidence, result.RuntimeEvidence, resource, cause,
+			timeline, deadline) != nil || receipt.ProtocolVersion != EvidenceSetReceiptProtocolVersion ||
+		receipt.RecordCount != 6 || receipt.CanonicalBytes < 1 ||
+		receipt.CanonicalBytes > MaxEvidenceSetCanonicalBytes || !receipt.Complete ||
+		!receipt.MetadataOnly || !receipt.TimelineLogicalSequenceOnly ||
+		receipt.CrossRecordWallClockOrderClaimed || receipt.RawOutputIncluded ||
+		receipt.ProcessIdentityIncluded || receipt.OSResourceLimitsVerified ||
+		receipt.ProductExecutionEnabled {
 		t.Fatalf("lifecycle control evidence widened or diverged: %#v", result)
 	}
 }

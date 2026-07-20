@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FileClock, FileCode2, FileDiff, FileInput, FileOutput, GitCommitHorizontal,
+import { Columns2, FileClock, FileCode2, FileDiff, FileInput, FileOutput, GitCommitHorizontal,
   GitCompareArrows, RefreshCw } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import { formatDate } from "../lib/format";
@@ -14,6 +14,9 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
   const [fileSelection, setFileSelection] = useState({ workspaceID: "", objectID: "", path: "" });
   const [historySelection, setHistorySelection] = useState({ workspaceID: "", path: "" });
   const [comparisonBase, setComparisonBase] = useState({ workspaceID: "", objectID: "" });
+  const [comparisonPreview, setComparisonPreview] = useState({ workspaceID: "", baseObjectID: "",
+    baseHash: "", baseAvailable: false, headObjectID: "", headHash: "", headAvailable: false,
+    path: "" });
   const selectedObjectID = selection.workspaceID === workspaceID ? selection.objectID : "";
   const comparisonBaseObjectID = comparisonBase.workspaceID === workspaceID ?
     comparisonBase.objectID : "";
@@ -24,6 +27,9 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
   const selectedFilePath = fileSelection.workspaceID === workspaceID ? fileSelection.path : "";
   const selectedHistoryPath = historySelection.workspaceID === workspaceID ?
     historySelection.path : "";
+  const activeComparisonPreview = comparisonPreview.workspaceID === workspaceID &&
+    comparisonPreview.baseObjectID === comparisonBaseObjectID &&
+    comparisonPreview.headObjectID === comparisonHeadObjectID ? comparisonPreview : null;
   const query = useQuery({
     queryKey: ["workspace", workspaceID, "repository-history"],
     queryFn: ({ signal }) => client.repositoryHistory(workspaceID, signal),
@@ -52,6 +58,20 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
     queryKey: ["workspace", workspaceID, "repository-file-history", selectedHistoryPath],
     queryFn: ({ signal }) => client.repositoryFileHistory(workspaceID, selectedHistoryPath, signal),
     enabled: Boolean(workspaceID && selectedHistoryPath),
+  });
+  const comparisonBasePreviewQuery = useQuery({
+    queryKey: ["workspace", workspaceID, "repository-comparison-preview",
+      activeComparisonPreview?.baseObjectID, activeComparisonPreview?.path, "base"],
+    queryFn: ({ signal }) => client.repositoryCommitFilePreview(workspaceID,
+      activeComparisonPreview?.baseObjectID ?? "", activeComparisonPreview?.path ?? "", signal),
+    enabled: Boolean(workspaceID && activeComparisonPreview?.baseAvailable),
+  });
+  const comparisonHeadPreviewQuery = useQuery({
+    queryKey: ["workspace", workspaceID, "repository-comparison-preview",
+      activeComparisonPreview?.headObjectID, activeComparisonPreview?.path, "head"],
+    queryFn: ({ signal }) => client.repositoryCommitFilePreview(workspaceID,
+      activeComparisonPreview?.headObjectID ?? "", activeComparisonPreview?.path ?? "", signal),
+    enabled: Boolean(workspaceID && activeComparisonPreview?.headAvailable),
   });
   if (!workspaceID) return null;
   return <section aria-label="Repository history" className="repository-history-panel">
@@ -205,12 +225,80 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
                       title="Preview redacted head file" type="button">
                       <FileOutput aria-hidden="true" size={14} />
                     </button> : <span aria-hidden="true" className="repository-preview-placeholder" />}
+                  {["regular", "executable"].includes(change.previous_kind) ||
+                    ["regular", "executable"].includes(change.current_kind) ?
+                    <button aria-label={`Compare redacted previews for ${change.path} between ${comparisonQuery.data.base_hash} and ${comparisonQuery.data.head_hash}`}
+                      aria-pressed={activeComparisonPreview?.path === change.path}
+                      className="icon-button" onClick={() => setComparisonPreview((current) =>
+                        current.workspaceID === workspaceID &&
+                          current.baseObjectID === comparisonQuery.data.base_object_id &&
+                          current.headObjectID === comparisonQuery.data.head_object_id &&
+                          current.path === change.path ?
+                          { workspaceID: "", baseObjectID: "", baseHash: "", baseAvailable: false,
+                            headObjectID: "", headHash: "", headAvailable: false, path: "" } :
+                          { workspaceID, baseObjectID: comparisonQuery.data.base_object_id,
+                            baseHash: comparisonQuery.data.base_hash,
+                            baseAvailable: ["regular", "executable"].includes(change.previous_kind),
+                            headObjectID: comparisonQuery.data.head_object_id,
+                            headHash: comparisonQuery.data.head_hash,
+                            headAvailable: ["regular", "executable"].includes(change.current_kind),
+                            path: change.path })}
+                      title="Open paired redacted previews" type="button">
+                      <Columns2 aria-hidden="true" size={14} />
+                    </button> : <span aria-hidden="true" className="repository-preview-placeholder" />}
                 </span>
               </div>)}</div>}
           {comparisonQuery.data.omitted_change_count > 0 &&
             <p className="repository-diff-omitted">
               {comparisonQuery.data.omitted_change_count} additional changes omitted
             </p>}
+          {activeComparisonPreview &&
+            <section aria-label="Paired redacted file preview"
+              className="repository-comparison-preview-workspace">
+              <header><span><Columns2 aria-hidden="true" size={14} />
+                <code title={activeComparisonPreview.path}>{activeComparisonPreview.path}</code></span>
+                <StatusBadge status="read-only" /></header>
+              <div>
+                <section aria-label="Base redacted file preview">
+                  <header><strong>Base</strong><code>{activeComparisonPreview.baseHash}</code></header>
+                  {!activeComparisonPreview.baseAvailable ?
+                    <EmptyState>File is absent at the base commit</EmptyState> : <>
+                      {comparisonBasePreviewQuery.isLoading &&
+                        <LoadingState label="Loading redacted base file" />}
+                      {comparisonBasePreviewQuery.isError &&
+                        <ErrorState error={comparisonBasePreviewQuery.error} />}
+                      {comparisonBasePreviewQuery.data && <>
+                        <div className="repository-comparison-preview-meta">
+                          <code title={`${comparisonBasePreviewQuery.data.hash} / ${comparisonBasePreviewQuery.data.path}`}>
+                            {comparisonBasePreviewQuery.data.hash} / {comparisonBasePreviewQuery.data.path}
+                          </code><span><StatusBadge status={comparisonBasePreviewQuery.data.kind} />
+                            {comparisonBasePreviewQuery.data.redacted &&
+                              <StatusBadge status="redacted" />}</span></div>
+                        <pre>{comparisonBasePreviewQuery.data.content}</pre>
+                      </>}
+                    </>}
+                </section>
+                <section aria-label="Head redacted file preview">
+                  <header><strong>Head</strong><code>{activeComparisonPreview.headHash}</code></header>
+                  {!activeComparisonPreview.headAvailable ?
+                    <EmptyState>File is absent at the head commit</EmptyState> : <>
+                      {comparisonHeadPreviewQuery.isLoading &&
+                        <LoadingState label="Loading redacted head file" />}
+                      {comparisonHeadPreviewQuery.isError &&
+                        <ErrorState error={comparisonHeadPreviewQuery.error} />}
+                      {comparisonHeadPreviewQuery.data && <>
+                        <div className="repository-comparison-preview-meta">
+                          <code title={`${comparisonHeadPreviewQuery.data.hash} / ${comparisonHeadPreviewQuery.data.path}`}>
+                            {comparisonHeadPreviewQuery.data.hash} / {comparisonHeadPreviewQuery.data.path}
+                          </code><span><StatusBadge status={comparisonHeadPreviewQuery.data.kind} />
+                            {comparisonHeadPreviewQuery.data.redacted &&
+                              <StatusBadge status="redacted" />}</span></div>
+                        <pre>{comparisonHeadPreviewQuery.data.content}</pre>
+                      </>}
+                    </>}
+                </section>
+              </div>
+            </section>}
         </>}
       </section>}
     {selectedHistoryPath && <section aria-label="Exact file history"

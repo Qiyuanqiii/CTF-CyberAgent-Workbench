@@ -772,3 +772,35 @@ OS-enforcement claims remain false. Exit, runtime, configured-limit, termination
 timeline, and deadline-budget records validate before atomic assignment; drift leaves
 no partial replacement. Concrete adapters remain `_test.go` only and R6 adds no product
 Runner import or starter. ADR 0057 records these bounds.
+
+## Paired Preview, Snapshot Receipt History, And Evidence-Set Digest
+
+The paired comparison workspace is TypeScript composition over two existing
+`repository_commit_file_preview.v1` calls. Its state binds the registered Workspace,
+exact base/head objects, and canonical path. Each pane repeats the Go-returned identity;
+an unavailable side has no query and renders an explicit absent state. This adds no Git
+protocol, raw blob/patch, revision expression, checkout, mutation, process, network,
+hook, or authority.
+
+Schema v83 adds `operator_verification_plan_item_snapshot_receipt.v1`. Application
+rebuilds the deterministic snapshot from durable facts and compares the submitted
+format, association-event high-water, and content digest. Store then obtains a Run
+writer lock and rechecks the active Code Session/Workspace, exact plan/item digests,
+current high-water, counts, and truncation before one transaction appends the event and
+metadata-only receipt. SQLite binds the row to that event and current aggregate, rejects
+updates/deletes, and creates no row during v82 upgrade. Exact committed intent may
+replay; a changed intent or stale new snapshot fails closed.
+
+The receipt table has no content column. Private `recorded_by` remains Store-only;
+public inventory is capped at 100 and fixes content/private-body/identity inclusion,
+snapshot/result acceptance, result inference, rewrite, approval, authority, and
+execution to false. Recording and future review are intentionally different protocols.
+
+`runner_evidence_set_receipt.v1` hashes a fixed, map-free, bounded canonical JSON tuple
+of exit, runtime, configured-limit, termination-cause, logical-timeline, and independent-
+deadline evidence. Canonical bytes are discarded. Result retains only the six protocol
+versions, SHA-256, byte count, and closed semantic flags. The six records plus receipt
+validate before atomic assignment, and drift leaves the old Result untouched. It claims
+no wall-clock ordering, raw output, process identity, verified OS limits, or product
+execution. Test-only adapters and the no-product-starter boundary remain unchanged.
+ADR 0058 records these bounds.

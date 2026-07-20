@@ -1,6 +1,6 @@
 # CyberAgent Workbench Desktop Plan
 
-状态：Desktop D0-A、D0-B 与 D1-R1 至 D1-G9/V8 自动化核心已完成，数据库 schema 为 v82。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill、受控 Run/Session/Plan/审批、安全恢复的 Monaco FileEdit、只读 Repository/脱敏 Diff/本地历史/精确提交预览/可导航精确文件历史/精确提交比较与 base/head 行预览、多文件独立审阅、不可变操作者验证、snapshot-keyset 逐检查项下钻与快照下载、可恢复 Code Handoff、Code Journey、generation-safe Windows Credential Manager Provider reload，以及默认关闭的有界 wake worker 已经落地。R6 只在内部 `NonProductOnly` 测试边界验证 Windows/Unix 进程树终止/回收后的有界输出、退出、runtime、configured-control、logical-timeline 与 independent-deadline 元数据，不宣称 wall-clock measurement、CPU/memory OS enforcement、signal identity 或产品执行入口；Windows 10 实机矩阵、xterm、安装包、签名正式发行、注册表、自启动、更新和高权限执行仍未实现。
+状态：Desktop D0-A、D0-B 与 D1-R1 至 D1-G10/V9 自动化核心已完成，数据库 schema 为 v83。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill、受控 Run/Session/Plan/审批、安全恢复的 Monaco FileEdit、只读 Repository/脱敏 Diff/本地历史/精确提交预览/可导航精确文件历史/精确提交比较与成对 base/head 预览、多文件独立审阅、不可变操作者验证、snapshot-keyset 逐检查项下钻/快照下载/record-only 回执历史、可恢复 Code Handoff、Code Journey、generation-safe Windows Credential Manager Provider reload，以及默认关闭的有界 wake worker 已经落地。R7 只在内部 `NonProductOnly` 测试边界对 Windows/Unix 进程树终止/回收后的六份 metadata evidence 生成 canonical digest，不保留规范正文，不宣称 wall-clock order、raw output、process identity、CPU/memory OS enforcement、signal identity 或产品执行入口；Windows 10 实机矩阵、xterm、安装包、签名正式发行、注册表、自启动、更新和高权限执行仍未实现。
 
 ## 目标
 
@@ -33,7 +33,7 @@
 - `desktop_skill_package_preview.v1` 只返回有界风险元数据，排除路径、文件名、正文、Manifest description/content path/content digest，并固定安装、命令、网络、Provider、工具和能力授权为 false。
 - D0-A 已把该边界接入 Wails 原生对话框和 React 只读预览；D1-B1 再允许渲染层提交一次性确认句柄，由 Go 重新消费同一已验证包并写入惰性 Registry。渲染层仍不能提交路径或文件字节，安装不会执行包内容、选择 Run 或授予能力；ADR 0033、ADR 0034 与 ADR 0041 记录这些边界。
 
-## D0-A 至 D1-G9/V8 当前实现
+## D0-A 至 D1-G10/V9 当前实现
 
 - `cmd/cyberagent-desktop` 只在 Windows `desktop,wv2runtime.error` build tags 下编译，production 构建再增加 `production`；默认 read-only。共十九项独立 Go gate，包含 `--enable-file-edit-proposals`、`--enable-provider-credentials`、`--enable-wake-worker` 和独立的 `--enable-verification-evidence`；单项启用不能访问 sibling route。模型可用性、Workspace search、receipt history、operator actions、evidence inventory 和凭证配置状态只使用 read token；`Ctrl+K` 只在客户端导航或刷新这些读取。
 - `web/dist` 以 compile-time embed 进入二进制；Go 在启动前验证 index、内容哈希资源、类型、数量、单项/总大小并复制为不可变内存快照。
@@ -231,7 +231,11 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D1-V8：逐检查项增加 deterministic Markdown/JSON snapshot download receipt；exact binding/high-water、最多 100 references、计数/截断、SHA-256/bytes/MIME/filename/256 KiB 上限，无 body/identity/verdict/mutation/approval/execution。
 - [x] Runtime R6：`NonProductOnly` 增加 logical lifecycle timeline 与 independent Go deadline budgets；不宣称 wall-clock/backend timing/cumulative deadline/CPU-memory-OS quota，无产品 starter。
 - [x] D1-G9/V8/R6 后累计六切片完整门通过：ordinary/race 387.3/395.8 秒、ordinary/secure Desktop、vet/staticcheck/双路径 govulncheck/module、129 React、strict TypeScript、确定性契约、Vite/npm、mock-only CLI、隐私/产品入口、Linux cross-compile 与 Windows 可复现构建全绿；OpenAPI 73/79/172，GUI SHA-256 `7aa5c3bf67a0af12e51e396977632e5dcc21c74dc04411d3fec7b6f09719aeef`；审计修复 exact export-format 低风险回归，边界见 ADR 0057。
-- [ ] 下一批候选 D1-G10 bounded paired base/head preview workspace、D1-V9 durable snapshot-receipt history 与 R7 canonical non-product evidence-set digest；Local/Docker 产品执行继续关闭。
+- [x] D1-G10：comparison 增加 Workspace/base/head/path 精确绑定的成对脱敏预览与 explicit absent side；复用既有两次 exact preview，无新 Git/raw content/mutation/process/network/hook。
+- [x] D1-V9 / schema v83：增加 deterministic snapshot export 重建、写锁后二次复核、event+metadata receipt 原子提交、immutable 100 条 record-only 历史；snapshot/result acceptance 与全部 authority/execution 语义固定 false。
+- [x] Runtime R7：`NonProductOnly` 对固定六份 post-reap evidence 生成 bounded map-free canonical SHA-256 receipt，规范正文不保留且无 wall-clock/raw-output/process/OS/product claim。
+- [x] D1-G10/V9/R7 三切片普通功能门通过：uncached Go 404.1 秒、vet、Desktop boundary、129 React、strict TypeScript、确定性契约、Vite 与 Windows 可复现双构建全绿；OpenAPI 74/81/176，GUI SHA-256 `d5e37e193223a41939598edceb77a92637430b0c87c52233cdafb9c2fda10bb5`；边界见 ADR 0058。
+- [ ] 下一批候选 D1-G11 synchronized paired-preview navigation、D1-V10 explicit non-authorizing receipt review 与 R8 cross-platform receipt golden vectors；完成后跑累计六切片完整健壮性门，Local/Docker 产品执行继续关闭。
 - [ ] 所有状态 mutation 使用独立 control capability、Origin/Host 校验、稳定 operation key 和 typed errors；显式 Provider 诊断每次只允许一次有界无正文请求。CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。
 

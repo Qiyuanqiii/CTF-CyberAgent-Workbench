@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ClipboardList, Download, ListTree, LoaderCircle, Plus, RefreshCw,
+import { ChevronDown, ClipboardList, Download, FileCheck2, ListTree, LoaderCircle, Plus, RefreshCw,
   Trash2 } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import type { VerificationPlanItemCoveragePage, VerificationPlanRequestView } from "../api/types";
@@ -70,6 +70,7 @@ export function VerificationPlan({ client, runID }: {
 }) {
   const queryClient = useQueryClient();
   const operationKey = useRef("");
+  const receiptOperationKeys = useRef(new Map<string, string>());
   const [title, setTitle] = useState("");
   const [summary, setSummary] = useState("");
   const [items, setItems] = useState<DraftItem[]>([emptyItem()]);
@@ -99,12 +100,45 @@ export function VerificationPlan({ client, runID }: {
     getNextPageParam: (lastPage) => lastPage.page.next_cursor || undefined,
     enabled: Boolean(runID && coverageSelection),
   });
+  const receiptQuery = useQuery({
+    queryKey: ["run", runID, "verification-snapshot-receipts"],
+    queryFn: ({ signal }) => client.verificationSnapshotReceipts(runID, signal),
+    enabled: Boolean(runID && coverageSelection),
+  });
   const mergedCoverage = mergeCoveragePages(coverageDetailQuery.data?.pages ?? []);
   const exportSnapshot = useMutation({
     mutationFn: ({ planID, ordinal, format }: { planID: string; ordinal: number;
       format: "json" | "markdown" }) =>
       client.verificationPlanItemSnapshotExport(runID, planID, ordinal, format),
     onSuccess: (value) => downloadTextFile(value.filename, value.mime_type, value.content),
+  });
+  const recordSnapshotReceipt = useMutation({
+    mutationFn: async ({ planID, ordinal, format }: { planID: string; ordinal: number;
+      format: "json" | "markdown" }) => {
+      const snapshot = await client.verificationPlanItemSnapshotExport(runID, planID,
+        ordinal, format);
+      const intent = [planID, ordinal, format, snapshot.snapshot_high_water_event_sequence,
+        snapshot.content_sha256].join(":");
+      let key = receiptOperationKeys.current.get(intent);
+      if (!key) {
+        key = `web-verification-snapshot-receipt-${globalThis.crypto.randomUUID()}`;
+        receiptOperationKeys.current.set(intent, key);
+      }
+      const receipt = await client.recordVerificationSnapshotReceipt(runID, {
+        version: "operator_verification_plan_item_snapshot_receipt.v1",
+        plan_id: planID, plan_item_ordinal: ordinal, format,
+        snapshot_high_water_event_sequence: snapshot.snapshot_high_water_event_sequence,
+        content_sha256: snapshot.content_sha256, confirm_metadata_snapshot: true,
+      }, key);
+      return { intent, receipt };
+    },
+    onSuccess: ({ intent }) => {
+      receiptOperationKeys.current.delete(intent);
+      void queryClient.invalidateQueries({
+        queryKey: ["run", runID, "verification-snapshot-receipts"],
+      });
+      void queryClient.invalidateQueries({ queryKey: ["run", runID, "events"] });
+    },
   });
   const record = useMutation({
     mutationFn: (body: VerificationPlanRequestView) => {
@@ -146,16 +180,22 @@ export function VerificationPlan({ client, runID }: {
       <div>{query.data && <StatusBadge status={`${query.data.items.length} plans`} />}
         {coverageQuery.data && <StatusBadge
           status={`${coverageQuery.data.observed_plan_item_count}/${coverageQuery.data.plan_item_count} observed`} />}
+        {receiptQuery.data && <StatusBadge status={`${receiptQuery.data.items.length} receipts`} />}
         <button aria-label="Refresh verification plans" className="icon-button"
-          disabled={query.isFetching || coverageQuery.isFetching || coverageDetailQuery.isFetching}
+          disabled={query.isFetching || coverageQuery.isFetching || coverageDetailQuery.isFetching ||
+            receiptQuery.isFetching}
           onClick={() => {
             void query.refetch();
             void coverageQuery.refetch();
-            if (coverageSelection) void coverageDetailQuery.refetch();
+            if (coverageSelection) {
+              void coverageDetailQuery.refetch();
+              void receiptQuery.refetch();
+            }
           }}
           title="Refresh" type="button"><RefreshCw aria-hidden="true"
             className={query.isFetching || coverageQuery.isFetching ||
-              coverageDetailQuery.isFetching ? "spin" : ""} size={15} /></button></div>
+              coverageDetailQuery.isFetching || receiptQuery.isFetching ? "spin" : ""}
+            size={15} /></button></div>
     </header>
     {client.hasVerificationEvidence && <form className="verification-plan-form" onSubmit={submit}>
       <label>Title<input disabled={record.isPending} maxLength={160} required value={title}
@@ -202,6 +242,8 @@ export function VerificationPlan({ client, runID }: {
             ?.items.find((entry) => entry.ordinal === item.ordinal);
           const selected = coverageSelection?.planID === plan.id &&
             coverageSelection.ordinal === item.ordinal;
+          const snapshotReceipts = receiptQuery.data?.items.filter((receipt) =>
+            receipt.plan_id === plan.id && receipt.plan_item_ordinal === item.ordinal) ?? [];
           return <li key={item.ordinal}>
             <strong>{item.title}</strong><span>{item.expected_observation}</span>
             <div className="verification-coverage-row">
@@ -241,9 +283,33 @@ export function VerificationPlan({ client, runID }: {
                       onClick={() => exportSnapshot.mutate({ planID: plan.id,
                         ordinal: item.ordinal, format: "json" })} type="button">
                       <Download aria-hidden="true" size={13} />JSON</button>
+                    {client.hasVerificationEvidence && <>
+                      <button aria-label={`Record check ${item.ordinal} Markdown snapshot receipt`}
+                        className="compact-command" disabled={recordSnapshotReceipt.isPending}
+                        onClick={() => recordSnapshotReceipt.mutate({ planID: plan.id,
+                          ordinal: item.ordinal, format: "markdown" })} type="button">
+                        <FileCheck2 aria-hidden="true" size={13} />Receipt MD</button>
+                      <button aria-label={`Record check ${item.ordinal} JSON snapshot receipt`}
+                        className="compact-command" disabled={recordSnapshotReceipt.isPending}
+                        onClick={() => recordSnapshotReceipt.mutate({ planID: plan.id,
+                          ordinal: item.ordinal, format: "json" })} type="button">
+                        <FileCheck2 aria-hidden="true" size={13} />Receipt JSON</button>
+                    </>}
                   </div>
                 </header>
                 {exportSnapshot.error && <ErrorState error={exportSnapshot.error} />}
+                {recordSnapshotReceipt.error && <ErrorState error={recordSnapshotReceipt.error} />}
+                {receiptQuery.isError && <ErrorState error={receiptQuery.error} />}
+                {snapshotReceipts.length > 0 &&
+                  <div className="verification-snapshot-receipts"><strong>Snapshot receipts</strong>
+                    <ul>{snapshotReceipts.map((receipt) => <li key={receipt.id}>
+                      <StatusBadge status={receipt.format} />
+                      <code title={receipt.content_sha256}>{receipt.content_sha256.slice(0, 12)}</code>
+                      <span>events {receipt.snapshot_high_water_event_sequence} / {receipt.receipt_event_sequence}</span>
+                      <time dateTime={receipt.recorded_at}>{formatDate(receipt.recorded_at)}</time>
+                      <StatusBadge status="record only" />
+                    </li>)}</ul>
+                  </div>}
                 {mergedCoverage.associations.length === 0 ?
                   <span className="verification-coverage-empty">No explicit evidence associated</span> :
                   <ul>{mergedCoverage.associations.map((association) =>

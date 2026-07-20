@@ -119,7 +119,9 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				(path == VerificationPlanPathTemplate &&
 					item.Post.OperationID == "recordRunVerificationPlan") ||
 				(path == VerificationAssociationPathTemplate &&
-					item.Post.OperationID == "associateRunVerificationEvidence")
+					item.Post.OperationID == "associateRunVerificationEvidence") ||
+				(path == VerificationSnapshotReceiptPathTemplate &&
+					item.Post.OperationID == "recordRunVerificationSnapshotReceipt")
 			if !validControl ||
 				item.Post.ReadOnly || item.Post.Responses["202"] == nil || item.Post.RequestBody == nil ||
 				len(item.Post.Security) != 1 || item.Post.Security[0]["ControlBearerAuth"] == nil {
@@ -130,7 +132,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 		expectedOperations := 1
 		if path == RunCreationControlPath || path == SessionMessageControlPathTemplate ||
 			path == RunWakeIntentPathTemplate || path == EvidenceAttachmentPathTemplate ||
-			path == VerificationEvidencePathTemplate || path == VerificationPlanPathTemplate {
+			path == VerificationEvidencePathTemplate || path == VerificationPlanPathTemplate ||
+			path == VerificationSnapshotReceiptPathTemplate {
 			expectedOperations = 2
 		}
 		if len(operations) != expectedOperations {
@@ -178,7 +181,8 @@ func TestOpenAPIDocumentIsDeterministicCapabilitySeparatedAndSecretFree(t *testi
 				path == EvidenceAttachmentPathTemplate ||
 				path == VerificationEvidencePathTemplate ||
 				path == VerificationPlanPathTemplate ||
-				path == VerificationAssociationPathTemplate) &&
+				path == VerificationAssociationPathTemplate ||
+				path == VerificationSnapshotReceiptPathTemplate) &&
 				method == "post") {
 				t.Fatalf("OpenAPI path %s exposed unexpected operation %q", path, method)
 			}

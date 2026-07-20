@@ -466,6 +466,23 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 					Required: true, Schema: map[string]any{"type": "string",
 						"minLength": domain.MinAgentOperationKeyBytes,
 						"maxLength": domain.MaxAgentOperationKeyBytes, "pattern": `^\S+$`}}}},
+		{Path: VerificationSnapshotReceiptPathTemplate,
+			OperationID: "listRunVerificationSnapshotReceipts",
+			Summary:     "List immutable verification snapshot receipts", Tag: "Runs",
+			Description: "Returns bounded metadata-only history proving that an operator retained exact deterministic verification snapshots. Snapshot/result acceptance, private bodies, operator identity, record rewriting, approval, authority, and execution remain false.",
+			DataType:    reflect.TypeOf(VerificationSnapshotReceiptInventoryView{}), NotFound: true,
+			Parameters: []openAPIParameter{runID}},
+		{Path: VerificationSnapshotReceiptPathTemplate, Method: http.MethodPost,
+			OperationID: "recordRunVerificationSnapshotReceipt",
+			Summary:     "Record one exact verification snapshot receipt", Tag: "Control",
+			Description: "Rebuilds and digest-checks one current deterministic item snapshot before appending an immutable metadata-only receipt. Recording does not accept a snapshot or result, expose private bodies or operator identity, rewrite records, approve work, grant authority, or start execution.",
+			DataType:    reflect.TypeOf(VerificationSnapshotReceiptControlView{}),
+			RequestType: reflect.TypeOf(VerificationSnapshotReceiptRequestView{}), Control: true,
+			NotFound: true, Parameters: []openAPIParameter{runID,
+				{Name: "Idempotency-Key", In: "header", Description: "Opaque retry key; only a domain-separated digest is persisted",
+					Required: true, Schema: map[string]any{"type": "string",
+						"minLength": domain.MinAgentOperationKeyBytes,
+						"maxLength": domain.MaxAgentOperationKeyBytes, "pattern": `^\S+$`}}}},
 		{Path: CodeHandoffPathTemplate, OperationID: "getCodeHandoff",
 			Summary: "Build a resumable Code handoff", Tag: "Runs",
 			Description: "Regenerates a metadata-only Code Run handoff from durable Plan, queue, change-set, verification, explicit per-item coverage, pending-action, and report records. Coverage preserves pass/fail/unknown counts without private summaries or an inferred aggregate result. The handoff performs no composite mutation, starts no execution, and grants no resume authority.",
@@ -1817,6 +1834,51 @@ func init() {
 	openAPIFieldMaxLengths["VerificationSnapshotExportView.filename"] = 255
 	openAPIFieldMaxLengths["VerificationSnapshotExportView.content"] =
 		application.MaxVerificationSnapshotExportBytes
+
+	for _, typeName := range []string{"VerificationSnapshotReceiptView",
+		"VerificationSnapshotReceiptControlView"} {
+		openAPIFieldEnums[typeName+".protocol_version"] =
+			[]string{verification.SnapshotReceiptProtocolVersion}
+		openAPIFieldEnums[typeName+".format"] = []string{
+			application.VerificationSnapshotExportFormatJSON,
+			application.VerificationSnapshotExportFormatMarkdown,
+		}
+		openAPIFieldMinimums[typeName+".plan_item_ordinal"] = 1
+		openAPIFieldMaximums[typeName+".plan_item_ordinal"] = verification.MaxPlanItems
+		for _, field := range []string{"snapshot_high_water_event_sequence",
+			"associated_evidence_count", "pass_count", "fail_count", "unknown_count",
+			"returned_association_count"} {
+			openAPIFieldMinimums[typeName+"."+field] = 0
+		}
+		openAPIFieldMinimums[typeName+".content_bytes"] = 1
+		openAPIFieldMinimums[typeName+".receipt_event_sequence"] = 1
+		openAPIFieldMaximums[typeName+".snapshot_high_water_event_sequence"] = float64(1<<53 - 1)
+		openAPIFieldMaximums[typeName+".associated_evidence_count"] = verification.MaxSafeCoverageCount
+		openAPIFieldMaximums[typeName+".pass_count"] = verification.MaxSafeCoverageCount
+		openAPIFieldMaximums[typeName+".fail_count"] = verification.MaxSafeCoverageCount
+		openAPIFieldMaximums[typeName+".unknown_count"] = verification.MaxSafeCoverageCount
+		openAPIFieldMaximums[typeName+".returned_association_count"] = verification.MaxCoverageAssociations
+		openAPIFieldMaximums[typeName+".content_bytes"] = verification.MaxSnapshotReceiptContentBytes
+		openAPIFieldMaximums[typeName+".receipt_event_sequence"] = float64(1<<53 - 1)
+		openAPIFieldMaxLengths[typeName+".plan_sha256"] = 64
+		openAPIFieldMaxLengths[typeName+".plan_item_sha256"] = 64
+		openAPIFieldMaxLengths[typeName+".content_sha256"] = 64
+	}
+	openAPIFieldEnums["VerificationSnapshotReceiptRequestView.version"] =
+		[]string{verification.SnapshotReceiptProtocolVersion}
+	openAPIFieldEnums["VerificationSnapshotReceiptRequestView.format"] = []string{
+		application.VerificationSnapshotExportFormatJSON,
+		application.VerificationSnapshotExportFormatMarkdown,
+	}
+	openAPIFieldMinimums["VerificationSnapshotReceiptRequestView.plan_item_ordinal"] = 1
+	openAPIFieldMaximums["VerificationSnapshotReceiptRequestView.plan_item_ordinal"] =
+		verification.MaxPlanItems
+	openAPIFieldMinimums["VerificationSnapshotReceiptRequestView.snapshot_high_water_event_sequence"] = 0
+	openAPIFieldMaximums["VerificationSnapshotReceiptRequestView.snapshot_high_water_event_sequence"] =
+		float64(1<<53 - 1)
+	openAPIFieldMaxLengths["VerificationSnapshotReceiptRequestView.content_sha256"] = 64
+	openAPIFieldEnums["VerificationSnapshotReceiptInventoryView.protocol_version"] =
+		[]string{verification.SnapshotReceiptInventoryProtocolVersion}
 }
 
 func runStatuses() []string {

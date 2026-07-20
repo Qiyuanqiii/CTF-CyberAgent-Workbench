@@ -11,7 +11,7 @@ import (
 )
 
 func removeSchemaV82ForTestStatements() []string {
-	return []string{
+	return append(removeSchemaV83ForTestStatements(), []string{
 		`DROP TRIGGER trg_context_summaries_delete_immutable`,
 		`DROP TRIGGER trg_context_summaries_update_immutable`,
 		`DROP TRIGGER trg_context_summaries_v1_insert`,
@@ -21,7 +21,7 @@ func removeSchemaV82ForTestStatements() []string {
 		`ALTER TABLE context_summaries DROP COLUMN previous_summary_id`,
 		`ALTER TABLE context_summaries DROP COLUMN protocol_version`,
 		`DELETE FROM schema_migrations WHERE version = 82`,
-	}
+	}...)
 }
 
 func TestSchemaV82UpgradePreservesAndFoldsLegacySummary(t *testing.T) {
