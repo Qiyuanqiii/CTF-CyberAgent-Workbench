@@ -4,9 +4,9 @@ Last updated: 2026-07-20
 
 ## Resume Context
 
-Current database schema is v84. Schemas v78-v81 add immutable operator verification evidence, livelock recovery, verification plans, and explicit plan-item/evidence associations; schema v82 adds conservative complete-request model-context planning and immutable cumulative handoff memory; schema v83 adds immutable metadata-only verification snapshot receipt history; schema v84 adds one immutable non-authorizing metadata review per exact receipt. Code/Desktop work now reaches D1-G13/V12. R9 strictly rejects malformed, future, digest-mismatched, or authority-widening receipt envelopes, while R10 pins accepted envelope bytes/SHA only behind the internal `NonProductOnly` Runner boundary. Root and Specialist requests use a 32K conservative fallback with explicit output/safety reservations, repeated compaction preserves a predecessor-bound cumulative handoff chain, and arbitrary repository documents remain untrusted evidence instead of instructions. Operators can compare any two exact local commit trees, use focus-safe keyboard navigation in the paired redacted preview, page through one frozen verification-item snapshot, download a deterministic metadata-only Markdown/JSON representation, record an immutable digest receipt, separately confirm or dispute only its metadata, carry bounded review metadata into a regenerable Code Handoff/Journey audit, and navigate only after Verify independently matches exact review/receipt/plan/item digests. R9/R10 do not claim wall-clock order, raw output, process identity, CPU/memory enforcement, verified OS quotas, signal identity, or product execution. None grants general Shell, LocalRunner, Docker, child scheduling, install hooks, renderer host-path authority, credential readback, document instruction authority, automatic Skill selection, result acceptance, or product process execution.
+Current database schema is v84. Schemas v78-v81 add immutable operator verification evidence, livelock recovery, verification plans, and explicit plan-item/evidence associations; schema v82 adds conservative complete-request model-context planning and immutable cumulative handoff memory; schema v83 adds immutable metadata-only verification snapshot receipt history; schema v84 adds one immutable non-authorizing metadata review per exact receipt. Code/Desktop work now reaches D1-G13/V12. R9 strictly rejects malformed, future, digest-mismatched, or authority-widening receipt envelopes, while R10 pins accepted envelope bytes/SHA only behind the internal `NonProductOnly` Runner boundary. P10-A1/A2/A3 establish the first Go/Rust analyzer boundary: Go owns a strict bounded request/result/error protocol, Rust implements only a deterministic metadata fixture, and both languages independently verify shared semantic and byte/SHA vectors. There is no analyzer Registry, Go-to-Rust product process bridge, file/path input, result persistence, or Artifact commit. Root and Specialist requests use a 32K conservative fallback with explicit output/safety reservations, repeated compaction preserves a predecessor-bound cumulative handoff chain, and arbitrary repository documents remain untrusted evidence instead of instructions. Operators can compare any two exact local commit trees, use focus-safe keyboard navigation in the paired redacted preview, page through one frozen verification-item snapshot, download a deterministic metadata-only Markdown/JSON representation, record an immutable digest receipt, separately confirm or dispute only its metadata, carry bounded review metadata into a regenerable Code Handoff/Journey audit, and navigate only after Verify independently matches exact review/receipt/plan/item digests. R9/R10 and P10 do not claim wall-clock order, raw output, process identity, CPU/memory enforcement, verified OS quotas, signal identity, or product execution. None grants general Shell, LocalRunner, Docker, child scheduling, install hooks, renderer host-path authority, credential readback, document instruction authority, automatic Skill selection, result acceptance, or product process execution.
 
-Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No product path starts a Runner, container, Shell, or host process. ADR 0024 through ADR 0061 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/recovery/review/apply, Provider credential/generation, inert-install, receipt, Explorer/search, Repository, Verification, Handoff, process-conformance, and portable-build boundaries.
+Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No product path starts a Runner, container, Shell, host process, or Rust analyzer. ADR 0024 through ADR 0062 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/recovery/review/apply, Provider credential/generation, inert-install, receipt, Explorer/search, Repository, Verification, Handoff, process-conformance, portable-build, and analyzer-protocol boundaries.
 
 CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The CLI-first implementation has resumable Runs, a durable root Agent Coordinator, bounded review-gated Specialist delegation, a separate read-only 1/2/4/6 Fan-out pool, persisted sessions and model calls, context compaction, WorkItems/Notes/Artifacts, a unified Tool Gateway, embedded and inert user Skills, Finding/Evidence/Report lifecycles with SARIF/CI output, loopback HTTP/SSE/OpenAPI, a Run-first TUI, a React/Vite console, and a Windows Wails shell with independently gated Run/Session/Plan/approval, FileEdit proposal/review/apply, Provider credentials, foreground/bounded wake, inert Skills, actions/evidence, and navigation. Core delegation remains capped at two children and only the original application operator can schedule it; models, ordinary tools, HTTP, and the Desktop native bridge cannot autonomously spawn or schedule children.
 
@@ -1826,14 +1826,44 @@ high/medium issue exists on an enabled path. No real Provider/key, Shell, LocalR
 Docker, hook, attack traffic, external network, installer, registry mutation, or product
 process start was used. ADR 0061 is authoritative.
 
+## P10-A1/A2/A3: Go-Owned Analyzer Protocol, Rust Fixture, And Shared Vectors
+
+P10-A1 adds the pure Go `internal/analyzer` protocol owner. It strictly validates
+`analyzer_protocol.v1`, `analyzer_result.v1`, and `analyzer_error.v1`; fixes request,
+decoded-input, output, timeout, identifier, media-type, Base64, and JSON-depth limits;
+requires filesystem, network, subprocess, and environment capabilities to be explicitly
+false; and exposes fourteen stable error codes. Unknown, duplicate, missing, trailing,
+future, malformed, oversized, or authority-widening input fails closed without reflecting
+parser details. The package imports no product process starter.
+
+P10-A2 adds the first Rust workspace and the development-only
+`cyberagent-analyzer-fixture`. The locked Rust 1.97.1 tool accepts one bounded stdin JSON
+request and emits one bounded stdout JSON envelope containing only media type, byte count,
+SHA-256, UTF-8, and line-count metadata. Its input has no path, URL, command, environment,
+credential, model, Run, Session, network, persistence, or authority field, and the output
+never returns source bytes.
+
+P10-A3 makes Go and Rust independently validate five shared vectors that pin every protocol
+ID, limit, exit code, error code, exact output JSON, stdout byte count, and SHA-256. CI now
+has a separate Rust fmt, locked-test, and zero-warning clippy job, while the Go job names the
+shared-vector check before its full suite. The three-slice functional gate covered the
+394.6-second full Go suite, vet, protocol fuzzing, Rust unit/integration tests, fixture
+success/denial smokes, Web/API regression, secure Desktop, reproducible Windows build, npm
+audit, and RustSec. The unsigned GUI SHA-256 is
+`69ed40aede0cfc23e075df824fecf6c1ef7b4b0586a8f4b685b7d8aa95dde3b4`, with
+`release_ready=false`. Review fixed five low-risk validation/coverage issues; no known
+unresolved high/medium issue exists on an enabled path. Schema/OpenAPI remain v84 and
+75/83/182. ADR 0062 is authoritative.
+
 ## Recommended Next Batch
 
-Candidate slices are P10-A1 Go-owned analyzer protocol/limits/errors with no process
-starter, P10-A2 a deterministic Rust `clap`/`serde` stdin-JSON fixture tool with no LLM,
-key, config, network, or session ownership, and P10-A3 shared Go/Rust golden vectors in CI
-without product invocation or Artifact commit. The Rust toolchain is not installed on
-this host and may be installed under the user's standing dependency authorization with
-its version recorded. Keep the Local profile disabled until a real
+Candidate slices are P10-B1 an inert Go-owned `analyzer_descriptor.v1` Registry with no
+executable path or starter, P10-B2 a bounded `archive.inventory.v1` contract for memory-only
+ZIP central-directory inspection without extraction, and P10-B3 a deterministic Rust ZIP
+inventory implementation plus benign and malicious shared vectors. Product invocation,
+result persistence, and Artifact commit remain unwired. This is the second three-slice batch
+in the current six-slice cycle, so its gate must include the complete robustness review. Keep
+the Local profile disabled until a real
 OS sandbox makes protected host roots unavailable or read-only; never map it to
 unrestricted `os/exec`. Product Docker start/wait/TERM/KILL/orphan behavior still
 requires a later independent release gate; R2-R10 test-binary conformance and post-reap

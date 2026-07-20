@@ -61,7 +61,7 @@ The production React bundle is built by Vite but hosted only when Go receives an
 
 ## Core Domain
 
-`Run` is a domain aggregate, not a programming language, operating-system process, or replacement for Go/TypeScript/Rust. Go creates and owns Run lifecycle state; TypeScript may display and control it through Go APIs; Rust may execute a bounded analyzer request carrying a `run_id` but never owns the Run.
+`Run` is a domain aggregate, not a programming language, operating-system process, or replacement for Go/TypeScript/Rust. Go creates and owns Run lifecycle state; TypeScript may display and control it through Go APIs. Rust never owns a Run. The current analyzer fixture has no Run field or product bridge; a future Go adapter may bind a validated analyzer operation to a Run outside the Rust wire contract.
 
 Budget, events, sandbox sessions, and reports are Run-scoped rather than embedded into one large object. Their modules remain independent and persist references by `run_id`; `RunSupervisor` coordinates their lifecycle.
 
@@ -596,7 +596,7 @@ internal/store/             SQLite stores and migrations
 internal/session/           Compatibility conversation service
 internal/tui/               Bubble Tea adapter
 internal/httpapi/           Loopback-only read/control API, OpenAPI contract, and bounded Run-event SSE
-internal/analyzer/          Future Rust JSON process bridge
+internal/analyzer/          Go-owned analyzer protocol, validation, and future bridge boundary
 ```
 
 This layout is a migration target. Packages move only when a vertical slice uses the new boundary; unrelated working code is not rewritten for naming alone.
@@ -886,3 +886,25 @@ pinned SHA-256. Strict decode, typed compatibility, and byte-identical re-encodi
 required on Linux and Windows CI. These tests are pure and internal; no product import,
 subprocess, filesystem write, network, Docker, or Runner starter is introduced. ADR 0061
 records these bounds.
+
+## Go-Owned Analyzer Protocol And Rust Fixture
+
+P10-A1 establishes `internal/analyzer` as a pure Go protocol owner rather than a process
+launcher. `analyzer_protocol.v1` accepts one canonical inline Base64 payload plus explicit
+limits and four capability declarations that must all be false. Strict decoding rejects
+unknown, duplicate, missing, trailing, invalid UTF-8, future, malformed, oversized, and
+authority-widening input. Go also owns the bounded metadata-only `analyzer_result.v1`, the
+stable `analyzer_error.v1`, exit-code mapping, safe identifiers, media types, and JSON depth.
+
+P10-A2 adds a Rust 1.97.1 fixture behind that contract. It reads only bounded stdin, writes
+only one bounded stdout envelope, and computes content byte count, SHA-256, UTF-8 status,
+and line count. The wire has no filesystem path, URL, command, environment, key, Provider,
+Run, Session, network, persistence, or tool authority. Source bytes are never emitted.
+`clap`, `serde`, `serde_json`, `base64`, and `sha2` are locked in `Cargo.lock`.
+
+P10-A3 stores one shared versioned vector document under `analyzers/testdata`. Go and Rust
+load it independently and must agree on every version, limit, exit code, error code, exact
+JSON output, byte count, and SHA-256; neither implementation shells out to the other. The
+Rust CI job runs fmt, locked tests, and clippy with warnings denied. No Registry, executable
+path, product process adapter, file reader, Run/Event/SQLite writer, result persistence, or
+Artifact commit exists. ADR 0062 records the complete boundary.

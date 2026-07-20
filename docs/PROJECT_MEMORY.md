@@ -4,7 +4,7 @@ Last updated: 2026-07-20
 
 ## Resume First
 
-CyberAgent Workbench is a local-first, resumable, auditable AI Agent workbench. Go is the only control plane. TypeScript consumes Go-owned HTTP/OpenAPI contracts, and future Rust analyzers must run as deterministic JSON tools behind Go. CTF-specific solving remains deferred until the generic runtime, Skills, Sandbox, and analyzer boundaries are stable.
+CyberAgent Workbench is a local-first, resumable, auditable AI Agent workbench. Go is the only control plane. TypeScript consumes Go-owned HTTP/OpenAPI contracts, while the current Rust fixture implements a deterministic Go-owned JSON protocol without product invocation. CTF-specific solving remains deferred until the generic runtime, Skills, Sandbox, and analyzer boundaries are stable.
 
 Read in this order after a long context break:
 
@@ -73,8 +73,10 @@ Read in this order after a long context break:
 63. `docs/adr/0058-paired-comparison-snapshot-receipts-runner-evidence-set.md`
 64. `docs/adr/0059-paired-navigation-receipt-review-runner-golden-vectors.md`
 65. `docs/adr/0060-keyboard-paired-preview-handoff-reviews-receipt-compatibility.md`
-66. `docs/DESKTOP_PLAN.md`
-67. `docs/SKILL_PACKAGE_PLAN.md`
+66. `docs/adr/0061-exact-receipt-review-navigation-audit-facts-envelope-golden.md`
+67. `docs/adr/0062-go-owned-analyzer-protocol-rust-fixture-shared-vectors.md`
+68. `docs/DESKTOP_PLAN.md`
+69. `docs/SKILL_PACKAGE_PLAN.md`
 
 ## Current Baseline
 
@@ -85,7 +87,8 @@ Read in this order after a long context break:
 - These are engineering estimates based on tested roadmap slices, not performance benchmarks. Do not reuse the retired single-axis "overall product vision" percentage.
 - Database schema: v84.
 - `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v84` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
-- Main languages: Go control plane, TypeScript React/Vite local console; Rust has not started.
+- Main languages: Go control plane, TypeScript React/Vite local console, and a first deterministic Rust 1.97.1 protocol fixture. Rust has no Agent, LLM, config, key, persistence, network, filesystem, subprocess, or product-lifecycle ownership.
+- Analyzer status: P10-A1/A2/A3 fixes `analyzer_protocol.v1`, strict Go request/result/error validation, a bounded Rust stdin/stdout metadata fixture, and five shared semantic/bytes/SHA vectors with a separate CI job. Registry, Go-to-Rust process bridge, product invocation, result persistence, and Artifact commit remain absent. See ADR 0062 and `analyzers/README.md`.
 - Desktop status: D0-A/D0-B and D1-R1 through D1-G13/V12 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, read-only Repository state/redacted Diff/local history/exact-commit metadata/redacted preview/navigable exact-file history/exact-commit comparison with keyboard-accessible paired base/head previews, independent multi-file review, separate immutable verification plans/results/associations plus snapshot-stable exact per-item drilldown/download/receipt history/non-authorizing review and Handoff coverage, digest-bound Code Handoff export with exact fail-closed receipt-review navigation, bounded Code Journey audit facts, generation-safe Windows Credential Manager Provider controls, and a default-off one-concurrent/one-step wake worker. Schema v79 protects the shared Go runtime with Tool deadlines, a synchronous wait graph, and a durable no-progress pause; schema v80 adds immutable verification checklists; schema v81 adds immutable plan-item/evidence associations; schema v82 adds the shared conservative model-context gate and cumulative handoff memory; schema v83 adds immutable metadata-only snapshot receipts; schema v84 adds one immutable non-authorizing metadata review per receipt. R9 strictly rejects malformed, future, digest-mismatched, or authority-widening receipt envelopes; R10 pins two accepted 660-byte envelopes and SHA-256 values inside the same internal non-product boundary. Neither has product execution wiring, raw-output retention, wall-clock claims, process identity, or OS CPU/memory enforcement claims. Capability-only launches cannot reach sibling routes. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, terminal, real Shell/Local/Docker process execution, or install-time Skill execution. See ADR 0033 through ADR 0061 and `docs/DESKTOP_PLAN.md`.
 - Custom Skill status: the five embedded `skill.v1` guides and explicitly selected external packages are Run-loadable through separate protocols. Schema v69 adds persistent content-addressed import/history; schema v70 adds a second explicitly confirmed exact Run selection and redacted user-role root/Specialist context; schema v71 adds bounded read-only provenance across HTTP/TUI/Web. D1-A adds a pathless, one-time-handle preview boundary; D1-B1 adds explicit HTTP/Desktop registration through the same inert Registry. External packages remain untrusted and grant no declared tools. Installation executes no content and still does not select a package for a Run. See ADR 0024, ADR 0031 through ADR 0033, ADR 0041, and `docs/SKILL_PACKAGE_PLAN.md`.
 - Protected-delete status: explicit recursive, absolute/traversing/wildcard, environment-derived, command-substituted, current-home, PowerShell/`cmd`, and common interpreter deletion intents are permanently denied before approval across Shell, ScriptProcess, and Sandbox Policy. This is defense in depth; Local/container process execution remains disabled and a future executor still requires OS/container isolation. See ADR 0025.
@@ -1404,17 +1407,60 @@ external network, installer, registry mutation, or product process start was use
 独立核对 review、receipt、plan/item digest 后才聚焦，任何漂移都失败关闭。R10 只固定内部
 纯函数信封的 660-byte/SHA，不是产品导入或执行入口。schema/OpenAPI 未变，真实执行继续关闭。
 
+## Completed Go-Owned Analyzer Protocol And Rust Fixture (P10-A1/A2/A3)
+
+P10-A1 adds `internal/analyzer` as a pure Go protocol owner. It fixes strict
+`analyzer_protocol.v1`, `analyzer_result.v1`, and `analyzer_error.v1` envelopes; 96 KiB
+request, 64 KiB decoded-input, 16 KiB result, 100-30,000 ms declared-timeout, safe-ID,
+media-type, canonical-Base64, and eight-level JSON limits; four explicitly false
+capabilities; and fourteen stable error codes. Duplicate, unknown, missing, trailing,
+future, oversized, malformed, or authority-widening input fails closed without reflecting
+parser details. The package has no process starter or product imports.
+
+P10-A2 adds the first Rust workspace and `cyberagent-analyzer-fixture`. Rust 1.97.1,
+Cargo 1.97.1, and the locked `clap`/`serde`/`serde_json`/`base64`/`sha2` dependency graph
+implement bounded stdin JSON -> stdout JSON only. Success emits media type, byte count,
+SHA-256, UTF-8, and line count without raw content. No path, URL, command, environment,
+model, Run, Session, persistence, or capability input exists.
+
+P10-A3 makes Go and Rust independently validate one shared five-vector contract. The
+file pins every version, limit, exit code, error code, expected JSON, stdout byte count,
+and stdout SHA-256. CI adds a separate Rust fmt/locked-test/zero-warning-clippy job, while
+the Go job explicitly validates the same vectors before the full suite.
+
+The first three-slice functional gate passed full uncached Go in 394.6 seconds, vet, more
+than one million Go protocol fuzz evaluations, five Rust unit tests plus one shared-vector
+integration test, fmt, clippy, success/denial fixture CLI smokes, 37 files/134 Web tests,
+deterministic OpenAPI, Vite, npm audit, RustSec, secure Desktop tests/vet, and a reproducible
+Windows dual build. The unsigned GUI SHA-256 is
+`69ed40aede0cfc23e075df824fecf6c1ef7b4b0586a8f4b685b7d8aa95dde3b4` and remains
+`release_ready=false`. RustSec loaded 1,166 official advisories and found zero known
+vulnerabilities among 41 locked crate dependencies. Review fixed shared-
+constant coverage, explicit-false parity, result line-count validation, oversized error
+classification, and recursive JSON-depth bounds. No known unresolved high/medium issue
+exists on an enabled path. ADR 0062 is authoritative.
+
+中文交接：Rust 已经开始，但当前只有开发期确定性夹具。Go 仍是唯一主控，Rust 只处理内联
+Base64 并输出有界元数据；没有 Registry、产品桥接、文件读取、Run/Event/SQLite/Artifact 写入或
+任何执行授权。schema 仍为 v84，OpenAPI 仍为 75/83/182。
+
 ## Next Slice
 
 The next three-slice candidates are:
 
-1. P10-A1: define a Go-owned `analyzer_protocol.v1` request/result/error/limit boundary with every external capability closed and no subprocess starter.
-2. P10-A2: initialize a deterministic Rust analyzer workspace using `clap` and `serde`, limited to stdin JSON -> stdout JSON fixtures with no LLM, user config, key, network, or session ownership.
-3. P10-A3: make Go and Rust validate shared golden vectors in CI while keeping process invocation and Artifact commit unwired.
-4. The Rust toolchain is not currently installed on this host; installation may proceed under the user's standing dependency authorization, followed by checksum/toolchain-version recording.
+1. P10-B1: add a Go-owned inert `analyzer_descriptor.v1` Registry with exact IDs, protocol versions, limits, and all capabilities false; descriptors contain no executable path and start nothing.
+2. P10-B2: define a bounded `archive.inventory.v1` result contract for memory-only ZIP central-directory inspection, including entry-count/name/size/ratio/path-risk limits and no extraction.
+3. P10-B3: implement the deterministic Rust ZIP inventory function plus benign, traversal, duplicate-name, oversized-metadata, and compression-ratio shared vectors; product invocation and Artifact commit remain unwired.
+4. The following six-slice gate may then consider a disabled/fake-transport Go bridge before any real subprocess adapter.
 5. The manual Windows 10 matrix, signed distribution, real Sandbox release gate, xterm input, network grants, product analyzer execution, and CTF solving remain separate.
 
 ## Local Machine Note
+
+Rustup installed the current-user minimal `stable-x86_64-pc-windows-gnu` toolchain for
+P10-A2 and the repository pins Rust/Cargo 1.97.1 in `analyzers/rust-toolchain.toml`.
+WinLibs GCC 16.1.0 supplies the GNU linker. Local commands should set
+`RUSTUP_TOOLCHAIN=1.97.1-x86_64-pc-windows-gnu` when rustup channel synchronization is
+unavailable; the source and lockfile remain the reproducible authority.
 
 The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v84 and D1-Q2 through D1-G13/V12 plus H1-H3/R10/C1-C3 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the repository's ignored build root or the OS temporary root.
 

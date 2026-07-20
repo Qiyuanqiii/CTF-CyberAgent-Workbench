@@ -7,12 +7,12 @@
 
 项目从 schema v49 起同时使用两项工程指标，避免把“架构已经搭好”误解为“产品已经完整可用”。这些百分比是基于当前任务书和可验证工作流的工程估算，不是性能基准。
 
-- **架构完成度 / Architecture completion：约 99%**。衡量 Go 控制平面、Run/Session、状态恢复、Policy、审批、预算、事件流、Tool Gateway、Agent 协调、Skills、报告、Sandbox 协议及 Go/TypeScript 边界的覆盖程度；其中 V2 Run-centric Runtime 约 99%。schema v84 已覆盖同步等待环检测、工具硬超时、Run 活锁熔断、模型总上下文闸门、不可变累计交接记忆、验证快照回执历史和不授权的回执元数据复核；D1-G13/V12/R10 又完成 Handoff/Journey 到 Verify 的精确失败关闭导航，并固定严格 Runner 回执接受信封的跨平台 bytes/SHA。
+- **架构完成度 / Architecture completion：约 99%**。衡量 Go 控制平面、Run/Session、状态恢复、Policy、审批、预算、事件流、Tool Gateway、Agent 协调、Skills、报告、Sandbox 协议及 Go/TypeScript/Rust 边界的覆盖程度；其中 V2 Run-centric Runtime 约 99%。schema v84 已覆盖同步等待环检测、工具硬超时、Run 活锁熔断、模型总上下文闸门、不可变累计交接记忆、验证快照回执历史和不授权的回执元数据复核；D1-G13/V12/R10 完成精确复核导航与 Runner 信封黄金边界，P10-A1/A2/A3 又落地 Go-owned `analyzer_protocol.v1`、确定性 Rust stdin/stdout 夹具和双语言共享黄金向量。产品 analyzer 调用仍未接线。
 - **产品可用度 / Product usability：约 95-97%**。衡量普通用户能否依靠当前 CLI、TUI、Web 和 Windows Desktop 完成真实端到端工作。通用 Coding Agent 工作流约 95-96%，Cyber 自动化工作流约 20%；Run 工作台现已提供安全恢复的 Monaco 提案/Diff 编辑器、只读仓库状态/脱敏 Diff/本地提交与可导航的精确文件历史、支持键盘关闭与导航的成对 base/head 精确预览、多文件独立审阅、分离的验证计划/结果、可分页的逐检查项证据下钻及 Markdown/JSON 快照下载/回执历史/不授权复核、带摘要/事件高水位/回执复核元数据的 Code Handoff 导出、Code Journey、可热重载的 Windows 系统凭证和有界 wake worker。真实 Sandbox/宿主进程执行、安装时脚本/钩子、Windows 10 人工发布矩阵和 Cyber 工具链仍未开放或完成。
 
 Starting with schema v49, the project reports two engineering indicators so architectural maturity is not mistaken for end-user completeness. These percentages are roadmap estimates backed by tested workflows, not performance benchmarks.
 
-- **Architecture completion: about 99%.** This covers the Go control plane and its Run/Session recovery, Policy, approval, budget, event, Tool Gateway, Agent coordination, Skills, reporting, Sandbox protocol, and Go/TypeScript boundaries. The V2 run-centric runtime itself is about 99% complete. Schema v84 includes synchronous wait-cycle rejection, hard Tool deadlines, a recoverable Run livelock circuit breaker, an aggregate model-context gate, immutable cumulative handoff memory, verification snapshot receipt history, and non-authorizing receipt-metadata review.
+- **Architecture completion: about 99%.** This covers the Go control plane and its Run/Session recovery, Policy, approval, budget, event, Tool Gateway, Agent coordination, Skills, reporting, Sandbox protocol, and Go/TypeScript/Rust boundaries. The V2 run-centric runtime itself is about 99% complete. Schema v84 includes synchronous wait-cycle rejection, hard Tool deadlines, a recoverable Run livelock circuit breaker, an aggregate model-context gate, immutable cumulative handoff memory, verification snapshot receipt history, and non-authorizing receipt-metadata review. P10-A1/A2/A3 now add the Go-owned `analyzer_protocol.v1`, a deterministic Rust stdin/stdout fixture, and shared cross-language golden vectors, while product analyzer invocation remains unwired.
 - **Product usability: about 95-97%.** This measures how much real end-to-end work a user can complete through the current CLI, TUI, Web, and Windows Desktop shell. The generic coding-agent workflow is about 95-96% usable and the Cyber automation workflow about 20%. The Run workbench now includes safely recoverable Monaco proposal/Diff editing, read-only repository state/redacted Diffs/local commit and navigable exact-file history, keyboard-accessible paired exact base/head comparison previews, independent multi-file review, separate verification plans/outcomes with paginated per-check drilldown and Markdown/JSON snapshot downloads/receipt history/non-authorizing review, digest- and event-high-water-bound Code Handoff exports with exact receipt-review navigation, bounded Code Journey audit facts, hot-reloaded Windows system credentials, and a bounded wake worker. Real Sandbox/host-process execution, install-time scripts/hooks, the manual Windows 10 release matrix, and the Cyber toolchain remain disabled or unfinished.
 
 ## 项目简介 / Project Overview
@@ -21,7 +21,7 @@ Starting with schema v49, the project reports two engineering indicators so arch
 
 CyberAgent Workbench 是一个由 Go 驱动的本地 AI Agent 工作台，面向代码开发、代码审查、安全学习、脚本任务和受控网络安全分析。它把模型调用、长上下文、工作区文件、策略检查、审批、执行预算和事件记录统一到一套可恢复的运行时中，让一次任务即使在程序退出后也能继续，并且每一步都可以追踪和复核。
 
-每个用户目标会被记录为一个 `Mission`，每次可恢复的执行过程则是一个 `Run`。Go 是唯一控制平面，负责模型路由、状态机、SQLite 持久化、安全策略和工具边界；当前 TypeScript read-mostly 控制台与未来的 Rust 确定性分析器都通过 Go 协议接入，不绕过安全控制。
+每个用户目标会被记录为一个 `Mission`，每次可恢复的执行过程则是一个 `Run`。Go 是唯一控制平面，负责模型路由、状态机、SQLite 持久化、安全策略和工具边界；TypeScript read-mostly 控制台与当前 Rust 确定性协议夹具都受 Go 定义的边界约束，不绕过安全控制。
 
 项目当前优先完善通用 Agent 运行时及其受控多 Agent 内核。CTF 将作为后续 Profile 和 Skills 能力接入，而不是另建一套独立运行系统。
 
@@ -29,7 +29,7 @@ CyberAgent Workbench 是一个由 Go 驱动的本地 AI Agent 工作台，面向
 
 CyberAgent Workbench is a local AI agent workbench powered by Go for coding, code review, security learning, scripting, and controlled cybersecurity analysis. It unifies model calls, long-context memory, workspace files, policy checks, approvals, execution budgets, and event history in one resumable and auditable runtime.
 
-Each user objective is stored as a `Mission`, while each resumable execution attempt is a `Run`. Go is the sole control plane for model routing, state machines, SQLite persistence, safety policy, and tool boundaries. The TypeScript console and future deterministic Rust analyzers connect through Go-defined protocols instead of bypassing those controls.
+Each user objective is stored as a `Mission`, while each resumable execution attempt is a `Run`. Go is the sole control plane for model routing, state machines, SQLite persistence, safety policy, and tool boundaries. The TypeScript console and the current deterministic Rust protocol fixture remain behind Go-defined boundaries instead of bypassing those controls.
 
 The current priority is the general-purpose Agent runtime and its controlled multi-agent kernel. CTF capabilities will be added later as Profiles and Skills on the same foundation rather than as a separate execution system.
 
@@ -1978,13 +1978,62 @@ high/medium issue is known on an enabled path, and no real Provider/key, Shell,
 LocalRunner, Docker, hook, attack traffic, external network, installer, registry
 mutation, or product process start was used. ADR 0061 is authoritative.
 
+### P10-A1/A2/A3：Go 主控分析协议、Rust 夹具与共享黄金向量
+
+本批不新增 migration，schema/OpenAPI 保持 v84 与 75 path / 83 operation / 182 schema。
+P10-A1 在新的 `internal/analyzer` 固定 `analyzer_protocol.v1` 请求、
+`analyzer_result.v1` 成功结果和 `analyzer_error.v1` 错误信封。Go 拒绝未知、重复、缺失、
+尾随、非法 UTF-8、非规范 Base64、未来版本、越界及任何 capability widening；请求最多 96 KiB，
+内联解码输入最多 64 KiB，结果最多 16 KiB，声明超时为 100-30,000 ms，JSON 深度最多八层。
+filesystem/network/subprocess/environment 必须全部为 false，错误不会回显解析器细节或不安全 ID。
+
+P10-A2 新增首个 Rust workspace。`cyberagent-analyzer-fixture` 使用锁定的
+`clap`、`serde`、`serde_json`、`base64` 与 `sha2`，只从 stdin 读取有界 JSON、向 stdout
+写一个有界 JSON。它没有路径、URL、命令、Run、Session、key 或配置参数；成功只返回媒体类型、
+字节数、SHA-256、UTF-8 与逻辑行数，不返回原文。Rust 固定为 1.97.1，`Cargo.lock` 已提交，
+`target/` 不进入 Git。
+
+P10-A3 让 Go 和 Rust 独立读取同一份五组共享向量，逐项固定协议/限制/14 个错误码、退出码、
+JSON 语义、stdout 精确 bytes 与 SHA-256。GitHub Actions 增加独立 Rust fmt/test/clippy job；
+Go job 也显式执行共享向量。Rust 不调用 Go，Go 也没有 Rust 子进程 starter。
+
+三切片功能门通过 394.6 秒全仓 uncached Go、vet、协议 fuzz、Rust locked tests/fmt/零告警
+clippy、真实 fixture 成功/拒绝 smoke、37 文件 134 项前端测试、确定性 OpenAPI、Vite、npm
+零漏洞、RustSec、secure Desktop 测试/vet 与 Windows 可复现双构建；未签名 GUI SHA-256 为
+`69ed40aede0cfc23e075df824fecf6c1ef7b4b0586a8f4b685b7d8aa95dde3b4`，继续保持
+`release_ready=false`。RustSec 读取 1,166 条官方 advisory 后对 41 个锁定 crate 检出零已知漏洞。
+审计修复共享常量未锁定、显式 false 缺失测试、结果行数一致性、超大错误分类和递归 JSON 深度
+五项 dormant/低风险问题；启用路径无已知未解决高/中风险。
+
+本批只为 CLI smoke 启动过非产品 Rust fixture；没有真实 Provider/key、Shell、LocalRunner、
+Docker、hook、攻击流量、产品 analyzer process、SQLite/Event/Artifact 写入或新权限。双指标仍为
+架构约 99%、完整产品可用度约 95-97%，因为协议基础已建立但用户尚不能从产品调用 analyzer。
+边界见 [ADR 0062](docs/adr/0062-go-owned-analyzer-protocol-rust-fixture-shared-vectors.md) 和
+[analyzers/README.md](analyzers/README.md)。
+
+This non-schema P10-A1/A2/A3 batch establishes the first Go/Rust analyzer boundary.
+Go owns strict versioned request/result/error envelopes, all byte/time limits, four
+explicitly disabled capabilities, and stable rejection codes. The Rust fixture accepts
+only bounded inline stdin JSON and emits bounded metadata-only stdout JSON; it has no
+path, URL, network, environment, subprocess, model, configuration, persistence, or
+Artifact authority.
+
+Go and Rust independently validate one shared five-vector contract, including all
+limits/error codes and exact output bytes/SHA-256. The 394.6-second uncached Go, vet,
+fuzz, locked Rust fmt/test/clippy, fixture smoke, Web/build, npm, RustSec, secure Desktop,
+and reproducible Windows build gates passed. The unsigned GUI SHA-256 is
+`69ed40aede0cfc23e075df824fecf6c1ef7b4b0586a8f4b685b7d8aa95dde3b4` and remains
+`release_ready=false`. No known unresolved high/medium issue exists on an enabled path.
+Product analyzer invocation, Registry, bridge, result persistence, and Artifact commit
+remain closed. ADR 0062 is authoritative.
+
 ## Project Memory
 
 Read [docs/PROJECT_MEMORY.md](docs/PROJECT_MEMORY.md), [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [docs/PROGRESS_BOOK.md](docs/PROGRESS_BOOK.md), [docs/TASK_BOOK.md](docs/TASK_BOOK.md), [docs/http-api.md](docs/http-api.md), [docs/openapi.json](docs/openapi.json), [web/README.md](web/README.md), [docs/errors.md](docs/errors.md), and the chronological [ADR 0001](docs/adr/0001-go-control-plane.md), [ADR 0002](docs/adr/0002-run-centric-runtime.md), [ADR 0003](docs/adr/0003-run-execution-modes.md), [ADR 0004](docs/adr/0004-plan-delivery-workflow.md), [ADR 0005](docs/adr/0005-operator-steering-queue.md), [ADR 0006](docs/adr/0006-operator-steering-controls.md), [ADR 0007](docs/adr/0007-specialist-skill-context.md), [ADR 0008](docs/adr/0008-sandbox-manifest-boundary.md), [ADR 0009](docs/adr/0009-sandbox-approval-candidate.md), [ADR 0010](docs/adr/0010-disabled-sandbox-lifecycle.md), [ADR 0011](docs/adr/0011-disabled-sandbox-preflight.md), [ADR 0012](docs/adr/0012-simulation-only-sandbox-evidence.md), [ADR 0013](docs/adr/0013-read-only-docker-observation.md), [ADR 0014](docs/adr/0014-deterministic-docker-container-plan.md), [ADR 0015](docs/adr/0015-bounded-docker-write-rehearsal.md), [ADR 0016](docs/adr/0016-recoverable-docker-rehearsal-attempt.md), [ADR 0017](docs/adr/0017-descriptor-sealed-host-input-staging.md), [ADR 0018](docs/adr/0018-durable-pre-stage-host-input-requirement.md), [ADR 0019](docs/adr/0019-daemon-owned-host-input-handoff.md), [ADR 0020](docs/adr/0020-deterministic-runtime-input-projection.md), [ADR 0021](docs/adr/0021-recoverable-runtime-input-application.md), [ADR 0022](docs/adr/0022-retained-runtime-input-resource-lifecycle.md), [ADR 0023](docs/adr/0023-blocked-docker-start-gate-review.md), [ADR 0024](docs/adr/0024-strict-inert-skill-package.md), [ADR 0025](docs/adr/0025-protected-delete-command-guard.md), [ADR 0026](docs/adr/0026-run-execution-profile-selection.md), [ADR 0027](docs/adr/0027-non-authorizing-docker-production-evidence-ledger.md), and [ADR 0028](docs/adr/0028-recoverable-docker-production-evidence-attempts.md) when resuming development after a long conversation. They record current progress, language ownership, run architecture, execution mode, Plan/Delivery and steering invariants, Specialist Skill delivery, Sandbox authority boundaries, API and error contracts, audit notes, verified commands, and the recommended next slice.
 
 The latest decisions are [ADR 0029](docs/adr/0029-bounded-linux-read-only-docker-evidence-harness.md), [ADR 0030](docs/adr/0030-immutable-docker-production-evidence-review.md), [ADR 0031](docs/adr/0031-content-addressed-inert-skill-registry.md), [ADR 0032](docs/adr/0032-external-skill-run-context.md), [ADR 0033](docs/adr/0033-pathless-desktop-skill-preview.md), [ADR 0034](docs/adr/0034-embedded-read-first-wails-shell.md), [ADR 0035](docs/adr/0035-desktop-lifecycle-and-event-resumption.md), [ADR 0036](docs/adr/0036-idempotent-controlled-run-creation.md), [ADR 0037](docs/adr/0037-controlled-session-message-submission.md), [ADR 0038](docs/adr/0038-idempotent-run-control-and-bounded-handoff.md), [ADR 0039](docs/adr/0039-model-plan-and-approval-controls.md), [ADR 0040](docs/adr/0040-provider-diff-wake-controls.md), [ADR 0041](docs/adr/0041-explicit-wake-file-apply-and-inert-skill-install.md), [ADR 0042](docs/adr/0042-receipts-explorer-portable-build.md), [ADR 0043](docs/adr/0043-workspace-search-evidence-attachment-receipt-history.md), [ADR 0044](docs/adr/0044-operator-action-center-evidence-inventory-command-palette.md), [ADR 0045](docs/adr/0045-go-issued-editor-system-credentials-bounded-wake-worker.md), [ADR 0046](docs/adr/0046-safe-editor-recovery-provider-generation-worker-health.md), [ADR 0047](docs/adr/0047-read-only-repository-change-set-code-journey.md), [ADR 0048](docs/adr/0048-bounded-diff-verification-code-handoff.md), [ADR 0049](docs/adr/0049-deadlock-livelock-runtime-guards.md), [ADR 0050](docs/adr/0050-repository-history-verification-plan-handoff-export.md), [ADR 0051](docs/adr/0051-exact-commit-verification-association-runner-lifecycle.md), [ADR 0052](docs/adr/0052-conservative-model-context-cumulative-handoff-memory.md), [ADR 0053](docs/adr/0053-commit-preview-handoff-coverage-process-conformance.md), [ADR 0054](docs/adr/0054-file-history-verification-drilldown-runner-exit-evidence.md), [ADR 0055](docs/adr/0055-history-navigation-verification-pagination-runner-runtime-evidence.md), [ADR 0056](docs/adr/0056-exact-commit-comparison-keyset-verification-runner-control-evidence.md), [ADR 0057](docs/adr/0057-comparison-preview-verification-snapshot-runner-timeline-evidence.md), [ADR 0058](docs/adr/0058-paired-comparison-snapshot-receipts-runner-evidence-set.md), and [ADR 0059](docs/adr/0059-paired-navigation-receipt-review-runner-golden-vectors.md).
 
-The newest decisions are [ADR 0060](docs/adr/0060-keyboard-paired-preview-handoff-reviews-receipt-compatibility.md) and [ADR 0061](docs/adr/0061-exact-receipt-review-navigation-audit-facts-envelope-golden.md).
+The newest decisions are [ADR 0060](docs/adr/0060-keyboard-paired-preview-handoff-reviews-receipt-compatibility.md), [ADR 0061](docs/adr/0061-exact-receipt-review-navigation-audit-facts-envelope-golden.md), and [ADR 0062](docs/adr/0062-go-owned-analyzer-protocol-rust-fixture-shared-vectors.md).
 
 Windows Desktop D0-A/D0-B 与 D1-R1 至 D1-G13/V12 加 R10 非产品 Runner 回执信封黄金边界的自动化核心已实现，但仍是未签名开发/便携测试壳，不是安装版或完整工作台；Windows 10 实机发布矩阵仍待完成。分阶段方案见 [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md)。自定义 Skill 已具备严格 `skill_package.v1` 校验、schema v69 本地惰性 Registry、schema v70 CLI Run 选择/最小上下文、schema v71 三端只读来源投影，以及 HTTP/Desktop 显式确认的惰性安装；签名、远程分发和安装时执行仍未开放。详情见 [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md)。
 
@@ -2005,6 +2054,8 @@ This project is licensed by the repository owner under the [Apache License 2.0](
 ## Development Priority
 
 The current priority is the V2 run-centric runtime. P0 and P1 are complete. P2 supports resumable root Agent turns, cumulative token/model-time accounting, bounded execution and Provider retry loops, strict Supervisor-owned `continue`, `finish`, and `wait` actions, one Run execution path for ordinary CLI/TUI Session chat, real Provider streaming with bounded `model.delta` progress, local and schema v18 cross-process active-call cancellation, Bubble Tea live metadata, durable model events, exactly one restart-safe lifecycle-protocol repair, the schema v16 bounded structured-memory tool loop, and schema v17 execution leases with heartbeat/fencing. P3 includes migration v9 Work Board and v10 Notes. P4 covers the schema-v19 root Coordinator through schema-v34 read-only Fan-out. P5 includes the unified Tool Gateway, durable approvals/Grants, typed processes, Artifacts, and structured tools. P9 now includes authenticated API/event surfaces, controlled Run/Session/lifecycle/bounded execution, explicit Provider diagnostics/routes and generation-safe Windows system-credential controls, Plan/Deliver, constrained approvals, schema-v76 review/apply plus safely recoverable Go-issued Monaco proposals, repository state/redacted Diff/history/exact-commit preview/navigation/comparison with keyboard-accessible paired base/head previews and multi-file review projections, immutable operator verification/coverage with snapshot-stable exact-item pagination, deterministic snapshot download, immutable metadata-only receipt history and non-authorizing receipt review, a regenerable Code Handoff/export with exact review navigation and bounded Code Journey audit facts, explicit foreground wake consumption and a default-off 1 x 1 worker, inert Skill installation, receipts, bounded Workspace exploration/search, evidence attachment/inventory, operator actions, command palette, portable-build diagnostics, React/Vite, TUI, Headless, and Windows Desktop through D1-G13/V12. xterm, the Windows 10 release matrix, and true Local/Docker execution remain pending. CTF-specific solving logic stays deferred until the generic runtime is stable.
+
+P10 now includes A1/A2/A3: Go-owned strict analyzer request/result/error envelopes and limits, a pinned Rust 1.97.1 metadata-only stdin/stdout fixture, one locked Cargo workspace, and independent Go/Rust shared golden-vector CI. No Analyzer Registry, Go-to-Rust process bridge, product invocation, file input, result persistence, or Artifact commit exists yet.
 
 Keyboard-accessible paired comparison previews, event-high-water/keyset verification pagination, deterministic snapshot export, immutable record-only receipt history, explicit non-authorizing receipt review, exact Handoff/Journey-to-Verify navigation, and non-product R10 accepted-envelope golden vectors are complete. xterm, signed distribution, and the Windows 10 release matrix remain pending. The current narrow controls include read-only repository state, redacted Diff/history/exact-commit preview/navigable exact-file history/comparison, status-only Provider diagnostics/routes/credentials with atomic generation reload, Go-issued FileEdit proposal/read-only recovery plus independently authorized review/apply, immutable operator verification and metadata-only Handoff/snapshot-paginated exact-item coverage/download/receipt history/review, a regenerable non-mutating Code Handoff/export, foreground wake consumption plus an optional 1 x 1-step worker with bounded health, and explicitly confirmed inert Skill registration. R10 pins strict accepted receipt-envelope encoding only inside `NonProductOnly`; wall-clock measurement, raw output, process identity, CPU/memory OS limits, signal identity, and host/container process authority remain false.
 

@@ -1,0 +1,237 @@
+{
+  "protocol_version": "analyzer_protocol_golden_vectors.v1",
+  "contract": {
+    "request_protocol": "analyzer_protocol.v1",
+    "result_protocol": "analyzer_result.v1",
+    "error_protocol": "analyzer_error.v1",
+    "fixture_analyzer": "fixture.digest.v1",
+    "max_request_envelope_bytes": 98304,
+    "max_decoded_input_bytes": 65536,
+    "min_result_envelope_bytes": 512,
+    "max_result_envelope_bytes": 16384,
+    "min_timeout_ms": 100,
+    "max_timeout_ms": 30000,
+    "max_request_id_bytes": 128,
+    "max_media_type_bytes": 128,
+    "exit_success": 0,
+    "exit_rejected": 2,
+    "exit_internal": 3
+  },
+  "error_codes": [
+    "malformed_envelope",
+    "request_too_large",
+    "unsupported_protocol",
+    "invalid_request",
+    "capability_denied",
+    "unsupported_analyzer",
+    "input_limit_exceeded",
+    "invalid_content",
+    "output_limit_exceeded",
+    "result_too_large",
+    "deadline_exceeded",
+    "process_failed",
+    "invalid_result",
+    "internal_error"
+  ],
+  "vectors": [
+    {
+      "name": "empty_binary_success",
+      "request": {
+        "protocol_version": "analyzer_protocol.v1",
+        "request_id": "golden-empty",
+        "analyzer": "fixture.digest.v1",
+        "input": {
+          "media_type": "application/octet-stream",
+          "content_base64": ""
+        },
+        "limits": {
+          "max_input_bytes": 65536,
+          "max_output_bytes": 4096,
+          "timeout_ms": 5000
+        },
+        "capabilities": {
+          "filesystem": false,
+          "network": false,
+          "subprocess": false,
+          "environment": false
+        },
+        "metadata_only": true
+      },
+      "expected_exit_code": 0,
+      "expected_stdout": {
+        "protocol_version": "analyzer_result.v1",
+        "request_id": "golden-empty",
+        "analyzer": "fixture.digest.v1",
+        "status": "succeeded",
+        "summary": {
+          "media_type": "application/octet-stream",
+          "input_bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "utf8": true,
+          "line_count": 0
+        },
+        "metadata_only": true,
+        "capabilities_used": {
+          "filesystem": false,
+          "network": false,
+          "subprocess": false,
+          "environment": false
+        }
+      },
+      "expected_stdout_bytes": 409,
+      "expected_stdout_sha256": "454d988b988627333805ba90a476379a8694e7123b81023c51473a36866861b8"
+    },
+    {
+      "name": "text_metadata_success",
+      "request": {
+        "protocol_version": "analyzer_protocol.v1",
+        "request_id": "golden-text",
+        "analyzer": "fixture.digest.v1",
+        "input": {
+          "media_type": "text/plain",
+          "content_base64": "YWxwaGEKYmV0YQo="
+        },
+        "limits": {
+          "max_input_bytes": 64,
+          "max_output_bytes": 4096,
+          "timeout_ms": 1000
+        },
+        "capabilities": {
+          "filesystem": false,
+          "network": false,
+          "subprocess": false,
+          "environment": false
+        },
+        "metadata_only": true
+      },
+      "expected_exit_code": 0,
+      "expected_stdout": {
+        "protocol_version": "analyzer_result.v1",
+        "request_id": "golden-text",
+        "analyzer": "fixture.digest.v1",
+        "status": "succeeded",
+        "summary": {
+          "media_type": "text/plain",
+          "input_bytes": 11,
+          "sha256": "e49c81e2d2f84e259d40e2fb8192f3bcd198b355184845d76d8f58807d0d78ee",
+          "utf8": true,
+          "line_count": 2
+        },
+        "metadata_only": true,
+        "capabilities_used": {
+          "filesystem": false,
+          "network": false,
+          "subprocess": false,
+          "environment": false
+        }
+      },
+      "expected_stdout_bytes": 395,
+      "expected_stdout_sha256": "e2961f362118d99bfce58847b0376546bdc8aa06eb9e710be08e0f8292dd9048"
+    },
+    {
+      "name": "capability_denied",
+      "request": {
+        "protocol_version": "analyzer_protocol.v1",
+        "request_id": "golden-denied",
+        "analyzer": "fixture.digest.v1",
+        "input": {
+          "media_type": "application/octet-stream",
+          "content_base64": ""
+        },
+        "limits": {
+          "max_input_bytes": 64,
+          "max_output_bytes": 4096,
+          "timeout_ms": 1000
+        },
+        "capabilities": {
+          "filesystem": true,
+          "network": false,
+          "subprocess": false,
+          "environment": false
+        },
+        "metadata_only": true
+      },
+      "expected_exit_code": 2,
+      "expected_stdout": {
+        "protocol_version": "analyzer_error.v1",
+        "request_id": "golden-denied",
+        "code": "capability_denied",
+        "retryable": false,
+        "message": "requested analyzer capability is disabled",
+        "metadata_only": true
+      },
+      "expected_stdout_bytes": 189,
+      "expected_stdout_sha256": "5cf3777222e5a372bf7deecf25d91108f51b31fa3ad4c8caacf2cc585c9965a0"
+    },
+    {
+      "name": "input_limit_exceeded",
+      "request": {
+        "protocol_version": "analyzer_protocol.v1",
+        "request_id": "golden-limit",
+        "analyzer": "fixture.digest.v1",
+        "input": {
+          "media_type": "application/octet-stream",
+          "content_base64": "MTIzNDU="
+        },
+        "limits": {
+          "max_input_bytes": 4,
+          "max_output_bytes": 4096,
+          "timeout_ms": 1000
+        },
+        "capabilities": {
+          "filesystem": false,
+          "network": false,
+          "subprocess": false,
+          "environment": false
+        },
+        "metadata_only": true
+      },
+      "expected_exit_code": 2,
+      "expected_stdout": {
+        "protocol_version": "analyzer_error.v1",
+        "request_id": "golden-limit",
+        "code": "input_limit_exceeded",
+        "retryable": false,
+        "message": "analyzer input exceeds its declared limit",
+        "metadata_only": true
+      },
+      "expected_stdout_bytes": 191,
+      "expected_stdout_sha256": "78cb7eb62e028b808e2e39c48bf4dcfe14a66b37d840d000c8f0cfa40c97cff9"
+    },
+    {
+      "name": "future_protocol_rejected",
+      "request": {
+        "protocol_version": "analyzer_protocol.v2",
+        "request_id": "golden-future",
+        "analyzer": "fixture.digest.v1",
+        "input": {
+          "media_type": "application/octet-stream",
+          "content_base64": ""
+        },
+        "limits": {
+          "max_input_bytes": 64,
+          "max_output_bytes": 4096,
+          "timeout_ms": 1000
+        },
+        "capabilities": {
+          "filesystem": false,
+          "network": false,
+          "subprocess": false,
+          "environment": false
+        },
+        "metadata_only": true
+      },
+      "expected_exit_code": 2,
+      "expected_stdout": {
+        "protocol_version": "analyzer_error.v1",
+        "request_id": "golden-future",
+        "code": "unsupported_protocol",
+        "retryable": false,
+        "message": "analyzer protocol is unsupported",
+        "metadata_only": true
+      },
+      "expected_stdout_bytes": 183,
+      "expected_stdout_sha256": "d91cc0896cc3b5182685efe41be9d531dabf5715168e146cd2a6ced2e0b59824"
+    }
+  ]
+}

@@ -23,6 +23,8 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go mod verify
+      - name: Verify Go analyzer protocol vectors
+        run: go test -count=1 ./internal/analyzer -run TestAnalyzerProtocolSharedGoldenVectors
       - run: go test -count=1 ./...
       - run: go vet ./...
       - uses: golang/govulncheck-action@v1
@@ -59,6 +61,20 @@ jobs:
             fi
           done
           exit 1
+
+  rust:
+    name: Rust analyzer fixtures
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: analyzers
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo test --locked
+      - run: cargo clippy --locked --all-targets -- -D warnings
 
   desktop:
     name: Windows Desktop shell

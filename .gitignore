@@ -18,6 +18,9 @@ dist/
 build/
 .tmp/
 
+# Rust build output
+target/
+
 # TypeScript frontend output
 node_modules/
 web/dist/
