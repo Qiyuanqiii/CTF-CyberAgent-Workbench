@@ -50,7 +50,7 @@ func (a *API) route(request *http.Request) (any, *Page, error) {
 		resources := []string{"runs", "sessions", "work-items", "notes", "artifacts",
 			"agent-graph", "delegations", "readonly-fanout", "finding-reports",
 			"external-skills", "workspaces", "workspace-explorer", "workspace-search", "models",
-			"repository-state", "repository-diff", "repository-history", "repository-file-history", "repository-commit-detail", "repository-commit-comparison", "repository-commit-file-preview", "verification-evidence", "verification-plan", "verification-plan-coverage", "code-handoff", "code-handoff-export",
+			"repository-state", "repository-diff", "repository-history", "repository-file-history", "repository-commit-detail", "repository-commit-comparison", "repository-commit-file-preview", "verification-evidence", "verification-plan", "verification-plan-coverage", "verification-snapshot-export", "code-handoff", "code-handoff-export",
 			"operation-receipts", "operator-actions", "evidence-inventory",
 			"event-stream", "event-poll", "capabilities", "openapi"}
 		if a.controlEnabled {
@@ -470,6 +470,12 @@ func (a *API) routeRuns(request *http.Request, segments []string) (any, *Page, e
 	case 6:
 		if segments[2] == "verification-plan-coverage" && segments[4] == "items" {
 			return a.runVerificationPlanItemCoverage(request, segments[1], segments[3], segments[5])
+		}
+	case 7:
+		if segments[2] == "verification-plan-coverage" && segments[4] == "items" &&
+			segments[6] == "snapshot-export" {
+			return a.runVerificationPlanItemSnapshotExport(request, segments[1], segments[3],
+				segments[5])
 		}
 	}
 	return nil, nil, apperror.New(apperror.CodeNotFound, "Run HTTP API endpoint was not found")

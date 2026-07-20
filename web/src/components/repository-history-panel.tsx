@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FileClock, FileCode2, FileDiff, GitCommitHorizontal, GitCompareArrows,
-  RefreshCw } from "lucide-react";
+import { FileClock, FileCode2, FileDiff, FileInput, FileOutput, GitCommitHorizontal,
+  GitCompareArrows, RefreshCw } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import { formatDate } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
@@ -19,8 +19,9 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
     comparisonBase.objectID : "";
   const comparisonHeadObjectID = selectedObjectID && selectedObjectID !== comparisonBaseObjectID ?
     selectedObjectID : "";
-  const selectedFilePath = fileSelection.workspaceID === workspaceID &&
-    fileSelection.objectID === selectedObjectID ? fileSelection.path : "";
+  const selectedPreviewObjectID = fileSelection.workspaceID === workspaceID ?
+    fileSelection.objectID : "";
+  const selectedFilePath = fileSelection.workspaceID === workspaceID ? fileSelection.path : "";
   const selectedHistoryPath = historySelection.workspaceID === workspaceID ?
     historySelection.path : "";
   const query = useQuery({
@@ -41,11 +42,11 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
     enabled: Boolean(workspaceID && comparisonBaseObjectID && comparisonHeadObjectID),
   });
   const fileQuery = useQuery({
-    queryKey: ["workspace", workspaceID, "repository-commit", selectedObjectID,
+    queryKey: ["workspace", workspaceID, "repository-commit", selectedPreviewObjectID,
       "file-preview", selectedFilePath],
     queryFn: ({ signal }) => client.repositoryCommitFilePreview(workspaceID,
-      selectedObjectID, selectedFilePath, signal),
-    enabled: Boolean(workspaceID && selectedObjectID && selectedFilePath),
+      selectedPreviewObjectID, selectedFilePath, signal),
+    enabled: Boolean(workspaceID && selectedPreviewObjectID && selectedFilePath),
   });
   const fileHistoryQuery = useQuery({
     queryKey: ["workspace", workspaceID, "repository-file-history", selectedHistoryPath],
@@ -128,7 +129,8 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
               </button>
               {["regular", "executable"].includes(change.current_kind) ?
                 <button aria-label={`Preview ${change.path} at ${detailQuery.data.hash}`}
-                  aria-pressed={selectedFilePath === change.path} className="icon-button"
+                  aria-pressed={selectedPreviewObjectID === selectedObjectID &&
+                    selectedFilePath === change.path} className="icon-button"
                   onClick={() => setFileSelection((current) =>
                     current.workspaceID === workspaceID && current.objectID === selectedObjectID &&
                       current.path === change.path ? { workspaceID: "", objectID: "", path: "" } :
@@ -144,7 +146,8 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
           {fileQuery.isLoading && <LoadingState label="Loading redacted commit file" />}
           {fileQuery.isError && <ErrorState error={fileQuery.error} />}
           {fileQuery.data && <>
-            <header><code title={fileQuery.data.path}>{fileQuery.data.path}</code>
+            <header><code title={`${fileQuery.data.hash} / ${fileQuery.data.path}`}>
+              {fileQuery.data.hash} / {fileQuery.data.path}</code>
               <span><StatusBadge status={fileQuery.data.kind} />
                 {fileQuery.data.redacted && <StatusBadge status="redacted" />}</span></header>
             <pre>{fileQuery.data.content}</pre>
@@ -173,6 +176,36 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
                 <code title={change.path}>{change.path}</code>
                 <span>{change.previous_kind || "none"} to {change.current_kind || "none"}</span>
                 <span>{change.content_changed ? "content" : "mode only"}</span>
+                <span className="repository-commit-comparison-actions">
+                  {["regular", "executable"].includes(change.previous_kind) ?
+                    <button aria-label={`Preview ${change.path} at comparison base ${comparisonQuery.data.base_hash}`}
+                      aria-pressed={selectedPreviewObjectID === comparisonQuery.data.base_object_id &&
+                        selectedFilePath === change.path} className="icon-button"
+                      onClick={() => setFileSelection((current) =>
+                        current.workspaceID === workspaceID &&
+                          current.objectID === comparisonQuery.data.base_object_id &&
+                          current.path === change.path ?
+                          { workspaceID: "", objectID: "", path: "" } :
+                          { workspaceID, objectID: comparisonQuery.data.base_object_id,
+                            path: change.path })}
+                      title="Preview redacted base file" type="button">
+                      <FileInput aria-hidden="true" size={14} />
+                    </button> : <span aria-hidden="true" className="repository-preview-placeholder" />}
+                  {["regular", "executable"].includes(change.current_kind) ?
+                    <button aria-label={`Preview ${change.path} at comparison head ${comparisonQuery.data.head_hash}`}
+                      aria-pressed={selectedPreviewObjectID === comparisonQuery.data.head_object_id &&
+                        selectedFilePath === change.path} className="icon-button"
+                      onClick={() => setFileSelection((current) =>
+                        current.workspaceID === workspaceID &&
+                          current.objectID === comparisonQuery.data.head_object_id &&
+                          current.path === change.path ?
+                          { workspaceID: "", objectID: "", path: "" } :
+                          { workspaceID, objectID: comparisonQuery.data.head_object_id,
+                            path: change.path })}
+                      title="Preview redacted head file" type="button">
+                      <FileOutput aria-hidden="true" size={14} />
+                    </button> : <span aria-hidden="true" className="repository-preview-placeholder" />}
+                </span>
               </div>)}</div>}
           {comparisonQuery.data.omitted_change_count > 0 &&
             <p className="repository-diff-omitted">

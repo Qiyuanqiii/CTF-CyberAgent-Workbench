@@ -1,9 +1,10 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, ClipboardList, ListTree, LoaderCircle, Plus, RefreshCw,
+import { ChevronDown, ClipboardList, Download, ListTree, LoaderCircle, Plus, RefreshCw,
   Trash2 } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import type { VerificationPlanItemCoveragePage, VerificationPlanRequestView } from "../api/types";
+import { downloadTextFile } from "../lib/download";
 import { formatDate } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
 
@@ -99,6 +100,12 @@ export function VerificationPlan({ client, runID }: {
     enabled: Boolean(runID && coverageSelection),
   });
   const mergedCoverage = mergeCoveragePages(coverageDetailQuery.data?.pages ?? []);
+  const exportSnapshot = useMutation({
+    mutationFn: ({ planID, ordinal, format }: { planID: string; ordinal: number;
+      format: "json" | "markdown" }) =>
+      client.verificationPlanItemSnapshotExport(runID, planID, ordinal, format),
+    onSuccess: (value) => downloadTextFile(value.filename, value.mime_type, value.content),
+  });
   const record = useMutation({
     mutationFn: (body: VerificationPlanRequestView) => {
       if (!operationKey.current) {
@@ -223,7 +230,20 @@ export function VerificationPlan({ client, runID }: {
                   <span>{mergedCoverage.associations.length} of {mergedCoverage.detail.associated_evidence_count}</span>
                   {coverageDetailQuery.data?.pages.at(-1)?.page.truncated &&
                     <StatusBadge status="page limit reached" />}
+                  <div className="verification-snapshot-actions">
+                    <button aria-label={`Download check ${item.ordinal} verification snapshot as Markdown`}
+                      className="compact-command" disabled={exportSnapshot.isPending}
+                      onClick={() => exportSnapshot.mutate({ planID: plan.id,
+                        ordinal: item.ordinal, format: "markdown" })} type="button">
+                      <Download aria-hidden="true" size={13} />Markdown</button>
+                    <button aria-label={`Download check ${item.ordinal} verification snapshot as JSON`}
+                      className="compact-command" disabled={exportSnapshot.isPending}
+                      onClick={() => exportSnapshot.mutate({ planID: plan.id,
+                        ordinal: item.ordinal, format: "json" })} type="button">
+                      <Download aria-hidden="true" size={13} />JSON</button>
+                  </div>
                 </header>
+                {exportSnapshot.error && <ErrorState error={exportSnapshot.error} />}
                 {mergedCoverage.associations.length === 0 ?
                   <span className="verification-coverage-empty">No explicit evidence associated</span> :
                   <ul>{mergedCoverage.associations.map((association) =>

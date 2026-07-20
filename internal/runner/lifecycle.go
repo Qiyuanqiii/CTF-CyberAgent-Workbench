@@ -14,37 +14,41 @@ import (
 )
 
 const (
-	LifecycleProtocolVersion                = "runner_lifecycle_contract.v1"
-	ExitEvidenceProtocolVersion             = "runner_exit_evidence.v1"
-	RuntimeEvidenceProtocolVersion          = "runner_runtime_evidence.v1"
-	ResourceLimitEvidenceProtocolVersion    = "runner_resource_limit_evidence.v1"
-	TerminationCauseEvidenceProtocolVersion = "runner_termination_cause_evidence.v1"
-	DefaultRunTimeout                       = 30 * time.Second
-	MaxRunTimeout                           = 5 * time.Minute
-	DefaultTerminationGrace                 = 2 * time.Second
-	DefaultKillGrace                        = 2 * time.Second
-	MaxControlGrace                         = 10 * time.Second
-	MaxOutputCaptureBytes                   = 64 * 1024
-	MaxOutputObservedBytes                  = 64 * 1024 * 1024
-	MaxStdinProvidedBytes                   = 1024 * 1024
-	MaxRuntimeEvidenceMilliseconds          = int64((MaxRunTimeout + 2*MaxControlGrace) / time.Millisecond)
-	MaxCPUTimeEvidenceMilliseconds          = int64((24 * time.Hour) / time.Millisecond)
-	MaxPeakResidentBytes                    = int64(1 << 40)
-	EmptyOutputSHA256                       = "e3b0c44298fc1c149afbf4c8996fb924" +
+	LifecycleProtocolVersion                 = "runner_lifecycle_contract.v1"
+	ExitEvidenceProtocolVersion              = "runner_exit_evidence.v1"
+	RuntimeEvidenceProtocolVersion           = "runner_runtime_evidence.v1"
+	ResourceLimitEvidenceProtocolVersion     = "runner_resource_limit_evidence.v1"
+	TerminationCauseEvidenceProtocolVersion  = "runner_termination_cause_evidence.v1"
+	LifecycleTimelineEvidenceProtocolVersion = "runner_lifecycle_timeline_evidence.v1"
+	DeadlineBudgetEvidenceProtocolVersion    = "runner_deadline_budget_evidence.v1"
+	DefaultRunTimeout                        = 30 * time.Second
+	MaxRunTimeout                            = 5 * time.Minute
+	DefaultTerminationGrace                  = 2 * time.Second
+	DefaultKillGrace                         = 2 * time.Second
+	MaxControlGrace                          = 10 * time.Second
+	MaxOutputCaptureBytes                    = 64 * 1024
+	MaxOutputObservedBytes                   = 64 * 1024 * 1024
+	MaxStdinProvidedBytes                    = 1024 * 1024
+	MaxRuntimeEvidenceMilliseconds           = int64((MaxRunTimeout + 2*MaxControlGrace) / time.Millisecond)
+	MaxCPUTimeEvidenceMilliseconds           = int64((24 * time.Hour) / time.Millisecond)
+	MaxPeakResidentBytes                     = int64(1 << 40)
+	EmptyOutputSHA256                        = "e3b0c44298fc1c149afbf4c8996fb924" +
 		"27ae41e4649b934ca495991b7852b855"
 )
 
 var (
-	ErrHarnessBoundary          = errors.New("runner lifecycle backend is not non-product-only")
-	ErrStartFailed              = errors.New("runner process start failed")
-	ErrWaitFailed               = errors.New("runner process wait failed")
-	ErrTerminateFailed          = errors.New("runner process-tree termination failed")
-	ErrKillFailed               = errors.New("runner process-tree kill failed")
-	ErrOrphanedProcess          = errors.New("runner process tree was not fully reaped")
-	ErrExitEvidence             = errors.New("runner exit evidence is invalid")
-	ErrRuntimeEvidence          = errors.New("runner runtime evidence is invalid")
-	ErrResourceLimitEvidence    = errors.New("runner resource limit evidence is invalid")
-	ErrTerminationCauseEvidence = errors.New("runner termination cause evidence is invalid")
+	ErrHarnessBoundary           = errors.New("runner lifecycle backend is not non-product-only")
+	ErrStartFailed               = errors.New("runner process start failed")
+	ErrWaitFailed                = errors.New("runner process wait failed")
+	ErrTerminateFailed           = errors.New("runner process-tree termination failed")
+	ErrKillFailed                = errors.New("runner process-tree kill failed")
+	ErrOrphanedProcess           = errors.New("runner process tree was not fully reaped")
+	ErrExitEvidence              = errors.New("runner exit evidence is invalid")
+	ErrRuntimeEvidence           = errors.New("runner runtime evidence is invalid")
+	ErrResourceLimitEvidence     = errors.New("runner resource limit evidence is invalid")
+	ErrTerminationCauseEvidence  = errors.New("runner termination cause evidence is invalid")
+	ErrLifecycleTimelineEvidence = errors.New("runner lifecycle timeline evidence is invalid")
+	ErrDeadlineBudgetEvidence    = errors.New("runner deadline budget evidence is invalid")
 )
 
 type StopReason string
@@ -279,6 +283,150 @@ type TerminationCauseEvidence struct {
 	ProductExecutionEnabled bool
 }
 
+// LifecycleTimelineEvidence is a canonical order of observed control facts.
+// Sequence numbers do not claim wall-clock timing or backend call duration.
+type LifecycleTimelineEvidence struct {
+	ProtocolVersion              string
+	ControlTrigger               TerminationControlTrigger
+	FinalMechanism               TerminationFinalMechanism
+	StartAcceptedSequence        int
+	StopTriggerSequence          int
+	TerminateRequestedSequence   int
+	KillRequestedSequence        int
+	TreeReapedSequence           int
+	ExitEvidenceSequence         int
+	RuntimeEvidenceSequence      int
+	EvidenceSetCommittedSequence int
+	StepCount                    int
+	LogicalSequenceOnly          bool
+	WallClockIncluded            bool
+	BackendCallTimingInferred    bool
+	ProcessIdentityIncluded      bool
+	MetadataOnly                 bool
+	ProductExecutionEnabled      bool
+}
+
+func buildLifecycleTimelineEvidence(result Result) (LifecycleTimelineEvidence, bool) {
+	trigger, ok := terminationTrigger(result)
+	if !ok || !result.Started || !result.TreeReaped {
+		return LifecycleTimelineEvidence{}, false
+	}
+	sequence := 2
+	evidence := LifecycleTimelineEvidence{
+		ProtocolVersion: LifecycleTimelineEvidenceProtocolVersion,
+		ControlTrigger:  trigger, FinalMechanism: terminationMechanism(result),
+		StartAcceptedSequence: 1, StopTriggerSequence: 2, LogicalSequenceOnly: true,
+		MetadataOnly: true,
+	}
+	if result.TerminateRequested {
+		sequence++
+		evidence.TerminateRequestedSequence = sequence
+	}
+	if result.KillRequested {
+		sequence++
+		evidence.KillRequestedSequence = sequence
+	}
+	sequence++
+	evidence.TreeReapedSequence = sequence
+	sequence++
+	evidence.ExitEvidenceSequence = sequence
+	sequence++
+	evidence.RuntimeEvidenceSequence = sequence
+	sequence++
+	evidence.EvidenceSetCommittedSequence = sequence
+	evidence.StepCount = sequence
+	return evidence, true
+}
+
+func (e LifecycleTimelineEvidence) validate(result Result) error {
+	expected, ok := buildLifecycleTimelineEvidence(result)
+	if !ok || e != expected || !e.LogicalSequenceOnly || e.WallClockIncluded ||
+		e.BackendCallTimingInferred || e.ProcessIdentityIncluded || !e.MetadataOnly ||
+		e.ProductExecutionEnabled {
+		return errors.New("runner lifecycle timeline evidence binding is invalid")
+	}
+	return nil
+}
+
+// DeadlineBudgetEvidence records independent Go context ceilings. It does not
+// claim a cumulative wall deadline or operating-system resource enforcement.
+type DeadlineBudgetEvidence struct {
+	ProtocolVersion                          string
+	RunContextBudgetMilliseconds             int64
+	TerminateCallContextBudgetMilliseconds   int64
+	PostTerminateWaitBudgetMilliseconds      int64
+	KillCallContextBudgetMilliseconds        int64
+	PostKillWaitBudgetMilliseconds           int64
+	TreeInspectionContextBudgetMilliseconds  int64
+	ExitEvidenceContextBudgetMilliseconds    int64
+	RuntimeEvidenceContextBudgetMilliseconds int64
+	RunContextApplied                        bool
+	TerminateCallContextApplied              bool
+	PostTerminateWaitContextApplied          bool
+	KillCallContextApplied                   bool
+	PostKillWaitContextApplied               bool
+	TreeInspectionContextApplied             bool
+	ExitEvidenceContextApplied               bool
+	RuntimeEvidenceContextApplied            bool
+	GoContextDeadlinesConfigured             bool
+	IndependentContextBudgets                bool
+	CumulativeWallDeadlineClaimed            bool
+	CPUTimeLimitClaimed                      bool
+	MemoryLimitClaimed                       bool
+	OSResourceLimitsVerified                 bool
+	MetadataOnly                             bool
+	ProductExecutionEnabled                  bool
+}
+
+func buildDeadlineBudgetEvidence(request Request, result Result) DeadlineBudgetEvidence {
+	return DeadlineBudgetEvidence{
+		ProtocolVersion:                          DeadlineBudgetEvidenceProtocolVersion,
+		RunContextBudgetMilliseconds:             request.Timeout.Milliseconds(),
+		TerminateCallContextBudgetMilliseconds:   request.TerminationGrace.Milliseconds(),
+		PostTerminateWaitBudgetMilliseconds:      request.TerminationGrace.Milliseconds(),
+		KillCallContextBudgetMilliseconds:        request.KillGrace.Milliseconds(),
+		PostKillWaitBudgetMilliseconds:           request.KillGrace.Milliseconds(),
+		TreeInspectionContextBudgetMilliseconds:  request.KillGrace.Milliseconds(),
+		ExitEvidenceContextBudgetMilliseconds:    request.KillGrace.Milliseconds(),
+		RuntimeEvidenceContextBudgetMilliseconds: request.KillGrace.Milliseconds(),
+		RunContextApplied:                        true,
+		TerminateCallContextApplied:              result.TerminateRequested,
+		PostTerminateWaitContextApplied:          result.TerminateRequested,
+		KillCallContextApplied:                   result.KillRequested,
+		PostKillWaitContextApplied:               result.KillRequested,
+		TreeInspectionContextApplied:             true, ExitEvidenceContextApplied: true,
+		RuntimeEvidenceContextApplied: true, GoContextDeadlinesConfigured: true,
+		IndependentContextBudgets: true, MetadataOnly: true,
+	}
+}
+
+func (e DeadlineBudgetEvidence) validate(request Request, result Result) error {
+	expected := buildDeadlineBudgetEvidence(request, result)
+	if !result.Started || !result.TreeReaped || e != expected ||
+		e.RunContextBudgetMilliseconds < 1 ||
+		e.RunContextBudgetMilliseconds > MaxRunTimeout.Milliseconds() ||
+		e.TerminateCallContextBudgetMilliseconds < 1 ||
+		e.TerminateCallContextBudgetMilliseconds > MaxControlGrace.Milliseconds() ||
+		e.PostTerminateWaitBudgetMilliseconds < 1 ||
+		e.PostTerminateWaitBudgetMilliseconds > MaxControlGrace.Milliseconds() ||
+		e.KillCallContextBudgetMilliseconds < 1 ||
+		e.KillCallContextBudgetMilliseconds > MaxControlGrace.Milliseconds() ||
+		e.PostKillWaitBudgetMilliseconds < 1 ||
+		e.PostKillWaitBudgetMilliseconds > MaxControlGrace.Milliseconds() ||
+		e.TreeInspectionContextBudgetMilliseconds < 1 ||
+		e.TreeInspectionContextBudgetMilliseconds > MaxControlGrace.Milliseconds() ||
+		e.ExitEvidenceContextBudgetMilliseconds < 1 ||
+		e.ExitEvidenceContextBudgetMilliseconds > MaxControlGrace.Milliseconds() ||
+		e.RuntimeEvidenceContextBudgetMilliseconds < 1 ||
+		e.RuntimeEvidenceContextBudgetMilliseconds > MaxControlGrace.Milliseconds() ||
+		!e.GoContextDeadlinesConfigured || !e.IndependentContextBudgets ||
+		e.CumulativeWallDeadlineClaimed || e.CPUTimeLimitClaimed || e.MemoryLimitClaimed ||
+		e.OSResourceLimitsVerified || !e.MetadataOnly || e.ProductExecutionEnabled {
+		return errors.New("runner deadline budget evidence binding is invalid")
+	}
+	return nil
+}
+
 func (e TerminationCauseEvidence) validate(status ExitStatus, result Result) error {
 	trigger, ok := terminationTrigger(result)
 	mechanism := terminationMechanism(result)
@@ -376,31 +524,35 @@ type Backend interface {
 }
 
 type Result struct {
-	ProtocolVersion                   string
-	RequestID                         string
-	Backend                           string
-	Started                           bool
-	ExitCode                          int
-	StopReason                        StopReason
-	Cancelled                         bool
-	TimedOut                          bool
-	TerminateRequested                bool
-	TerminateFailed                   bool
-	KillRequested                     bool
-	KillFailed                        bool
-	OrphanDetected                    bool
-	TreeReaped                        bool
-	ExitEvidenceAvailable             bool
-	ExitEvidence                      ExitEvidence
-	RuntimeEvidenceAvailable          bool
-	RuntimeEvidence                   RuntimeEvidence
-	ResourceLimitEvidenceAvailable    bool
-	ResourceLimitEvidence             ResourceLimitEvidence
-	TerminationCauseEvidenceAvailable bool
-	TerminationCauseEvidence          TerminationCauseEvidence
-	OutputTruncated                   bool
-	RawOutputIncluded                 bool
-	ProductExecutionEnabled           bool
+	ProtocolVersion                    string
+	RequestID                          string
+	Backend                            string
+	Started                            bool
+	ExitCode                           int
+	StopReason                         StopReason
+	Cancelled                          bool
+	TimedOut                           bool
+	TerminateRequested                 bool
+	TerminateFailed                    bool
+	KillRequested                      bool
+	KillFailed                         bool
+	OrphanDetected                     bool
+	TreeReaped                         bool
+	ExitEvidenceAvailable              bool
+	ExitEvidence                       ExitEvidence
+	RuntimeEvidenceAvailable           bool
+	RuntimeEvidence                    RuntimeEvidence
+	ResourceLimitEvidenceAvailable     bool
+	ResourceLimitEvidence              ResourceLimitEvidence
+	TerminationCauseEvidenceAvailable  bool
+	TerminationCauseEvidence           TerminationCauseEvidence
+	LifecycleTimelineEvidenceAvailable bool
+	LifecycleTimelineEvidence          LifecycleTimelineEvidence
+	DeadlineBudgetEvidenceAvailable    bool
+	DeadlineBudgetEvidence             DeadlineBudgetEvidence
+	OutputTruncated                    bool
+	RawOutputIncluded                  bool
+	ProductExecutionEnabled            bool
 }
 
 type Harness struct {
@@ -658,6 +810,16 @@ func (h *Harness) collectEvidence(parent context.Context, process Process,
 		result.StopReason = StopEvidenceFailed
 		return fmt.Errorf("%w: contract mismatch", ErrTerminationCauseEvidence)
 	}
+	lifecycleTimelineEvidence, ok := buildLifecycleTimelineEvidence(*result)
+	if !ok || lifecycleTimelineEvidence.validate(*result) != nil {
+		result.StopReason = StopEvidenceFailed
+		return fmt.Errorf("%w: contract mismatch", ErrLifecycleTimelineEvidence)
+	}
+	deadlineBudgetEvidence := buildDeadlineBudgetEvidence(request, *result)
+	if err := deadlineBudgetEvidence.validate(request, *result); err != nil {
+		result.StopReason = StopEvidenceFailed
+		return fmt.Errorf("%w: contract mismatch", ErrDeadlineBudgetEvidence)
+	}
 	if result.ExitEvidenceAvailable && result.ExitEvidence != exitEvidence {
 		result.StopReason = StopEvidenceFailed
 		return fmt.Errorf("%w: evidence changed after collection", ErrExitEvidence)
@@ -676,6 +838,16 @@ func (h *Harness) collectEvidence(parent context.Context, process Process,
 		result.StopReason = StopEvidenceFailed
 		return fmt.Errorf("%w: evidence changed after collection", ErrTerminationCauseEvidence)
 	}
+	if result.LifecycleTimelineEvidenceAvailable &&
+		result.LifecycleTimelineEvidence != lifecycleTimelineEvidence {
+		result.StopReason = StopEvidenceFailed
+		return fmt.Errorf("%w: evidence changed after collection", ErrLifecycleTimelineEvidence)
+	}
+	if result.DeadlineBudgetEvidenceAvailable &&
+		result.DeadlineBudgetEvidence != deadlineBudgetEvidence {
+		result.StopReason = StopEvidenceFailed
+		return fmt.Errorf("%w: evidence changed after collection", ErrDeadlineBudgetEvidence)
+	}
 	result.ExitEvidence = exitEvidence
 	result.ExitEvidenceAvailable = true
 	result.RuntimeEvidence = runtimeEvidence
@@ -684,6 +856,10 @@ func (h *Harness) collectEvidence(parent context.Context, process Process,
 	result.ResourceLimitEvidenceAvailable = true
 	result.TerminationCauseEvidence = terminationCauseEvidence
 	result.TerminationCauseEvidenceAvailable = true
+	result.LifecycleTimelineEvidence = lifecycleTimelineEvidence
+	result.LifecycleTimelineEvidenceAvailable = true
+	result.DeadlineBudgetEvidence = deadlineBudgetEvidence
+	result.DeadlineBudgetEvidenceAvailable = true
 	result.OutputTruncated = exitEvidence.Stdout.Truncated || exitEvidence.Stderr.Truncated
 	result.RawOutputIncluded = false
 	return nil

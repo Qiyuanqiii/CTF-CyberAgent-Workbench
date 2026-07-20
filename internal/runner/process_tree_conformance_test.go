@@ -348,6 +348,7 @@ func assertConformanceEvidence(t *testing.T, result Result) {
 	t.Helper()
 	if !result.ExitEvidenceAvailable || !result.RuntimeEvidenceAvailable ||
 		!result.ResourceLimitEvidenceAvailable || !result.TerminationCauseEvidenceAvailable ||
+		!result.LifecycleTimelineEvidenceAvailable || !result.DeadlineBudgetEvidenceAvailable ||
 		result.RawOutputIncluded || result.OutputTruncated ||
 		result.ExitEvidence.ProtocolVersion != ExitEvidenceProtocolVersion ||
 		!result.ExitEvidence.MetadataOnly || result.ExitEvidence.RawOutputIncluded ||
@@ -382,7 +383,22 @@ func assertConformanceEvidence(t *testing.T, result Result) {
 		result.TerminationCauseEvidence.OSCauseInferred ||
 		result.TerminationCauseEvidence.SignalIdentityIncluded ||
 		!result.TerminationCauseEvidence.MetadataOnly ||
-		result.TerminationCauseEvidence.ProductExecutionEnabled {
+		result.TerminationCauseEvidence.ProductExecutionEnabled ||
+		result.LifecycleTimelineEvidence.ProtocolVersion !=
+			LifecycleTimelineEvidenceProtocolVersion ||
+		result.LifecycleTimelineEvidence.validate(result) != nil ||
+		result.LifecycleTimelineEvidence.WallClockIncluded ||
+		result.LifecycleTimelineEvidence.BackendCallTimingInferred ||
+		result.LifecycleTimelineEvidence.ProcessIdentityIncluded ||
+		result.DeadlineBudgetEvidence.ProtocolVersion != DeadlineBudgetEvidenceProtocolVersion ||
+		!result.DeadlineBudgetEvidence.GoContextDeadlinesConfigured ||
+		!result.DeadlineBudgetEvidence.IndependentContextBudgets ||
+		result.DeadlineBudgetEvidence.CumulativeWallDeadlineClaimed ||
+		result.DeadlineBudgetEvidence.CPUTimeLimitClaimed ||
+		result.DeadlineBudgetEvidence.MemoryLimitClaimed ||
+		result.DeadlineBudgetEvidence.OSResourceLimitsVerified ||
+		!result.DeadlineBudgetEvidence.MetadataOnly ||
+		result.DeadlineBudgetEvidence.ProductExecutionEnabled {
 		t.Fatalf("process-tree output evidence widened or was incomplete: %#v", result)
 	}
 }

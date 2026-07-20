@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import type { CyberAgentClient } from "../api/client";
+import { downloadTextFile } from "../lib/download";
 import { VerificationPlan } from "./verification-plan";
+
+vi.mock("../lib/download", () => ({ downloadTextFile: vi.fn() }));
 
 const emptyCoverage = () => ({
   protocol_version: "operator_verification_plan_coverage.v1", run_id: "run-1",
@@ -120,8 +123,16 @@ describe("VerificationPlan", () => {
           evidence_outcome: "fail", evidence_event_sequence: 5,
           association_event_sequence: 6, associated_at: "2026-07-20T01:05:00Z" }],
         associations_truncated: false }, page: { limit: 25 }, requestID: "request-2" });
+    const verificationPlanItemSnapshotExport = vi.fn()
+      .mockImplementation((_runID: string, _planID: string, _ordinal: number,
+        format: "json" | "markdown") => Promise.resolve({
+        filename: `snapshot.${format === "json" ? "json" : "md"}`,
+        mime_type: format === "json" ? "application/json" : "text/markdown; charset=utf-8",
+        content: `snapshot-${format}`,
+      }));
     const client = { hasVerificationEvidence: true, verificationPlans,
       verificationPlanCoverage, verificationPlanItemCoveragePage,
+      verificationPlanItemSnapshotExport,
       recordVerificationPlan: vi.fn() } as unknown as CyberAgentClient;
     const user = userEvent.setup();
     render(<QueryClientProvider client={new QueryClient()}>
@@ -135,6 +146,20 @@ describe("VerificationPlan", () => {
       .toHaveBeenCalledWith("run-1", "plan-1", 1, "", 25, expect.any(AbortSignal)));
     expect(await screen.findByText("verification-1")).toBeInTheDocument();
     expect(screen.getByText("events 7 / 8")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", {
+      name: "Download check 1 verification snapshot as Markdown",
+    }));
+    await waitFor(() => expect(verificationPlanItemSnapshotExport)
+      .toHaveBeenCalledWith("run-1", "plan-1", 1, "markdown"));
+    expect(downloadTextFile).toHaveBeenCalledWith("snapshot.md",
+      "text/markdown; charset=utf-8", "snapshot-markdown");
+    await user.click(screen.getByRole("button", {
+      name: "Download check 1 verification snapshot as JSON",
+    }));
+    await waitFor(() => expect(verificationPlanItemSnapshotExport)
+      .toHaveBeenCalledWith("run-1", "plan-1", 1, "json"));
+    expect(downloadTextFile).toHaveBeenCalledWith("snapshot.json", "application/json",
+      "snapshot-json");
     await user.click(screen.getByRole("button", { name: "Load older evidence" }));
     await waitFor(() => expect(verificationPlanItemCoveragePage)
       .toHaveBeenCalledWith("run-1", "plan-1", 1, "older-evidence", 25,

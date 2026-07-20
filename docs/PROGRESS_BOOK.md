@@ -12,7 +12,7 @@
 - 产品可用度：完整 Code + Cyber 产品约 95-97%；其中通用 Coding Agent 工作流约 95-96%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
 - 上述数值是依据已测试任务切片给出的工程估算，不是性能基准，也不代表仍被安全关闭的功能已经可用。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、主动取消、有界工具循环和跨进程 execution lease。P3-P5 已落地 Work/Note/Context、最多两个核心 child、独立 1/2/4/6 只读 Fan-out、Tool Gateway、审批/Grant、预算、ScriptProcess 与 Artifact。P9/Desktop 已推进到 schema v82 / D1-G8/V7，通用运行时安全面已推进到 H1-H3/R5/C1-C3：除既有 Run/Session/Plan/审批/Workspace/证据/回执/行动中心外，现有 API/Desktop 还支持安全恢复的 Monaco FileEdit、独立多文件汇总、exact-root 只读 Repository、可导航精确文件历史与精确提交比较、snapshot-keyset 逐检查项验证下钻、Code Journey、累计上下文记忆、Provider generation reload 和有界 wake worker。R5 configured-limit/Go control-cause 元数据仍只存在于内部 `NonProductOnly` 测试边界，且不宣称 CPU/memory OS enforcement 或 signal identity。真实 Local/Docker/Shell/Git 进程、安装脚本/钩子和远程 Skill 分发继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、主动取消、有界工具循环和跨进程 execution lease。P3-P5 已落地 Work/Note/Context、最多两个核心 child、独立 1/2/4/6 只读 Fan-out、Tool Gateway、审批/Grant、预算、ScriptProcess 与 Artifact。P9/Desktop 已推进到 schema v82 / D1-G9/V8，通用运行时安全面已推进到 H1-H3/R6/C1-C3：除既有 Run/Session/Plan/审批/Workspace/证据/回执/行动中心外，现有 API/Desktop 还支持安全恢复的 Monaco FileEdit、独立多文件汇总、exact-root 只读 Repository、可导航精确文件历史、精确提交比较与 base/head 行预览、snapshot-keyset 逐检查项验证下钻和确定性快照下载、Code Journey、累计上下文记忆、Provider generation reload 和有界 wake worker。R6 logical-timeline/independent-deadline 元数据仍只存在于内部 `NonProductOnly` 测试边界，且不宣称 wall-clock measurement、CPU/memory OS enforcement 或 signal identity。真实 Local/Docker/Shell/Git 进程、安装脚本/钩子和远程 Skill 分发继续关闭。
 
 P8 已推进到 schema v37 及其只读 CI 投影：v35 把完成的 Fan-out execution 投影为通用 `draft` Finding、不可变 `model_assertion` Evidence 和可重建的 Markdown/JSON Report；v36 增加同 Run 冻结 Artifact Evidence、一次性 operator `validated/rejected` 决定与完整复核；v37 以独立不可变事实完成 `validated -> accepted -> fixed`，并强制修复 Evidence 来自接受后新建且未用于验证的同 Run Artifact。验证、接受和修复始终分离；SARIF、通用 CI gate 与 GitHub Actions annotations 均为同一持久化事实上的 Go 只读投影。
 
@@ -1366,10 +1366,57 @@ snapshot receipt/export（不推导 verdict）与 R6 非产品 lifecycle timelin
 真实 Local/Docker start、Windows 10 人工矩阵、签名分发、Rust analyzer、xterm、网络授权与 CTF
 继续独立设门。
 
+## D1-G9/V8/R6 批次：比较预览、验证快照与 Runner 时间线证据
+
+任务 ID：`P9-Comparison-Preview-Verification-Snapshot-Runner-Timeline-Evidence-v82`。
+本轮不新增 SQLite migration，schema 保持 v82。
+
+D1-G9 将精确提交 comparison 行连接到既有 `repository_commit_file_preview.v1`。added
+regular/executable 只可预览 head，deleted 只可预览 base，modified 可分别打开两侧；symlink、
+submodule 和不存在的一侧继续没有按钮。预览选择按 Workspace/object/path 隔离，标题显示 Go
+返回的 exact hash/path。前端没有获得 blob、host root、symbolic ref、Git mutation、进程、网络或
+hook 能力。
+
+D1-V8 增加
+`operator_verification_plan_item_snapshot_export.v1` 与其 deterministic Markdown/JSON content。
+每次导出精确绑定 Run/Session/Workspace/plan/item digest 与当前 association event high-water，
+最多包含 100 条降序显式引用、pass/fail/unknown/returned/total 计数和 truncation，并携带内容
+SHA-256、UTF-8 字节数、安全文件名、固定 MIME 与 256 KiB 上限。没有 private plan/evidence body、
+operator identity、verdict inference、record mutation、approval、authority 或 execution。它是可重建
+下载回执，不是 durable acceptance fact；TypeScript 在下载前复核完整 envelope/content。
+
+R6 在内部 `NonProductOnly` 增加 `runner_lifecycle_timeline_evidence.v1` 与
+`runner_deadline_budget_evidence.v1`。timeline 只表达 start/trigger/optional TERM/KILL/reap/
+evidence commit 的逻辑 ordinal，不包含 wall clock、backend timing 或 process identity；budget
+列出 run、TERM/KILL call/post-wait、tree/exit/runtime evidence 的独立 Go context ceiling 与 applied
+flags，不宣称 cumulative deadline、CPU/memory limit 或 OS enforcement。exit/runtime/resource/cause/
+timeline/budget 六份 evidence 全部验证后才原子提交，漂移失败关闭；产品仍无 Runner starter。
+
+这是累计六切片完整健壮性门。最终 uncached ordinary/race Go 分别 387.3/395.8 秒；全仓 vet、
+ordinary/secure Desktop test/vet/staticcheck/govulncheck、module verify/tidy、37 文件 129 项 Web、
+strict TypeScript、确定性 OpenAPI/TypeScript、Vite、npm 高危漏洞为零、隔离 mock-only CLI、隐私/
+产品入口扫描、Linux runner-test 交叉编译和 Windows 可复现构建全部通过。OpenAPI 为 73 path /
+79 operation / 172 schema，OpenAPI/TypeScript SHA-256 分别为
+`8FF7E6A39132ED46DA828009D6D7A603D05B862AEA734E4D8C3E13838DD8A8AE` 与
+`FE852EEC8B561D14BD5C3FD1411B2F1930C8A80F15551D071DD3356236BA3503`；未签名 GUI SHA-256
+为 `7aa5c3bf67a0af12e51e396977632e5dcc21c74dc04411d3fec7b6f09719aeef`，并保持
+`release_ready=false`、无 installer/registry write。
+
+组合审计发现并修复一个低风险 format 归一化回归：共享 query helper 曾让空白包裹的 export
+format 被接受；snapshot 与既有 Handoff export 现在都要求唯一且字节精确的值，missing/
+duplicate/padded 回归已覆盖。当前启用路径没有已知未解决高/中风险；未使用真实 Provider/Key、
+Shell、LocalRunner、Docker、Git hook、攻击流量、外网或产品进程。双指标保持架构约 99%、完整
+产品可用度约 95-97%；通用 Coding Agent 约 95-96%，Cyber 自动化约 20%。边界见 ADR 0057。
+
+下一批候选为 D1-G10 bounded paired base/head preview workspace、D1-V9 independently designed
+durable snapshot-receipt history 与 R7 canonical six-record non-product evidence-set digest。真实
+Local/Docker start、Windows 10 人工矩阵、签名分发、Rust analyzer、xterm、网络授权与 CTF 继续
+独立设门。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0056-exact-commit-comparison-keyset-verification-runner-control-evidence.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0057-comparison-preview-verification-snapshot-runner-timeline-evidence.md`。

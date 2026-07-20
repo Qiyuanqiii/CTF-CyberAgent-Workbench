@@ -1,8 +1,8 @@
 # 本地 HTTP API / Local HTTP API
 
-CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`，用于检查 SQLite 持久状态并投影可恢复 Run events。独立 capability 允许受控 Run/Session/Plan/审批、Provider 诊断/路由/系统凭证、FileEdit 提案/只读恢复/审阅/apply、wake 意图/前台消费、不可变操作者验证，以及惰性 Skill 安装。只读面还提供 capability/worker health、exact-root Repository 状态与脱敏 Diff、非原子的多文件 FileEdit 汇总和可重建 Code Handoff。API 不编辑/重排消息、不执行验证或 Skill、不启动 Git/通用宿主/容器进程，也不替代 Policy、Tool Gateway 或 Sandbox 门禁。
+CyberAgent Workbench 提供由 Go 控制的本地 `api.v1`，用于检查 SQLite 持久状态并投影可恢复 Run events。独立 capability 允许受控 Run/Session/Plan/审批、Provider 诊断/路由/系统凭证、FileEdit 提案/只读恢复/审阅/apply、wake 意图/前台消费、不可变操作者验证，以及惰性 Skill 安装。只读面还提供 capability/worker health、exact-root Repository 状态与脱敏 Diff、非原子的多文件 FileEdit 汇总、逐验证项确定性快照下载和可重建 Code Handoff。API 不编辑/重排消息、不执行验证或 Skill、不启动 Git/通用宿主/容器进程，也不替代 Policy、Tool Gateway 或 Sandbox 门禁。
 
-CyberAgent Workbench exposes a Go-controlled local `api.v1` for durable SQLite state and resumable Run-event projections. Independent capabilities permit controlled Run/Session/Plan/approval operations, Provider diagnostics/routes/system credentials, FileEdit propose/read-only recovery/review/apply, wake intent/foreground consumption, immutable operator verification, and inert Skill installation. Read-only surfaces also expose capabilities/worker health, exact-root Repository state and redacted Diffs, non-atomic multi-file FileEdit summaries, and a regenerable Code handoff. The API cannot edit/reorder messages, execute verification or a Skill, start Git or a general host/container process, or replace Policy, the Tool Gateway, or Sandbox gates.
+CyberAgent Workbench exposes a Go-controlled local `api.v1` for durable SQLite state and resumable Run-event projections. Independent capabilities permit controlled Run/Session/Plan/approval operations, Provider diagnostics/routes/system credentials, FileEdit propose/read-only recovery/review/apply, wake intent/foreground consumption, immutable operator verification, and inert Skill installation. Read-only surfaces also expose capabilities/worker health, exact-root Repository state and redacted Diffs, non-atomic multi-file FileEdit summaries, deterministic per-check verification snapshot downloads, and a regenerable Code handoff. The API cannot edit/reorder messages, execute verification or a Skill, start Git or a general host/container process, or replace Policy, the Tool Gateway, or Sandbox gates.
 
 ## 启动 / Start
 
@@ -52,9 +52,9 @@ route still requires the control token and its corresponding Go gate independent
 
 ### Windows Desktop 进程内传输 / Windows Desktop In-Process Transport
 
-Desktop 至 D1-G8/V7 复用同一 `api.v1` Handler，但不调用 `ListenAndServe`，也不绑定回环端口。Wails AssetServer 在同一进程内把 React 请求交给 Go；适配层只接受精确 `http://wails.localhost`。默认只生成内存 read token；十九个独立 flag 开放各自窄 route 或进程生命周期内的 wake worker。Repository state/Diff/history/comparison、change-set、Journey、Handoff 与验证分页不增加 flag 或 control route；verification evidence 使用自己的默认关闭 flag。任一 control capability 会生成同一个不同于 read token 的内存 control token，未启用 route 仍返回 404。两个 token 都不写磁盘、日志、Local Storage 或注册表。
+Desktop 至 D1-G9/V8 复用同一 `api.v1` Handler，但不调用 `ListenAndServe`，也不绑定回环端口。Wails AssetServer 在同一进程内把 React 请求交给 Go；适配层只接受精确 `http://wails.localhost`。默认只生成内存 read token；十九个独立 flag 开放各自窄 route 或进程生命周期内的 wake worker。Repository state/Diff/history/comparison、change-set、Journey、Handoff 与验证分页/快照下载不增加 flag 或 control route；verification evidence 使用自己的默认关闭 flag。任一 control capability 会生成同一个不同于 read token 的内存 control token，未启用 route 仍返回 404。两个 token 都不写磁盘、日志、Local Storage 或注册表。
 
-Desktop through D1-G8/V7 reuses the same `api.v1` Handler without calling `ListenAndServe` or binding a loopback port. The Wails AssetServer passes React requests to Go in process, and a narrow adapter accepts only exact `http://wails.localhost`. Nineteen independent flags expose narrow routes or the process-lifetime wake worker. Repository state/Diff/history/comparison, change-set, Journey, Handoff, and verification pagination add no flag or control route; verification evidence has its own default-off flag. Any control capability creates one in-memory control token distinct from the read token, while disabled routes remain 404; neither token is written to disk, logs, browser storage, or the registry.
+Desktop through D1-G9/V8 reuses the same `api.v1` Handler without calling `ListenAndServe` or binding a loopback port. The Wails AssetServer passes React requests to Go in process, and a narrow adapter accepts only exact `http://wails.localhost`. Nineteen independent flags expose narrow routes or the process-lifetime wake worker. Repository state/Diff/history/comparison, change-set, Journey, Handoff, verification pagination, and snapshot download add no flag or control route; verification evidence has its own default-off flag. Any control capability creates one in-memory control token distinct from the read token, while disabled routes remain 404; neither token is written to disk, logs, browser storage, or the registry.
 
 普通浏览器继续使用 `/events/stream` SSE。Wails v2 在 Windows 上不支持 AssetServer response streaming，因此 Desktop 使用 `GET /runs/{run_id}/events/poll` 做一秒有界轮询。该 endpoint 与 SSE 共用同一个绑定 Run 与 sequence 的高水位 cursor，单次最多返回 100 帧并明确给出 `has_more`；poll cursor 可续接 SSE，SSE cursor 也可续接 poll。Renderer 最多在模块内存保存 16 个 Run、每个 500 帧，重挂载继续最后 cursor，失效 cursor 每次挂载最多回退一次；不写 Local/Session Storage，也不再生成伪 cursor。它不会建立新的事件真源。原生 Wails bridge 不是通用业务 API 旁路：前三项只提供 connection bootstrap 和路径隔离 Skill 选择/预览，第四项只消费 Go 发放的一次性确认句柄并调用惰性 Registry。
 
@@ -240,6 +240,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/skills/packages/inst
 | `POST` | `/api/v1/runs/{run_id}/verification-plan` | Record one exact-bound 1-32 item operator checklist; no command/model/execution/authority |
 | `GET` | `/api/v1/runs/{run_id}/verification-plan-coverage` | Per-item explicit pass/fail/unknown association counts and unobserved state; no aggregate pass |
 | `GET` | `/api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}` | Snapshot-stable event-high-water/keyset pages of exact association metadata; no bodies, verdict inference, mutation, execution, approval, or authority |
+| `GET` | `/api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}/snapshot-export?format=markdown\|json` | Deterministic digest-bound download receipt over the current exact-item snapshot; no private bodies, durable acceptance, verdict inference, mutation, execution, approval, or authority |
 | `POST` | `/api/v1/runs/{run_id}/verification-plan-associations` | Immutably associate one later evidence record with one earlier plan item; no reassignment, execution, approval, or inference |
 | `GET` | `/api/v1/runs/{run_id}/code-handoff` | Regenerable Code-only Plan/queue/change/verification/coverage/action/report summary; no private body, inferred aggregate result, resume, execution, or composite mutation |
 | `GET` | `/api/v1/runs/{run_id}/code-handoff/export` | Digest-bound Markdown/JSON export of one stable Handoff including explicit coverage metadata; no import, result inference, resume, mutation, acceptance, or execution |
@@ -371,9 +372,9 @@ cyberagent api openapi
 cyberagent api openapi --output docs/openapi.json
 ```
 
-运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 68 个 path、74 个 operation 和 163 个 schema。测试逐条命中公开 handler，并确认普通 DTO 不包含 Workspace root、Artifact/Skill/Session 正文、模型输出、工具参数、私有 lifecycle、operation/fencing/lease owner、API key、Provider Base URL 或环境变量名。Explorer/Search/Repository Diff/History/Commit Detail 绝不返回 Workspace root；它们只提供有界、脱敏且明确非授权的 Workspace 投影。行动中心、证据清单、验证计划/结果/显式关联 coverage 和 Code Handoff 只提供闭集或有界 metadata，不包含 private operation、message/report body 或 capability。Skill 安装请求仍是唯一有界 archive 传输，并明确排除 path/content/command/hook 字段；证据附件请求只包含相对引用与投影摘要，verification evidence POST 只包含闭集 outcome 与有界文本，association POST 只包含精确 plan/item/evidence identity。
+运行时的 `/api/v1/openapi.json` 返回同一份原始文档，仍要求 loopback 与 read Bearer 认证，不接受 query 或 body。它使用 `application/vnd.oai.openapi+json`，不套普通 `api.v1` envelope。当前契约有 73 个 path、79 个 operation 和 172 个 schema。测试逐条命中公开 handler，并确认普通 DTO 不包含 Workspace root、Artifact/Skill/Session 正文、模型输出、工具参数、私有 lifecycle、operation/fencing/lease owner、API key、Provider Base URL 或环境变量名。Explorer/Search/Repository Diff/History/Commit Detail 绝不返回 Workspace root；它们只提供有界、脱敏且明确非授权的 Workspace 投影。行动中心、证据清单、验证计划/结果/显式关联 coverage、逐检查项 snapshot export 和 Code Handoff 只提供闭集或有界 metadata，不包含 private operation、message/report body 或 capability。Skill 安装请求仍是唯一有界 archive 传输，并明确排除 path/content/command/hook 字段；证据附件请求只包含相对引用与投影摘要，verification evidence POST 只包含闭集 outcome 与有界文本，association POST 只包含精确 plan/item/evidence identity。
 
-The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract contains 68 paths, 74 operations, and 163 schemas. Tests exercise every handler and verify that ordinary DTOs omit Workspace roots, Artifact/Skill/Session bodies, model output, tool arguments, private lifecycle, operation/fencing/lease-owner identities, API keys, Provider base URLs, and environment-variable names. Explorer, Search, Repository Diff, History, and Commit Detail never return a Workspace root; they are bounded, redacted, explicitly non-authorizing Workspace projections. Operator actions, evidence inventory, verification plans/outcomes/explicit-association coverage, and Code Handoff expose only closed or bounded metadata without private operations, message/report bodies, or capability fields. The Skill-install request remains the sole bounded archive transport and explicitly omits path, content, command, and hook fields; evidence attachment carries only a relative reference and projected digest, verification evidence POST carries only a closed outcome and bounded text, and association POST carries only exact plan/item/evidence identity.
+The runtime `/api/v1/openapi.json` returns the same raw document under the loopback and read-bearer boundary and accepts neither a query nor a body. It uses `application/vnd.oai.openapi+json` rather than the ordinary `api.v1` envelope. The contract contains 73 paths, 79 operations, and 172 schemas. Tests exercise every handler and verify that ordinary DTOs omit Workspace roots, Artifact/Skill/Session bodies, model output, tool arguments, private lifecycle, operation/fencing/lease-owner identities, API keys, Provider base URLs, and environment-variable names. Explorer, Search, Repository Diff, History, and Commit Detail never return a Workspace root; they are bounded, redacted, explicitly non-authorizing Workspace projections. Operator actions, evidence inventory, verification plans/outcomes/explicit-association coverage, per-check snapshot export, and Code Handoff expose only closed or bounded metadata without private operations, message/report bodies, or capability fields. The Skill-install request remains the sole bounded archive transport and explicitly omits path, content, command, and hook fields; evidence attachment carries only a relative reference and projected digest, verification evidence POST carries only a closed outcome and bounded text, and association POST carries only exact plan/item/evidence identity.
 
 ## 主动取消 / Active-Call Cancellation
 
@@ -512,6 +513,21 @@ event sequence and cannot shift or enter the frozen pages. The read window is ca
 the last permitted page sets `page.truncated=true` and emits no next cursor. React loads
 25 older references only after an explicit operator action and validates the repeated
 snapshot identity, aggregate counts, ordering, uniqueness, and closed-authority fields.
+
+`GET /api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}/snapshot-export`
+requires exactly one byte-exact `format=json|markdown` value. It reuses the current
+exact-item detail boundary and returns `operator_verification_plan_item_snapshot_export.v1`
+around deterministic `operator_verification_plan_item_snapshot.v1` content. The receipt
+binds exact Run/Session/Workspace/plan/item identities and digests, snapshot event high-
+water, explicit outcome/returned/total counts, at most 100 descending references,
+truncation, content SHA-256/UTF-8 bytes, safe filename, fixed MIME, and a 256 KiB limit.
+
+The content has no generated timestamp and therefore reproduces the same bytes while
+source facts remain unchanged. It contains no private plan/evidence body or operator
+identity, infers no result, persists no acceptance, grants no approval or authority,
+rewrites no record, and starts no command, model, or execution. Missing, duplicate,
+blank, whitespace-padded, or unknown query values fail closed. React verifies the outer
+envelope and inner content before creating the local download.
 
 ## Envelopes
 

@@ -444,6 +444,17 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 			DataType:    reflect.TypeOf(VerificationPlanItemCoverageDetailView{}), NotFound: true,
 			Paginated: true, Parameters: append([]openAPIParameter{runID, verificationPlanID,
 				verificationPlanItemOrdinal}, paginationParameters()...)},
+		{Path: VerificationSnapshotExportPathTemplate,
+			OperationID: "exportRunVerificationPlanItemSnapshot",
+			Summary:     "Export one verification item snapshot", Tag: "Runs",
+			Description: "Builds a deterministic bounded JSON or Markdown receipt from the current frozen association high-water for one exact verification plan item. It includes only opaque association references and explicit outcome counts; private plan/evidence bodies, operator identity, verdict inference, mutation, approval, command, model, and execution authority remain excluded.",
+			DataType:    reflect.TypeOf(VerificationSnapshotExportView{}), NotFound: true,
+			Parameters: []openAPIParameter{runID, verificationPlanID,
+				verificationPlanItemOrdinal,
+				{Name: "format", In: "query", Description: "Bounded snapshot representation",
+					Required: true, Schema: map[string]any{"type": "string",
+						"enum": []string{application.VerificationSnapshotExportFormatMarkdown,
+							application.VerificationSnapshotExportFormatJSON}}}}},
 		{Path: VerificationAssociationPathTemplate, Method: http.MethodPost,
 			OperationID: "associateRunVerificationEvidence",
 			Summary:     "Associate evidence with one verification plan item", Tag: "Control",
@@ -1762,6 +1773,50 @@ var openAPIFieldMaxLengths = map[string]int{
 	"VerificationEvidenceControlView.summary_sha256":           64,
 	"CodeHandoffVerificationCoverageItemView.plan_sha256":      64,
 	"CodeHandoffVerificationCoverageItemView.item_sha256":      64,
+}
+
+func init() {
+	openAPIFieldEnums["VerificationSnapshotExportView.protocol_version"] =
+		[]string{application.VerificationSnapshotExportProtocolVersion}
+	openAPIFieldEnums["VerificationSnapshotExportView.snapshot_protocol_version"] =
+		[]string{application.VerificationSnapshotProtocolVersion}
+	openAPIFieldEnums["VerificationSnapshotExportView.format"] = []string{
+		application.VerificationSnapshotExportFormatJSON,
+		application.VerificationSnapshotExportFormatMarkdown,
+	}
+
+	openAPIFieldMinimums["VerificationSnapshotExportView.plan_item_ordinal"] = 1
+	openAPIFieldMinimums["VerificationSnapshotExportView.snapshot_high_water_event_sequence"] = 0
+	openAPIFieldMinimums["VerificationSnapshotExportView.associated_evidence_count"] = 0
+	openAPIFieldMinimums["VerificationSnapshotExportView.pass_count"] = 0
+	openAPIFieldMinimums["VerificationSnapshotExportView.fail_count"] = 0
+	openAPIFieldMinimums["VerificationSnapshotExportView.unknown_count"] = 0
+	openAPIFieldMinimums["VerificationSnapshotExportView.returned_association_count"] = 0
+	openAPIFieldMinimums["VerificationSnapshotExportView.content_bytes"] = 1
+
+	openAPIFieldMaximums["VerificationSnapshotExportView.plan_item_ordinal"] =
+		verification.MaxPlanItems
+	openAPIFieldMaximums["VerificationSnapshotExportView.snapshot_high_water_event_sequence"] =
+		float64(1<<53 - 1)
+	openAPIFieldMaximums["VerificationSnapshotExportView.associated_evidence_count"] =
+		verification.MaxSafeCoverageCount
+	openAPIFieldMaximums["VerificationSnapshotExportView.pass_count"] =
+		verification.MaxSafeCoverageCount
+	openAPIFieldMaximums["VerificationSnapshotExportView.fail_count"] =
+		verification.MaxSafeCoverageCount
+	openAPIFieldMaximums["VerificationSnapshotExportView.unknown_count"] =
+		verification.MaxSafeCoverageCount
+	openAPIFieldMaximums["VerificationSnapshotExportView.returned_association_count"] =
+		verification.MaxCoverageAssociations
+	openAPIFieldMaximums["VerificationSnapshotExportView.content_bytes"] =
+		application.MaxVerificationSnapshotExportBytes
+
+	openAPIFieldMaxLengths["VerificationSnapshotExportView.plan_sha256"] = 64
+	openAPIFieldMaxLengths["VerificationSnapshotExportView.plan_item_sha256"] = 64
+	openAPIFieldMaxLengths["VerificationSnapshotExportView.content_sha256"] = 64
+	openAPIFieldMaxLengths["VerificationSnapshotExportView.filename"] = 255
+	openAPIFieldMaxLengths["VerificationSnapshotExportView.content"] =
+		application.MaxVerificationSnapshotExportBytes
 }
 
 func runStatuses() []string {

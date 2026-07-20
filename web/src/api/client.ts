@@ -78,6 +78,7 @@ import type {
   VerificationPlanCoverageInventoryView,
   VerificationPlanItemCoverageDetailView,
   VerificationPlanItemCoveragePage,
+  VerificationSnapshotExportView,
 } from "./types";
 
 export type QueryValue = boolean | number | string | undefined;
@@ -1859,6 +1860,156 @@ function parseVerificationPlanItemCoverage(value: unknown, runID: string, planID
   return { ...value, associations } as unknown as VerificationPlanItemCoverageDetailView;
 }
 
+async function parseVerificationSnapshotExport(value: unknown, runID: string, planID: string,
+  ordinal: number, format: "json" | "markdown"): Promise<VerificationSnapshotExportView> {
+  const keys = ["approval", "associated_evidence_count", "associations_truncated",
+    "authority_granted", "command_executed", "content", "content_bytes", "content_sha256",
+    "download_only", "execution_started", "fail_count", "filename", "format", "metadata_only",
+    "mime_type", "model_assertion", "mutation_supported", "operator_identity_included",
+    "pass_count", "plan_id", "plan_item_ordinal", "plan_item_sha256", "plan_sha256",
+    "private_evidence_bodies_included", "private_plan_body_included", "protocol_version",
+    "read_only", "record_rewritten", "result_inferred", "returned_association_count", "run_id",
+    "session_id", "snapshot_high_water_event_sequence", "snapshot_protocol_version",
+    "unknown_count", "workspace_id"];
+  if (!hasExactKeys(value, keys) ||
+    value.protocol_version !== "operator_verification_plan_item_snapshot_export.v1" ||
+    value.snapshot_protocol_version !== "operator_verification_plan_item_snapshot.v1" ||
+    value.run_id !== runID || value.plan_id !== planID || value.plan_item_ordinal !== ordinal ||
+    value.format !== format || !boundedIdentity(value.session_id) ||
+    !boundedIdentity(value.workspace_id) || !isSHA256(value.plan_sha256) ||
+    !isSHA256(value.plan_item_sha256) ||
+    !safeBoundedCount(value.associated_evidence_count, 1_000_000_000) ||
+    !safeBoundedCount(value.pass_count, 1_000_000_000) ||
+    !safeBoundedCount(value.fail_count, 1_000_000_000) ||
+    !safeBoundedCount(value.unknown_count, 1_000_000_000) ||
+    value.pass_count + value.fail_count + value.unknown_count !==
+      value.associated_evidence_count ||
+    !safeBoundedCount(value.snapshot_high_water_event_sequence, Number.MAX_SAFE_INTEGER) ||
+    ((value.associated_evidence_count === 0) !==
+      (value.snapshot_high_water_event_sequence === 0)) ||
+    !safeBoundedCount(value.returned_association_count, 100) ||
+    value.returned_association_count !== Math.min(Number(value.associated_evidence_count), 100) ||
+    value.associations_truncated !== (value.associated_evidence_count > 100) ||
+    typeof value.filename !== "string" || value.filename.length < 1 || value.filename.length > 255 ||
+    /[\\/:*?"<>|\u0000-\u001f]/u.test(value.filename) || typeof value.mime_type !== "string" ||
+    typeof value.content !== "string" || !safePositiveInteger(value.content_bytes) ||
+    value.content_bytes > 256 * 1024 || !isSHA256(value.content_sha256) ||
+    value.metadata_only !== true || value.read_only !== true || value.download_only !== true ||
+    value.private_plan_body_included !== false ||
+    value.private_evidence_bodies_included !== false ||
+    value.operator_identity_included !== false || value.result_inferred !== false ||
+    value.command_executed !== false || value.model_assertion !== false ||
+    value.record_rewritten !== false || value.approval !== false ||
+    value.authority_granted !== false || value.mutation_supported !== false ||
+    value.execution_started !== false) {
+    throw new APIRequestError("Verification snapshot export widened its read-only boundary",
+      "INVALID_RESPONSE", 502);
+  }
+  const expectedMIME = format === "json" ? "application/json" : "text/markdown; charset=utf-8";
+  const expectedSuffix = format === "json" ? ".json" : ".md";
+  const encoded = new TextEncoder().encode(value.content);
+  if (value.mime_type !== expectedMIME || !value.filename.endsWith(expectedSuffix) ||
+    encoded.length !== value.content_bytes) {
+    throw new APIRequestError("Verification snapshot metadata does not match its content",
+      "INVALID_RESPONSE", 502);
+  }
+  const digest = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", encoded));
+  const digestHex = [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  if (digestHex !== value.content_sha256) {
+    throw new APIRequestError("Verification snapshot digest verification failed",
+      "INVALID_RESPONSE", 502);
+  }
+  if (format === "json") {
+    let document: unknown;
+    try {
+      document = JSON.parse(value.content);
+    } catch {
+      throw new APIRequestError("Verification snapshot JSON is invalid", "INVALID_RESPONSE", 502);
+    }
+    const documentKeys = ["approval", "associated_evidence_count", "associations",
+      "associations_truncated", "authority_granted", "command_executed", "execution_started",
+      "fail_count", "metadata_only", "model_assertion", "mutation_supported",
+      "operator_identity_included", "pass_count", "plan_id", "plan_item_ordinal",
+      "plan_item_sha256", "plan_sha256", "private_evidence_bodies_included",
+      "private_plan_body_included", "protocol_version", "read_only", "record_rewritten",
+      "result_inferred", "returned_association_count", "run_id", "session_id",
+      "snapshot_high_water_event_sequence", "unknown_count", "workspace_id"];
+    if (!hasExactKeys(document, documentKeys) ||
+      document.protocol_version !== "operator_verification_plan_item_snapshot.v1" ||
+      document.run_id !== runID || document.session_id !== value.session_id ||
+      document.workspace_id !== value.workspace_id || document.plan_id !== planID ||
+      document.plan_sha256 !== value.plan_sha256 || document.plan_item_ordinal !== ordinal ||
+      document.plan_item_sha256 !== value.plan_item_sha256 ||
+      document.snapshot_high_water_event_sequence !== value.snapshot_high_water_event_sequence ||
+      document.associated_evidence_count !== value.associated_evidence_count ||
+      document.pass_count !== value.pass_count || document.fail_count !== value.fail_count ||
+      document.unknown_count !== value.unknown_count ||
+      document.returned_association_count !== value.returned_association_count ||
+      document.associations_truncated !== value.associations_truncated ||
+      !Array.isArray(document.associations) ||
+      document.associations.length !== value.returned_association_count ||
+      document.metadata_only !== true || document.read_only !== true ||
+      document.private_plan_body_included !== false ||
+      document.private_evidence_bodies_included !== false ||
+      document.operator_identity_included !== false || document.result_inferred !== false ||
+      document.command_executed !== false || document.model_assertion !== false ||
+      document.record_rewritten !== false || document.approval !== false ||
+      document.authority_granted !== false || document.mutation_supported !== false ||
+      document.execution_started !== false) {
+      throw new APIRequestError("Verification snapshot JSON escaped its exact source binding",
+        "INVALID_RESPONSE", 502);
+    }
+    const associationIDs = new Set<string>();
+    const evidenceIDs = new Set<string>();
+    let previousSequence = Number.MAX_SAFE_INTEGER;
+    let returnedPass = 0;
+    let returnedFail = 0;
+    let returnedUnknown = 0;
+    for (const [index, association] of document.associations.entries()) {
+      if (!hasExactKeys(association, ["associated_at", "association_event_sequence",
+        "evidence_event_sequence", "evidence_id", "evidence_outcome", "id", "plan_id",
+        "plan_item_ordinal", "plan_item_sha256"]) || !boundedIdentity(association.id) ||
+        associationIDs.has(String(association.id)) || !boundedIdentity(association.evidence_id) ||
+        evidenceIDs.has(String(association.evidence_id)) || association.plan_id !== planID ||
+        association.plan_item_ordinal !== ordinal ||
+        association.plan_item_sha256 !== value.plan_item_sha256 ||
+        !["pass", "fail", "unknown"].includes(String(association.evidence_outcome)) ||
+        !safePositiveInteger(association.evidence_event_sequence) ||
+        !safePositiveInteger(association.association_event_sequence) ||
+        association.association_event_sequence <= association.evidence_event_sequence ||
+        association.association_event_sequence > value.snapshot_high_water_event_sequence ||
+        (index > 0 && association.association_event_sequence >= previousSequence) ||
+        (index === 0 && association.association_event_sequence !==
+          value.snapshot_high_water_event_sequence) || !validDate(association.associated_at)) {
+        throw new APIRequestError("Verification snapshot association escaped its exact binding",
+          "INVALID_RESPONSE", 502);
+      }
+      associationIDs.add(String(association.id));
+      evidenceIDs.add(String(association.evidence_id));
+      previousSequence = Number(association.association_event_sequence);
+      if (association.evidence_outcome === "pass") returnedPass += 1;
+      if (association.evidence_outcome === "fail") returnedFail += 1;
+      if (association.evidence_outcome === "unknown") returnedUnknown += 1;
+    }
+    if (returnedPass > value.pass_count || returnedFail > value.fail_count ||
+      returnedUnknown > value.unknown_count || (!value.associations_truncated &&
+        (returnedPass !== value.pass_count || returnedFail !== value.fail_count ||
+          returnedUnknown !== value.unknown_count))) {
+      throw new APIRequestError("Verification snapshot outcome counts are inconsistent",
+        "INVALID_RESPONSE", 502);
+    }
+  } else if (!value.content.startsWith("# CyberAgent Verification Snapshot\n") ||
+    !value.content.includes(`Run: \`${runID}\``) ||
+    !value.content.includes(`Plan: \`${planID}\``) ||
+    !value.content.includes(`Item: \`${ordinal}\``) ||
+    !value.content.includes(`Snapshot event high-water: \`${value.snapshot_high_water_event_sequence}\``) ||
+    !value.content.includes("This is a read-only metadata snapshot.")) {
+    throw new APIRequestError("Verification snapshot Markdown omitted its exact source binding",
+      "INVALID_RESPONSE", 502);
+  }
+  return value as unknown as VerificationSnapshotExportView;
+}
+
 function parseCodeHandoff(value: unknown, runID: string): CodeHandoffView {
   const keys = ["change_set", "composite_mutation", "durable_sources", "execution_started",
     "generated_at", "mission_id", "mode_revision", "pending_action_count", "pending_actions",
@@ -2626,6 +2777,19 @@ export class CyberAgentClient {
     const page = parseResponsePage(envelope.page, limit);
     return { detail: parseVerificationPlanItemCoverage(envelope.data, runID, planID, ordinal,
       page, cursor === ""), page, requestID: envelope.request_id };
+  }
+
+  async verificationPlanItemSnapshotExport(runID: string, planID: string, ordinal: number,
+    format: "json" | "markdown", signal?: AbortSignal): Promise<VerificationSnapshotExportView> {
+    if (!boundedIdentity(runID) || runID.trim() !== runID || !boundedIdentity(planID) ||
+      planID.trim() !== planID || !safePositiveInteger(ordinal) || ordinal > 32 ||
+      !["json", "markdown"].includes(format)) {
+      throw new Error("Normalized Run, plan, item, and snapshot format are required");
+    }
+    return parseVerificationSnapshotExport(await this.get<unknown>(
+      `/runs/${encodeURIComponent(runID)}/verification-plan-coverage/` +
+        `${encodeURIComponent(planID)}/items/${ordinal}/snapshot-export`, { format }, signal,
+    ), runID, planID, ordinal, format);
   }
 
   async associateVerificationEvidence(runID: string, body: VerificationAssociationRequestView,

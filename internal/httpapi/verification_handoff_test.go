@@ -233,6 +233,14 @@ func TestVerificationPlanHTTPPersistsGuidanceWithoutResultAuthority(t *testing.T
 	invalidExport := performSessionMessageRequest(t, api, http.MethodGet,
 		strings.TrimSuffix(exportPath, "markdown")+"html", testAccessToken, "", "", nil)
 	assertAPIError(t, invalidExport, http.StatusBadRequest, "INVALID_ARGUMENT")
+	duplicateExportFormat := performSessionMessageRequest(t, api, http.MethodGet,
+		strings.TrimSuffix(exportPath, "markdown")+"json&format=markdown",
+		testAccessToken, "", "", nil)
+	assertAPIError(t, duplicateExportFormat, http.StatusBadRequest, "INVALID_ARGUMENT")
+	spacedExportFormat := performSessionMessageRequest(t, api, http.MethodGet,
+		strings.TrimSuffix(exportPath, "markdown")+url.QueryEscape(" markdown "),
+		testAccessToken, "", "", nil)
+	assertAPIError(t, spacedExportFormat, http.StatusBadRequest, "INVALID_ARGUMENT")
 	withOutcome := strings.TrimSuffix(body, "}") + `,"outcome":"pass"}`
 	rejected := performSessionMessageRequest(t, api, http.MethodPost, path,
 		testControlToken, "http-verification-plan-outcome-0001", "application/json",
@@ -454,6 +462,71 @@ func TestVerificationAssociationHTTPPreservesExplicitCausalityAndMetadataOnlyCov
 		crossPlanPath+"?limit=1&cursor="+url.QueryEscape(detailEnvelope.Page.NextCursor),
 		testAccessToken, "", "", nil)
 	assertAPIError(t, crossPlanCursor, http.StatusBadRequest, "INVALID_ARGUMENT")
+	snapshotPath := strings.ReplaceAll(VerificationSnapshotExportPathTemplate, "{run_id}", run.ID)
+	snapshotPath = strings.ReplaceAll(snapshotPath, "{plan_id}", planResult.Plan.ID)
+	snapshotPath = strings.ReplaceAll(snapshotPath, "{ordinal}", "1")
+	snapshotResponse := performSessionMessageRequest(t, api, http.MethodGet,
+		snapshotPath+"?format=json", testAccessToken, "", "", nil)
+	if snapshotResponse.Code != http.StatusOK {
+		t.Fatalf("verification snapshot status=%d body=%s", snapshotResponse.Code,
+			snapshotResponse.Body.String())
+	}
+	var snapshotEnvelope struct {
+		Data VerificationSnapshotExportView `json:"data"`
+	}
+	if err := json.Unmarshal(snapshotResponse.Body.Bytes(), &snapshotEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	snapshotExport := snapshotEnvelope.Data
+	snapshotDigest := sha256.Sum256([]byte(snapshotExport.Content))
+	if snapshotExport.ProtocolVersion != application.VerificationSnapshotExportProtocolVersion ||
+		snapshotExport.SnapshotProtocolVersion != application.VerificationSnapshotProtocolVersion ||
+		snapshotExport.RunID != run.ID || snapshotExport.SessionID != run.SessionID ||
+		snapshotExport.WorkspaceID != workspace.ID || snapshotExport.PlanID != planResult.Plan.ID ||
+		snapshotExport.PlanSHA256 != planResult.Plan.PlanSHA256 ||
+		snapshotExport.PlanItemOrdinal != 1 ||
+		snapshotExport.PlanItemSHA256 != planResult.Plan.Items[0].ItemSHA256 ||
+		snapshotExport.SnapshotHighWaterEventSequence !=
+			failedAssociation.Association.EventSequence ||
+		snapshotExport.AssociatedEvidenceCount != 2 || snapshotExport.PassCount != 1 ||
+		snapshotExport.FailCount != 1 || snapshotExport.UnknownCount != 0 ||
+		snapshotExport.ReturnedAssociationCount != 2 || snapshotExport.AssociationsTruncated ||
+		snapshotExport.ContentBytes != len(snapshotExport.Content) ||
+		snapshotExport.ContentSHA256 != hex.EncodeToString(snapshotDigest[:]) ||
+		!snapshotExport.MetadataOnly || !snapshotExport.ReadOnly || !snapshotExport.DownloadOnly ||
+		snapshotExport.PrivatePlanBodyIncluded || snapshotExport.PrivateEvidenceBodiesIncluded ||
+		snapshotExport.OperatorIdentityIncluded || snapshotExport.ResultInferred ||
+		snapshotExport.CommandExecuted || snapshotExport.ModelAssertion ||
+		snapshotExport.RecordRewritten || snapshotExport.Approval ||
+		snapshotExport.AuthorityGranted || snapshotExport.MutationSupported ||
+		snapshotExport.ExecutionStarted || strings.Contains(snapshotExport.Content, "Release checks") ||
+		strings.Contains(snapshotExport.Content, "Observed a passing suite") ||
+		strings.Contains(snapshotExport.Content, "Observed a failing suite") ||
+		strings.Contains(snapshotExport.Content, `"associated_by"`) ||
+		strings.Contains(snapshotExport.Content, `"authored_by"`) ||
+		strings.Contains(snapshotExport.Content, `"recorded_by"`) {
+		t.Fatalf("verification snapshot widened private data or authority: %#v", snapshotExport)
+	}
+	var snapshot application.VerificationPlanItemSnapshot
+	if err := json.Unmarshal([]byte(snapshotExport.Content), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.ProtocolVersion != application.VerificationSnapshotProtocolVersion ||
+		snapshot.ReturnedAssociationCount != 2 || len(snapshot.Associations) != 2 ||
+		snapshot.Associations[0].EvidenceID != failedEvidence.Evidence.ID ||
+		snapshot.Associations[1].EvidenceID != evidenceResult.Evidence.ID ||
+		!snapshot.MetadataOnly || !snapshot.ReadOnly || snapshot.ResultInferred {
+		t.Fatalf("verification snapshot content escaped its source binding: %#v", snapshot)
+	}
+	missingSnapshotFormat := performSessionMessageRequest(t, api, http.MethodGet,
+		snapshotPath, testAccessToken, "", "", nil)
+	assertAPIError(t, missingSnapshotFormat, http.StatusBadRequest, "INVALID_ARGUMENT")
+	duplicateSnapshotFormat := performSessionMessageRequest(t, api, http.MethodGet,
+		snapshotPath+"?format=json&format=markdown", testAccessToken, "", "", nil)
+	assertAPIError(t, duplicateSnapshotFormat, http.StatusBadRequest, "INVALID_ARGUMENT")
+	spacedSnapshotFormat := performSessionMessageRequest(t, api, http.MethodGet,
+		snapshotPath+"?format="+url.QueryEscape(" json "), testAccessToken, "", "", nil)
+	assertAPIError(t, spacedSnapshotFormat, http.StatusBadRequest, "INVALID_ARGUMENT")
 	handoffPath := strings.ReplaceAll(CodeHandoffPathTemplate, "{run_id}", run.ID)
 	handoff := performSessionMessageRequest(t, api, http.MethodGet, handoffPath,
 		testAccessToken, "", "", nil)

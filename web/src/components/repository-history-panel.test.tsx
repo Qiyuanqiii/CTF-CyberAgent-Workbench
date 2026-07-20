@@ -58,8 +58,10 @@ describe("RepositoryHistoryPanel", () => {
       head_committed_at: "2026-07-18T01:00:00Z", head_redacted: false,
       head_subject_bounded: false, same_object: false,
       changes: [{ path: "internal/second.go", change: "added", previous_kind: "",
-        current_kind: "regular", content_changed: true, mode_changed: false }],
-      changed_file_count: 1, returned_change_count: 1, omitted_change_count: 0,
+        current_kind: "regular", content_changed: true, mode_changed: false },
+      { path: "internal/old.go", change: "deleted", previous_kind: "executable",
+        current_kind: "", content_changed: true, mode_changed: false }],
+      changed_file_count: 2, returned_change_count: 2, omitted_change_count: 0,
       redaction_count: 0, truncated: false, metadata_only: true, read_only: true,
       rename_inferred: false, ancestor_required: false, authority_granted: false,
       root_path_exposed: false, author_identity_included: false, commit_body_included: false,
@@ -120,6 +122,23 @@ describe("RepositoryHistoryPanel", () => {
       expect.any(AbortSignal)));
     expect(await screen.findByRole("region", { name: "Exact commit comparison" }))
       .toHaveTextContent("internal/second.go");
+    expect(screen.queryByRole("button", {
+      name: "Preview internal/second.go at comparison base abcdef123456",
+    })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", {
+      name: "Preview internal/old.go at comparison head 1234567890ab",
+    })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", {
+      name: "Preview internal/second.go at comparison head 1234567890ab",
+    }));
+    await waitFor(() => expect(repositoryCommitFilePreview).toHaveBeenCalledWith("workspace-1",
+      historyObjectID, "internal/second.go", expect.any(AbortSignal)));
+    await user.click(screen.getByRole("button", {
+      name: "Preview internal/old.go at comparison base abcdef123456",
+    }));
+    await waitFor(() => expect(repositoryCommitFilePreview).toHaveBeenCalledWith("workspace-1",
+      "abcdef1234567890abcdef1234567890abcdef12", "internal/old.go",
+      expect.any(AbortSignal)));
     await user.click(screen.getByRole("button", {
       name: "Preview internal/example.go at history commit 1234567890ab",
     }));
@@ -130,7 +149,7 @@ describe("RepositoryHistoryPanel", () => {
     </QueryClientProvider>);
     expect(screen.queryByRole("region", { name: "Exact commit metadata" })).not.toBeInTheDocument();
     expect(repositoryCommit).toHaveBeenCalledTimes(2);
-    expect(repositoryCommitFilePreview).toHaveBeenCalledTimes(2);
+    expect(repositoryCommitFilePreview).toHaveBeenCalledTimes(4);
     expect(screen.queryByRole("region", { name: "Exact commit comparison" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Exact file history" })).not.toBeInTheDocument();
   });

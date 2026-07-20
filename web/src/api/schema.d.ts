@@ -1060,6 +1060,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}/snapshot-export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export one verification item snapshot
+         * @description Builds a deterministic bounded JSON or Markdown receipt from the current frozen association high-water for one exact verification plan item. It includes only opaque association references and explicit outcome counts; private plan/evidence bodies, operator identity, verdict inference, mutation, approval, command, model, and execution authority remain excluded.
+         */
+        get: operations["exportRunVerificationPlanItemSnapshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/runs/{run_id}/wake-intent": {
         parameters: {
             query?: never;
@@ -3808,6 +3828,55 @@ export interface components {
             title: string;
             workspace_id: string;
         };
+        VerificationSnapshotExportView: {
+            approval: boolean;
+            /** Format: int32 */
+            associated_evidence_count: number;
+            associations_truncated: boolean;
+            authority_granted: boolean;
+            command_executed: boolean;
+            content: string;
+            /** Format: int32 */
+            content_bytes: number;
+            content_sha256: string;
+            download_only: boolean;
+            execution_started: boolean;
+            /** Format: int32 */
+            fail_count: number;
+            filename: string;
+            /** @enum {string} */
+            format: "json" | "markdown";
+            metadata_only: boolean;
+            mime_type: string;
+            model_assertion: boolean;
+            mutation_supported: boolean;
+            operator_identity_included: boolean;
+            /** Format: int32 */
+            pass_count: number;
+            plan_id: string;
+            /** Format: int32 */
+            plan_item_ordinal: number;
+            plan_item_sha256: string;
+            plan_sha256: string;
+            private_evidence_bodies_included: boolean;
+            private_plan_body_included: boolean;
+            /** @enum {string} */
+            protocol_version: "operator_verification_plan_item_snapshot_export.v1";
+            read_only: boolean;
+            record_rewritten: boolean;
+            result_inferred: boolean;
+            /** Format: int32 */
+            returned_association_count: number;
+            run_id: string;
+            session_id: string;
+            /** Format: int64 */
+            snapshot_high_water_event_sequence: number;
+            /** @enum {string} */
+            snapshot_protocol_version: "operator_verification_plan_item_snapshot.v1";
+            /** Format: int32 */
+            unknown_count: number;
+            workspace_id: string;
+        };
         WorkItemView: {
             acceptance_criteria: string[];
             blocked_reason?: string;
@@ -6214,6 +6283,48 @@ export interface operations {
                     "application/json": {
                         data: components["schemas"]["VerificationPlanItemCoverageDetailView"];
                         page: components["schemas"]["Page"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    exportRunVerificationPlanItemSnapshot: {
+        parameters: {
+            query: {
+                /** @description Bounded snapshot representation */
+                format: "markdown" | "json";
+            };
+            header?: never;
+            path: {
+                /** @description Run identity */
+                run_id: string;
+                /** @description Verification plan identity */
+                plan_id: string;
+                /** @description Verification plan item ordinal */
+                ordinal: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["VerificationSnapshotExportView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";

@@ -1070,6 +1070,70 @@ describe("CyberAgentClient", () => {
       "/api/v1/runs/run-1/code-handoff/export?format=json");
   });
 
+  it("verifies exact bounded verification snapshot downloads before returning content", async () => {
+    const planSHA = "a".repeat(64);
+    const itemSHA = "b".repeat(64);
+    const snapshot = {
+      protocol_version: "operator_verification_plan_item_snapshot.v1", run_id: "run-1",
+      session_id: "session-1", workspace_id: "workspace-1", plan_id: "plan-1",
+      plan_sha256: planSHA, plan_item_ordinal: 1, plan_item_sha256: itemSHA,
+      snapshot_high_water_event_sequence: 9, associated_evidence_count: 2,
+      pass_count: 1, fail_count: 1, unknown_count: 0, returned_association_count: 2,
+      associations_truncated: false,
+      associations: [{ id: "association-2", plan_id: "plan-1", plan_item_ordinal: 1,
+        plan_item_sha256: itemSHA, evidence_id: "evidence-2", evidence_outcome: "fail",
+        evidence_event_sequence: 8, association_event_sequence: 9,
+        associated_at: "2026-07-20T01:02:03Z" },
+      { id: "association-1", plan_id: "plan-1", plan_item_ordinal: 1,
+        plan_item_sha256: itemSHA, evidence_id: "evidence-1", evidence_outcome: "pass",
+        evidence_event_sequence: 6, association_event_sequence: 7,
+        associated_at: "2026-07-20T01:01:03Z" }],
+      metadata_only: true, read_only: true, private_plan_body_included: false,
+      private_evidence_bodies_included: false, operator_identity_included: false,
+      result_inferred: false, command_executed: false, model_assertion: false,
+      record_rewritten: false, approval: false, authority_granted: false,
+      mutation_supported: false, execution_started: false,
+    };
+    const content = `${JSON.stringify(snapshot, null, 2)}\n`;
+    const bytes = new TextEncoder().encode(content);
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+    const contentSHA256 = [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    const exported = {
+      protocol_version: "operator_verification_plan_item_snapshot_export.v1",
+      snapshot_protocol_version: "operator_verification_plan_item_snapshot.v1", format: "json",
+      filename: "cyberagent-verification-snapshot-run-1-plan-1-item-1.json",
+      mime_type: "application/json", run_id: "run-1", session_id: "session-1",
+      workspace_id: "workspace-1", plan_id: "plan-1", plan_sha256: planSHA,
+      plan_item_ordinal: 1, plan_item_sha256: itemSHA,
+      snapshot_high_water_event_sequence: 9, associated_evidence_count: 2,
+      pass_count: 1, fail_count: 1, unknown_count: 0, returned_association_count: 2,
+      associations_truncated: false, content_sha256: contentSHA256,
+      content_bytes: bytes.length, content, metadata_only: true, read_only: true,
+      download_only: true, private_plan_body_included: false,
+      private_evidence_bodies_included: false, operator_identity_included: false,
+      result_inferred: false, command_executed: false, model_assertion: false,
+      record_rewritten: false, approval: false, authority_granted: false,
+      mutation_supported: false, execution_started: false,
+    };
+    const envelope = (data: unknown) => new Response(JSON.stringify({ version: "api.v1",
+      request_id: "req-verification-snapshot", data }),
+    { status: 200, headers: { "Content-Type": "application/json" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(envelope(exported))
+      .mockResolvedValueOnce(envelope({ ...exported, result_inferred: true }))
+      .mockResolvedValueOnce(envelope({ ...exported, content: `${content} ` }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret");
+    await expect(client.verificationPlanItemSnapshotExport("run-1", "plan-1", 1, "json"))
+      .resolves.toEqual(exported);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "/api/v1/runs/run-1/verification-plan-coverage/plan-1/items/1/snapshot-export?format=json");
+    await expect(client.verificationPlanItemSnapshotExport("run-1", "plan-1", 1, "json"))
+      .rejects.toThrow("read-only boundary");
+    await expect(client.verificationPlanItemSnapshotExport("run-1", "plan-1", 1, "json"))
+      .rejects.toThrow("metadata does not match");
+  });
+
   it("validates exact commit metadata and explicit plan evidence coverage", async () => {
     const objectID = "1234567890abcdef1234567890abcdef12345678";
     const commit = { protocol_version: "repository_commit_detail.v1",

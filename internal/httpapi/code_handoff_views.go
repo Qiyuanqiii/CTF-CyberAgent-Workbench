@@ -258,6 +258,45 @@ type VerificationPlanItemCoverageDetailView struct {
 	AuthorityGranted               bool                                   `json:"authority_granted"`
 }
 
+type VerificationSnapshotExportView struct {
+	ProtocolVersion                string `json:"protocol_version"`
+	SnapshotProtocolVersion        string `json:"snapshot_protocol_version"`
+	Format                         string `json:"format"`
+	Filename                       string `json:"filename"`
+	MIMEType                       string `json:"mime_type"`
+	RunID                          string `json:"run_id"`
+	SessionID                      string `json:"session_id"`
+	WorkspaceID                    string `json:"workspace_id"`
+	PlanID                         string `json:"plan_id"`
+	PlanSHA256                     string `json:"plan_sha256"`
+	PlanItemOrdinal                int    `json:"plan_item_ordinal"`
+	PlanItemSHA256                 string `json:"plan_item_sha256"`
+	SnapshotHighWaterEventSequence int64  `json:"snapshot_high_water_event_sequence"`
+	AssociatedEvidenceCount        int    `json:"associated_evidence_count"`
+	PassCount                      int    `json:"pass_count"`
+	FailCount                      int    `json:"fail_count"`
+	UnknownCount                   int    `json:"unknown_count"`
+	ReturnedAssociationCount       int    `json:"returned_association_count"`
+	AssociationsTruncated          bool   `json:"associations_truncated"`
+	ContentSHA256                  string `json:"content_sha256"`
+	ContentBytes                   int    `json:"content_bytes"`
+	Content                        string `json:"content"`
+	MetadataOnly                   bool   `json:"metadata_only"`
+	ReadOnly                       bool   `json:"read_only"`
+	DownloadOnly                   bool   `json:"download_only"`
+	PrivatePlanBodyIncluded        bool   `json:"private_plan_body_included"`
+	PrivateEvidenceBodiesIncluded  bool   `json:"private_evidence_bodies_included"`
+	OperatorIdentityIncluded       bool   `json:"operator_identity_included"`
+	ResultInferred                 bool   `json:"result_inferred"`
+	CommandExecuted                bool   `json:"command_executed"`
+	ModelAssertion                 bool   `json:"model_assertion"`
+	RecordRewritten                bool   `json:"record_rewritten"`
+	Approval                       bool   `json:"approval"`
+	AuthorityGranted               bool   `json:"authority_granted"`
+	MutationSupported              bool   `json:"mutation_supported"`
+	ExecutionStarted               bool   `json:"execution_started"`
+}
+
 type CodeHandoffPlanView struct {
 	State             string `json:"state"`
 	ProposalID        string `json:"proposal_id"`

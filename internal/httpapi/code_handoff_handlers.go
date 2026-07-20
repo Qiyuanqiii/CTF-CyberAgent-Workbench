@@ -17,6 +17,7 @@ const (
 	VerificationAssociationPathTemplate    = "/api/v1/runs/{run_id}/verification-plan-associations"
 	VerificationCoveragePathTemplate       = "/api/v1/runs/{run_id}/verification-plan-coverage"
 	VerificationCoverageDetailPathTemplate = "/api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}"
+	VerificationSnapshotExportPathTemplate = "/api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}/snapshot-export"
 	CodeHandoffPathTemplate                = "/api/v1/runs/{run_id}/code-handoff"
 	CodeHandoffExportPathTemplate          = "/api/v1/runs/{run_id}/code-handoff/export"
 	MaxVerificationEvidenceBodyBytes       = 16 * 1024
@@ -506,6 +507,54 @@ func (a *API) runCodeHandoff(request *http.Request, runID string) (any, *Page, e
 	return codeHandoffView(value), nil, nil
 }
 
+func (a *API) runVerificationPlanItemSnapshotExport(request *http.Request, runID string,
+	planID string, ordinalText string,
+) (any, *Page, error) {
+	values := request.URL.Query()
+	if err := validateSingleQueryValues(values, "format"); err != nil {
+		return nil, nil, err
+	}
+	formats := values["format"]
+	if len(formats) != 1 || formats[0] == "" || formats[0] != strings.TrimSpace(formats[0]) {
+		return nil, nil, apperror.New(apperror.CodeInvalidArgument,
+			"verification snapshot export format must appear exactly once")
+	}
+	format := formats[0]
+	ordinal, err := strconv.Atoi(ordinalText)
+	if err != nil {
+		return nil, nil, apperror.New(apperror.CodeInvalidArgument,
+			"verification snapshot item ordinal is invalid")
+	}
+	value, err := application.NewVerificationSnapshotExportService(a.store).Build(
+		request.Context(), runID, planID, ordinal, format)
+	if err != nil {
+		return nil, nil, err
+	}
+	return VerificationSnapshotExportView{
+		ProtocolVersion:         value.ProtocolVersion,
+		SnapshotProtocolVersion: value.SnapshotProtocolVersion,
+		Format:                  value.Format, Filename: value.Filename, MIMEType: value.MIMEType,
+		RunID: value.RunID, SessionID: value.SessionID, WorkspaceID: value.WorkspaceID,
+		PlanID: value.PlanID, PlanSHA256: value.PlanSHA256,
+		PlanItemOrdinal: value.PlanItemOrdinal, PlanItemSHA256: value.PlanItemSHA256,
+		SnapshotHighWaterEventSequence: value.SnapshotHighWaterEventSequence,
+		AssociatedEvidenceCount:        value.AssociatedEvidenceCount,
+		PassCount:                      value.PassCount, FailCount: value.FailCount, UnknownCount: value.UnknownCount,
+		ReturnedAssociationCount: value.ReturnedAssociationCount,
+		AssociationsTruncated:    value.AssociationsTruncated,
+		ContentSHA256:            value.ContentSHA256, ContentBytes: value.ContentBytes,
+		Content: value.Content, MetadataOnly: value.MetadataOnly, ReadOnly: value.ReadOnly,
+		DownloadOnly:                  value.DownloadOnly,
+		PrivatePlanBodyIncluded:       value.PrivatePlanBodyIncluded,
+		PrivateEvidenceBodiesIncluded: value.PrivateEvidenceBodiesIncluded,
+		OperatorIdentityIncluded:      value.OperatorIdentityIncluded,
+		ResultInferred:                value.ResultInferred, CommandExecuted: value.CommandExecuted,
+		ModelAssertion: value.ModelAssertion, RecordRewritten: value.RecordRewritten,
+		Approval: value.Approval, AuthorityGranted: value.AuthorityGranted,
+		MutationSupported: value.MutationSupported, ExecutionStarted: value.ExecutionStarted,
+	}, nil, nil
+}
+
 func (a *API) runCodeHandoffExport(request *http.Request,
 	runID string,
 ) (any, *Page, error) {
@@ -513,11 +562,12 @@ func (a *API) runCodeHandoffExport(request *http.Request,
 	if err := validateSingleQueryValues(values, "format"); err != nil {
 		return nil, nil, err
 	}
-	format := values.Get("format")
-	if format == "" {
+	formats := values["format"]
+	if len(formats) != 1 || formats[0] == "" || formats[0] != strings.TrimSpace(formats[0]) {
 		return nil, nil, apperror.New(apperror.CodeInvalidArgument,
-			"Code handoff export format is required")
+			"Code handoff export format must appear exactly once")
 	}
+	format := formats[0]
 	value, err := application.NewCodeHandoffExportService(a.store).Build(
 		request.Context(), runID, format)
 	if err != nil {

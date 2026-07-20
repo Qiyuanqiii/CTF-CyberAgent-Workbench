@@ -498,6 +498,8 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 			requestPath += "?path=README.md"
 		} else if spec.OperationID == "exportCodeHandoff" {
 			requestPath += "?format=markdown"
+		} else if spec.OperationID == "exportRunVerificationPlanItemSnapshot" {
+			requestPath += "?format=json"
 		}
 		t.Run(spec.OperationID, func(t *testing.T) {
 			var response *httptest.ResponseRecorder

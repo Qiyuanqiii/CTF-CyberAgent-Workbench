@@ -5519,6 +5519,120 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}/snapshot-export": {
+      "get": {
+        "operationId": "exportRunVerificationPlanItemSnapshot",
+        "summary": "Export one verification item snapshot",
+        "description": "Builds a deterministic bounded JSON or Markdown receipt from the current frozen association high-water for one exact verification plan item. It includes only opaque association references and explicit outcome counts; private plan/evidence bodies, operator identity, verdict inference, mutation, approval, command, model, and execution authority remain excluded.",
+        "tags": [
+          "Runs"
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "description": "Run identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "plan_id",
+            "in": "path",
+            "description": "Verification plan identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "ordinal",
+            "in": "path",
+            "description": "Verification plan item ordinal",
+            "required": true,
+            "schema": {
+              "maximum": 32,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "description": "Bounded snapshot representation",
+            "required": true,
+            "schema": {
+              "enum": [
+                "markdown",
+                "json"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/VerificationSnapshotExportView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
     "/api/v1/runs/{run_id}/wake-intent": {
       "get": {
         "operationId": "getRunWakeIntent",
@@ -16857,6 +16971,206 @@
           "result_inferred",
           "approval",
           "authority_granted"
+        ],
+        "type": "object"
+      },
+      "VerificationSnapshotExportView": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "type": "boolean"
+          },
+          "associated_evidence_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "associations_truncated": {
+            "type": "boolean"
+          },
+          "authority_granted": {
+            "type": "boolean"
+          },
+          "command_executed": {
+            "type": "boolean"
+          },
+          "content": {
+            "maxLength": 262144,
+            "type": "string"
+          },
+          "content_bytes": {
+            "format": "int32",
+            "maximum": 262144,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "content_sha256": {
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "download_only": {
+            "type": "boolean"
+          },
+          "execution_started": {
+            "type": "boolean"
+          },
+          "fail_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "filename": {
+            "maxLength": 255,
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "json",
+              "markdown"
+            ],
+            "type": "string"
+          },
+          "metadata_only": {
+            "type": "boolean"
+          },
+          "mime_type": {
+            "type": "string"
+          },
+          "model_assertion": {
+            "type": "boolean"
+          },
+          "mutation_supported": {
+            "type": "boolean"
+          },
+          "operator_identity_included": {
+            "type": "boolean"
+          },
+          "pass_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "plan_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "plan_item_ordinal": {
+            "format": "int32",
+            "maximum": 32,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "plan_item_sha256": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "plan_sha256": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "private_evidence_bodies_included": {
+            "type": "boolean"
+          },
+          "private_plan_body_included": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "operator_verification_plan_item_snapshot_export.v1"
+            ],
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "record_rewritten": {
+            "type": "boolean"
+          },
+          "result_inferred": {
+            "type": "boolean"
+          },
+          "returned_association_count": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "session_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "snapshot_high_water_event_sequence": {
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "snapshot_protocol_version": {
+            "enum": [
+              "operator_verification_plan_item_snapshot.v1"
+            ],
+            "type": "string"
+          },
+          "unknown_count": {
+            "format": "int32",
+            "maximum": 1000000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "snapshot_protocol_version",
+          "format",
+          "filename",
+          "mime_type",
+          "run_id",
+          "session_id",
+          "workspace_id",
+          "plan_id",
+          "plan_sha256",
+          "plan_item_ordinal",
+          "plan_item_sha256",
+          "snapshot_high_water_event_sequence",
+          "associated_evidence_count",
+          "pass_count",
+          "fail_count",
+          "unknown_count",
+          "returned_association_count",
+          "associations_truncated",
+          "content_sha256",
+          "content_bytes",
+          "content",
+          "metadata_only",
+          "read_only",
+          "download_only",
+          "private_plan_body_included",
+          "private_evidence_bodies_included",
+          "operator_identity_included",
+          "result_inferred",
+          "command_executed",
+          "model_assertion",
+          "record_rewritten",
+          "approval",
+          "authority_granted",
+          "mutation_supported",
+          "execution_started"
         ],
         "type": "object"
       },

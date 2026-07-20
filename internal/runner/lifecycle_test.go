@@ -220,6 +220,7 @@ func TestLifecycleHarnessNormalExitRequiresReapedTree(t *testing.T) {
 		!result.TreeReaped || result.TerminateRequested || result.KillRequested ||
 		!result.ExitEvidenceAvailable || !result.RuntimeEvidenceAvailable ||
 		!result.ResourceLimitEvidenceAvailable || !result.TerminationCauseEvidenceAvailable ||
+		!result.LifecycleTimelineEvidenceAvailable || !result.DeadlineBudgetEvidenceAvailable ||
 		result.RawOutputIncluded ||
 		result.ProductExecutionEnabled {
 		t.Fatalf("normal lifecycle result=%#v err=%v", result, err)
@@ -257,7 +258,9 @@ func TestLifecycleHarnessRejectsRuntimeEvidenceThatWidensMetadataBoundary(t *tes
 			if !errors.Is(err, ErrRuntimeEvidence) || result.StopReason != StopEvidenceFailed ||
 				!result.TreeReaped || result.ExitEvidenceAvailable ||
 				result.RuntimeEvidenceAvailable || result.ResourceLimitEvidenceAvailable ||
-				result.TerminationCauseEvidenceAvailable || result.ProductExecutionEnabled {
+				result.TerminationCauseEvidenceAvailable ||
+				result.LifecycleTimelineEvidenceAvailable || result.DeadlineBudgetEvidenceAvailable ||
+				result.ProductExecutionEnabled {
 				t.Fatalf("invalid runtime evidence result=%#v err=%v", result, err)
 			}
 		})
@@ -273,7 +276,7 @@ func TestLifecycleHarnessRequiresStableRepeatedEvidence(t *testing.T) {
 	}
 	request := Request{ID: "repeated-evidence", Timeout: time.Second,
 		TerminationGrace: time.Second, KillGrace: time.Second}
-	result := Result{StopReason: StopExited, TreeReaped: true}
+	result := Result{Started: true, StopReason: StopExited, TreeReaped: true}
 	status := ExitStatus{Exited: true, ExitCode: 0, Reaped: true}
 	if err := harness.collectEvidence(t.Context(), process, status, request, &result); err != nil {
 		t.Fatal(err)
@@ -284,6 +287,8 @@ func TestLifecycleHarnessRequiresStableRepeatedEvidence(t *testing.T) {
 	original := result.RuntimeEvidence
 	originalResourceLimit := result.ResourceLimitEvidence
 	originalTerminationCause := result.TerminationCauseEvidence
+	originalTimeline := result.LifecycleTimelineEvidence
+	originalDeadlineBudget := result.DeadlineBudgetEvidence
 	changedRequest := request
 	changedRequest.Timeout = 2 * time.Second
 	changedResult := result
@@ -291,16 +296,44 @@ func TestLifecycleHarnessRequiresStableRepeatedEvidence(t *testing.T) {
 		&changedResult); !errors.Is(err, ErrResourceLimitEvidence) ||
 		changedResult.StopReason != StopEvidenceFailed ||
 		changedResult.ResourceLimitEvidence != originalResourceLimit ||
-		changedResult.TerminationCauseEvidence != originalTerminationCause {
+		changedResult.TerminationCauseEvidence != originalTerminationCause ||
+		changedResult.LifecycleTimelineEvidence != originalTimeline ||
+		changedResult.DeadlineBudgetEvidence != originalDeadlineBudget {
 		t.Fatalf("changed request partially replaced evidence: result=%#v err=%v",
 			changedResult, err)
+	}
+	tamperedTimeline := result
+	tamperedTimeline.LifecycleTimelineEvidence.StepCount++
+	if err := harness.collectEvidence(t.Context(), process, status, request,
+		&tamperedTimeline); !errors.Is(err, ErrLifecycleTimelineEvidence) ||
+		tamperedTimeline.StopReason != StopEvidenceFailed ||
+		tamperedTimeline.LifecycleTimelineEvidence.StepCount != originalTimeline.StepCount+1 ||
+		tamperedTimeline.DeadlineBudgetEvidence != originalDeadlineBudget ||
+		tamperedTimeline.ResourceLimitEvidence != originalResourceLimit ||
+		tamperedTimeline.TerminationCauseEvidence != originalTerminationCause {
+		t.Fatalf("changed timeline partially replaced evidence: result=%#v err=%v",
+			tamperedTimeline, err)
+	}
+	tamperedBudget := result
+	tamperedBudget.DeadlineBudgetEvidence.CumulativeWallDeadlineClaimed = true
+	if err := harness.collectEvidence(t.Context(), process, status, request,
+		&tamperedBudget); !errors.Is(err, ErrDeadlineBudgetEvidence) ||
+		tamperedBudget.StopReason != StopEvidenceFailed ||
+		!tamperedBudget.DeadlineBudgetEvidence.CumulativeWallDeadlineClaimed ||
+		tamperedBudget.LifecycleTimelineEvidence != originalTimeline ||
+		tamperedBudget.ResourceLimitEvidence != originalResourceLimit ||
+		tamperedBudget.TerminationCauseEvidence != originalTerminationCause {
+		t.Fatalf("changed deadline budget partially replaced evidence: result=%#v err=%v",
+			tamperedBudget, err)
 	}
 	process.mu.Lock()
 	process.runtimeEvidence.Resources.WallTimeMilliseconds++
 	process.mu.Unlock()
 	if err := harness.collectEvidence(t.Context(), process, status, request, &result); !errors.Is(err, ErrRuntimeEvidence) || result.StopReason != StopEvidenceFailed ||
 		result.RuntimeEvidence != original || result.ResourceLimitEvidence != originalResourceLimit ||
-		result.TerminationCauseEvidence != originalTerminationCause {
+		result.TerminationCauseEvidence != originalTerminationCause ||
+		result.LifecycleTimelineEvidence != originalTimeline ||
+		result.DeadlineBudgetEvidence != originalDeadlineBudget {
 		t.Fatalf("changed repeated evidence result=%#v err=%v", result, err)
 	}
 }
@@ -339,6 +372,7 @@ func TestLifecycleHarnessBoundsOutputAndRejectsInvalidExitEvidence(t *testing.T)
 		!result.TreeReaped || result.OrphanDetected || result.TerminateRequested ||
 		result.KillRequested || result.ExitEvidenceAvailable ||
 		result.ResourceLimitEvidenceAvailable || result.TerminationCauseEvidenceAvailable ||
+		result.LifecycleTimelineEvidenceAvailable || result.DeadlineBudgetEvidenceAvailable ||
 		result.RawOutputIncluded {
 		t.Fatalf("invalid output evidence result=%#v err=%v", result, err)
 	}
@@ -528,7 +562,10 @@ func assertLifecycleControlEvidence(t *testing.T, result Result, runTimeout time
 	t.Helper()
 	resource := result.ResourceLimitEvidence
 	cause := result.TerminationCauseEvidence
+	timeline := result.LifecycleTimelineEvidence
+	deadline := result.DeadlineBudgetEvidence
 	if !result.ResourceLimitEvidenceAvailable || !result.TerminationCauseEvidenceAvailable ||
+		!result.LifecycleTimelineEvidenceAvailable || !result.DeadlineBudgetEvidenceAvailable ||
 		resource.ProtocolVersion != ResourceLimitEvidenceProtocolVersion ||
 		resource.RunTimeoutMilliseconds != runTimeout.Milliseconds() ||
 		resource.TerminationGraceMilliseconds != terminationGrace.Milliseconds() ||
@@ -545,7 +582,40 @@ func assertLifecycleControlEvidence(t *testing.T, result Result, runTimeout time
 		cause.TerminateFailed != result.TerminateFailed ||
 		cause.KillRequested != result.KillRequested || cause.KillFailed != result.KillFailed ||
 		cause.OSCauseInferred || cause.SignalIdentityIncluded || !cause.MetadataOnly ||
-		cause.ProductExecutionEnabled {
+		cause.ProductExecutionEnabled ||
+		timeline.ProtocolVersion != LifecycleTimelineEvidenceProtocolVersion ||
+		timeline.ControlTrigger != trigger || timeline.FinalMechanism != mechanism ||
+		timeline.StartAcceptedSequence != 1 || timeline.StopTriggerSequence != 2 ||
+		(timeline.TerminateRequestedSequence > 0) != result.TerminateRequested ||
+		(timeline.KillRequestedSequence > 0) != result.KillRequested ||
+		timeline.TreeReapedSequence <= timeline.StopTriggerSequence ||
+		timeline.ExitEvidenceSequence != timeline.TreeReapedSequence+1 ||
+		timeline.RuntimeEvidenceSequence != timeline.ExitEvidenceSequence+1 ||
+		timeline.EvidenceSetCommittedSequence != timeline.RuntimeEvidenceSequence+1 ||
+		timeline.StepCount != timeline.EvidenceSetCommittedSequence ||
+		!timeline.LogicalSequenceOnly || timeline.WallClockIncluded ||
+		timeline.BackendCallTimingInferred || timeline.ProcessIdentityIncluded ||
+		!timeline.MetadataOnly || timeline.ProductExecutionEnabled ||
+		deadline.ProtocolVersion != DeadlineBudgetEvidenceProtocolVersion ||
+		deadline.RunContextBudgetMilliseconds != runTimeout.Milliseconds() ||
+		deadline.TerminateCallContextBudgetMilliseconds != terminationGrace.Milliseconds() ||
+		deadline.PostTerminateWaitBudgetMilliseconds != terminationGrace.Milliseconds() ||
+		deadline.KillCallContextBudgetMilliseconds != killGrace.Milliseconds() ||
+		deadline.PostKillWaitBudgetMilliseconds != killGrace.Milliseconds() ||
+		deadline.TreeInspectionContextBudgetMilliseconds != killGrace.Milliseconds() ||
+		deadline.ExitEvidenceContextBudgetMilliseconds != killGrace.Milliseconds() ||
+		deadline.RuntimeEvidenceContextBudgetMilliseconds != killGrace.Milliseconds() ||
+		!deadline.RunContextApplied ||
+		deadline.TerminateCallContextApplied != result.TerminateRequested ||
+		deadline.PostTerminateWaitContextApplied != result.TerminateRequested ||
+		deadline.KillCallContextApplied != result.KillRequested ||
+		deadline.PostKillWaitContextApplied != result.KillRequested ||
+		!deadline.TreeInspectionContextApplied || !deadline.ExitEvidenceContextApplied ||
+		!deadline.RuntimeEvidenceContextApplied || !deadline.GoContextDeadlinesConfigured ||
+		!deadline.IndependentContextBudgets || deadline.CumulativeWallDeadlineClaimed ||
+		deadline.CPUTimeLimitClaimed || deadline.MemoryLimitClaimed ||
+		deadline.OSResourceLimitsVerified || !deadline.MetadataOnly ||
+		deadline.ProductExecutionEnabled {
 		t.Fatalf("lifecycle control evidence widened or diverged: %#v", result)
 	}
 }

@@ -100,6 +100,7 @@ export type VerificationAssociationRequestView = components["schemas"]["Verifica
 export type VerificationAssociationControlView = components["schemas"]["VerificationAssociationControlView"];
 export type VerificationPlanCoverageInventoryView = components["schemas"]["VerificationPlanCoverageInventoryView"];
 export type VerificationPlanItemCoverageDetailView = components["schemas"]["VerificationPlanItemCoverageDetailView"];
+export type VerificationSnapshotExportView = components["schemas"]["VerificationSnapshotExportView"];
 export type CodeHandoffView = components["schemas"]["CodeHandoffView"];
 export type CodeHandoffExportView = components["schemas"]["CodeHandoffExportView"];
 

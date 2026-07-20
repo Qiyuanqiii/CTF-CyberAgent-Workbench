@@ -741,3 +741,34 @@ false. Exit, runtime, limit, and cause evidence validate before atomic assignmen
 Concrete OS adapters remain test-only and start only the current Go test binary. R5
 adds no CLI, HTTP, Desktop, Agent, Sandbox, approval, profile, LocalRunner, Docker, or
 product process-start dependency. ADR 0056 records these bounds.
+
+## Comparison Preview, Verification Snapshot Export, And Runner Timeline Evidence
+
+Comparison-side preview is a renderer composition over two existing Go contracts. The
+comparison projection supplies exact base/head object IDs, path, and kind; only regular
+or executable sides may call `repository_commit_file_preview.v1`. Preview selection is
+Workspace/object/path-bound and independent of the currently selected detail commit.
+The returned hash/path is displayed verbatim. No new Git content, revision-expression,
+mutation, process, network, or hook boundary exists.
+
+`operator_verification_plan_item_snapshot_export.v1` wraps deterministic JSON or
+Markdown `operator_verification_plan_item_snapshot.v1` content. Application first reads
+the current exact-item detail, which freezes the latest association event high-water
+and caps references at 100. The export revalidates exact Run/Session/Workspace/plan/item
+digests, outcome counts, order, truncation, and closed-authority fields, then adds the
+content SHA-256, UTF-8 byte count, safe filename/MIME, and a 256 KiB cap. It contains no
+generated timestamp, private body, operator identity, inferred result, durable
+acceptance, mutation, approval, authority, or execution.
+
+`runner_lifecycle_timeline_evidence.v1` is a canonical logical ordering of control
+facts, not a clock. It binds the Go trigger and final wait/terminate/kill mechanism to
+start, optional escalation, tree reap, exit/runtime evidence, and evidence-set commit,
+while structurally excluding wall time, backend duration, and process identity.
+
+`runner_deadline_budget_evidence.v1` inventories the independent Go context ceilings
+for run, terminate/kill calls and waits, tree inspection, and exit/runtime evidence. Its
+applied flags must match the path, while cumulative wall-deadline, CPU/memory limit, and
+OS-enforcement claims remain false. Exit, runtime, configured-limit, termination-cause,
+timeline, and deadline-budget records validate before atomic assignment; drift leaves
+no partial replacement. Concrete adapters remain `_test.go` only and R6 adds no product
+Runner import or starter. ADR 0057 records these bounds.
