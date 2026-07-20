@@ -14,33 +14,37 @@ import (
 )
 
 const (
-	LifecycleProtocolVersion       = "runner_lifecycle_contract.v1"
-	ExitEvidenceProtocolVersion    = "runner_exit_evidence.v1"
-	RuntimeEvidenceProtocolVersion = "runner_runtime_evidence.v1"
-	DefaultRunTimeout              = 30 * time.Second
-	MaxRunTimeout                  = 5 * time.Minute
-	DefaultTerminationGrace        = 2 * time.Second
-	DefaultKillGrace               = 2 * time.Second
-	MaxControlGrace                = 10 * time.Second
-	MaxOutputCaptureBytes          = 64 * 1024
-	MaxOutputObservedBytes         = 64 * 1024 * 1024
-	MaxStdinProvidedBytes          = 1024 * 1024
-	MaxRuntimeEvidenceMilliseconds = int64((MaxRunTimeout + 2*MaxControlGrace) / time.Millisecond)
-	MaxCPUTimeEvidenceMilliseconds = int64((24 * time.Hour) / time.Millisecond)
-	MaxPeakResidentBytes           = int64(1 << 40)
-	EmptyOutputSHA256              = "e3b0c44298fc1c149afbf4c8996fb924" +
+	LifecycleProtocolVersion                = "runner_lifecycle_contract.v1"
+	ExitEvidenceProtocolVersion             = "runner_exit_evidence.v1"
+	RuntimeEvidenceProtocolVersion          = "runner_runtime_evidence.v1"
+	ResourceLimitEvidenceProtocolVersion    = "runner_resource_limit_evidence.v1"
+	TerminationCauseEvidenceProtocolVersion = "runner_termination_cause_evidence.v1"
+	DefaultRunTimeout                       = 30 * time.Second
+	MaxRunTimeout                           = 5 * time.Minute
+	DefaultTerminationGrace                 = 2 * time.Second
+	DefaultKillGrace                        = 2 * time.Second
+	MaxControlGrace                         = 10 * time.Second
+	MaxOutputCaptureBytes                   = 64 * 1024
+	MaxOutputObservedBytes                  = 64 * 1024 * 1024
+	MaxStdinProvidedBytes                   = 1024 * 1024
+	MaxRuntimeEvidenceMilliseconds          = int64((MaxRunTimeout + 2*MaxControlGrace) / time.Millisecond)
+	MaxCPUTimeEvidenceMilliseconds          = int64((24 * time.Hour) / time.Millisecond)
+	MaxPeakResidentBytes                    = int64(1 << 40)
+	EmptyOutputSHA256                       = "e3b0c44298fc1c149afbf4c8996fb924" +
 		"27ae41e4649b934ca495991b7852b855"
 )
 
 var (
-	ErrHarnessBoundary = errors.New("runner lifecycle backend is not non-product-only")
-	ErrStartFailed     = errors.New("runner process start failed")
-	ErrWaitFailed      = errors.New("runner process wait failed")
-	ErrTerminateFailed = errors.New("runner process-tree termination failed")
-	ErrKillFailed      = errors.New("runner process-tree kill failed")
-	ErrOrphanedProcess = errors.New("runner process tree was not fully reaped")
-	ErrExitEvidence    = errors.New("runner exit evidence is invalid")
-	ErrRuntimeEvidence = errors.New("runner runtime evidence is invalid")
+	ErrHarnessBoundary          = errors.New("runner lifecycle backend is not non-product-only")
+	ErrStartFailed              = errors.New("runner process start failed")
+	ErrWaitFailed               = errors.New("runner process wait failed")
+	ErrTerminateFailed          = errors.New("runner process-tree termination failed")
+	ErrKillFailed               = errors.New("runner process-tree kill failed")
+	ErrOrphanedProcess          = errors.New("runner process tree was not fully reaped")
+	ErrExitEvidence             = errors.New("runner exit evidence is invalid")
+	ErrRuntimeEvidence          = errors.New("runner runtime evidence is invalid")
+	ErrResourceLimitEvidence    = errors.New("runner resource limit evidence is invalid")
+	ErrTerminationCauseEvidence = errors.New("runner termination cause evidence is invalid")
 )
 
 type StopReason string
@@ -204,6 +208,104 @@ type RuntimeEvidence struct {
 	ProductExecutionEnabled    bool
 }
 
+type ResourceLimitEvidence struct {
+	ProtocolVersion              string
+	RunTimeoutMilliseconds       int64
+	TerminationGraceMilliseconds int64
+	KillGraceMilliseconds        int64
+	WallDeadlineConfigured       bool
+	CPUTimeLimitConfigured       bool
+	MemoryLimitConfigured        bool
+	OSResourceLimitsVerified     bool
+	MetadataOnly                 bool
+	ProductExecutionEnabled      bool
+}
+
+func (e ResourceLimitEvidence) validate(request Request) error {
+	if e.ProtocolVersion != ResourceLimitEvidenceProtocolVersion ||
+		e.RunTimeoutMilliseconds != request.Timeout.Milliseconds() ||
+		e.TerminationGraceMilliseconds != request.TerminationGrace.Milliseconds() ||
+		e.KillGraceMilliseconds != request.KillGrace.Milliseconds() ||
+		e.RunTimeoutMilliseconds < 1 ||
+		e.RunTimeoutMilliseconds > MaxRunTimeout.Milliseconds() ||
+		e.TerminationGraceMilliseconds < 1 ||
+		e.TerminationGraceMilliseconds > MaxControlGrace.Milliseconds() ||
+		e.KillGraceMilliseconds < 1 ||
+		e.KillGraceMilliseconds > MaxControlGrace.Milliseconds() ||
+		!e.WallDeadlineConfigured || e.CPUTimeLimitConfigured ||
+		e.MemoryLimitConfigured || e.OSResourceLimitsVerified || !e.MetadataOnly ||
+		e.ProductExecutionEnabled {
+		return errors.New("runner resource limit evidence binding is invalid")
+	}
+	return nil
+}
+
+type TerminationControlTrigger string
+
+const (
+	TerminationTriggerProcessExit         TerminationControlTrigger = "process_exit"
+	TerminationTriggerCallerCancelled     TerminationControlTrigger = "caller_cancelled"
+	TerminationTriggerRunDeadline         TerminationControlTrigger = "run_deadline"
+	TerminationTriggerWaitFailure         TerminationControlTrigger = "wait_failure"
+	TerminationTriggerOrphanAfterExit     TerminationControlTrigger = "orphan_after_exit"
+	TerminationTriggerPartialStartFailure TerminationControlTrigger = "partial_start_failure"
+)
+
+type TerminationFinalMechanism string
+
+const (
+	TerminationMechanismWait      TerminationFinalMechanism = "wait"
+	TerminationMechanismTerminate TerminationFinalMechanism = "terminate"
+	TerminationMechanismKill      TerminationFinalMechanism = "kill"
+)
+
+type TerminationCauseEvidence struct {
+	ProtocolVersion         string
+	ControlTrigger          TerminationControlTrigger
+	FinalMechanism          TerminationFinalMechanism
+	Exited                  bool
+	ExitCode                int
+	TreeReaped              bool
+	TimedOut                bool
+	Cancelled               bool
+	OrphanDetected          bool
+	TerminateRequested      bool
+	TerminateFailed         bool
+	KillRequested           bool
+	KillFailed              bool
+	OSCauseInferred         bool
+	SignalIdentityIncluded  bool
+	MetadataOnly            bool
+	ProductExecutionEnabled bool
+}
+
+func (e TerminationCauseEvidence) validate(status ExitStatus, result Result) error {
+	trigger, ok := terminationTrigger(result)
+	mechanism := terminationMechanism(result)
+	if !ok || e.ProtocolVersion != TerminationCauseEvidenceProtocolVersion ||
+		e.ControlTrigger != trigger || e.FinalMechanism != mechanism ||
+		!e.Exited || !status.Exited || e.ExitCode != status.ExitCode ||
+		!e.TreeReaped || e.TreeReaped != status.Reaped || e.TreeReaped != result.TreeReaped ||
+		e.TimedOut != result.TimedOut || e.Cancelled != result.Cancelled ||
+		e.OrphanDetected != result.OrphanDetected ||
+		e.TerminateRequested != result.TerminateRequested ||
+		e.TerminateFailed != result.TerminateFailed ||
+		e.KillRequested != result.KillRequested || e.KillFailed != result.KillFailed ||
+		(result.TerminateFailed && !result.TerminateRequested) ||
+		(result.KillFailed && !result.KillRequested) ||
+		(mechanism == TerminationMechanismWait &&
+			(result.TerminateRequested || result.KillRequested)) ||
+		(mechanism == TerminationMechanismTerminate &&
+			(!result.TerminateRequested || result.KillRequested)) ||
+		(mechanism == TerminationMechanismKill &&
+			(!result.TerminateRequested || !result.KillRequested)) ||
+		e.OSCauseInferred || e.SignalIdentityIncluded || !e.MetadataOnly ||
+		e.ProductExecutionEnabled {
+		return errors.New("runner termination cause evidence binding is invalid")
+	}
+	return nil
+}
+
 func (e RuntimeEvidence) validate(status ExitStatus) error {
 	if e.ProtocolVersion != RuntimeEvidenceProtocolVersion || !e.TreeReaped ||
 		e.TreeReaped != status.Reaped || !e.MetadataOnly || e.EnvironmentIncluded ||
@@ -274,27 +376,31 @@ type Backend interface {
 }
 
 type Result struct {
-	ProtocolVersion          string
-	RequestID                string
-	Backend                  string
-	Started                  bool
-	ExitCode                 int
-	StopReason               StopReason
-	Cancelled                bool
-	TimedOut                 bool
-	TerminateRequested       bool
-	TerminateFailed          bool
-	KillRequested            bool
-	KillFailed               bool
-	OrphanDetected           bool
-	TreeReaped               bool
-	ExitEvidenceAvailable    bool
-	ExitEvidence             ExitEvidence
-	RuntimeEvidenceAvailable bool
-	RuntimeEvidence          RuntimeEvidence
-	OutputTruncated          bool
-	RawOutputIncluded        bool
-	ProductExecutionEnabled  bool
+	ProtocolVersion                   string
+	RequestID                         string
+	Backend                           string
+	Started                           bool
+	ExitCode                          int
+	StopReason                        StopReason
+	Cancelled                         bool
+	TimedOut                          bool
+	TerminateRequested                bool
+	TerminateFailed                   bool
+	KillRequested                     bool
+	KillFailed                        bool
+	OrphanDetected                    bool
+	TreeReaped                        bool
+	ExitEvidenceAvailable             bool
+	ExitEvidence                      ExitEvidence
+	RuntimeEvidenceAvailable          bool
+	RuntimeEvidence                   RuntimeEvidence
+	ResourceLimitEvidenceAvailable    bool
+	ResourceLimitEvidence             ResourceLimitEvidence
+	TerminationCauseEvidenceAvailable bool
+	TerminationCauseEvidence          TerminationCauseEvidence
+	OutputTruncated                   bool
+	RawOutputIncluded                 bool
+	ProductExecutionEnabled           bool
 }
 
 type Harness struct {
@@ -396,12 +502,12 @@ func (h *Harness) Run(ctx context.Context, request Request) (Result, error) {
 			result.ExitCode = exit.ExitCode
 			safe, inspectErr := h.inspectReaped(ctx, process, normalized.KillGrace, &result)
 			if inspectErr == nil && safe && exit.Reaped {
+				result.StopReason = StopExited
 				if evidenceErr := h.collectEvidence(ctx, process, exit,
-					normalized.KillGrace, &result); evidenceErr != nil {
+					normalized, &result); evidenceErr != nil {
 					result.StopReason = StopEvidenceFailed
 					return result, evidenceErr
 				}
-				result.StopReason = StopExited
 				return result, nil
 			}
 			result.OrphanDetected = true
@@ -456,7 +562,7 @@ func (h *Harness) cleanup(parent context.Context, process Process, request Reque
 		result.ExitCode = exit.ExitCode
 		if safe, inspectErr := h.inspectReaped(base, process, request.KillGrace, result); inspectErr == nil && safe && exit.Reaped {
 			if evidenceErr := h.collectEvidence(base, process, exit,
-				request.KillGrace, result); evidenceErr != nil {
+				request, result); evidenceErr != nil {
 				return evidenceErr
 			}
 			if terminateErr != nil {
@@ -485,7 +591,7 @@ func (h *Harness) cleanup(parent context.Context, process Process, request Reque
 		return ErrOrphanedProcess
 	}
 	if evidenceErr := h.collectEvidence(base, process, exit,
-		request.KillGrace, result); evidenceErr != nil {
+		request, result); evidenceErr != nil {
 		return evidenceErr
 	}
 	if terminateErr != nil {
@@ -498,9 +604,9 @@ func (h *Harness) cleanup(parent context.Context, process Process, request Reque
 }
 
 func (h *Harness) collectEvidence(parent context.Context, process Process,
-	status ExitStatus, timeout time.Duration, result *Result,
+	status ExitStatus, request Request, result *Result,
 ) error {
-	exitCtx, exitCancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
+	exitCtx, exitCancel := context.WithTimeout(context.WithoutCancel(parent), request.KillGrace)
 	exitEvidence, err := process.ExitEvidence(exitCtx)
 	exitCancel()
 	if err != nil {
@@ -511,7 +617,7 @@ func (h *Harness) collectEvidence(parent context.Context, process Process,
 		result.StopReason = StopEvidenceFailed
 		return fmt.Errorf("%w: contract mismatch", ErrExitEvidence)
 	}
-	runtimeCtx, runtimeCancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
+	runtimeCtx, runtimeCancel := context.WithTimeout(context.WithoutCancel(parent), request.KillGrace)
 	runtimeEvidence, err := process.RuntimeEvidence(runtimeCtx)
 	runtimeCancel()
 	if err != nil {
@@ -522,6 +628,36 @@ func (h *Harness) collectEvidence(parent context.Context, process Process,
 		result.StopReason = StopEvidenceFailed
 		return fmt.Errorf("%w: contract mismatch", ErrRuntimeEvidence)
 	}
+	resourceLimitEvidence := ResourceLimitEvidence{
+		ProtocolVersion:              ResourceLimitEvidenceProtocolVersion,
+		RunTimeoutMilliseconds:       request.Timeout.Milliseconds(),
+		TerminationGraceMilliseconds: request.TerminationGrace.Milliseconds(),
+		KillGraceMilliseconds:        request.KillGrace.Milliseconds(),
+		WallDeadlineConfigured:       true, MetadataOnly: true,
+	}
+	if err := resourceLimitEvidence.validate(request); err != nil {
+		result.StopReason = StopEvidenceFailed
+		return fmt.Errorf("%w: contract mismatch", ErrResourceLimitEvidence)
+	}
+	trigger, ok := terminationTrigger(*result)
+	if !ok {
+		result.StopReason = StopEvidenceFailed
+		return fmt.Errorf("%w: control trigger is unavailable", ErrTerminationCauseEvidence)
+	}
+	terminationCauseEvidence := TerminationCauseEvidence{
+		ProtocolVersion: TerminationCauseEvidenceProtocolVersion,
+		ControlTrigger:  trigger, FinalMechanism: terminationMechanism(*result),
+		Exited: status.Exited, ExitCode: status.ExitCode, TreeReaped: status.Reaped,
+		TimedOut: result.TimedOut, Cancelled: result.Cancelled,
+		OrphanDetected:     result.OrphanDetected,
+		TerminateRequested: result.TerminateRequested,
+		TerminateFailed:    result.TerminateFailed, KillRequested: result.KillRequested,
+		KillFailed: result.KillFailed, MetadataOnly: true,
+	}
+	if err := terminationCauseEvidence.validate(status, *result); err != nil {
+		result.StopReason = StopEvidenceFailed
+		return fmt.Errorf("%w: contract mismatch", ErrTerminationCauseEvidence)
+	}
 	if result.ExitEvidenceAvailable && result.ExitEvidence != exitEvidence {
 		result.StopReason = StopEvidenceFailed
 		return fmt.Errorf("%w: evidence changed after collection", ErrExitEvidence)
@@ -530,13 +666,59 @@ func (h *Harness) collectEvidence(parent context.Context, process Process,
 		result.StopReason = StopEvidenceFailed
 		return fmt.Errorf("%w: evidence changed after collection", ErrRuntimeEvidence)
 	}
+	if result.ResourceLimitEvidenceAvailable &&
+		result.ResourceLimitEvidence != resourceLimitEvidence {
+		result.StopReason = StopEvidenceFailed
+		return fmt.Errorf("%w: evidence changed after collection", ErrResourceLimitEvidence)
+	}
+	if result.TerminationCauseEvidenceAvailable &&
+		result.TerminationCauseEvidence != terminationCauseEvidence {
+		result.StopReason = StopEvidenceFailed
+		return fmt.Errorf("%w: evidence changed after collection", ErrTerminationCauseEvidence)
+	}
 	result.ExitEvidence = exitEvidence
 	result.ExitEvidenceAvailable = true
 	result.RuntimeEvidence = runtimeEvidence
 	result.RuntimeEvidenceAvailable = true
+	result.ResourceLimitEvidence = resourceLimitEvidence
+	result.ResourceLimitEvidenceAvailable = true
+	result.TerminationCauseEvidence = terminationCauseEvidence
+	result.TerminationCauseEvidenceAvailable = true
 	result.OutputTruncated = exitEvidence.Stdout.Truncated || exitEvidence.Stderr.Truncated
 	result.RawOutputIncluded = false
 	return nil
+}
+
+func terminationTrigger(result Result) (TerminationControlTrigger, bool) {
+	switch result.StopReason {
+	case StopExited:
+		return TerminationTriggerProcessExit, !result.Cancelled && !result.TimedOut &&
+			!result.OrphanDetected && !result.TerminateRequested && !result.KillRequested
+	case StopCancelled:
+		return TerminationTriggerCallerCancelled, result.Cancelled && !result.TimedOut
+	case StopTimedOut:
+		return TerminationTriggerRunDeadline, result.TimedOut && !result.Cancelled
+	case StopWaitFailed:
+		return TerminationTriggerWaitFailure, !result.TimedOut && !result.Cancelled
+	case StopOrphanAfterExit:
+		return TerminationTriggerOrphanAfterExit, result.OrphanDetected &&
+			!result.Cancelled && !result.TimedOut
+	case StopStartFailed:
+		return TerminationTriggerPartialStartFailure, result.Started &&
+			!result.Cancelled && !result.TimedOut && !result.OrphanDetected
+	default:
+		return "", false
+	}
+}
+
+func terminationMechanism(result Result) TerminationFinalMechanism {
+	if result.KillRequested {
+		return TerminationMechanismKill
+	}
+	if result.TerminateRequested {
+		return TerminationMechanismTerminate
+	}
+	return TerminationMechanismWait
 }
 
 func (h *Harness) inspectReaped(parent context.Context, process Process,

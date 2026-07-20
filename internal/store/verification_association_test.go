@@ -119,7 +119,8 @@ func TestVerificationAssociationIsCausalImmutableAndCoverageDoesNotInferResult(t
 		t.Fatalf("coverage inferred or widened explicit facts: %#v", coverage)
 	}
 	itemAssociations, err := state.ListVerificationPlanItemEvidenceAssociations(ctx, run.ID,
-		planResult.Plan.ID, 1, verification.MaxCoverageAssociations+1, 0)
+		planResult.Plan.ID, 1, verification.MaxCoverageAssociations+1,
+		coverage.Plans[0].Items[0].LatestAssociationEventSequence, 0, "")
 	if err != nil || len(itemAssociations) != 2 ||
 		itemAssociations[0].EventSequence <= itemAssociations[1].EventSequence ||
 		itemAssociations[0].PlanItemOrdinal != 1 || itemAssociations[1].PlanItemOrdinal != 1 {
@@ -127,15 +128,30 @@ func TestVerificationAssociationIsCausalImmutableAndCoverageDoesNotInferResult(t
 			itemAssociations, err)
 	}
 	emptyItemAssociations, err := state.ListVerificationPlanItemEvidenceAssociations(ctx,
-		run.ID, planResult.Plan.ID, 2, verification.MaxCoverageAssociations+1, 0)
+		run.ID, planResult.Plan.ID, 2, verification.MaxCoverageAssociations+1,
+		coverage.Plans[0].Items[0].LatestAssociationEventSequence, 0, "")
 	if err != nil || len(emptyItemAssociations) != 0 {
 		t.Fatalf("exact item association projection escaped ordinal: %#v err=%v",
 			emptyItemAssociations, err)
 	}
 	secondPage, err := state.ListVerificationPlanItemEvidenceAssociations(ctx, run.ID,
-		planResult.Plan.ID, 1, 1, 1)
+		planResult.Plan.ID, 1, 1, coverage.Plans[0].Items[0].LatestAssociationEventSequence,
+		itemAssociations[0].EventSequence, itemAssociations[0].ID)
 	if err != nil || len(secondPage) != 1 || secondPage[0].ID != itemAssociations[1].ID {
-		t.Fatalf("exact item association offset diverged: %#v err=%v", secondPage, err)
+		t.Fatalf("exact item association keyset diverged: %#v err=%v", secondPage, err)
+	}
+	snapshot, found, err := state.GetVerificationPlanItemCoverageSnapshot(ctx, run.ID,
+		planResult.Plan.ID, 1, itemAssociations[0].EventSequence)
+	if err != nil || !found || snapshot.AssociatedEvidenceCount != 2 ||
+		snapshot.LatestAssociationEventSequence != itemAssociations[0].EventSequence {
+		t.Fatalf("exact item snapshot diverged: %#v found=%v err=%v", snapshot, found, err)
+	}
+	position, found, err := state.CountVerificationPlanItemAssociationsThroughAnchor(ctx,
+		run.ID, planResult.Plan.ID, 1, itemAssociations[0].EventSequence,
+		itemAssociations[0].EventSequence, itemAssociations[0].ID)
+	if err != nil || !found || position != 1 {
+		t.Fatalf("exact item anchor rank diverged: position=%d found=%v err=%v",
+			position, found, err)
 	}
 	handoff, err := application.NewCodeHandoffService(state).Build(ctx, run.ID)
 	if err != nil {

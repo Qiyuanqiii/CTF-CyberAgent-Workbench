@@ -1,6 +1,6 @@
 # CyberAgent Workbench Desktop Plan
 
-状态：Desktop D0-A、D0-B 与 D1-R1 至 D1-G7/V6 自动化核心已完成，数据库 schema 为 v82。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill、受控 Run/Session/Plan/审批、安全恢复的 Monaco FileEdit、只读 Repository/脱敏 Diff/本地历史/精确提交预览/可导航精确文件历史、多文件独立审阅、不可变操作者验证与可分页逐检查项下钻、可恢复 Code Handoff、Code Journey、generation-safe Windows Credential Manager Provider reload，以及默认关闭的有界 wake worker 已经落地。R4 只在内部 `NonProductOnly` 测试边界验证 Windows/Unix 进程树终止/回收后的有界输出、退出、stdin、descriptor 与资源元数据，不提供产品执行入口；Windows 10 实机矩阵、xterm、安装包、签名正式发行、注册表、自启动、更新和高权限执行仍未实现。
+状态：Desktop D0-A、D0-B 与 D1-R1 至 D1-G8/V7 自动化核心已完成，数据库 schema 为 v82。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill、受控 Run/Session/Plan/审批、安全恢复的 Monaco FileEdit、只读 Repository/脱敏 Diff/本地历史/精确提交预览/可导航精确文件历史/精确提交比较、多文件独立审阅、不可变操作者验证与 snapshot-keyset 逐检查项下钻、可恢复 Code Handoff、Code Journey、generation-safe Windows Credential Manager Provider reload，以及默认关闭的有界 wake worker 已经落地。R5 只在内部 `NonProductOnly` 测试边界验证 Windows/Unix 进程树终止/回收后的有界输出、退出、runtime、configured-limit 与 Go control-cause 元数据，不宣称 CPU/memory OS enforcement、signal identity 或产品执行入口；Windows 10 实机矩阵、xterm、安装包、签名正式发行、注册表、自启动、更新和高权限执行仍未实现。
 
 ## 目标
 
@@ -33,7 +33,7 @@
 - `desktop_skill_package_preview.v1` 只返回有界风险元数据，排除路径、文件名、正文、Manifest description/content path/content digest，并固定安装、命令、网络、Provider、工具和能力授权为 false。
 - D0-A 已把该边界接入 Wails 原生对话框和 React 只读预览；D1-B1 再允许渲染层提交一次性确认句柄，由 Go 重新消费同一已验证包并写入惰性 Registry。渲染层仍不能提交路径或文件字节，安装不会执行包内容、选择 Run 或授予能力；ADR 0033、ADR 0034 与 ADR 0041 记录这些边界。
 
-## D0-A 至 D1-G7/V6 当前实现
+## D0-A 至 D1-G8/V7 当前实现
 
 - `cmd/cyberagent-desktop` 只在 Windows `desktop,wv2runtime.error` build tags 下编译，production 构建再增加 `production`；默认 read-only。共十九项独立 Go gate，包含 `--enable-file-edit-proposals`、`--enable-provider-credentials`、`--enable-wake-worker` 和独立的 `--enable-verification-evidence`；单项启用不能访问 sibling route。模型可用性、Workspace search、receipt history、operator actions、evidence inventory 和凭证配置状态只使用 read token；`Ctrl+K` 只在客户端导航或刷新这些读取。
 - `web/dist` 以 compile-time embed 进入二进制；Go 在启动前验证 index、内容哈希资源、类型、数量、单项/总大小并复制为不可变内存快照。
@@ -223,7 +223,11 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D1-V6：exact-item evidence 使用 route-scoped opaque cursor、100,000 offset window 与逐页 strict validation；React 每次显式加载 25 条并检测跨页 live-projection 漂移。
 - [x] Runtime R4：`NonProductOnly` post-reap 增加 stdin/descriptor/resource metadata，和 exit evidence 联合验证后原子提交；无 raw input/env/descriptor identity/network telemetry/product starter。
 - [x] D1-G7/V6/R4 后累计六切片完整门通过：ordinary/race 377.3/409.8 秒、ordinary/secure Desktop、vet/staticcheck/双路径 govulncheck/module、127 React、strict TypeScript、确定性契约、Vite/npm、mock-only CLI、隐私/进程入口、Linux cross-compile 与 Windows 可复现双构建全绿；OpenAPI 71/77/170，GUI SHA-256 `1d51529b1a6d7d90e121e770faa54c9f4d77b4a96d3c0d920fe091178a299da2`，边界见 ADR 0055。
-- [ ] 下一批候选 D1-G8 exact-commit comparison、D1-V7 verification pagination keyset/high-water 与 R5 non-product resource-limit/termination-cause evidence；Local/Docker 产品执行继续关闭。
+- [x] D1-G8：Repository 增加两个 exact lowercase local commit tree 的有界 metadata comparison；不要求 ancestor，无 raw Git/body/content/root/mutation/process/network/hook。
+- [x] D1-V7：exact-item verification pagination 改为 frozen event high-water + event/ID keyset；cursor rank 由 Store/Go 复核，后续 append 不移动已加载页，100,000 行窗口显式 truncated。
+- [x] Runtime R5：`NonProductOnly` 增加 configured wall-time/grace 与 Go termination-control cause evidence；不宣称 CPU/memory/OS quota 或 signal identity，无产品 starter。
+- [x] D1-G8/V7/R5 集成门通过：uncached Go 391.1 秒、focused race、全仓 vet/staticcheck、module verify、ordinary/secure Desktop、128 React、strict TypeScript、确定性契约、Vite/npm 与 Windows 可复现双构建全绿；OpenAPI 72/78/171，GUI SHA-256 `748411c3b3dfd56768c814fd06b6da7e5e81dcd636ad69b658d862afca313e01`，边界见 ADR 0056。
+- [ ] 下一批候选 D1-G9 comparison-to-exact-file-preview 导航、D1-V8 bounded verification snapshot receipt/export 与 R6 non-product lifecycle timeline/deadline-budget evidence；Local/Docker 产品执行继续关闭。
 - [ ] 所有状态 mutation 使用独立 control capability、Origin/Host 校验、稳定 operation key 和 typed errors；显式 Provider 诊断每次只允许一次有界无正文请求。CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。
 
@@ -255,4 +259,4 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - 安装、升级和卸载不会静默删除 Workspace、数据库、凭证或用户创建文件。
 - 未签名开发产物不得伪装成正式发布；正式包必须有可核验签名和哈希。
 
-ADR 0034 至 ADR 0055 依次记录桌面壳与生命周期、受控 Run/Session/Plan/审批/Provider/FileEdit/wake/Skill/Workspace/Repository/Verification/Handoff 能力、运行时防死锁/活锁，以及 exact commit preview/file history/navigation、显式验证覆盖率/分页下钻和 test-only process-tree/exit/runtime-evidence 边界。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。
+ADR 0034 至 ADR 0056 依次记录桌面壳与生命周期、受控 Run/Session/Plan/审批/Provider/FileEdit/wake/Skill/Workspace/Repository/Verification/Handoff 能力、运行时防死锁/活锁，以及 exact commit preview/file history/navigation/comparison、显式验证覆盖率/snapshot-keyset 分页和 test-only process-tree/exit/runtime/control-evidence 边界。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。

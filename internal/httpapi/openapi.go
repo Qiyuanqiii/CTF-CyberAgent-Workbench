@@ -362,6 +362,18 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 			Description: "Compares one exact local commit object with its first parent and returns only bounded path, change-kind, file-kind, and content/mode-change metadata. It returns no author, body, blob, patch, remote, or host path and performs no checkout, ref update, process, hook, or network operation.",
 			DataType:    reflect.TypeOf(RepositoryCommitDetailView{}), NotFound: true,
 			Parameters: []openAPIParameter{workspaceID, commitObjectID}},
+		{Path: "/api/v1/workspaces/{workspace_id}/repository-commit-comparison",
+			OperationID: "compareWorkspaceRepositoryCommits",
+			Summary:     "Compare two exact commit trees", Tag: "Workspaces",
+			Description: "Compares two exact local commit objects through bounded tree metadata. The commits need not have an ancestor relationship. The response contains no author, body, blob, patch, remote, host path, rename inference, mutation, process, hook, network, or authority.",
+			DataType:    reflect.TypeOf(RepositoryCommitComparisonView{}), NotFound: true,
+			Parameters: []openAPIParameter{workspaceID,
+				{Name: "base_object_id", In: "query", Description: "Exact lowercase base commit object identity",
+					Required: true, Schema: map[string]any{"type": "string", "minLength": 40,
+						"maxLength": 40, "pattern": `^[0-9a-f]{40}$`}},
+				{Name: "head_object_id", In: "query", Description: "Exact lowercase head commit object identity",
+					Required: true, Schema: map[string]any{"type": "string", "minLength": 40,
+						"maxLength": 40, "pattern": `^[0-9a-f]{40}$`}}}},
 		{Path: "/api/v1/workspaces/{workspace_id}/repository-commits/{object_id}/file-preview",
 			OperationID: "getWorkspaceRepositoryCommitFilePreview",
 			Summary:     "Preview one redacted file from an exact commit", Tag: "Workspaces",
@@ -1108,6 +1120,12 @@ func applyOpenAPIFieldMetadata(typeName string, fieldName string, schema map[str
 			schema["maxLength"] = 256
 		}
 	}
+	if typeName == "RepositoryCommitComparisonView" &&
+		(fieldName == "base_object_id" || fieldName == "head_object_id") {
+		schema["minLength"] = 40
+		schema["maxLength"] = 40
+		schema["pattern"] = "^[0-9a-f]{40}$"
+	}
 	if typeName == "ArtifactView" && fieldName == "sha256" {
 		schema["pattern"] = "^[a-f0-9]{64}$"
 	}
@@ -1128,6 +1146,9 @@ func applyOpenAPIFieldMetadata(typeName string, fieldName string, schema map[str
 	}
 	if typeName == "RepositoryFileHistoryView" && fieldName == "entries" {
 		schema["maxItems"] = repository.MaxFileHistoryEntries
+	}
+	if typeName == "RepositoryCommitComparisonView" && fieldName == "changes" {
+		schema["maxItems"] = repository.MaxCommitChangedFiles
 	}
 	if typeName == "VerificationPlanCoverageInventoryView" && fieldName == "plans" {
 		schema["maxItems"] = verification.MaxPlanInventoryItems
@@ -1288,6 +1309,11 @@ var openAPIFieldEnums = map[string][]string{
 	"RepositoryFileHistoryEntryView.change":                   {"added", "modified", "deleted"},
 	"RepositoryFileHistoryEntryView.previous_kind":            {"", "regular", "executable", "symlink", "submodule"},
 	"RepositoryFileHistoryEntryView.current_kind":             {"", "regular", "executable", "symlink", "submodule"},
+	"RepositoryCommitComparisonView.protocol_version":         {repository.CommitComparisonProtocolVersion},
+	"RepositoryCommitComparisonView.kind":                     {"none", "git"},
+	"RepositoryCommitFileChangeView.change":                   {"added", "modified", "deleted"},
+	"RepositoryCommitFileChangeView.previous_kind":            {"", "regular", "executable", "symlink", "submodule"},
+	"RepositoryCommitFileChangeView.current_kind":             {"", "regular", "executable", "symlink", "submodule"},
 	"RepositoryCommitFilePreviewView.protocol_version":        {repository.CommitFilePreviewProtocolVersion},
 	"RepositoryCommitFilePreviewView.kind":                    {"regular", "executable"},
 	"RepositoryCommitFilePreviewProvenanceView.version":       {session.ContextProvenanceVersion},
@@ -1522,6 +1548,10 @@ var openAPIFieldMinimums = map[string]float64{
 	"RepositoryFileHistoryView.scanned_commit_count":                            0,
 	"RepositoryFileHistoryView.returned_entry_count":                            0,
 	"RepositoryFileHistoryView.redaction_count":                                 0,
+	"RepositoryCommitComparisonView.changed_file_count":                         0,
+	"RepositoryCommitComparisonView.returned_change_count":                      0,
+	"RepositoryCommitComparisonView.omitted_change_count":                       0,
+	"RepositoryCommitComparisonView.redaction_count":                            0,
 	"VerificationPlanItemCoverageDetailView.plan_item_ordinal":                  1,
 	"VerificationPlanItemCoverageDetailView.associated_evidence_count":          0,
 	"VerificationPlanItemCoverageDetailView.pass_count":                         0,
@@ -1622,6 +1652,10 @@ var openAPIFieldMaximums = map[string]float64{
 	"RepositoryFileHistoryView.scanned_commit_count":                    repository.MaxFileHistoryCommitScan,
 	"RepositoryFileHistoryView.returned_entry_count":                    repository.MaxFileHistoryEntries,
 	"RepositoryFileHistoryView.redaction_count":                         repository.MaxFileHistoryCommitScan * repository.MaxCommitSubjectRunes,
+	"RepositoryCommitComparisonView.changed_file_count":                 repository.MaxCommitOmittedFiles,
+	"RepositoryCommitComparisonView.returned_change_count":              repository.MaxCommitChangedFiles,
+	"RepositoryCommitComparisonView.omitted_change_count":               repository.MaxCommitOmittedFiles,
+	"RepositoryCommitComparisonView.redaction_count":                    repository.MaxCommitOmittedFiles,
 	"VerificationPlanItemCoverageDetailView.plan_item_ordinal":          verification.MaxPlanItems,
 	"VerificationPlanItemCoverageDetailView.associated_evidence_count":  verification.MaxSafeCoverageCount,
 	"VerificationPlanItemCoverageDetailView.pass_count":                 verification.MaxSafeCoverageCount,
@@ -1704,6 +1738,10 @@ var openAPIFieldMaxLengths = map[string]int{
 	"RepositoryFileHistoryView.path":                           repository.MaxPathRunes,
 	"RepositoryFileHistoryEntryView.object_id":                 40,
 	"RepositoryFileHistoryEntryView.hash":                      12,
+	"RepositoryCommitComparisonView.base_object_id":            40,
+	"RepositoryCommitComparisonView.base_hash":                 12,
+	"RepositoryCommitComparisonView.head_object_id":            40,
+	"RepositoryCommitComparisonView.head_hash":                 12,
 	"VerificationPlanItemCoverageDetailView.plan_sha256":       64,
 	"VerificationPlanItemCoverageDetailView.plan_item_sha256":  64,
 	"VerificationAssociationReferenceView.plan_item_sha256":    64,

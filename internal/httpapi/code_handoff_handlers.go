@@ -230,6 +230,68 @@ func (a *API) workspaceRepositoryCommit(request *http.Request,
 	}, nil, nil
 }
 
+func (a *API) workspaceRepositoryCommitComparison(request *http.Request,
+	workspaceID string,
+) (any, *Page, error) {
+	values := request.URL.Query()
+	if err := validateSingleQueryValues(values, "base_object_id", "head_object_id"); err != nil {
+		return nil, nil, err
+	}
+	baseValues, basePresent := values["base_object_id"]
+	headValues, headPresent := values["head_object_id"]
+	if !basePresent || len(baseValues) != 1 || baseValues[0] == "" ||
+		!headPresent || len(headValues) != 1 || headValues[0] == "" {
+		return nil, nil, apperror.New(apperror.CodeInvalidArgument,
+			"repository comparison object identities must appear exactly once")
+	}
+	registered, err := a.store.GetWorkspaceInfo(request.Context(), workspaceID)
+	if err != nil {
+		return nil, nil, apperror.Normalize(err)
+	}
+	if registered.ID != workspaceID {
+		return nil, nil, apperror.New(apperror.CodeInternal,
+			"workspace lookup returned a mismatched identity")
+	}
+	projection, err := repository.InspectCommitComparison(request.Context(),
+		registered.RootPath, registered.ID, baseValues[0], headValues[0])
+	if err != nil {
+		return nil, nil, err
+	}
+	changes := make([]RepositoryCommitFileChangeView, len(projection.Changes))
+	for index, change := range projection.Changes {
+		changes[index] = RepositoryCommitFileChangeView{
+			Path: change.Path, Change: change.Change, PreviousKind: change.PreviousKind,
+			CurrentKind: change.CurrentKind, ContentChanged: change.ContentChanged,
+			ModeChanged: change.ModeChanged,
+		}
+	}
+	return RepositoryCommitComparisonView{
+		ProtocolVersion: projection.ProtocolVersion, WorkspaceID: projection.WorkspaceID,
+		Kind: projection.Kind, Available: projection.Available,
+		BaseObjectID: projection.BaseObjectID, BaseHash: projection.BaseHash,
+		BaseSubject: projection.BaseSubject, BaseCommittedAt: projection.BaseCommittedAt,
+		BaseRedacted: projection.BaseRedacted, BaseSubjectBounded: projection.BaseSubjectBounded,
+		HeadObjectID: projection.HeadObjectID, HeadHash: projection.HeadHash,
+		HeadSubject: projection.HeadSubject, HeadCommittedAt: projection.HeadCommittedAt,
+		HeadRedacted: projection.HeadRedacted, HeadSubjectBounded: projection.HeadSubjectBounded,
+		SameObject: projection.SameObject, Changes: changes,
+		ChangedFileCount:    projection.ChangedFileCount,
+		ReturnedChangeCount: projection.ReturnedChangeCount,
+		OmittedChangeCount:  projection.OmittedChangeCount,
+		RedactionCount:      projection.RedactionCount, Truncated: projection.Truncated,
+		MetadataOnly: projection.MetadataOnly, ReadOnly: projection.ReadOnly,
+		RenameInferred: projection.RenameInferred, AncestorRequired: projection.AncestorRequired,
+		AuthorityGranted: projection.AuthorityGranted, RootPathExposed: projection.RootPathExposed,
+		AuthorIdentityIncluded: projection.AuthorIdentityIncluded,
+		CommitBodyIncluded:     projection.CommitBodyIncluded,
+		FileContentIncluded:    projection.FileContentIncluded, PatchIncluded: projection.PatchIncluded,
+		RemoteConfigIncluded: projection.RemoteConfigIncluded,
+		CheckoutPerformed:    projection.CheckoutPerformed,
+		ReferenceUpdated:     projection.ReferenceUpdated, ProcessStarted: projection.ProcessStarted,
+		NetworkUsed: projection.NetworkUsed, HooksExecuted: projection.HooksExecuted,
+	}, nil, nil
+}
+
 func (a *API) workspaceRepositoryCommitFilePreview(request *http.Request,
 	workspaceID string, objectID string,
 ) (any, *Page, error) {
@@ -387,7 +449,7 @@ func (a *API) runVerificationPlanItemCoverage(request *http.Request, runID strin
 	if err := validateSingleQueryValues(values, "limit", "cursor"); err != nil {
 		return nil, nil, err
 	}
-	pageRequest, err := parsePage(values, request.URL.Path)
+	pageRequest, err := parseVerificationCoveragePage(values, request.URL.Path)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -397,7 +459,7 @@ func (a *API) runVerificationPlanItemCoverage(request *http.Request, runID strin
 			"verification coverage item ordinal is invalid")
 	}
 	detail, err := application.NewVerificationCoverageDetailService(a.store).DetailPage(
-		request.Context(), runID, planID, ordinal, pageRequest.Limit, pageRequest.Offset)
+		request.Context(), runID, planID, ordinal, pageRequest.Limit, pageRequest.Anchor)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -430,7 +492,7 @@ func (a *API) runVerificationPlanItemCoverage(request *http.Request, runID strin
 		ResultInferred:                detail.ResultInferred, CommandExecuted: detail.CommandExecuted,
 		ModelAssertion: detail.ModelAssertion, RecordRewritten: detail.RecordRewritten,
 		Approval: detail.Approval, AuthorityGranted: detail.AuthorityGranted,
-	}, pageFromMore(pageRequest, len(detail.Associations), detail.AssociationsTruncated), nil
+	}, verificationCoveragePage(detail, pageRequest), nil
 }
 
 func (a *API) runCodeHandoff(request *http.Request, runID string) (any, *Page, error) {

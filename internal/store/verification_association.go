@@ -65,7 +65,8 @@ func (s *SQLiteStore) ListVerificationPlanEvidenceAssociations(ctx context.Conte
 }
 
 func (s *SQLiteStore) ListVerificationPlanItemEvidenceAssociations(ctx context.Context,
-	runID string, planID string, ordinal int, limit int, offset int,
+	runID string, planID string, ordinal int, limit int, highWater int64,
+	beforeSequence int64, beforeID string,
 ) ([]verification.PlanEvidenceAssociation, error) {
 	if runID != strings.TrimSpace(runID) || !domain.ValidAgentID(runID) ||
 		planID != strings.TrimSpace(planID) || !domain.ValidAgentID(planID) ||
@@ -77,14 +78,24 @@ func (s *SQLiteStore) ListVerificationPlanItemEvidenceAssociations(ctx context.C
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"verification plan item association limit is invalid")
 	}
-	if offset < 0 || offset > verification.MaxCoveragePageOffset {
+	if highWater < 0 || beforeSequence < 0 || beforeSequence > highWater ||
+		((beforeSequence == 0) != (beforeID == "")) ||
+		(beforeID != "" && (beforeID != strings.TrimSpace(beforeID) ||
+			!domain.ValidAgentID(beforeID))) {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
-			"verification plan item association offset is invalid")
+			"verification plan item association keyset is invalid")
 	}
-	rows, err := s.db.QueryContext(ctx, verificationAssociationSelect+
+	query := verificationAssociationSelect +
 		` WHERE run_id = ? AND plan_id = ? AND plan_item_ordinal = ?
-		 ORDER BY event_sequence DESC, id DESC LIMIT ? OFFSET ?`, runID, planID, ordinal,
-		limit, offset)
+		 AND event_sequence <= ?`
+	arguments := []any{runID, planID, ordinal, highWater}
+	if beforeSequence > 0 {
+		query += ` AND (event_sequence < ? OR (event_sequence = ? AND id < ?))`
+		arguments = append(arguments, beforeSequence, beforeSequence, beforeID)
+	}
+	query += ` ORDER BY event_sequence DESC, id DESC LIMIT ?`
+	arguments = append(arguments, limit)
+	rows, err := s.db.QueryContext(ctx, query, arguments...)
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +109,68 @@ func (s *SQLiteStore) ListVerificationPlanItemEvidenceAssociations(ctx context.C
 		values = append(values, value)
 	}
 	return values, rows.Err()
+}
+
+func (s *SQLiteStore) GetVerificationPlanItemCoverageSnapshot(ctx context.Context,
+	runID string, planID string, ordinal int, highWater int64,
+) (verification.PlanItemCoverageCount, bool, error) {
+	if runID != strings.TrimSpace(runID) || !domain.ValidAgentID(runID) ||
+		planID != strings.TrimSpace(planID) || !domain.ValidAgentID(planID) ||
+		ordinal < 1 || ordinal > verification.MaxPlanItems || highWater < 0 {
+		return verification.PlanItemCoverageCount{}, false, apperror.New(
+			apperror.CodeInvalidArgument, "verification coverage snapshot binding is invalid")
+	}
+	query := `SELECT plan_id, plan_item_ordinal, plan_item_sha256, COUNT(*),
+		SUM(CASE WHEN evidence_outcome = 'pass' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN evidence_outcome = 'fail' THEN 1 ELSE 0 END),
+		SUM(CASE WHEN evidence_outcome = 'unknown' THEN 1 ELSE 0 END),
+		MAX(event_sequence)
+		FROM operator_verification_plan_evidence_associations
+		WHERE run_id = ? AND plan_id = ? AND plan_item_ordinal = ? AND event_sequence <= ?
+		GROUP BY plan_id, plan_item_ordinal, plan_item_sha256`
+	var value verification.PlanItemCoverageCount
+	err := s.db.QueryRowContext(ctx, query, runID, planID, ordinal, highWater).Scan(
+		&value.PlanID, &value.PlanItemOrdinal, &value.PlanItemSHA256,
+		&value.AssociatedEvidenceCount, &value.PassCount, &value.FailCount,
+		&value.UnknownCount, &value.LatestAssociationEventSequence)
+	if errors.Is(err, sql.ErrNoRows) {
+		return verification.PlanItemCoverageCount{}, false, nil
+	}
+	if err != nil {
+		return verification.PlanItemCoverageCount{}, false, err
+	}
+	if err := value.Validate(); err != nil {
+		return verification.PlanItemCoverageCount{}, false,
+			fmt.Errorf("stored verification coverage snapshot is invalid: %w", err)
+	}
+	return value, true, nil
+}
+
+func (s *SQLiteStore) CountVerificationPlanItemAssociationsThroughAnchor(ctx context.Context,
+	runID string, planID string, ordinal int, highWater int64, beforeSequence int64,
+	beforeID string,
+) (int, bool, error) {
+	if runID != strings.TrimSpace(runID) || !domain.ValidAgentID(runID) ||
+		planID != strings.TrimSpace(planID) || !domain.ValidAgentID(planID) ||
+		ordinal < 1 || ordinal > verification.MaxPlanItems || highWater <= 0 ||
+		beforeSequence <= 0 || beforeSequence > highWater ||
+		beforeID != strings.TrimSpace(beforeID) || !domain.ValidAgentID(beforeID) {
+		return 0, false, apperror.New(apperror.CodeInvalidArgument,
+			"verification coverage page anchor is invalid")
+	}
+	var count int
+	var anchorCount int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*),
+		COALESCE(SUM(CASE WHEN event_sequence = ? AND id = ? THEN 1 ELSE 0 END), 0)
+		FROM operator_verification_plan_evidence_associations
+		WHERE run_id = ? AND plan_id = ? AND plan_item_ordinal = ? AND event_sequence <= ?
+		AND (event_sequence > ? OR (event_sequence = ? AND id >= ?))`,
+		beforeSequence, beforeID, runID, planID, ordinal, highWater,
+		beforeSequence, beforeSequence, beforeID).Scan(&count, &anchorCount)
+	if err != nil {
+		return 0, false, err
+	}
+	return count, anchorCount == 1, nil
 }
 
 func (s *SQLiteStore) ListVerificationPlanCoverageCounts(ctx context.Context,

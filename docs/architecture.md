@@ -712,3 +712,32 @@ both validate; repeated collection must remain byte-for-byte stable.
 The only concrete OS lifecycle implementations remain in `_test.go` and run the current
 Go test binary. R4 adds no CLI, HTTP, Desktop, Agent, Sandbox, approval, profile,
 LocalRunner, Docker, or product process-start dependency. ADR 0055 records these bounds.
+
+## Exact Commit Comparison, Snapshot Verification, And Runner Control Evidence
+
+`repository_commit_comparison.v1` compares two exact lowercase local commit objects in
+one registered Workspace without requiring ancestry. It reuses the bounded tree-entry
+collector and changed-path projector, then exposes only redacted subject/time and
+canonical path/status/kind/content-change/mode-change metadata. Author identity, commit
+body, blob content, patch, remote configuration, root path, rename inference, checkout,
+reference mutation, process, network, hooks, and authority are structurally absent.
+
+Exact-item `operator_verification_plan_item_coverage.v1` pagination is now a multi-
+request snapshot over immutable associations. The first request freezes the latest
+association event sequence and recomputes aggregate counts at that high-water. Later
+requests use a descending `(event_sequence, association_id)` keyset. Their route-scoped
+opaque cursor carries high-water, anchor tuple, and consumed count; SQLite recomputes
+the anchor's frozen-range rank and Go requires an exact match. New associations have
+higher event sequences and cannot shift prior pages. The finite 100,000-row read window
+ends with `page.truncated=true` rather than an unusable continuation cursor.
+
+`runner_resource_limit_evidence.v1` and `runner_termination_cause_evidence.v1` extend
+only the internal post-reap `NonProductOnly` result. The first binds normalized wall
+timeout and termination/kill grace while fixing CPU/memory limits and verified OS quotas
+to false. The second binds Go's process-exit/cancel/deadline/wait-failure/orphan/partial-
+start trigger to wait/terminate/kill and fixes OS-cause inference and signal identity to
+false. Exit, runtime, limit, and cause evidence validate before atomic assignment.
+
+Concrete OS adapters remain test-only and start only the current Go test binary. R5
+adds no CLI, HTTP, Desktop, Agent, Sandbox, approval, profile, LocalRunner, Docker, or
+product process-start dependency. ADR 0056 records these bounds.

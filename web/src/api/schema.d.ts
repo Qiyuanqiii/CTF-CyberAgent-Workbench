@@ -1308,6 +1308,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/repository-commit-comparison": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compare two exact commit trees
+         * @description Compares two exact local commit objects through bounded tree metadata. The commits need not have an ancestor relationship. The response contains no author, body, blob, patch, remote, host path, rename inference, mutation, process, hook, network, or authority.
+         */
+        get: operations["compareWorkspaceRepositoryCommits"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/repository-commits/{object_id}": {
         parameters: {
             query?: never;
@@ -2689,6 +2709,55 @@ export interface components {
             /** @enum {string} */
             worktree: "unmodified" | "untracked" | "modified" | "added" | "deleted" | "renamed" | "copied" | "conflicted";
         };
+        RepositoryCommitComparisonView: {
+            ancestor_required: boolean;
+            author_identity_included: boolean;
+            authority_granted: boolean;
+            available: boolean;
+            /** Format: date-time */
+            base_committed_at: string;
+            base_hash: string;
+            base_object_id: string;
+            base_redacted: boolean;
+            base_subject: string;
+            base_subject_bounded: boolean;
+            /** Format: int32 */
+            changed_file_count: number;
+            changes: components["schemas"]["RepositoryCommitFileChangeView"][];
+            checkout_performed: boolean;
+            commit_body_included: boolean;
+            file_content_included: boolean;
+            /** Format: date-time */
+            head_committed_at: string;
+            head_hash: string;
+            head_object_id: string;
+            head_redacted: boolean;
+            head_subject: string;
+            head_subject_bounded: boolean;
+            hooks_executed: boolean;
+            /** @enum {string} */
+            kind: "none" | "git";
+            metadata_only: boolean;
+            network_used: boolean;
+            /** Format: int32 */
+            omitted_change_count: number;
+            patch_included: boolean;
+            process_started: boolean;
+            /** @enum {string} */
+            protocol_version: "repository_commit_comparison.v1";
+            read_only: boolean;
+            /** Format: int32 */
+            redaction_count: number;
+            reference_updated: boolean;
+            remote_config_included: boolean;
+            rename_inferred: boolean;
+            /** Format: int32 */
+            returned_change_count: number;
+            root_path_exposed: boolean;
+            same_object: boolean;
+            truncated: boolean;
+            workspace_id: string;
+        };
         RepositoryCommitDetailView: {
             author_identity_included: boolean;
             available: boolean;
@@ -2726,12 +2795,15 @@ export interface components {
             workspace_id: string;
         };
         RepositoryCommitFileChangeView: {
-            change: string;
+            /** @enum {string} */
+            change: "added" | "modified" | "deleted";
             content_changed: boolean;
-            current_kind: string;
+            /** @enum {string} */
+            current_kind: "" | "regular" | "executable" | "symlink" | "submodule";
             mode_changed: boolean;
             path: string;
-            previous_kind: string;
+            /** @enum {string} */
+            previous_kind: "" | "regular" | "executable" | "symlink" | "submodule";
         };
         RepositoryCommitFilePreviewProvenanceView: {
             content_sha256: string;
@@ -6720,6 +6792,46 @@ export interface operations {
                 content: {
                     "application/json": {
                         data: components["schemas"]["WorkspaceExplorerView"];
+                        request_id: string;
+                        /** @constant */
+                        version: "api.v1";
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            414: components["responses"]["RequestTooLarge"];
+            429: components["responses"]["ResourceExhausted"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    compareWorkspaceRepositoryCommits: {
+        parameters: {
+            query: {
+                /** @description Exact lowercase base commit object identity */
+                base_object_id: string;
+                /** @description Exact lowercase head commit object identity */
+                head_object_id: string;
+            };
+            header?: never;
+            path: {
+                /** @description Workspace identity */
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful read */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["RepositoryCommitComparisonView"];
                         request_id: string;
                         /** @constant */
                         version: "api.v1";

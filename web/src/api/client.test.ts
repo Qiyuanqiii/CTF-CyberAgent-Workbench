@@ -1232,6 +1232,49 @@ describe("CyberAgentClient", () => {
       .rejects.toThrow("read-only boundary");
   });
 
+  it("accepts only bounded metadata-only exact commit comparisons", async () => {
+    const baseObjectID = "a".repeat(40);
+    const headObjectID = "b".repeat(40);
+    const comparison = {
+      protocol_version: "repository_commit_comparison.v1", workspace_id: "workspace-1",
+      kind: "git", available: true, base_object_id: baseObjectID,
+      base_hash: baseObjectID.slice(0, 12), base_subject: "comparison base",
+      base_committed_at: "2026-07-19T10:00:00Z", base_redacted: false,
+      base_subject_bounded: false, head_object_id: headObjectID,
+      head_hash: headObjectID.slice(0, 12), head_subject: "comparison head",
+      head_committed_at: "2026-07-19T11:00:00Z", head_redacted: false,
+      head_subject_bounded: false, same_object: false,
+      changes: [{ path: "internal/check.go", change: "modified",
+        previous_kind: "regular", current_kind: "executable", content_changed: true,
+        mode_changed: true }], changed_file_count: 1, returned_change_count: 1,
+      omitted_change_count: 0, redaction_count: 0, truncated: false,
+      metadata_only: true, read_only: true, rename_inferred: false,
+      ancestor_required: false, authority_granted: false, root_path_exposed: false,
+      author_identity_included: false, commit_body_included: false,
+      file_content_included: false, patch_included: false, remote_config_included: false,
+      checkout_performed: false, reference_updated: false, process_started: false,
+      network_used: false, hooks_executed: false,
+    };
+    const envelope = (data: unknown) => new Response(JSON.stringify({
+      version: "api.v1", request_id: "req-comparison", data,
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(envelope(comparison))
+      .mockResolvedValueOnce(envelope({ ...comparison, file_content_included: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new CyberAgentClient("read-secret");
+    await expect(client.repositoryCommitComparison("workspace-1", baseObjectID, headObjectID))
+      .resolves.toEqual(comparison);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      "/api/v1/workspaces/workspace-1/repository-commit-comparison?" +
+      `base_object_id=${baseObjectID}&head_object_id=${headObjectID}`);
+    await expect(client.repositoryCommitComparison("workspace-1", baseObjectID, headObjectID))
+      .rejects.toThrow("metadata contract");
+    await expect(client.repositoryCommitComparison("workspace-1", "short", headObjectID))
+      .rejects.toThrow("exact commit identities");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("validates Workspace search, evidence attachment, and metadata-only receipt history", async () => {
     const provenance = { version: "context_provenance.v1", source_kind: "workspace_file",
       source_ref: "README.md", content_sha256: "d".repeat(64),

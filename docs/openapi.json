@@ -6970,6 +6970,108 @@
         "x-cyberagent-read-only": true
       }
     },
+    "/api/v1/workspaces/{workspace_id}/repository-commit-comparison": {
+      "get": {
+        "operationId": "compareWorkspaceRepositoryCommits",
+        "summary": "Compare two exact commit trees",
+        "description": "Compares two exact local commit objects through bounded tree metadata. The commits need not have an ancestor relationship. The response contains no author, body, blob, patch, remote, host path, rename inference, mutation, process, hook, network, or authority.",
+        "tags": [
+          "Workspaces"
+        ],
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "Workspace identity",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "pattern": "^[^/\\\\\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "base_object_id",
+            "in": "query",
+            "description": "Exact lowercase base commit object identity",
+            "required": true,
+            "schema": {
+              "maxLength": 40,
+              "minLength": 40,
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            }
+          },
+          {
+            "name": "head_object_id",
+            "in": "query",
+            "description": "Exact lowercase head commit object identity",
+            "required": true,
+            "schema": {
+              "maxLength": 40,
+              "minLength": 40,
+              "pattern": "^[0-9a-f]{40}$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful read",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RepositoryCommitComparisonView"
+                    },
+                    "request_id": {
+                      "maxLength": 256,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "version": {
+                      "const": "api.v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "request_id",
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "414": {
+            "$ref": "#/components/responses/RequestTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/ResourceExhausted"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "x-cyberagent-read-only": true
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/repository-commits/{object_id}": {
       "get": {
         "operationId": "getWorkspaceRepositoryCommit",
@@ -12410,6 +12512,205 @@
         ],
         "type": "object"
       },
+      "RepositoryCommitComparisonView": {
+        "additionalProperties": false,
+        "properties": {
+          "ancestor_required": {
+            "type": "boolean"
+          },
+          "author_identity_included": {
+            "type": "boolean"
+          },
+          "authority_granted": {
+            "type": "boolean"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "base_committed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "base_hash": {
+            "maxLength": 12,
+            "type": "string"
+          },
+          "base_object_id": {
+            "maxLength": 40,
+            "minLength": 40,
+            "pattern": "^[0-9a-f]{40}$",
+            "type": "string"
+          },
+          "base_redacted": {
+            "type": "boolean"
+          },
+          "base_subject": {
+            "type": "string"
+          },
+          "base_subject_bounded": {
+            "type": "boolean"
+          },
+          "changed_file_count": {
+            "format": "int32",
+            "maximum": 40000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/RepositoryCommitFileChangeView"
+            },
+            "maxItems": 200,
+            "type": "array"
+          },
+          "checkout_performed": {
+            "type": "boolean"
+          },
+          "commit_body_included": {
+            "type": "boolean"
+          },
+          "file_content_included": {
+            "type": "boolean"
+          },
+          "head_committed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "head_hash": {
+            "maxLength": 12,
+            "type": "string"
+          },
+          "head_object_id": {
+            "maxLength": 40,
+            "minLength": 40,
+            "pattern": "^[0-9a-f]{40}$",
+            "type": "string"
+          },
+          "head_redacted": {
+            "type": "boolean"
+          },
+          "head_subject": {
+            "type": "string"
+          },
+          "head_subject_bounded": {
+            "type": "boolean"
+          },
+          "hooks_executed": {
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "none",
+              "git"
+            ],
+            "type": "string"
+          },
+          "metadata_only": {
+            "type": "boolean"
+          },
+          "network_used": {
+            "type": "boolean"
+          },
+          "omitted_change_count": {
+            "format": "int32",
+            "maximum": 40000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "patch_included": {
+            "type": "boolean"
+          },
+          "process_started": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "repository_commit_comparison.v1"
+            ],
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "redaction_count": {
+            "format": "int32",
+            "maximum": 40000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reference_updated": {
+            "type": "boolean"
+          },
+          "remote_config_included": {
+            "type": "boolean"
+          },
+          "rename_inferred": {
+            "type": "boolean"
+          },
+          "returned_change_count": {
+            "format": "int32",
+            "maximum": 200,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "root_path_exposed": {
+            "type": "boolean"
+          },
+          "same_object": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "workspace_id",
+          "kind",
+          "available",
+          "base_object_id",
+          "base_hash",
+          "base_subject",
+          "base_committed_at",
+          "base_redacted",
+          "base_subject_bounded",
+          "head_object_id",
+          "head_hash",
+          "head_subject",
+          "head_committed_at",
+          "head_redacted",
+          "head_subject_bounded",
+          "same_object",
+          "changes",
+          "changed_file_count",
+          "returned_change_count",
+          "omitted_change_count",
+          "redaction_count",
+          "truncated",
+          "metadata_only",
+          "read_only",
+          "rename_inferred",
+          "ancestor_required",
+          "authority_granted",
+          "root_path_exposed",
+          "author_identity_included",
+          "commit_body_included",
+          "file_content_included",
+          "patch_included",
+          "remote_config_included",
+          "checkout_performed",
+          "reference_updated",
+          "process_started",
+          "network_used",
+          "hooks_executed"
+        ],
+        "type": "object"
+      },
       "RepositoryCommitDetailView": {
         "additionalProperties": false,
         "properties": {
@@ -12547,12 +12848,24 @@
         "additionalProperties": false,
         "properties": {
           "change": {
+            "enum": [
+              "added",
+              "modified",
+              "deleted"
+            ],
             "type": "string"
           },
           "content_changed": {
             "type": "boolean"
           },
           "current_kind": {
+            "enum": [
+              "",
+              "regular",
+              "executable",
+              "symlink",
+              "submodule"
+            ],
             "type": "string"
           },
           "mode_changed": {
@@ -12562,6 +12875,13 @@
             "type": "string"
           },
           "previous_kind": {
+            "enum": [
+              "",
+              "regular",
+              "executable",
+              "symlink",
+              "submodule"
+            ],
             "type": "string"
           }
         },

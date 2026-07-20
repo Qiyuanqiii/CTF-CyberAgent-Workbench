@@ -491,6 +491,9 @@ func TestOpenAPIRoutesMatchAuthenticatedLiveHandlers(t *testing.T) {
 			requestPath += "?path=README.md"
 		} else if spec.OperationID == "getWorkspaceRepositoryCommitFilePreview" {
 			requestPath += "?path=README.md"
+		} else if spec.OperationID == "compareWorkspaceRepositoryCommits" {
+			requestPath += "?base_object_id=" + strings.Repeat("a", 40) +
+				"&head_object_id=" + strings.Repeat("b", 40)
 		} else if spec.OperationID == "issueFileEditProposalSource" {
 			requestPath += "?path=README.md"
 		} else if spec.OperationID == "exportCodeHandoff" {

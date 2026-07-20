@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FileClock, FileCode2, FileDiff, GitCommitHorizontal, RefreshCw } from "lucide-react";
+import { FileClock, FileCode2, FileDiff, GitCommitHorizontal, GitCompareArrows,
+  RefreshCw } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import { formatDate } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
@@ -12,7 +13,12 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
   const [selection, setSelection] = useState({ workspaceID: "", objectID: "" });
   const [fileSelection, setFileSelection] = useState({ workspaceID: "", objectID: "", path: "" });
   const [historySelection, setHistorySelection] = useState({ workspaceID: "", path: "" });
+  const [comparisonBase, setComparisonBase] = useState({ workspaceID: "", objectID: "" });
   const selectedObjectID = selection.workspaceID === workspaceID ? selection.objectID : "";
+  const comparisonBaseObjectID = comparisonBase.workspaceID === workspaceID ?
+    comparisonBase.objectID : "";
+  const comparisonHeadObjectID = selectedObjectID && selectedObjectID !== comparisonBaseObjectID ?
+    selectedObjectID : "";
   const selectedFilePath = fileSelection.workspaceID === workspaceID &&
     fileSelection.objectID === selectedObjectID ? fileSelection.path : "";
   const selectedHistoryPath = historySelection.workspaceID === workspaceID ?
@@ -26,6 +32,13 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
     queryKey: ["workspace", workspaceID, "repository-commit", selectedObjectID],
     queryFn: ({ signal }) => client.repositoryCommit(workspaceID, selectedObjectID, signal),
     enabled: Boolean(workspaceID && selectedObjectID),
+  });
+  const comparisonQuery = useQuery({
+    queryKey: ["workspace", workspaceID, "repository-commit-comparison",
+      comparisonBaseObjectID, comparisonHeadObjectID],
+    queryFn: ({ signal }) => client.repositoryCommitComparison(workspaceID,
+      comparisonBaseObjectID, comparisonHeadObjectID, signal),
+    enabled: Boolean(workspaceID && comparisonBaseObjectID && comparisonHeadObjectID),
   });
   const fileQuery = useQuery({
     queryKey: ["workspace", workspaceID, "repository-commit", selectedObjectID,
@@ -86,7 +99,19 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
       {detailQuery.data && <>
         <header><span><code>{detailQuery.data.hash}</code><strong>{detailQuery.data.subject}</strong></span>
           <span><StatusBadge status={`${detailQuery.data.changed_file_count} changed`} />
-            {detailQuery.data.truncated && <StatusBadge status="truncated" />}</span></header>
+            {comparisonBaseObjectID === selectedObjectID && <StatusBadge status="comparison base" />}
+            {detailQuery.data.truncated && <StatusBadge status="truncated" />}
+            <button aria-label={comparisonBaseObjectID === selectedObjectID ?
+              `Clear comparison base ${detailQuery.data.hash}` :
+              `Use ${detailQuery.data.hash} as comparison base`}
+              aria-pressed={comparisonBaseObjectID === selectedObjectID} className="icon-button"
+              onClick={() => setComparisonBase((current) =>
+                current.workspaceID === workspaceID && current.objectID === selectedObjectID ?
+                  { workspaceID: "", objectID: "" } : { workspaceID, objectID: selectedObjectID })}
+              title={comparisonBaseObjectID === selectedObjectID ?
+                "Clear comparison base" : "Use as comparison base"} type="button">
+              <GitCompareArrows aria-hidden="true" size={14} />
+            </button></span></header>
         {detailQuery.data.changes.length === 0 ? <EmptyState>No changed files in this commit</EmptyState> :
           <div className="repository-commit-change-list">{detailQuery.data.changes.map((change) =>
             <div key={`${change.change}:${change.path}`}><StatusBadge status={change.change} />
@@ -127,6 +152,34 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
         </section>}
       </>}
     </section>}
+    {comparisonBaseObjectID && comparisonHeadObjectID &&
+      <section aria-label="Exact commit comparison" className="repository-commit-comparison">
+        {comparisonQuery.isLoading && <LoadingState label="Loading exact commit comparison" />}
+        {comparisonQuery.isError && <ErrorState error={comparisonQuery.error} />}
+        {comparisonQuery.data && <>
+          <header><span><GitCompareArrows aria-hidden="true" size={14} />
+            <code>{comparisonQuery.data.base_hash}</code><span>to</span>
+            <code>{comparisonQuery.data.head_hash}</code></span>
+            <span><StatusBadge status={`${comparisonQuery.data.changed_file_count} changed`} />
+              {comparisonQuery.data.truncated && <StatusBadge status="truncated" />}</span></header>
+          <div className="repository-commit-comparison-subjects">
+            <span title={comparisonQuery.data.base_subject}>{comparisonQuery.data.base_subject}</span>
+            <span title={comparisonQuery.data.head_subject}>{comparisonQuery.data.head_subject}</span>
+          </div>
+          {comparisonQuery.data.changes.length === 0 ?
+            <EmptyState>No metadata changes between these commits</EmptyState> :
+            <div className="repository-commit-comparison-list">{comparisonQuery.data.changes.map((change) =>
+              <div key={`${change.change}:${change.path}`}><StatusBadge status={change.change} />
+                <code title={change.path}>{change.path}</code>
+                <span>{change.previous_kind || "none"} to {change.current_kind || "none"}</span>
+                <span>{change.content_changed ? "content" : "mode only"}</span>
+              </div>)}</div>}
+          {comparisonQuery.data.omitted_change_count > 0 &&
+            <p className="repository-diff-omitted">
+              {comparisonQuery.data.omitted_change_count} additional changes omitted
+            </p>}
+        </>}
+      </section>}
     {selectedHistoryPath && <section aria-label="Exact file history"
       className="repository-file-history">
       {fileHistoryQuery.isLoading && <LoadingState label="Loading exact file history" />}

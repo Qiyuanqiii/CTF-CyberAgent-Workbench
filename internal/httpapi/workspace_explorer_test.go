@@ -223,6 +223,32 @@ func TestWorkspaceRepositoryStateHTTPIsReadOnlyAndRootBound(t *testing.T) {
 		testAccessToken, "", "", nil)
 	assertAPIError(t, invalidCommit, http.StatusBadRequest, "INVALID_ARGUMENT")
 
+	comparisonPath := "/api/v1/workspaces/" + registered.ID +
+		"/repository-commit-comparison?base_object_id=" + commitID.String() +
+		"&head_object_id=" + commitID.String()
+	comparison := performSessionMessageRequest(t, api, http.MethodGet, comparisonPath,
+		testAccessToken, "", "", nil)
+	comparisonBody := comparison.Body.String()
+	if comparison.Code != http.StatusOK ||
+		!strings.Contains(comparisonBody, `"protocol_version":"repository_commit_comparison.v1"`) ||
+		!strings.Contains(comparisonBody, `"base_object_id":"`+commitID.String()+`"`) ||
+		!strings.Contains(comparisonBody, `"head_object_id":"`+commitID.String()+`"`) ||
+		!strings.Contains(comparisonBody, `"same_object":true`) ||
+		!strings.Contains(comparisonBody, `"metadata_only":true`) ||
+		!strings.Contains(comparisonBody, `"rename_inferred":false`) ||
+		!strings.Contains(comparisonBody, `"authority_granted":false`) ||
+		strings.Contains(comparisonBody, commitSecret) || strings.Contains(comparisonBody, "Private") ||
+		strings.Contains(comparisonBody, "private body") || strings.Contains(comparisonBody, root) {
+		t.Fatalf("repository comparison status=%d body=%s", comparison.Code, comparisonBody)
+	}
+	duplicateComparison := performSessionMessageRequest(t, api, http.MethodGet,
+		comparisonPath+"&head_object_id="+commitID.String(), testAccessToken, "", "", nil)
+	assertAPIError(t, duplicateComparison, http.StatusBadRequest, "INVALID_ARGUMENT")
+	missingComparison := performSessionMessageRequest(t, api, http.MethodGet,
+		strings.Split(comparisonPath, "?")[0]+"?base_object_id="+commitID.String(),
+		testAccessToken, "", "", nil)
+	assertAPIError(t, missingComparison, http.StatusBadRequest, "INVALID_ARGUMENT")
+
 	previewPath := commitPath + "/file-preview?path=tracked.txt"
 	preview := performSessionMessageRequest(t, api, http.MethodGet, previewPath,
 		testAccessToken, "", "", nil)

@@ -347,6 +347,7 @@ func TestProcessTreeConformanceCleansChildAfterParentExit(t *testing.T) {
 func assertConformanceEvidence(t *testing.T, result Result) {
 	t.Helper()
 	if !result.ExitEvidenceAvailable || !result.RuntimeEvidenceAvailable ||
+		!result.ResourceLimitEvidenceAvailable || !result.TerminationCauseEvidenceAvailable ||
 		result.RawOutputIncluded || result.OutputTruncated ||
 		result.ExitEvidence.ProtocolVersion != ExitEvidenceProtocolVersion ||
 		!result.ExitEvidence.MetadataOnly || result.ExitEvidence.RawOutputIncluded ||
@@ -368,7 +369,20 @@ func assertConformanceEvidence(t *testing.T, result Result) {
 		result.RuntimeEvidence.Descriptors.ExtraDescriptorCount != 0 ||
 		result.RuntimeEvidence.Descriptors.InheritedDescriptorCount != 0 ||
 		result.RuntimeEvidence.Resources.RawTelemetryIncluded ||
-		result.RuntimeEvidence.Resources.NetworkTelemetryIncluded {
+		result.RuntimeEvidence.Resources.NetworkTelemetryIncluded ||
+		result.ResourceLimitEvidence.ProtocolVersion != ResourceLimitEvidenceProtocolVersion ||
+		!result.ResourceLimitEvidence.WallDeadlineConfigured ||
+		result.ResourceLimitEvidence.CPUTimeLimitConfigured ||
+		result.ResourceLimitEvidence.MemoryLimitConfigured ||
+		result.ResourceLimitEvidence.OSResourceLimitsVerified ||
+		!result.ResourceLimitEvidence.MetadataOnly ||
+		result.ResourceLimitEvidence.ProductExecutionEnabled ||
+		result.TerminationCauseEvidence.ProtocolVersion != TerminationCauseEvidenceProtocolVersion ||
+		result.TerminationCauseEvidence.FinalMechanism != terminationMechanism(result) ||
+		result.TerminationCauseEvidence.OSCauseInferred ||
+		result.TerminationCauseEvidence.SignalIdentityIncluded ||
+		!result.TerminationCauseEvidence.MetadataOnly ||
+		result.TerminationCauseEvidence.ProductExecutionEnabled {
 		t.Fatalf("process-tree output evidence widened or was incomplete: %#v", result)
 	}
 }

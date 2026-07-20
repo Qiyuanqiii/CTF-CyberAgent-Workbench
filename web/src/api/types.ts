@@ -88,6 +88,7 @@ export type RepositoryDiffView = components["schemas"]["RepositoryDiffView"];
 export type RepositoryHistoryView = components["schemas"]["RepositoryHistoryView"];
 export type RepositoryFileHistoryView = components["schemas"]["RepositoryFileHistoryView"];
 export type RepositoryCommitDetailView = components["schemas"]["RepositoryCommitDetailView"];
+export type RepositoryCommitComparisonView = components["schemas"]["RepositoryCommitComparisonView"];
 export type RepositoryCommitFilePreviewView = components["schemas"]["RepositoryCommitFilePreviewView"];
 export type VerificationEvidenceRequestView = components["schemas"]["VerificationEvidenceRequestView"];
 export type VerificationEvidenceControlView = components["schemas"]["VerificationEvidenceControlView"];

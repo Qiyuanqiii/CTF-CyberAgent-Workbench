@@ -408,6 +408,15 @@ td code { font-size: 11px; }
 .repository-commit-change-list > div { min-width: 0; display: grid; grid-template-columns: 76px minmax(180px, 1fr) 170px 70px 32px 32px; align-items: center; gap: 9px; min-height: 36px; border-top: 1px solid var(--border); font-size: 10px; }
 .repository-commit-change-list code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .repository-commit-change-list > div > span:not(.status-badge) { color: var(--muted); }
+.repository-commit-comparison { min-width: 0; border-bottom: 1px solid var(--border); }
+.repository-commit-comparison > header { min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.repository-commit-comparison > header > span { min-width: 0; display: flex; align-items: center; gap: 7px; }
+.repository-commit-comparison-subjects { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 0 0 9px; color: var(--muted); font-size: 10px; }
+.repository-commit-comparison-subjects > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-commit-comparison-list { display: grid; }
+.repository-commit-comparison-list > div { min-width: 0; display: grid; grid-template-columns: 76px minmax(180px, 1fr) 170px 70px; align-items: center; gap: 9px; min-height: 36px; border-top: 1px solid var(--border); font-size: 10px; }
+.repository-commit-comparison-list code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repository-commit-comparison-list > div > span:not(.status-badge) { color: var(--muted); }
 .repository-preview-placeholder { width: 32px; height: 32px; }
 .repository-commit-file-preview { min-width: 0; border-top: 1px solid var(--border); }
 .repository-commit-file-preview > header { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -707,6 +716,10 @@ td code { font-size: 11px; }
 	.repository-commit-change-list > div > span:not(.status-badge) { grid-column: 2; }
 	.repository-commit-change-list > div > .icon-button:first-of-type { grid-column: 3; grid-row: 1 / span 2; }
 	.repository-commit-change-list > div > .icon-button:nth-of-type(2), .repository-preview-placeholder { grid-column: 4; grid-row: 1 / span 2; }
+	.repository-commit-comparison > header { align-items: flex-start; flex-direction: column; padding: 8px 0; }
+	.repository-commit-comparison-subjects { grid-template-columns: minmax(0, 1fr); }
+	.repository-commit-comparison-list > div { grid-template-columns: 76px minmax(0, 1fr); padding: 6px 0; }
+	.repository-commit-comparison-list > div > span:not(.status-badge) { grid-column: 2; }
 	.repository-file-history-list > div { grid-template-columns: 76px 88px minmax(0, 1fr) 72px; padding: 6px 0; }
 	.repository-file-history-list time, .repository-file-history-list > div > span:not(.status-badge) { grid-column: 3; }
 	.repository-file-history-actions { grid-column: 4; grid-row: 1 / span 3; }

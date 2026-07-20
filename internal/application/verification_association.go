@@ -42,7 +42,12 @@ type VerificationAssociationStore interface {
 type VerificationCoverageDetailStore interface {
 	VerificationCoverageStore
 	GetVerificationPlan(context.Context, string) (verification.Plan, error)
-	ListVerificationPlanItemEvidenceAssociations(context.Context, string, string, int, int, int) (
+	GetVerificationPlanItemCoverageSnapshot(context.Context, string, string, int, int64) (
+		verification.PlanItemCoverageCount, bool, error)
+	CountVerificationPlanItemAssociationsThroughAnchor(context.Context,
+		string, string, int, int64, int64, string) (int, bool, error)
+	ListVerificationPlanItemEvidenceAssociations(context.Context,
+		string, string, int, int, int64, int64, string) (
 		[]verification.PlanEvidenceAssociation, error)
 }
 
@@ -139,6 +144,17 @@ type VerificationPlanItemCoverageDetail struct {
 	RecordRewritten                bool
 	Approval                       bool
 	AuthorityGranted               bool
+	SnapshotHighWaterEventSequence int64
+	NextPageBeforeEventSequence    int64
+	NextPageBeforeAssociationID    string
+	NextPageConsumed               int
+}
+
+type VerificationCoveragePageAnchor struct {
+	SnapshotHighWaterEventSequence int64
+	BeforeEventSequence            int64
+	BeforeAssociationID            string
+	Consumed                       int
 }
 
 func NewVerificationAssociationService(store VerificationAssociationStore) *VerificationAssociationService {
@@ -155,11 +171,12 @@ func NewVerificationCoverageDetailService(
 func (s *VerificationCoverageDetailService) Detail(ctx context.Context, runID string,
 	planID string, ordinal int,
 ) (VerificationPlanItemCoverageDetail, error) {
-	return s.DetailPage(ctx, runID, planID, ordinal, verification.MaxCoverageAssociations, 0)
+	return s.DetailPage(ctx, runID, planID, ordinal, verification.MaxCoverageAssociations,
+		VerificationCoveragePageAnchor{})
 }
 
 func (s *VerificationCoverageDetailService) DetailPage(ctx context.Context, runID string,
-	planID string, ordinal int, limit int, offset int,
+	planID string, ordinal int, limit int, anchor VerificationCoveragePageAnchor,
 ) (VerificationPlanItemCoverageDetail, error) {
 	if s == nil || s.store == nil {
 		return VerificationPlanItemCoverageDetail{}, apperror.New(
@@ -167,8 +184,7 @@ func (s *VerificationCoverageDetailService) DetailPage(ctx context.Context, runI
 	}
 	if planID != strings.TrimSpace(planID) || !domain.ValidAgentID(planID) ||
 		ordinal < 1 || ordinal > verification.MaxPlanItems || limit < 1 ||
-		limit > verification.MaxCoverageAssociations || offset < 0 ||
-		offset > verification.MaxCoveragePageOffset {
+		limit > verification.MaxCoverageAssociations || !validVerificationCoveragePageAnchor(anchor) {
 		return VerificationPlanItemCoverageDetail{}, apperror.New(
 			apperror.CodeInvalidArgument, "verification coverage detail binding is invalid")
 	}
@@ -202,7 +218,8 @@ func (s *VerificationCoverageDetailService) DetailPage(ctx context.Context, runI
 	if err != nil {
 		return VerificationPlanItemCoverageDetail{}, apperror.Normalize(err)
 	}
-	countFound := false
+	currentCountFound := false
+	var currentCount verification.PlanItemCoverageCount
 	seenCounts := make(map[int]struct{}, len(counts))
 	for _, count := range counts {
 		if err := count.Validate(); err != nil || count.PlanID != plan.ID ||
@@ -219,33 +236,81 @@ func (s *VerificationCoverageDetailService) DetailPage(ctx context.Context, runI
 		if count.PlanItemOrdinal != ordinal {
 			continue
 		}
-		countFound = true
-		result.AssociatedEvidenceCount = count.AssociatedEvidenceCount
-		result.PassCount = count.PassCount
-		result.FailCount = count.FailCount
-		result.UnknownCount = count.UnknownCount
-		result.LatestAssociationEventSequence = count.LatestAssociationEventSequence
+		currentCountFound = true
+		currentCount = count
 	}
-	associations, err := s.store.ListVerificationPlanItemEvidenceAssociations(ctx, run.ID,
-		plan.ID, ordinal, limit+1, offset)
+	highWater := anchor.SnapshotHighWaterEventSequence
+	if anchor.Consumed == 0 && currentCountFound {
+		highWater = currentCount.LatestAssociationEventSequence
+	}
+	if anchor.Consumed > 0 && (!currentCountFound ||
+		currentCount.LatestAssociationEventSequence < highWater) {
+		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+			"verification coverage snapshot high-water is unavailable")
+	}
+	snapshot, snapshotFound, err := s.store.GetVerificationPlanItemCoverageSnapshot(ctx,
+		run.ID, plan.ID, ordinal, highWater)
 	if err != nil {
 		return VerificationPlanItemCoverageDetail{}, apperror.Normalize(err)
 	}
-	result.AssociationsTruncated = len(associations) > limit
-	if result.AssociationsTruncated {
-		associations = associations[:limit]
+	if snapshotFound && (snapshot.Validate() != nil || snapshot.PlanID != plan.ID ||
+		snapshot.PlanItemOrdinal != ordinal || snapshot.PlanItemSHA256 != item.ItemSHA256 ||
+		snapshot.LatestAssociationEventSequence != highWater) {
+		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+			"verification coverage snapshot is invalid")
 	}
-	expectedReturned := 0
-	expectedMore := false
-	if countFound && offset < result.AssociatedEvidenceCount {
-		expectedReturned = result.AssociatedEvidenceCount - offset
-		if expectedReturned > limit {
-			expectedReturned = limit
-			expectedMore = true
+	if (highWater == 0 && snapshotFound) || (highWater > 0 && !snapshotFound) ||
+		(anchor.Consumed == 0 && (snapshotFound != currentCountFound ||
+			(snapshotFound && !sameVerificationCoverageCount(snapshot, currentCount)))) {
+		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+			"verification coverage snapshot diverged from its initial aggregate")
+	}
+	if snapshotFound {
+		result.AssociatedEvidenceCount = snapshot.AssociatedEvidenceCount
+		result.PassCount = snapshot.PassCount
+		result.FailCount = snapshot.FailCount
+		result.UnknownCount = snapshot.UnknownCount
+		result.LatestAssociationEventSequence = snapshot.LatestAssociationEventSequence
+	}
+	result.SnapshotHighWaterEventSequence = highWater
+	if anchor.Consumed > 0 {
+		position, found, err := s.store.CountVerificationPlanItemAssociationsThroughAnchor(ctx,
+			run.ID, plan.ID, ordinal, highWater, anchor.BeforeEventSequence,
+			anchor.BeforeAssociationID)
+		if err != nil {
+			return VerificationPlanItemCoverageDetail{}, apperror.Normalize(err)
+		}
+		if !found || position != anchor.Consumed || position >= result.AssociatedEvidenceCount {
+			return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+				"verification coverage page anchor does not match its snapshot position")
 		}
 	}
-	if (!countFound && len(associations) != 0) || len(associations) != expectedReturned ||
-		result.AssociationsTruncated != expectedMore {
+	pageCapacity := limit
+	if remainingWindow := verification.MaxCoveragePageWindow - anchor.Consumed; pageCapacity > remainingWindow {
+		pageCapacity = remainingWindow
+	}
+	associations, err := s.store.ListVerificationPlanItemEvidenceAssociations(ctx, run.ID,
+		plan.ID, ordinal, pageCapacity+1, highWater, anchor.BeforeEventSequence,
+		anchor.BeforeAssociationID)
+	if err != nil {
+		return VerificationPlanItemCoverageDetail{}, apperror.Normalize(err)
+	}
+	actualMore := len(associations) > pageCapacity
+	if actualMore {
+		associations = associations[:pageCapacity]
+	}
+	remaining := result.AssociatedEvidenceCount - anchor.Consumed
+	if remaining < 0 {
+		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
+			"verification coverage page consumed count exceeds its snapshot")
+	}
+	expectedReturned := remaining
+	if expectedReturned > pageCapacity {
+		expectedReturned = pageCapacity
+	}
+	expectedMore := remaining > pageCapacity
+	result.AssociationsTruncated = expectedMore
+	if len(associations) != expectedReturned || actualMore != expectedMore {
 		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
 			"verification coverage detail association count is inconsistent")
 	}
@@ -253,14 +318,18 @@ func (s *VerificationCoverageDetailService) DetailPage(ctx context.Context, runI
 	seenAssociations := make(map[string]struct{}, len(associations))
 	seenEvidence := make(map[string]struct{}, len(associations))
 	previousSequence := int64(^uint64(0) >> 1)
+	previousID := ""
 	returnedPass, returnedFail, returnedUnknown := 0, 0, 0
 	for index, association := range associations {
 		if err := association.Validate(); err != nil || association.RunID != run.ID ||
 			association.SessionID != linkedSession.ID || association.WorkspaceID != mission.WorkspaceID ||
 			association.PlanID != plan.ID || association.PlanItemOrdinal != ordinal ||
 			association.PlanItemSHA256 != item.ItemSHA256 ||
-			association.EventSequence > result.LatestAssociationEventSequence ||
-			(index > 0 && association.EventSequence >= previousSequence) {
+			association.EventSequence > highWater ||
+			(anchor.Consumed > 0 && !verificationAssociationTupleBefore(association.EventSequence,
+				association.ID, anchor.BeforeEventSequence, anchor.BeforeAssociationID)) ||
+			(index > 0 && !verificationAssociationTupleBefore(association.EventSequence,
+				association.ID, previousSequence, previousID)) {
 			return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
 				"verification coverage detail association is invalid")
 		}
@@ -275,6 +344,7 @@ func (s *VerificationCoverageDetailService) DetailPage(ctx context.Context, runI
 		seenAssociations[association.ID] = struct{}{}
 		seenEvidence[association.EvidenceID] = struct{}{}
 		previousSequence = association.EventSequence
+		previousID = association.ID
 		switch association.EvidenceOutcome {
 		case verification.OutcomePass:
 			returnedPass++
@@ -291,19 +361,54 @@ func (s *VerificationCoverageDetailService) DetailPage(ctx context.Context, runI
 			AssociationSequence:   association.EventSequence, CreatedAt: association.CreatedAt,
 		}
 	}
-	if countFound && offset == 0 && len(associations) > 0 &&
+	if snapshotFound && anchor.Consumed == 0 && len(associations) > 0 &&
 		associations[0].EventSequence != result.LatestAssociationEventSequence {
 		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
 			"verification coverage detail latest sequence is inconsistent")
 	}
 	if returnedPass > result.PassCount || returnedFail > result.FailCount ||
 		returnedUnknown > result.UnknownCount ||
-		(offset == 0 && !result.AssociationsTruncated && (returnedPass != result.PassCount ||
-			returnedFail != result.FailCount || returnedUnknown != result.UnknownCount)) {
+		(anchor.Consumed == 0 && !result.AssociationsTruncated &&
+			(returnedPass != result.PassCount ||
+				returnedFail != result.FailCount || returnedUnknown != result.UnknownCount)) {
 		return VerificationPlanItemCoverageDetail{}, apperror.New(apperror.CodeConflict,
 			"verification coverage detail outcomes are inconsistent")
 	}
+	if result.AssociationsTruncated {
+		last := associations[len(associations)-1]
+		result.NextPageBeforeEventSequence = last.EventSequence
+		result.NextPageBeforeAssociationID = last.ID
+		result.NextPageConsumed = anchor.Consumed + len(associations)
+	}
 	return result, nil
+}
+
+func validVerificationCoveragePageAnchor(anchor VerificationCoveragePageAnchor) bool {
+	if anchor == (VerificationCoveragePageAnchor{}) {
+		return true
+	}
+	return anchor.SnapshotHighWaterEventSequence > 0 && anchor.BeforeEventSequence > 0 &&
+		anchor.BeforeEventSequence <= anchor.SnapshotHighWaterEventSequence &&
+		anchor.BeforeAssociationID == strings.TrimSpace(anchor.BeforeAssociationID) &&
+		domain.ValidAgentID(anchor.BeforeAssociationID) && anchor.Consumed > 0 &&
+		anchor.Consumed < verification.MaxCoveragePageWindow
+}
+
+func sameVerificationCoverageCount(left verification.PlanItemCoverageCount,
+	right verification.PlanItemCoverageCount,
+) bool {
+	return left.PlanID == right.PlanID && left.PlanItemOrdinal == right.PlanItemOrdinal &&
+		left.PlanItemSHA256 == right.PlanItemSHA256 &&
+		left.AssociatedEvidenceCount == right.AssociatedEvidenceCount &&
+		left.PassCount == right.PassCount && left.FailCount == right.FailCount &&
+		left.UnknownCount == right.UnknownCount &&
+		left.LatestAssociationEventSequence == right.LatestAssociationEventSequence
+}
+
+func verificationAssociationTupleBefore(sequence int64, id string,
+	beforeSequence int64, beforeID string,
+) bool {
+	return sequence < beforeSequence || (sequence == beforeSequence && id < beforeID)
 }
 
 func (s *VerificationAssociationService) Record(ctx context.Context,

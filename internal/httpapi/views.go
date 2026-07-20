@@ -287,6 +287,48 @@ type RepositoryCommitDetailView struct {
 	HooksExecuted          bool                             `json:"hooks_executed"`
 }
 
+type RepositoryCommitComparisonView struct {
+	ProtocolVersion        string                           `json:"protocol_version"`
+	WorkspaceID            string                           `json:"workspace_id"`
+	Kind                   string                           `json:"kind"`
+	Available              bool                             `json:"available"`
+	BaseObjectID           string                           `json:"base_object_id"`
+	BaseHash               string                           `json:"base_hash"`
+	BaseSubject            string                           `json:"base_subject"`
+	BaseCommittedAt        time.Time                        `json:"base_committed_at"`
+	BaseRedacted           bool                             `json:"base_redacted"`
+	BaseSubjectBounded     bool                             `json:"base_subject_bounded"`
+	HeadObjectID           string                           `json:"head_object_id"`
+	HeadHash               string                           `json:"head_hash"`
+	HeadSubject            string                           `json:"head_subject"`
+	HeadCommittedAt        time.Time                        `json:"head_committed_at"`
+	HeadRedacted           bool                             `json:"head_redacted"`
+	HeadSubjectBounded     bool                             `json:"head_subject_bounded"`
+	SameObject             bool                             `json:"same_object"`
+	Changes                []RepositoryCommitFileChangeView `json:"changes"`
+	ChangedFileCount       int                              `json:"changed_file_count"`
+	ReturnedChangeCount    int                              `json:"returned_change_count"`
+	OmittedChangeCount     int                              `json:"omitted_change_count"`
+	RedactionCount         int                              `json:"redaction_count"`
+	Truncated              bool                             `json:"truncated"`
+	MetadataOnly           bool                             `json:"metadata_only"`
+	ReadOnly               bool                             `json:"read_only"`
+	RenameInferred         bool                             `json:"rename_inferred"`
+	AncestorRequired       bool                             `json:"ancestor_required"`
+	AuthorityGranted       bool                             `json:"authority_granted"`
+	RootPathExposed        bool                             `json:"root_path_exposed"`
+	AuthorIdentityIncluded bool                             `json:"author_identity_included"`
+	CommitBodyIncluded     bool                             `json:"commit_body_included"`
+	FileContentIncluded    bool                             `json:"file_content_included"`
+	PatchIncluded          bool                             `json:"patch_included"`
+	RemoteConfigIncluded   bool                             `json:"remote_config_included"`
+	CheckoutPerformed      bool                             `json:"checkout_performed"`
+	ReferenceUpdated       bool                             `json:"reference_updated"`
+	ProcessStarted         bool                             `json:"process_started"`
+	NetworkUsed            bool                             `json:"network_used"`
+	HooksExecuted          bool                             `json:"hooks_executed"`
+}
+
 type RepositoryCommitFilePreviewProvenanceView struct {
 	Version               string `json:"version"`
 	SourceKind            string `json:"source_kind"`

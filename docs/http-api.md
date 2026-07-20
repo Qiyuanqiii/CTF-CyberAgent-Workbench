@@ -52,9 +52,9 @@ route still requires the control token and its corresponding Go gate independent
 
 ### Windows Desktop 进程内传输 / Windows Desktop In-Process Transport
 
-Desktop 至 D1-G7/V6 复用同一 `api.v1` Handler，但不调用 `ListenAndServe`，也不绑定回环端口。Wails AssetServer 在同一进程内把 React 请求交给 Go；适配层只接受精确 `http://wails.localhost`。默认只生成内存 read token；十九个独立 flag 开放各自窄 route 或进程生命周期内的 wake worker。Repository state/Diff、history、change-set、Journey、Handoff 与验证分页不增加 flag 或 control route；verification evidence 使用自己的默认关闭 flag。任一 control capability 会生成同一个不同于 read token 的内存 control token，未启用 route 仍返回 404。两个 token 都不写磁盘、日志、Local Storage 或注册表。
+Desktop 至 D1-G8/V7 复用同一 `api.v1` Handler，但不调用 `ListenAndServe`，也不绑定回环端口。Wails AssetServer 在同一进程内把 React 请求交给 Go；适配层只接受精确 `http://wails.localhost`。默认只生成内存 read token；十九个独立 flag 开放各自窄 route 或进程生命周期内的 wake worker。Repository state/Diff/history/comparison、change-set、Journey、Handoff 与验证分页不增加 flag 或 control route；verification evidence 使用自己的默认关闭 flag。任一 control capability 会生成同一个不同于 read token 的内存 control token，未启用 route 仍返回 404。两个 token 都不写磁盘、日志、Local Storage 或注册表。
 
-Desktop through D1-G7/V6 reuses the same `api.v1` Handler without calling `ListenAndServe` or binding a loopback port. The Wails AssetServer passes React requests to Go in process, and a narrow adapter accepts only exact `http://wails.localhost`. Nineteen independent flags expose narrow routes or the process-lifetime wake worker. Repository state/Diff/history, change-set, Journey, Handoff, and verification pagination add no flag or control route; verification evidence has its own default-off flag. Any control capability creates one in-memory control token distinct from the read token, while disabled routes remain 404; neither token is written to disk, logs, browser storage, or the registry.
+Desktop through D1-G8/V7 reuses the same `api.v1` Handler without calling `ListenAndServe` or binding a loopback port. The Wails AssetServer passes React requests to Go in process, and a narrow adapter accepts only exact `http://wails.localhost`. Nineteen independent flags expose narrow routes or the process-lifetime wake worker. Repository state/Diff/history/comparison, change-set, Journey, Handoff, and verification pagination add no flag or control route; verification evidence has its own default-off flag. Any control capability creates one in-memory control token distinct from the read token, while disabled routes remain 404; neither token is written to disk, logs, browser storage, or the registry.
 
 普通浏览器继续使用 `/events/stream` SSE。Wails v2 在 Windows 上不支持 AssetServer response streaming，因此 Desktop 使用 `GET /runs/{run_id}/events/poll` 做一秒有界轮询。该 endpoint 与 SSE 共用同一个绑定 Run 与 sequence 的高水位 cursor，单次最多返回 100 帧并明确给出 `has_more`；poll cursor 可续接 SSE，SSE cursor 也可续接 poll。Renderer 最多在模块内存保存 16 个 Run、每个 500 帧，重挂载继续最后 cursor，失效 cursor 每次挂载最多回退一次；不写 Local/Session Storage，也不再生成伪 cursor。它不会建立新的事件真源。原生 Wails bridge 不是通用业务 API 旁路：前三项只提供 connection bootstrap 和路径隔离 Skill 选择/预览，第四项只消费 Go 发放的一次性确认句柄并调用惰性 Registry。
 
@@ -192,6 +192,8 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/skills/packages/inst
 | `GET` | `/api/v1/workspaces/{workspace_id}/repository-state` | Bounded exact-root Git metadata only; no parent discovery, host root, body, remote, process, network, or hook |
 | `GET` | `/api/v1/workspaces/{workspace_id}/repository-diff` | At most 50 secret-redacted exact-root patches; 64 KiB each/512 KiB total, no raw body, process, remote, network, hook, or mutation |
 | `GET` | `/api/v1/workspaces/{workspace_id}/repository-history` | At most 50 first-parent commits and 64 local branches; no author/email/body/remote/root/process/network/hook |
+| `GET` | `/api/v1/workspaces/{workspace_id}/repository-file-history?path={canonical_path}` | At most 50 exact-path changes while scanning 512 first-parent commits; metadata only, no rename inference/raw Git/mutation/process/network/hook |
+| `GET` | `/api/v1/workspaces/{workspace_id}/repository-commit-comparison?base_object_id={exact_object}&head_object_id={exact_object}` | Bounded metadata comparison of two exact local commit trees; no ancestry requirement, blob/patch/root/mutation/process/network/hook |
 | `GET` | `/api/v1/workspaces/{workspace_id}/repository-commits/{object_id}` | One exact lowercase SHA-1 commit's bounded changed-path/mode metadata; no blob body, checkout, ref mutation, remote, process, network, or hook |
 | `GET` | `/api/v1/workspaces/{workspace_id}/repository-commits/{object_id}/file-preview?path={canonical_path}` | One bounded redacted regular/executable UTF-8 file from the exact commit; no raw blob, root, checkout, mutation, process, network, or hook |
 | `GET` | `/api/v1/operation-receipts` | At most 100 terminal metadata-only receipts; optional exact `run_id`, no operation key/path/private lease |
@@ -237,6 +239,7 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8765/api/v1/skills/packages/inst
 | `GET` | `/api/v1/runs/{run_id}/verification-plan` | At most 50 immutable guidance-only operator plans and ordered checks; no outcome inference |
 | `POST` | `/api/v1/runs/{run_id}/verification-plan` | Record one exact-bound 1-32 item operator checklist; no command/model/execution/authority |
 | `GET` | `/api/v1/runs/{run_id}/verification-plan-coverage` | Per-item explicit pass/fail/unknown association counts and unobserved state; no aggregate pass |
+| `GET` | `/api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}` | Snapshot-stable event-high-water/keyset pages of exact association metadata; no bodies, verdict inference, mutation, execution, approval, or authority |
 | `POST` | `/api/v1/runs/{run_id}/verification-plan-associations` | Immutably associate one later evidence record with one earlier plan item; no reassignment, execution, approval, or inference |
 | `GET` | `/api/v1/runs/{run_id}/code-handoff` | Regenerable Code-only Plan/queue/change/verification/coverage/action/report summary; no private body, inferred aggregate result, resume, execution, or composite mutation |
 | `GET` | `/api/v1/runs/{run_id}/code-handoff/export` | Digest-bound Markdown/JSON export of one stable Handoff including explicit coverage metadata; no import, result inference, resume, mutation, acceptance, or execution |
@@ -479,21 +482,36 @@ subject, added/modified/deleted status, previous/current kind, and content/mode-
 flags. It returns no raw blob, patch, identity/body, remote/root, rename inference, or
 authority, and performs no checkout, ref mutation, process, network, or hook action.
 
+`GET /api/v1/workspaces/{workspace_id}/repository-commit-comparison` requires exactly
+one `base_object_id` and one `head_object_id`. Both must be lowercase 40-character local
+commit object IDs in the exact registered Workspace repository. Symbolic refs and
+revision expressions are rejected, and no ancestor relationship is required. The
+pure-Go bounded projection returns redacted subject/time plus canonical added/modified/
+deleted path, kind, content-change, and mode-change metadata. It contains no author,
+body, blob, patch, remote, host root, or rename inference and performs no checkout,
+reference update, process, network, or hook action.
+
 `GET /api/v1/runs/{run_id}/verification-plan-coverage/{plan_id}/items/{ordinal}` returns
 one page of `operator_verification_plan_item_coverage.v1` for one exact Run, immutable
 plan, and 1-based item ordinal. It accepts only shared `limit` and opaque `cursor`
 parameters. Each page returns the immutable item digest/aggregate counts and up to the
 requested number of exact association records in descending association-event order.
-The cursor is bound to the exact route, and the starting offset is capped at 100,000.
-Duplicate/blank/unknown query parameters and cross-item cursor reuse fail closed.
+The first page freezes the latest association event sequence and aggregate counts at
+that high-water. A continuation cursor is bound to the exact route and carries the
+snapshot high-water, previous page's final event/association tuple, and consumed row
+count. SQLite recomputes the anchor's rank inside the frozen range and Go requires an
+exact match before reading the next keyset page. Duplicate/blank/unknown query
+parameters, forged positions, missing anchors, and cross-item cursor reuse fail closed.
 
 Associations contain only opaque evidence/association IDs, explicit pass/fail/unknown
 outcome, evidence/association event sequences, and time. Private plan/evidence bodies,
 operator identity, aggregate verdicts, mutation, command/model execution, approval,
-and authority remain absent. This is a bounded live projection rather than a snapshot;
-clients should compare the repeated aggregate/latest-event facts across pages and
-restart from page one when they change. The React client performs that check and loads
-25 older references only after an explicit operator action.
+and authority remain absent. Associations appended after the first page have a higher
+event sequence and cannot shift or enter the frozen pages. The read window is capped at
+100,000 associations without holding a long transaction; when more snapshot rows exist,
+the last permitted page sets `page.truncated=true` and emits no next cursor. React loads
+25 older references only after an explicit operator action and validates the repeated
+snapshot identity, aggregate counts, ordering, uniqueness, and closed-authority fields.
 
 ## Envelopes
 
@@ -528,11 +546,11 @@ The `X-Request-ID` header matches `request_id`. Responses also set `Cache-Contro
 
 ## Pagination
 
-Collection routes accept `limit` from 1 to 100; the default is 50. `next_cursor` is an opaque, URL-safe cursor bound to the exact route and filter set. A cursor cannot be reused on another endpoint or after changing filters. The Store bounds a cursor window to 100,000 starting rows; if additional data exists beyond that window, `page.truncated` is `true` and no invalid next cursor is emitted.
+Collection routes accept `limit` from 1 to 100; the default is 50. `next_cursor` is an opaque, URL-safe cursor bound to the exact route and filter set. A cursor cannot be reused on another endpoint or after changing filters. The Store bounds a cursor window to 100,000 rows; if additional data exists beyond that window, `page.truncated` is `true` and no invalid next cursor is emitted.
 
 Clients must not decode, edit, persist indefinitely, or synthesize cursors. Restart pagination from the first page after a filter change or a rejected cursor.
 
-Pagination is a bounded live SQLite projection, not a multi-request snapshot. Append-only event/message order remains stable, but updates to descending activity lists can move rows between requests. Clients that require a fresh consistent view should restart from the first page.
+Most pagination is a bounded live SQLite projection, not a multi-request snapshot. Append-only event/message order remains stable, but updates to descending activity lists can move rows between requests. Clients that require a fresh consistent view should restart from the first page. The exact verification-item route is the explicit exception: it freezes an association-event high-water and aggregate counts, then uses a rank-checked keyset cursor for stable pages within its 100,000-row window.
 
 ## 当前限制 / Current Limits
 

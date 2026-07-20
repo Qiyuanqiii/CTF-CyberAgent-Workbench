@@ -47,6 +47,26 @@ describe("RepositoryHistoryPanel", () => {
       network_used: false, hooks_executed: false,
     });
     const historyObjectID = "1234567890abcdef1234567890abcdef12345678";
+    const repositoryCommitComparison = vi.fn().mockResolvedValue({
+      protocol_version: "repository_commit_comparison.v1", workspace_id: "workspace-1",
+      kind: "git", available: true,
+      base_object_id: "abcdef1234567890abcdef1234567890abcdef12",
+      base_hash: "abcdef123456", base_subject: "bounded history",
+      base_committed_at: "2026-07-19T01:00:00Z", base_redacted: false,
+      base_subject_bounded: false, head_object_id: historyObjectID,
+      head_hash: "1234567890ab", head_subject: "file changed",
+      head_committed_at: "2026-07-18T01:00:00Z", head_redacted: false,
+      head_subject_bounded: false, same_object: false,
+      changes: [{ path: "internal/second.go", change: "added", previous_kind: "",
+        current_kind: "regular", content_changed: true, mode_changed: false }],
+      changed_file_count: 1, returned_change_count: 1, omitted_change_count: 0,
+      redaction_count: 0, truncated: false, metadata_only: true, read_only: true,
+      rename_inferred: false, ancestor_required: false, authority_granted: false,
+      root_path_exposed: false, author_identity_included: false, commit_body_included: false,
+      file_content_included: false, patch_included: false, remote_config_included: false,
+      checkout_performed: false, reference_updated: false, process_started: false,
+      network_used: false, hooks_executed: false,
+    });
     const repositoryFileHistory = vi.fn().mockResolvedValue({
       protocol_version: "repository_file_history.v1", workspace_id: "workspace-1",
       kind: "git", available: true, head: "abcdef123456", path: "internal/example.go",
@@ -62,7 +82,7 @@ describe("RepositoryHistoryPanel", () => {
       checkout_performed: false, reference_updated: false, process_started: false,
       network_used: false, hooks_executed: false,
     });
-    const client = { repositoryHistory, repositoryCommit,
+    const client = { repositoryHistory, repositoryCommit, repositoryCommitComparison,
       repositoryCommitFilePreview, repositoryFileHistory } as unknown as CyberAgentClient;
     const user = userEvent.setup();
     const queryClient = new QueryClient();
@@ -76,6 +96,9 @@ describe("RepositoryHistoryPanel", () => {
     expect(await screen.findByText("internal/example.go")).toBeInTheDocument();
     expect(repositoryCommit).toHaveBeenCalledWith("workspace-1",
       "abcdef1234567890abcdef1234567890abcdef12", expect.any(AbortSignal));
+    await user.click(screen.getByRole("button", {
+      name: "Use abcdef123456 as comparison base",
+    }));
     await user.click(screen.getByRole("button", {
       name: "Preview internal/example.go at abcdef123456",
     }));
@@ -92,6 +115,11 @@ describe("RepositoryHistoryPanel", () => {
     }));
     await waitFor(() => expect(repositoryCommit).toHaveBeenCalledWith("workspace-1",
       historyObjectID, expect.any(AbortSignal)));
+    await waitFor(() => expect(repositoryCommitComparison).toHaveBeenCalledWith("workspace-1",
+      "abcdef1234567890abcdef1234567890abcdef12", historyObjectID,
+      expect.any(AbortSignal)));
+    expect(await screen.findByRole("region", { name: "Exact commit comparison" }))
+      .toHaveTextContent("internal/second.go");
     await user.click(screen.getByRole("button", {
       name: "Preview internal/example.go at history commit 1234567890ab",
     }));
@@ -103,6 +131,7 @@ describe("RepositoryHistoryPanel", () => {
     expect(screen.queryByRole("region", { name: "Exact commit metadata" })).not.toBeInTheDocument();
     expect(repositoryCommit).toHaveBeenCalledTimes(2);
     expect(repositoryCommitFilePreview).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("region", { name: "Exact commit comparison" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Exact file history" })).not.toBeInTheDocument();
   });
 });

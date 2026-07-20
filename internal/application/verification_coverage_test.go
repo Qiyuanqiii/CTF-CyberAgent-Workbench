@@ -76,16 +76,75 @@ func (s verificationCoverageBoundaryStore) ListVerificationPlanCoverageCounts(
 }
 
 func (s verificationCoverageBoundaryStore) ListVerificationPlanItemEvidenceAssociations(
-	_ context.Context, _ string, _ string, _ int, limit int, offset int,
+	_ context.Context, runID string, planID string, ordinal int, limit int,
+	highWater int64, beforeSequence int64, beforeID string,
 ) ([]verification.PlanEvidenceAssociation, error) {
-	if offset >= len(s.associations) {
-		return []verification.PlanEvidenceAssociation{}, nil
+	values := make([]verification.PlanEvidenceAssociation, 0, len(s.associations))
+	for _, association := range s.associations {
+		if association.RunID != runID || association.PlanID != planID ||
+			association.PlanItemOrdinal != ordinal || association.EventSequence > highWater ||
+			(beforeSequence > 0 && !verificationAssociationTupleBefore(association.EventSequence,
+				association.ID, beforeSequence, beforeID)) {
+			continue
+		}
+		values = append(values, association)
 	}
-	end := offset + limit
-	if end > len(s.associations) {
-		end = len(s.associations)
+	if len(values) > limit {
+		values = values[:limit]
 	}
-	return append([]verification.PlanEvidenceAssociation(nil), s.associations[offset:end]...), nil
+	return values, nil
+}
+
+func (s verificationCoverageBoundaryStore) GetVerificationPlanItemCoverageSnapshot(
+	_ context.Context, runID string, planID string, ordinal int, highWater int64,
+) (verification.PlanItemCoverageCount, bool, error) {
+	var result verification.PlanItemCoverageCount
+	for _, association := range s.associations {
+		if association.RunID != runID || association.PlanID != planID ||
+			association.PlanItemOrdinal != ordinal || association.EventSequence > highWater {
+			continue
+		}
+		if result.AssociatedEvidenceCount == 0 {
+			result.PlanID = planID
+			result.PlanItemOrdinal = ordinal
+			result.PlanItemSHA256 = association.PlanItemSHA256
+		}
+		result.AssociatedEvidenceCount++
+		switch association.EvidenceOutcome {
+		case verification.OutcomePass:
+			result.PassCount++
+		case verification.OutcomeFail:
+			result.FailCount++
+		case verification.OutcomeUnknown:
+			result.UnknownCount++
+		}
+		if association.EventSequence > result.LatestAssociationEventSequence {
+			result.LatestAssociationEventSequence = association.EventSequence
+		}
+	}
+	return result, result.AssociatedEvidenceCount > 0, nil
+}
+
+func (s verificationCoverageBoundaryStore) CountVerificationPlanItemAssociationsThroughAnchor(
+	_ context.Context, runID string, planID string, ordinal int, highWater int64,
+	beforeSequence int64, beforeID string,
+) (int, bool, error) {
+	count := 0
+	found := false
+	for _, association := range s.associations {
+		if association.RunID != runID || association.PlanID != planID ||
+			association.PlanItemOrdinal != ordinal || association.EventSequence > highWater {
+			continue
+		}
+		if association.EventSequence > beforeSequence ||
+			(association.EventSequence == beforeSequence && association.ID >= beforeID) {
+			count++
+		}
+		if association.EventSequence == beforeSequence && association.ID == beforeID {
+			found = true
+		}
+	}
+	return count, found, nil
 }
 
 func TestVerificationCoverageRejectsUntrustedDuplicateOrEmptyAggregates(t *testing.T) {
@@ -248,7 +307,8 @@ func TestVerificationCoverageDetailPagesExactItemAssociationsWithoutReinferringC
 			LatestAssociationEventSequence: associations[0].EventSequence}},
 		associations: associations}
 	service := NewVerificationCoverageDetailService(store)
-	first, err := service.DetailPage(t.Context(), "run-1", plan.ID, 1, 2, 0)
+	first, err := service.DetailPage(t.Context(), "run-1", plan.ID, 1, 2,
+		VerificationCoveragePageAnchor{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +318,13 @@ func TestVerificationCoverageDetailPagesExactItemAssociationsWithoutReinferringC
 		first.UnknownCount != 1 {
 		t.Fatalf("first verification detail page diverged: %#v", first)
 	}
-	second, err := service.DetailPage(t.Context(), "run-1", plan.ID, 1, 2, 2)
+	anchor := VerificationCoveragePageAnchor{
+		SnapshotHighWaterEventSequence: first.SnapshotHighWaterEventSequence,
+		BeforeEventSequence:            first.NextPageBeforeEventSequence,
+		BeforeAssociationID:            first.NextPageBeforeAssociationID,
+		Consumed:                       first.NextPageConsumed,
+	}
+	second, err := service.DetailPage(t.Context(), "run-1", plan.ID, 1, 2, anchor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,15 +338,43 @@ func TestVerificationCoverageDetailPagesExactItemAssociationsWithoutReinferringC
 	escapedStore.associations[2].EventSequence = associations[0].EventSequence + 2
 	escapedStore.associations[2].EvidenceEventSequence = associations[0].EventSequence + 1
 	if _, err := NewVerificationCoverageDetailService(escapedStore).DetailPage(t.Context(),
-		"run-1", plan.ID, 1, 2, 2); apperror.CodeOf(err) != apperror.CodeConflict {
+		"run-1", plan.ID, 1, 2, anchor); apperror.CodeOf(err) != apperror.CodeConflict {
 		t.Fatalf("later page high-water escape code=%s err=%v", apperror.CodeOf(err), err)
 	}
-	if _, err := service.DetailPage(t.Context(), "run-1", plan.ID, 1, 0, 0); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+	inserted := associations[0]
+	inserted.ID = "association-new"
+	inserted.EvidenceID = "evidence-new"
+	inserted.EventSequence = 12
+	inserted.EvidenceEventSequence = 11
+	updatedStore := store
+	updatedStore.associations = append([]verification.PlanEvidenceAssociation{inserted},
+		associations...)
+	updatedStore.counts = []verification.PlanItemCoverageCount{{
+		PlanID: plan.ID, PlanItemOrdinal: 1, PlanItemSHA256: plan.Items[0].ItemSHA256,
+		AssociatedEvidenceCount: 4, PassCount: 2, FailCount: 1, UnknownCount: 1,
+		LatestAssociationEventSequence: inserted.EventSequence,
+	}}
+	stable, err := NewVerificationCoverageDetailService(updatedStore).DetailPage(t.Context(),
+		"run-1", plan.ID, 1, 2, anchor)
+	if err != nil || stable.AssociatedEvidenceCount != 3 || len(stable.Associations) != 1 ||
+		stable.Associations[0].ID != "association-3" || stable.AssociationsTruncated {
+		t.Fatalf("insert between pages shifted snapshot: %#v err=%v", stable, err)
+	}
+	forged := anchor
+	forged.Consumed--
+	if _, err := NewVerificationCoverageDetailService(updatedStore).DetailPage(t.Context(),
+		"run-1", plan.ID, 1, 2, forged); apperror.CodeOf(err) != apperror.CodeConflict {
+		t.Fatalf("forged page rank code=%s err=%v", apperror.CodeOf(err), err)
+	}
+	if _, err := service.DetailPage(t.Context(), "run-1", plan.ID, 1, 0,
+		VerificationCoveragePageAnchor{}); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
 		t.Fatalf("zero page limit code=%s err=%v", apperror.CodeOf(err), err)
 	}
+	oversized := anchor
+	oversized.Consumed = verification.MaxCoveragePageWindow
 	if _, err := service.DetailPage(t.Context(), "run-1", plan.ID, 1, 1,
-		verification.MaxCoveragePageOffset+1); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
-		t.Fatalf("oversized page offset code=%s err=%v", apperror.CodeOf(err), err)
+		oversized); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("oversized page window code=%s err=%v", apperror.CodeOf(err), err)
 	}
 }
 

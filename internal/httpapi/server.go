@@ -144,7 +144,12 @@ type Store interface {
 		verification.PlanEvidenceAssociation, bool, error)
 	ListVerificationPlanEvidenceAssociations(context.Context, string, int) (
 		[]verification.PlanEvidenceAssociation, error)
-	ListVerificationPlanItemEvidenceAssociations(context.Context, string, string, int, int, int) (
+	GetVerificationPlanItemCoverageSnapshot(context.Context, string, string, int, int64) (
+		verification.PlanItemCoverageCount, bool, error)
+	CountVerificationPlanItemAssociationsThroughAnchor(context.Context,
+		string, string, int, int64, int64, string) (int, bool, error)
+	ListVerificationPlanItemEvidenceAssociations(context.Context,
+		string, string, int, int, int64, int64, string) (
 		[]verification.PlanEvidenceAssociation, error)
 	ListVerificationPlanCoverageCounts(context.Context, string, []string) (
 		[]verification.PlanItemCoverageCount, error)

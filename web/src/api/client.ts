@@ -41,6 +41,7 @@ import type {
   RepositoryHistoryView,
   RepositoryFileHistoryView,
   RepositoryCommitDetailView,
+  RepositoryCommitComparisonView,
   RepositoryCommitFilePreviewView,
   RunCreationControlRequestView,
   RunCreationControlView,
@@ -1346,6 +1347,89 @@ function parseRepositoryCommitDetail(value: unknown, workspaceID: string,
   return { ...value, changes } as unknown as RepositoryCommitDetailView;
 }
 
+function parseRepositoryCommitComparison(value: unknown, workspaceID: string,
+  baseObjectID: string, headObjectID: string): RepositoryCommitComparisonView {
+  const keys = ["ancestor_required", "author_identity_included", "authority_granted",
+    "available", "base_committed_at", "base_hash", "base_object_id", "base_redacted",
+    "base_subject", "base_subject_bounded", "changed_file_count", "changes",
+    "checkout_performed", "commit_body_included", "file_content_included", "head_committed_at",
+    "head_hash", "head_object_id", "head_redacted", "head_subject", "head_subject_bounded",
+    "hooks_executed", "kind", "metadata_only", "network_used", "omitted_change_count",
+    "patch_included", "process_started", "protocol_version", "read_only", "redaction_count",
+    "reference_updated", "remote_config_included", "rename_inferred", "returned_change_count",
+    "root_path_exposed", "same_object", "truncated", "workspace_id"];
+  if (!hasExactKeys(value, keys) ||
+    value.protocol_version !== "repository_commit_comparison.v1" ||
+    value.workspace_id !== workspaceID || value.base_object_id !== baseObjectID ||
+    value.head_object_id !== headObjectID || !/^[0-9a-f]{40}$/u.test(baseObjectID) ||
+    !/^[0-9a-f]{40}$/u.test(headObjectID) || !["none", "git"].includes(String(value.kind)) ||
+    typeof value.available !== "boolean" || value.available !== (value.kind === "git") ||
+    value.same_object !== (baseObjectID === headObjectID) || value.metadata_only !== true ||
+    value.read_only !== true || value.rename_inferred !== false ||
+    value.ancestor_required !== false || value.authority_granted !== false ||
+    value.root_path_exposed !== false || value.author_identity_included !== false ||
+    value.commit_body_included !== false || value.file_content_included !== false ||
+    value.patch_included !== false || value.remote_config_included !== false ||
+    value.checkout_performed !== false || value.reference_updated !== false ||
+    value.process_started !== false || value.network_used !== false ||
+    value.hooks_executed !== false || typeof value.truncated !== "boolean" ||
+    typeof value.base_redacted !== "boolean" || typeof value.base_subject_bounded !== "boolean" ||
+    typeof value.head_redacted !== "boolean" || typeof value.head_subject_bounded !== "boolean" ||
+    !Array.isArray(value.changes) || value.changes.length > 200 ||
+    !safeBoundedCount(value.changed_file_count, 40_000) ||
+    !safeBoundedCount(value.returned_change_count, 200) ||
+    value.returned_change_count !== value.changes.length ||
+    !safeBoundedCount(value.omitted_change_count, 40_000) ||
+    value.changed_file_count !== value.returned_change_count + value.omitted_change_count ||
+    !safeBoundedCount(value.redaction_count, 40_000)) {
+    throw new APIRequestError("Repository commit comparison violated its metadata contract",
+      "INVALID_RESPONSE", 502);
+  }
+  const paths = new Set<string>();
+  const kinds = ["", "regular", "executable", "symlink", "submodule"];
+  const changes = value.changes.map((change) => {
+    if (!hasExactKeys(change, ["change", "content_changed", "current_kind", "mode_changed",
+      "path", "previous_kind"]) || !validWorkspaceRelativePath(change.path) ||
+      change.path === "." || paths.has(String(change.path)) ||
+      !["added", "modified", "deleted"].includes(String(change.change)) ||
+      !kinds.includes(String(change.previous_kind)) || !kinds.includes(String(change.current_kind)) ||
+      typeof change.content_changed !== "boolean" || typeof change.mode_changed !== "boolean" ||
+      (!change.content_changed && !change.mode_changed) ||
+      (change.change === "added" && (change.previous_kind !== "" || change.current_kind === "")) ||
+      (change.change === "deleted" && (change.previous_kind === "" || change.current_kind !== "")) ||
+      (change.change === "modified" &&
+        (change.previous_kind === "" || change.current_kind === ""))) {
+      throw new APIRequestError("Repository comparison file metadata widened content authority",
+        "INVALID_RESPONSE", 502);
+    }
+    paths.add(String(change.path));
+    return change;
+  });
+  const redactedSubjects = Number(value.base_redacted) + Number(value.head_redacted);
+  if ((!value.available && (value.base_hash !== "" || value.head_hash !== "" ||
+      value.base_subject !== "" || value.head_subject !== "" ||
+      value.base_committed_at !== "0001-01-01T00:00:00Z" ||
+      value.head_committed_at !== "0001-01-01T00:00:00Z" || value.changed_file_count !== 0 ||
+      value.redaction_count !== 0 || value.truncated)) ||
+    (value.available && (typeof value.base_hash !== "string" ||
+      !/^[0-9a-f]{12}$/u.test(value.base_hash) || !baseObjectID.startsWith(value.base_hash) ||
+      typeof value.head_hash !== "string" || !/^[0-9a-f]{12}$/u.test(value.head_hash) ||
+      !headObjectID.startsWith(value.head_hash) || typeof value.base_subject !== "string" ||
+      value.base_subject.length === 0 || [...value.base_subject].length > 512 ||
+      /[\u0000-\u001f\u007f]/u.test(value.base_subject) ||
+      typeof value.head_subject !== "string" || value.head_subject.length === 0 ||
+      [...value.head_subject].length > 512 || /[\u0000-\u001f\u007f]/u.test(value.head_subject) ||
+      !validDate(value.base_committed_at) || !validDate(value.head_committed_at))) ||
+    redactedSubjects > value.redaction_count ||
+    ((value.base_subject_bounded || value.head_subject_bounded ||
+      value.omitted_change_count > 0) && !value.truncated) ||
+    (value.same_object && (value.changed_file_count !== 0 || changes.length !== 0))) {
+    throw new APIRequestError("Repository comparison contains inconsistent exact facts",
+      "INVALID_RESPONSE", 502);
+  }
+  return { ...value, changes } as unknown as RepositoryCommitComparisonView;
+}
+
 async function parseRepositoryCommitFilePreview(value: unknown, workspaceID: string,
   objectID: string, path: string): Promise<RepositoryCommitFilePreviewView> {
   const keys = ["authority_granted", "checkout_performed", "content", "hash",
@@ -1758,7 +1842,9 @@ function parseVerificationPlanItemCoverage(value: unknown, runID: string, planID
   if ((firstPage && associations.length > 0 &&
       associations[0]?.association_event_sequence !== value.latest_association_event_sequence) ||
     value.associations_truncated !== pageHasMore ||
-    (value.associations_truncated && associations.length !== page.limit) ||
+    (value.associations_truncated && page.truncated !== true &&
+      associations.length !== page.limit) ||
+    (page.truncated === true && associations.length > page.limit) ||
     (firstPage && value.associations_truncated !==
       (associations.length < Number(value.associated_evidence_count))) ||
     (firstPage && !value.associations_truncated &&
@@ -2387,6 +2473,18 @@ export class CyberAgentClient {
     return parseRepositoryCommitDetail(await this.get<unknown>(
       `/workspaces/${encodeURIComponent(workspaceID)}/repository-commits/${objectID}`, {}, signal,
     ), workspaceID, objectID);
+  }
+
+  async repositoryCommitComparison(workspaceID: string, baseObjectID: string,
+    headObjectID: string, signal?: AbortSignal): Promise<RepositoryCommitComparisonView> {
+    if (!boundedIdentity(workspaceID) || workspaceID.trim() !== workspaceID ||
+      !/^[0-9a-f]{40}$/u.test(baseObjectID) || !/^[0-9a-f]{40}$/u.test(headObjectID)) {
+      throw new Error("Normalized Workspace and exact commit identities are required");
+    }
+    return parseRepositoryCommitComparison(await this.get<unknown>(
+      `/workspaces/${encodeURIComponent(workspaceID)}/repository-commit-comparison`,
+      { base_object_id: baseObjectID, head_object_id: headObjectID }, signal,
+    ), workspaceID, baseObjectID, headObjectID);
   }
 
   async repositoryFileHistory(workspaceID: string, path: string,

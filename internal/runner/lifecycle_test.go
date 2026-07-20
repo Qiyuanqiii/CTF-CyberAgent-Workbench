@@ -219,10 +219,13 @@ func TestLifecycleHarnessNormalExitRequiresReapedTree(t *testing.T) {
 	if err != nil || !result.Started || result.StopReason != StopExited || result.ExitCode != 0 ||
 		!result.TreeReaped || result.TerminateRequested || result.KillRequested ||
 		!result.ExitEvidenceAvailable || !result.RuntimeEvidenceAvailable ||
+		!result.ResourceLimitEvidenceAvailable || !result.TerminationCauseEvidenceAvailable ||
 		result.RawOutputIncluded ||
 		result.ProductExecutionEnabled {
 		t.Fatalf("normal lifecycle result=%#v err=%v", result, err)
 	}
+	assertLifecycleControlEvidence(t, result, DefaultRunTimeout, DefaultTerminationGrace,
+		DefaultKillGrace, TerminationTriggerProcessExit, TerminationMechanismWait)
 }
 
 func TestLifecycleHarnessRejectsRuntimeEvidenceThatWidensMetadataBoundary(t *testing.T) {
@@ -253,7 +256,8 @@ func TestLifecycleHarnessRejectsRuntimeEvidenceThatWidensMetadataBoundary(t *tes
 				Request{ID: "invalid-runtime-evidence"})
 			if !errors.Is(err, ErrRuntimeEvidence) || result.StopReason != StopEvidenceFailed ||
 				!result.TreeReaped || result.ExitEvidenceAvailable ||
-				result.RuntimeEvidenceAvailable || result.ProductExecutionEnabled {
+				result.RuntimeEvidenceAvailable || result.ResourceLimitEvidenceAvailable ||
+				result.TerminationCauseEvidenceAvailable || result.ProductExecutionEnabled {
 				t.Fatalf("invalid runtime evidence result=%#v err=%v", result, err)
 			}
 		})
@@ -267,20 +271,36 @@ func TestLifecycleHarnessRequiresStableRepeatedEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := Result{}
+	request := Request{ID: "repeated-evidence", Timeout: time.Second,
+		TerminationGrace: time.Second, KillGrace: time.Second}
+	result := Result{StopReason: StopExited, TreeReaped: true}
 	status := ExitStatus{Exited: true, ExitCode: 0, Reaped: true}
-	if err := harness.collectEvidence(t.Context(), process, status, time.Second, &result); err != nil {
+	if err := harness.collectEvidence(t.Context(), process, status, request, &result); err != nil {
 		t.Fatal(err)
 	}
-	if err := harness.collectEvidence(t.Context(), process, status, time.Second, &result); err != nil {
+	if err := harness.collectEvidence(t.Context(), process, status, request, &result); err != nil {
 		t.Fatalf("stable repeated evidence: %v", err)
 	}
 	original := result.RuntimeEvidence
+	originalResourceLimit := result.ResourceLimitEvidence
+	originalTerminationCause := result.TerminationCauseEvidence
+	changedRequest := request
+	changedRequest.Timeout = 2 * time.Second
+	changedResult := result
+	if err := harness.collectEvidence(t.Context(), process, status, changedRequest,
+		&changedResult); !errors.Is(err, ErrResourceLimitEvidence) ||
+		changedResult.StopReason != StopEvidenceFailed ||
+		changedResult.ResourceLimitEvidence != originalResourceLimit ||
+		changedResult.TerminationCauseEvidence != originalTerminationCause {
+		t.Fatalf("changed request partially replaced evidence: result=%#v err=%v",
+			changedResult, err)
+	}
 	process.mu.Lock()
 	process.runtimeEvidence.Resources.WallTimeMilliseconds++
 	process.mu.Unlock()
-	if err := harness.collectEvidence(t.Context(), process, status, time.Second, &result); !errors.Is(err, ErrRuntimeEvidence) || result.StopReason != StopEvidenceFailed ||
-		result.RuntimeEvidence != original {
+	if err := harness.collectEvidence(t.Context(), process, status, request, &result); !errors.Is(err, ErrRuntimeEvidence) || result.StopReason != StopEvidenceFailed ||
+		result.RuntimeEvidence != original || result.ResourceLimitEvidence != originalResourceLimit ||
+		result.TerminationCauseEvidence != originalTerminationCause {
 		t.Fatalf("changed repeated evidence result=%#v err=%v", result, err)
 	}
 }
@@ -317,7 +337,9 @@ func TestLifecycleHarnessBoundsOutputAndRejectsInvalidExitEvidence(t *testing.T)
 		Request{ID: "invalid-output-evidence"})
 	if !errors.Is(err, ErrExitEvidence) || result.StopReason != StopEvidenceFailed ||
 		!result.TreeReaped || result.OrphanDetected || result.TerminateRequested ||
-		result.KillRequested || result.ExitEvidenceAvailable || result.RawOutputIncluded {
+		result.KillRequested || result.ExitEvidenceAvailable ||
+		result.ResourceLimitEvidenceAvailable || result.TerminationCauseEvidenceAvailable ||
+		result.RawOutputIncluded {
 		t.Fatalf("invalid output evidence result=%#v err=%v", result, err)
 	}
 }
@@ -338,6 +360,8 @@ func TestLifecycleHarnessTimeoutEscalatesTerminateToKillAndReapsTree(t *testing.
 		result.OrphanDetected || process.terminateCount != 1 || process.killCount != 1 {
 		t.Fatalf("timeout lifecycle result=%#v process=%#v err=%v", result, process, err)
 	}
+	assertLifecycleControlEvidence(t, result, 5*time.Millisecond, 5*time.Millisecond,
+		20*time.Millisecond, TerminationTriggerRunDeadline, TerminationMechanismKill)
 }
 
 func TestLifecycleHarnessCancellationUsesIndependentCleanupContext(t *testing.T) {
@@ -362,6 +386,8 @@ func TestLifecycleHarnessCancellationUsesIndependentCleanupContext(t *testing.T)
 		process.terminateCount != 1 {
 		t.Fatalf("cancel lifecycle result=%#v process=%#v err=%v", result, process, err)
 	}
+	assertLifecycleControlEvidence(t, result, time.Second, 20*time.Millisecond,
+		20*time.Millisecond, TerminationTriggerCallerCancelled, TerminationMechanismTerminate)
 }
 
 func TestLifecycleHarnessFlagsAndCleansDescendantsAfterParentExit(t *testing.T) {
@@ -384,6 +410,8 @@ func TestLifecycleHarnessFlagsAndCleansDescendantsAfterParentExit(t *testing.T) 
 		process.killCount != 1 {
 		t.Fatalf("orphan cleanup result=%#v process=%#v err=%v", result, process, err)
 	}
+	assertLifecycleControlEvidence(t, result, DefaultRunTimeout, 5*time.Millisecond,
+		20*time.Millisecond, TerminationTriggerOrphanAfterExit, TerminationMechanismKill)
 }
 
 func TestLifecycleHarnessFailsClosedWhenKillLeavesLiveTree(t *testing.T) {
@@ -454,6 +482,8 @@ func TestLifecycleHarnessCleansPartialStartAndInvalidIdentity(t *testing.T) {
 		!result.TreeReaped || partial.terminateCount != 1 {
 		t.Fatalf("partial start leaked: result=%#v process=%#v err=%v", result, partial, err)
 	}
+	assertLifecycleControlEvidence(t, result, DefaultRunTimeout, 20*time.Millisecond,
+		20*time.Millisecond, TerminationTriggerPartialStartFailure, TerminationMechanismTerminate)
 
 	invalid := newSimulationProcess()
 	invalid.identity = " invalid-process "
@@ -472,6 +502,8 @@ func TestLifecycleHarnessCleansPartialStartAndInvalidIdentity(t *testing.T) {
 		t.Fatalf("invalid process identity leaked: result=%#v process=%#v err=%v",
 			result, invalid, err)
 	}
+	assertLifecycleControlEvidence(t, result, DefaultRunTimeout, 20*time.Millisecond,
+		20*time.Millisecond, TerminationTriggerPartialStartFailure, TerminationMechanismTerminate)
 
 	backend = &simulationBackend{name: " invalid-backend ", nonProductOnly: true}
 	if _, err := NewHarness(backend); !errors.Is(err, ErrHarnessBoundary) {
@@ -486,5 +518,34 @@ func TestLifecycleHarnessCleansPartialStartAndInvalidIdentity(t *testing.T) {
 	if err == nil || result.Started || backend.startCount != 0 {
 		t.Fatalf("non-normalized request reached backend: result=%#v count=%d err=%v",
 			result, backend.startCount, err)
+	}
+}
+
+func assertLifecycleControlEvidence(t *testing.T, result Result, runTimeout time.Duration,
+	terminationGrace time.Duration, killGrace time.Duration,
+	trigger TerminationControlTrigger, mechanism TerminationFinalMechanism,
+) {
+	t.Helper()
+	resource := result.ResourceLimitEvidence
+	cause := result.TerminationCauseEvidence
+	if !result.ResourceLimitEvidenceAvailable || !result.TerminationCauseEvidenceAvailable ||
+		resource.ProtocolVersion != ResourceLimitEvidenceProtocolVersion ||
+		resource.RunTimeoutMilliseconds != runTimeout.Milliseconds() ||
+		resource.TerminationGraceMilliseconds != terminationGrace.Milliseconds() ||
+		resource.KillGraceMilliseconds != killGrace.Milliseconds() ||
+		!resource.WallDeadlineConfigured || resource.CPUTimeLimitConfigured ||
+		resource.MemoryLimitConfigured || resource.OSResourceLimitsVerified ||
+		!resource.MetadataOnly || resource.ProductExecutionEnabled ||
+		cause.ProtocolVersion != TerminationCauseEvidenceProtocolVersion ||
+		cause.ControlTrigger != trigger || cause.FinalMechanism != mechanism ||
+		!cause.Exited || !cause.TreeReaped || cause.ExitCode != result.ExitCode ||
+		cause.TimedOut != result.TimedOut || cause.Cancelled != result.Cancelled ||
+		cause.OrphanDetected != result.OrphanDetected ||
+		cause.TerminateRequested != result.TerminateRequested ||
+		cause.TerminateFailed != result.TerminateFailed ||
+		cause.KillRequested != result.KillRequested || cause.KillFailed != result.KillFailed ||
+		cause.OSCauseInferred || cause.SignalIdentityIncluded || !cause.MetadataOnly ||
+		cause.ProductExecutionEnabled {
+		t.Fatalf("lifecycle control evidence widened or diverged: %#v", result)
 	}
 }
