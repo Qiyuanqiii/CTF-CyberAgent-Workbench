@@ -836,3 +836,31 @@ and Linux reconstruct the typed six-record tuple and compare exact byte count an
 SHA-256 while rechecking protocol order and closed claims. Raw output, environment,
 process identity, canonical runtime bytes, and a product process starter remain absent.
 ADR 0059 records these bounds.
+
+## Keyboard Preview, Handoff Review Projection, And Receipt Compatibility
+
+D1-G12 changes only renderer interaction state. The paired exact-redacted preview is a
+focusable region with plain ArrowLeft/ArrowRight navigation over the comparison response
+already in memory. Escape and the close control clear the selection and restore focus
+to the exact opener. Modified shortcuts, disabled bounds, unavailable sides, and paths
+outside the bounded candidate set produce no request. Repository protocols and Go
+authorization remain unchanged.
+
+D1-V11 reads existing schema-v84 receipt-review rows while rebuilding Code Handoff.
+The read participates in the same source-event high-water retry as all other handoff
+sections. Application rejects cross-Run/Session/Workspace records, duplicate review or
+receipt IDs, invalid digests/decisions, and non-descending review events. The public
+aggregate contains bounded counts and at most twenty references with opaque IDs,
+receipt digest, receipt/review sequences, decision, and time. Reviewer identity,
+operation keys, request fingerprints, bodies, acceptance, inference, rewrite, approval,
+authority, and execution are excluded. Markdown and JSON exports preserve the same
+metadata-only semantics.
+
+R9 adds an internal compatibility boundary around
+`runner_evidence_set_receipt.v1`. A complete envelope is limited to 8 KiB and decoded
+with exact field accounting: missing, unknown, duplicate, trailing, non-UTF-8, wrong-
+type, unsupported-protocol, canonical-record mismatch, digest mismatch, and semantic
+authority widening all fail closed. It recomputes the existing canonical receipt rather
+than trusting imported summary fields. The decoder has no product caller, filesystem,
+network, subprocess, LocalRunner, Docker, or state mutation. ADR 0060 records these
+bounds.

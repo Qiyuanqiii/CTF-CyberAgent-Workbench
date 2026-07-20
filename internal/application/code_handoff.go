@@ -13,13 +13,14 @@ import (
 )
 
 const (
-	CodeHandoffProtocolVersion     = "code_handoff.v1"
-	MaxCodeHandoffActionReferences = 20
-	MaxCodeHandoffReportReferences = 20
-	MaxCodeHandoffVerifyReferences = 20
-	MaxCodeHandoffVerifyPlanRefs   = 20
-	MaxCodeHandoffCoverageItemRefs = 100
-	maxCodeHandoffSnapshotAttempts = 4
+	CodeHandoffProtocolVersion      = "code_handoff.v1"
+	MaxCodeHandoffActionReferences  = 20
+	MaxCodeHandoffReportReferences  = 20
+	MaxCodeHandoffVerifyReferences  = 20
+	MaxCodeHandoffVerifyPlanRefs    = 20
+	MaxCodeHandoffCoverageItemRefs  = 100
+	MaxCodeHandoffReceiptReviewRefs = 20
+	maxCodeHandoffSnapshotAttempts  = 4
 )
 
 type CodeHandoffStore interface {
@@ -33,6 +34,8 @@ type CodeHandoffStore interface {
 	GetOperatorSteeringQueueSummary(context.Context, string) (domain.OperatorSteeringQueueSummary, error)
 	ListFileEditPreviewsPage(context.Context, fileedit.ListFilter, int, int) ([]fileedit.Preview, error)
 	ListVerificationEvidence(context.Context, string, int) ([]verification.Evidence, error)
+	ListVerificationSnapshotReceiptReviews(context.Context, string, int) (
+		[]verification.SnapshotReceiptReview, error)
 	ListFindingReportSummariesPage(context.Context, string, int, int) ([]domain.FindingReportSummary, error)
 }
 
@@ -132,6 +135,38 @@ type CodeHandoffVerificationCoverage struct {
 	PrivateBodiesIncluded   bool                                  `json:"private_bodies_included"`
 }
 
+type CodeHandoffSnapshotReceiptReviewReference struct {
+	ID                   string                                     `json:"id"`
+	ReceiptID            string                                     `json:"receipt_id"`
+	ReceiptContentSHA256 string                                     `json:"receipt_content_sha256"`
+	ReceiptEventSequence int64                                      `json:"receipt_event_sequence"`
+	Decision             verification.SnapshotReceiptReviewDecision `json:"decision"`
+	ReviewEventSequence  int64                                      `json:"review_event_sequence"`
+	ReviewedAt           time.Time                                  `json:"reviewed_at"`
+}
+
+type CodeHandoffSnapshotReceiptReviews struct {
+	ProtocolVersion          string                                      `json:"protocol_version"`
+	MetadataConfirmedCount   int                                         `json:"metadata_confirmed_count"`
+	MetadataDisputedCount    int                                         `json:"metadata_disputed_count"`
+	ReturnedCount            int                                         `json:"returned_count"`
+	Truncated                bool                                        `json:"truncated"`
+	References               []CodeHandoffSnapshotReceiptReviewReference `json:"references"`
+	MetadataOnly             bool                                        `json:"metadata_only"`
+	ReadOnly                 bool                                        `json:"read_only"`
+	ReviewNonAuthorizing     bool                                        `json:"review_non_authorizing"`
+	ContentIncluded          bool                                        `json:"content_included"`
+	PrivateBodiesIncluded    bool                                        `json:"private_bodies_included"`
+	OperatorIdentityIncluded bool                                        `json:"operator_identity_included"`
+	SnapshotAccepted         bool                                        `json:"snapshot_accepted"`
+	ResultAccepted           bool                                        `json:"result_accepted"`
+	ResultInferred           bool                                        `json:"result_inferred"`
+	RecordRewritten          bool                                        `json:"record_rewritten"`
+	Approval                 bool                                        `json:"approval"`
+	AuthorityGranted         bool                                        `json:"authority_granted"`
+	ExecutionStarted         bool                                        `json:"execution_started"`
+}
+
 type CodeHandoffActionReference struct {
 	ID          string                     `json:"id"`
 	Kind        operatoraction.Kind        `json:"kind"`
@@ -149,34 +184,35 @@ type CodeHandoffReportReference struct {
 }
 
 type CodeHandoff struct {
-	ProtocolVersion           string                          `json:"protocol_version"`
-	RunID                     string                          `json:"run_id"`
-	MissionID                 string                          `json:"mission_id"`
-	SessionID                 string                          `json:"session_id"`
-	WorkspaceID               string                          `json:"workspace_id"`
-	RunStatus                 domain.RunStatus                `json:"run_status"`
-	Surface                   domain.ExecutionSurface         `json:"surface"`
-	Phase                     domain.ExecutionPhase           `json:"phase"`
-	ModeRevision              int64                           `json:"mode_revision"`
-	SourceEventSequence       int64                           `json:"source_event_sequence"`
-	GeneratedAt               time.Time                       `json:"generated_at"`
-	Plan                      CodeHandoffPlan                 `json:"plan"`
-	Queue                     CodeHandoffQueue                `json:"queue"`
-	ChangeSet                 CodeHandoffChangeSet            `json:"change_set"`
-	Verification              CodeHandoffVerification         `json:"verification"`
-	VerificationPlans         CodeHandoffVerificationPlans    `json:"verification_plans"`
-	VerificationCoverage      CodeHandoffVerificationCoverage `json:"verification_coverage"`
-	PendingActionCount        int                             `json:"pending_action_count"`
-	PendingActionsTruncated   bool                            `json:"pending_actions_truncated"`
-	PendingActions            []CodeHandoffActionReference    `json:"pending_actions"`
-	ReportReferencesTruncated bool                            `json:"report_references_truncated"`
-	ReportReferences          []CodeHandoffReportReference    `json:"report_references"`
-	Regenerable               bool                            `json:"regenerable"`
-	DurableSources            bool                            `json:"durable_sources"`
-	PrivateBodiesIncluded     bool                            `json:"private_bodies_included"`
-	CompositeMutation         bool                            `json:"composite_mutation"`
-	ResumeAuthorized          bool                            `json:"resume_authorized"`
-	ExecutionStarted          bool                            `json:"execution_started"`
+	ProtocolVersion                    string                            `json:"protocol_version"`
+	RunID                              string                            `json:"run_id"`
+	MissionID                          string                            `json:"mission_id"`
+	SessionID                          string                            `json:"session_id"`
+	WorkspaceID                        string                            `json:"workspace_id"`
+	RunStatus                          domain.RunStatus                  `json:"run_status"`
+	Surface                            domain.ExecutionSurface           `json:"surface"`
+	Phase                              domain.ExecutionPhase             `json:"phase"`
+	ModeRevision                       int64                             `json:"mode_revision"`
+	SourceEventSequence                int64                             `json:"source_event_sequence"`
+	GeneratedAt                        time.Time                         `json:"generated_at"`
+	Plan                               CodeHandoffPlan                   `json:"plan"`
+	Queue                              CodeHandoffQueue                  `json:"queue"`
+	ChangeSet                          CodeHandoffChangeSet              `json:"change_set"`
+	Verification                       CodeHandoffVerification           `json:"verification"`
+	VerificationPlans                  CodeHandoffVerificationPlans      `json:"verification_plans"`
+	VerificationCoverage               CodeHandoffVerificationCoverage   `json:"verification_coverage"`
+	VerificationSnapshotReceiptReviews CodeHandoffSnapshotReceiptReviews `json:"verification_snapshot_receipt_reviews"`
+	PendingActionCount                 int                               `json:"pending_action_count"`
+	PendingActionsTruncated            bool                              `json:"pending_actions_truncated"`
+	PendingActions                     []CodeHandoffActionReference      `json:"pending_actions"`
+	ReportReferencesTruncated          bool                              `json:"report_references_truncated"`
+	ReportReferences                   []CodeHandoffReportReference      `json:"report_references"`
+	Regenerable                        bool                              `json:"regenerable"`
+	DurableSources                     bool                              `json:"durable_sources"`
+	PrivateBodiesIncluded              bool                              `json:"private_bodies_included"`
+	CompositeMutation                  bool                              `json:"composite_mutation"`
+	ResumeAuthorized                   bool                              `json:"resume_authorized"`
+	ExecutionStarted                   bool                              `json:"execution_started"`
 }
 
 func NewCodeHandoffService(store CodeHandoffStore) *CodeHandoffService {
@@ -279,6 +315,9 @@ func (s *CodeHandoffService) buildOnce(ctx context.Context, runID string) (CodeH
 	if err := s.addVerificationCoverage(ctx, run, mission, &result); err != nil {
 		return CodeHandoff{}, err
 	}
+	if err := s.addVerificationSnapshotReceiptReviews(ctx, run, mission, &result); err != nil {
+		return CodeHandoff{}, err
+	}
 	if err := s.addActions(ctx, &result); err != nil {
 		return CodeHandoff{}, err
 	}
@@ -286,6 +325,70 @@ func (s *CodeHandoffService) buildOnce(ctx context.Context, runID string) (CodeH
 		return CodeHandoff{}, err
 	}
 	return result, nil
+}
+
+func (s *CodeHandoffService) addVerificationSnapshotReceiptReviews(ctx context.Context,
+	run domain.Run, mission domain.Mission, result *CodeHandoff,
+) error {
+	values, err := s.store.ListVerificationSnapshotReceiptReviews(ctx, run.ID,
+		verification.MaxSnapshotReceiptReviewHistory+1)
+	if err != nil {
+		return apperror.Normalize(err)
+	}
+	projection := CodeHandoffSnapshotReceiptReviews{
+		ProtocolVersion: verification.SnapshotReceiptReviewInventoryProtocolVersion,
+		MetadataOnly:    true, ReadOnly: true, ReviewNonAuthorizing: true,
+		Truncated: len(values) > verification.MaxSnapshotReceiptReviewHistory,
+	}
+	if projection.Truncated {
+		values = values[:verification.MaxSnapshotReceiptReviewHistory]
+	}
+	projection.ReturnedCount = len(values)
+	projection.References = make([]CodeHandoffSnapshotReceiptReviewReference, 0,
+		min(len(values), MaxCodeHandoffReceiptReviewRefs))
+	reviewIDs := make(map[string]struct{}, len(values))
+	receiptIDs := make(map[string]struct{}, len(values))
+	var previousEventSequence int64
+	for _, value := range values {
+		if err := value.Validate(); err != nil || value.RunID != run.ID ||
+			value.SessionID != run.SessionID || value.WorkspaceID != mission.WorkspaceID {
+			return apperror.New(apperror.CodeConflict,
+				"Code handoff snapshot receipt review escaped its Run binding")
+		}
+		_, duplicateReview := reviewIDs[value.ID]
+		_, duplicateReceipt := receiptIDs[value.ReceiptID]
+		if duplicateReview || duplicateReceipt ||
+			(previousEventSequence != 0 && value.EventSequence >= previousEventSequence) {
+			return apperror.New(apperror.CodeConflict,
+				"Code handoff snapshot receipt reviews are duplicated or unordered")
+		}
+		reviewIDs[value.ID] = struct{}{}
+		receiptIDs[value.ReceiptID] = struct{}{}
+		previousEventSequence = value.EventSequence
+		switch value.Decision {
+		case verification.SnapshotReceiptReviewMetadataConfirmed:
+			projection.MetadataConfirmedCount++
+		case verification.SnapshotReceiptReviewMetadataDisputed:
+			projection.MetadataDisputedCount++
+		default:
+			return apperror.New(apperror.CodeConflict,
+				"Code handoff snapshot receipt review decision is invalid")
+		}
+		if len(projection.References) < MaxCodeHandoffReceiptReviewRefs {
+			projection.References = append(projection.References,
+				CodeHandoffSnapshotReceiptReviewReference{
+					ID: value.ID, ReceiptID: value.ReceiptID,
+					ReceiptContentSHA256: value.ReceiptContentSHA256,
+					ReceiptEventSequence: value.ReceiptEventSequence,
+					Decision:             value.Decision, ReviewEventSequence: value.EventSequence,
+					ReviewedAt: value.CreatedAt,
+				})
+		} else {
+			projection.Truncated = true
+		}
+	}
+	result.VerificationSnapshotReceiptReviews = projection
+	return nil
 }
 
 func (s *CodeHandoffService) addVerificationCoverage(ctx context.Context, run domain.Run,

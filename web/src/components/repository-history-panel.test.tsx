@@ -138,7 +138,11 @@ describe("RepositoryHistoryPanel", () => {
     expect(pairedPreview).toHaveTextContent("base internal/pair.go");
     expect(pairedPreview).toHaveTextContent("head internal/pair.go");
     expect(pairedPreview).toHaveTextContent("3 of 3");
+    expect(pairedPreview).toHaveAttribute("aria-keyshortcuts", "ArrowLeft ArrowRight Escape");
+    expect(screen.getByRole("button", { name: "Close paired redacted preview" }))
+      .toHaveAttribute("aria-keyshortcuts", "Escape");
     expect(screen.getByRole("button", { name: "Next paired redacted preview" })).toBeDisabled();
+    await waitFor(() => expect(pairedPreview).toHaveFocus());
     await waitFor(() => {
       expect(repositoryCommitFilePreview).toHaveBeenCalledWith("workspace-1",
         "abcdef1234567890abcdef1234567890abcdef12", "internal/pair.go",
@@ -146,7 +150,7 @@ describe("RepositoryHistoryPanel", () => {
       expect(repositoryCommitFilePreview).toHaveBeenCalledWith("workspace-1",
         historyObjectID, "internal/pair.go", expect.any(AbortSignal));
     });
-    await user.click(screen.getByRole("button", { name: "Previous paired redacted preview" }));
+    await user.keyboard("{ArrowLeft}");
     expect(screen.getByRole("region", { name: "Base redacted file preview" }))
       .toHaveTextContent("base internal/old.go");
     expect(screen.getByRole("region", { name: "Head redacted file preview" }))
@@ -159,8 +163,15 @@ describe("RepositoryHistoryPanel", () => {
       .toHaveTextContent("head internal/second.go");
     expect(screen.getByRole("button", { name: "Previous paired redacted preview" })).toBeDisabled();
     expect(pairedPreview).toHaveTextContent("1 of 3");
-    await user.click(screen.getByRole("button", { name: "Next paired redacted preview" }));
+    pairedPreview.focus();
+    await user.keyboard("{ArrowRight}");
     expect(pairedPreview).toHaveTextContent("2 of 3");
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("region", { name: "Paired redacted file preview" }))
+      .not.toBeInTheDocument();
+    expect(screen.getByRole("button", {
+      name: "Compare redacted previews for internal/pair.go between abcdef123456 and 1234567890ab",
+    })).toHaveFocus();
     await user.click(screen.getByRole("button", {
       name: "Compare redacted previews for internal/second.go between abcdef123456 and 1234567890ab",
     }));

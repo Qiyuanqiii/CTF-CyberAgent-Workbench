@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"path/filepath"
@@ -128,6 +130,83 @@ func TestVerificationSnapshotReceiptReviewHTTPIsExplicitAndNonAuthorizing(t *tes
 		strings.Contains(inventory.Body.String(), "http_run_operator") {
 		t.Fatalf("snapshot receipt review inventory status=%d body=%s", inventory.Code,
 			inventory.Body.String())
+	}
+	handoffPath := strings.ReplaceAll(CodeHandoffPathTemplate, "{run_id}", run.ID)
+	handoff := performSessionMessageRequest(t, api, http.MethodGet, handoffPath,
+		testAccessToken, "", "", nil)
+	if handoff.Code != http.StatusOK {
+		t.Fatalf("snapshot receipt review handoff status=%d body=%s", handoff.Code,
+			handoff.Body.String())
+	}
+	var handoffEnvelope struct {
+		Data CodeHandoffView `json:"data"`
+	}
+	if err := json.Unmarshal(handoff.Body.Bytes(), &handoffEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	reviews := handoffEnvelope.Data.VerificationSnapshotReceiptReviews
+	if reviews.ProtocolVersion != verification.SnapshotReceiptReviewInventoryProtocolVersion ||
+		reviews.MetadataConfirmedCount != 1 || reviews.MetadataDisputedCount != 0 ||
+		reviews.ReturnedCount != 1 || reviews.Truncated || len(reviews.References) != 1 ||
+		reviews.References[0].ID != value.ID ||
+		reviews.References[0].ReceiptID != receipt.ID ||
+		reviews.References[0].ReceiptContentSHA256 != receipt.ContentSHA256 ||
+		reviews.References[0].ReceiptEventSequence != receipt.EventSequence ||
+		reviews.References[0].ReviewEventSequence != value.ReviewEventSequence ||
+		reviews.References[0].Decision !=
+			string(verification.SnapshotReceiptReviewMetadataConfirmed) ||
+		!reviews.MetadataOnly || !reviews.ReadOnly || !reviews.ReviewNonAuthorizing ||
+		reviews.ContentIncluded || reviews.PrivateBodiesIncluded ||
+		reviews.OperatorIdentityIncluded || reviews.SnapshotAccepted || reviews.ResultAccepted ||
+		reviews.ResultInferred || reviews.RecordRewritten || reviews.Approval ||
+		reviews.AuthorityGranted || reviews.ExecutionStarted ||
+		handoffEnvelope.Data.SourceEventSequence < value.ReviewEventSequence ||
+		strings.Contains(handoff.Body.String(), "http_run_operator") {
+		t.Fatalf("Code handoff review projection widened authority or lost binding: %#v", reviews)
+	}
+	for _, format := range []string{application.CodeHandoffExportFormatJSON,
+		application.CodeHandoffExportFormatMarkdown} {
+		exportPath := strings.ReplaceAll(CodeHandoffExportPathTemplate, "{run_id}", run.ID) +
+			"?format=" + format
+		exportResponse := performSessionMessageRequest(t, api, http.MethodGet, exportPath,
+			testAccessToken, "", "", nil)
+		if exportResponse.Code != http.StatusOK {
+			t.Fatalf("snapshot receipt review %s export status=%d body=%s", format,
+				exportResponse.Code, exportResponse.Body.String())
+		}
+		var exported struct {
+			Data CodeHandoffExportView `json:"data"`
+		}
+		if err := json.Unmarshal(exportResponse.Body.Bytes(), &exported); err != nil {
+			t.Fatal(err)
+		}
+		digest := sha256.Sum256([]byte(exported.Data.Content))
+		if exported.Data.ContentSHA256 != hex.EncodeToString(digest[:]) ||
+			exported.Data.SourceEventSequence < value.ReviewEventSequence ||
+			exported.Data.PrivateBodies || exported.Data.ResumeAuthorized ||
+			exported.Data.MutationSupported || exported.Data.ReportAcceptance ||
+			exported.Data.ExecutionStarted ||
+			strings.Contains(exported.Data.Content, "http_run_operator") {
+			t.Fatalf("snapshot receipt review %s export widened authority: %#v", format,
+				exported.Data)
+		}
+		if format == application.CodeHandoffExportFormatJSON {
+			var document application.CodeHandoff
+			if err := json.Unmarshal([]byte(exported.Data.Content), &document); err != nil {
+				t.Fatal(err)
+			}
+			if document.VerificationSnapshotReceiptReviews.MetadataConfirmedCount != 1 ||
+				len(document.VerificationSnapshotReceiptReviews.References) != 1 ||
+				document.VerificationSnapshotReceiptReviews.References[0].ReceiptID != receipt.ID {
+				t.Fatalf("JSON handoff omitted receipt review metadata: %#v", document)
+			}
+		} else if !strings.Contains(exported.Data.Content,
+			"Receipt metadata reviews: 1 confirmed, 0 disputed.") ||
+			!strings.Contains(exported.Data.Content, receipt.ContentSHA256) ||
+			!strings.Contains(exported.Data.Content, string(
+				verification.SnapshotReceiptReviewMetadataConfirmed)) {
+			t.Fatalf("Markdown handoff omitted receipt review metadata: %s", exported.Data.Content)
+		}
 	}
 	requestView.Decision = string(verification.SnapshotReceiptReviewMetadataDisputed)
 	changedBody, err := json.Marshal(requestView)

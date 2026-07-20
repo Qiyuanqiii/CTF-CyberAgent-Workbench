@@ -417,7 +417,7 @@ export interface paths {
         };
         /**
          * Build a resumable Code handoff
-         * @description Regenerates a metadata-only Code Run handoff from durable Plan, queue, change-set, verification, explicit per-item coverage, pending-action, and report records. Coverage preserves pass/fail/unknown counts without private summaries or an inferred aggregate result. The handoff performs no composite mutation, starts no execution, and grants no resume authority.
+         * @description Regenerates a metadata-only Code Run handoff from durable Plan, queue, change-set, verification, explicit per-item coverage, non-authorizing snapshot-receipt reviews, pending-action, and report records. Coverage and review decisions preserve explicit metadata without private bodies, reviewer identity, or an inferred aggregate result. The handoff performs no composite mutation, starts no execution, and grants no resume authority.
          */
         get: operations["getCodeHandoff"];
         put?: never;
@@ -437,7 +437,7 @@ export interface paths {
         };
         /**
          * Export the current Code handoff
-         * @description Builds a bounded Markdown or JSON download projection from one stable Code handoff snapshot. The response includes the durable source event high-water mark and SHA-256 of the exact content; it grants no resume, mutation, report-acceptance, or execution authority.
+         * @description Builds a bounded Markdown or JSON download projection from one stable Code handoff snapshot, including non-authorizing snapshot-receipt review metadata. The response includes the durable source event high-water mark and SHA-256 of the exact content; it grants no resume, mutation, report-acceptance, or execution authority.
          */
         get: operations["exportCodeHandoff"];
         put?: never;
@@ -1776,6 +1776,44 @@ export interface components {
             /** @enum {string} */
             status: "generated";
         };
+        CodeHandoffSnapshotReceiptReviewReferenceView: {
+            /** @enum {string} */
+            decision: "metadata_confirmed" | "metadata_disputed";
+            id: string;
+            receipt_content_sha256: string;
+            /** Format: int64 */
+            receipt_event_sequence: number;
+            receipt_id: string;
+            /** Format: int64 */
+            review_event_sequence: number;
+            /** Format: date-time */
+            reviewed_at: string;
+        };
+        CodeHandoffSnapshotReceiptReviewsView: {
+            approval: boolean;
+            authority_granted: boolean;
+            content_included: boolean;
+            execution_started: boolean;
+            /** Format: int32 */
+            metadata_confirmed_count: number;
+            /** Format: int32 */
+            metadata_disputed_count: number;
+            metadata_only: boolean;
+            operator_identity_included: boolean;
+            private_bodies_included: boolean;
+            /** @enum {string} */
+            protocol_version: "operator_verification_plan_item_snapshot_receipt_review_inventory.v1";
+            read_only: boolean;
+            record_rewritten: boolean;
+            references: components["schemas"]["CodeHandoffSnapshotReceiptReviewReferenceView"][];
+            result_accepted: boolean;
+            result_inferred: boolean;
+            /** Format: int32 */
+            returned_count: number;
+            review_non_authorizing: boolean;
+            snapshot_accepted: boolean;
+            truncated: boolean;
+        };
         CodeHandoffVerificationCoverageItemView: {
             /** Format: int32 */
             associated_evidence_count: number;
@@ -1888,6 +1926,7 @@ export interface components {
             verification: components["schemas"]["CodeHandoffVerificationView"];
             verification_coverage: components["schemas"]["CodeHandoffVerificationCoverageView"];
             verification_plans: components["schemas"]["CodeHandoffVerificationPlansView"];
+            verification_snapshot_receipt_reviews: components["schemas"]["CodeHandoffSnapshotReceiptReviewsView"];
             workspace_id: string;
         };
         DelegationApplicationView: {

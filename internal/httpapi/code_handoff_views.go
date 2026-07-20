@@ -580,6 +580,38 @@ type CodeHandoffVerificationCoverageView struct {
 	PrivateBodiesIncluded   bool                                      `json:"private_bodies_included"`
 }
 
+type CodeHandoffSnapshotReceiptReviewReferenceView struct {
+	ID                   string    `json:"id"`
+	ReceiptID            string    `json:"receipt_id"`
+	ReceiptContentSHA256 string    `json:"receipt_content_sha256"`
+	ReceiptEventSequence int64     `json:"receipt_event_sequence"`
+	Decision             string    `json:"decision"`
+	ReviewEventSequence  int64     `json:"review_event_sequence"`
+	ReviewedAt           time.Time `json:"reviewed_at"`
+}
+
+type CodeHandoffSnapshotReceiptReviewsView struct {
+	ProtocolVersion          string                                          `json:"protocol_version"`
+	MetadataConfirmedCount   int                                             `json:"metadata_confirmed_count"`
+	MetadataDisputedCount    int                                             `json:"metadata_disputed_count"`
+	ReturnedCount            int                                             `json:"returned_count"`
+	Truncated                bool                                            `json:"truncated"`
+	References               []CodeHandoffSnapshotReceiptReviewReferenceView `json:"references"`
+	MetadataOnly             bool                                            `json:"metadata_only"`
+	ReadOnly                 bool                                            `json:"read_only"`
+	ReviewNonAuthorizing     bool                                            `json:"review_non_authorizing"`
+	ContentIncluded          bool                                            `json:"content_included"`
+	PrivateBodiesIncluded    bool                                            `json:"private_bodies_included"`
+	OperatorIdentityIncluded bool                                            `json:"operator_identity_included"`
+	SnapshotAccepted         bool                                            `json:"snapshot_accepted"`
+	ResultAccepted           bool                                            `json:"result_accepted"`
+	ResultInferred           bool                                            `json:"result_inferred"`
+	RecordRewritten          bool                                            `json:"record_rewritten"`
+	Approval                 bool                                            `json:"approval"`
+	AuthorityGranted         bool                                            `json:"authority_granted"`
+	ExecutionStarted         bool                                            `json:"execution_started"`
+}
+
 type CodeHandoffActionReferenceView struct {
 	ID          string                     `json:"id"`
 	Kind        operatoraction.Kind        `json:"kind"`
@@ -597,34 +629,35 @@ type CodeHandoffReportReferenceView struct {
 }
 
 type CodeHandoffView struct {
-	ProtocolVersion           string                              `json:"protocol_version"`
-	RunID                     string                              `json:"run_id"`
-	MissionID                 string                              `json:"mission_id"`
-	SessionID                 string                              `json:"session_id"`
-	WorkspaceID               string                              `json:"workspace_id"`
-	RunStatus                 string                              `json:"run_status"`
-	Surface                   string                              `json:"surface"`
-	Phase                     string                              `json:"phase"`
-	ModeRevision              int64                               `json:"mode_revision"`
-	SourceEventSequence       int64                               `json:"source_event_sequence"`
-	GeneratedAt               time.Time                           `json:"generated_at"`
-	Plan                      CodeHandoffPlanView                 `json:"plan"`
-	Queue                     CodeHandoffQueueView                `json:"queue"`
-	ChangeSet                 CodeHandoffChangeSetView            `json:"change_set"`
-	Verification              CodeHandoffVerificationView         `json:"verification"`
-	VerificationPlans         CodeHandoffVerificationPlansView    `json:"verification_plans"`
-	VerificationCoverage      CodeHandoffVerificationCoverageView `json:"verification_coverage"`
-	PendingActionCount        int                                 `json:"pending_action_count"`
-	PendingActionsTruncated   bool                                `json:"pending_actions_truncated"`
-	PendingActions            []CodeHandoffActionReferenceView    `json:"pending_actions"`
-	ReportReferencesTruncated bool                                `json:"report_references_truncated"`
-	ReportReferences          []CodeHandoffReportReferenceView    `json:"report_references"`
-	Regenerable               bool                                `json:"regenerable"`
-	DurableSources            bool                                `json:"durable_sources"`
-	PrivateBodiesIncluded     bool                                `json:"private_bodies_included"`
-	CompositeMutation         bool                                `json:"composite_mutation"`
-	ResumeAuthorized          bool                                `json:"resume_authorized"`
-	ExecutionStarted          bool                                `json:"execution_started"`
+	ProtocolVersion                    string                                `json:"protocol_version"`
+	RunID                              string                                `json:"run_id"`
+	MissionID                          string                                `json:"mission_id"`
+	SessionID                          string                                `json:"session_id"`
+	WorkspaceID                        string                                `json:"workspace_id"`
+	RunStatus                          string                                `json:"run_status"`
+	Surface                            string                                `json:"surface"`
+	Phase                              string                                `json:"phase"`
+	ModeRevision                       int64                                 `json:"mode_revision"`
+	SourceEventSequence                int64                                 `json:"source_event_sequence"`
+	GeneratedAt                        time.Time                             `json:"generated_at"`
+	Plan                               CodeHandoffPlanView                   `json:"plan"`
+	Queue                              CodeHandoffQueueView                  `json:"queue"`
+	ChangeSet                          CodeHandoffChangeSetView              `json:"change_set"`
+	Verification                       CodeHandoffVerificationView           `json:"verification"`
+	VerificationPlans                  CodeHandoffVerificationPlansView      `json:"verification_plans"`
+	VerificationCoverage               CodeHandoffVerificationCoverageView   `json:"verification_coverage"`
+	VerificationSnapshotReceiptReviews CodeHandoffSnapshotReceiptReviewsView `json:"verification_snapshot_receipt_reviews"`
+	PendingActionCount                 int                                   `json:"pending_action_count"`
+	PendingActionsTruncated            bool                                  `json:"pending_actions_truncated"`
+	PendingActions                     []CodeHandoffActionReferenceView      `json:"pending_actions"`
+	ReportReferencesTruncated          bool                                  `json:"report_references_truncated"`
+	ReportReferences                   []CodeHandoffReportReferenceView      `json:"report_references"`
+	Regenerable                        bool                                  `json:"regenerable"`
+	DurableSources                     bool                                  `json:"durable_sources"`
+	PrivateBodiesIncluded              bool                                  `json:"private_bodies_included"`
+	CompositeMutation                  bool                                  `json:"composite_mutation"`
+	ResumeAuthorized                   bool                                  `json:"resume_authorized"`
+	ExecutionStarted                   bool                                  `json:"execution_started"`
 }
 
 type CodeHandoffExportView struct {

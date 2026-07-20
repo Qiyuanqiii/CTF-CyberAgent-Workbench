@@ -420,6 +420,7 @@ td code { font-size: 11px; }
 .repository-commit-comparison-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; }
 .repository-preview-placeholder { width: 32px; height: 32px; }
 .repository-comparison-preview-workspace { min-width: 0; border-top: 1px solid var(--border); }
+.repository-comparison-preview-workspace:focus-visible { outline: 2px solid #168f82; outline-offset: 2px; }
 .repository-comparison-preview-workspace > header { min-height: 40px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .repository-comparison-preview-workspace > header > span { min-width: 0; display: flex; align-items: center; gap: 7px; }
 .repository-comparison-preview-workspace > header code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

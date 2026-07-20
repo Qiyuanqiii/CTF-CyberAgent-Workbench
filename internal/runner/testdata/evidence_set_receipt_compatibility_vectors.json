@@ -1,0 +1,80 @@
+{
+  "protocol_version": "runner_evidence_set_receipt_compatibility_rejection_vectors.v1",
+  "source_vector": "normal_empty_exit",
+  "vectors": [
+    {
+      "name": "future_receipt_protocol",
+      "operation": "replace",
+      "field": "protocol_version",
+      "value": "runner_evidence_set_receipt.v2",
+      "expected_code": "unsupported_protocol"
+    },
+    {
+      "name": "future_record_protocol",
+      "operation": "replace",
+      "field": "record_protocols",
+      "value": ["runner_exit_evidence.v2", "runner_runtime_evidence.v1", "runner_resource_limit_evidence.v1", "runner_termination_cause_evidence.v1", "runner_lifecycle_timeline_evidence.v1", "runner_deadline_budget_evidence.v1"],
+      "expected_code": "unsupported_protocol"
+    },
+    {
+      "name": "missing_required_authority_flag",
+      "operation": "remove",
+      "field": "product_execution_enabled",
+      "expected_code": "malformed_envelope"
+    },
+    {
+      "name": "unknown_authority_field",
+      "operation": "add",
+      "field": "process_started",
+      "value": true,
+      "expected_code": "malformed_envelope"
+    },
+    {
+      "name": "duplicate_protocol_field",
+      "operation": "duplicate",
+      "field": "protocol_version",
+      "value": "runner_evidence_set_receipt.v1",
+      "expected_code": "malformed_envelope"
+    },
+    {
+      "name": "trailing_json_document",
+      "operation": "append",
+      "field": "",
+      "value": {},
+      "expected_code": "malformed_envelope"
+    },
+    {
+      "name": "wrong_record_count_type",
+      "operation": "replace",
+      "field": "record_count",
+      "value": "6",
+      "expected_code": "malformed_envelope"
+    },
+    {
+      "name": "invalid_utf8_suffix",
+      "operation": "append_invalid_utf8",
+      "field": "",
+      "expected_code": "malformed_envelope"
+    },
+    {
+      "name": "oversized_envelope",
+      "operation": "exceed_size_limit",
+      "field": "",
+      "expected_code": "malformed_envelope"
+    },
+    {
+      "name": "canonical_digest_mismatch",
+      "operation": "replace",
+      "field": "canonical_sha256",
+      "value": "0000000000000000000000000000000000000000000000000000000000000000",
+      "expected_code": "contract_mismatch"
+    },
+    {
+      "name": "product_authority_widening",
+      "operation": "replace",
+      "field": "product_execution_enabled",
+      "value": true,
+      "expected_code": "contract_mismatch"
+    }
+  ]
+}

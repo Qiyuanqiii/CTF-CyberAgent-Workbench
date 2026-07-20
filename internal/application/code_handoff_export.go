@@ -170,6 +170,23 @@ func renderCodeHandoffMarkdown(value CodeHandoff) string {
 		}
 		output.WriteByte('\n')
 	}
+	reviews := value.VerificationSnapshotReceiptReviews
+	fmt.Fprintf(&output, "Receipt metadata reviews: %d confirmed, %d disputed%s.\n\n",
+		reviews.MetadataConfirmedCount, reviews.MetadataDisputedCount,
+		markdownTruncation(reviews.Truncated))
+	if len(reviews.References) > 0 {
+		output.WriteString("| Review | Receipt | Content SHA-256 | Decision | Receipt event | Review event | Reviewed |\n")
+		output.WriteString("| --- | --- | --- | --- | ---: | ---: | --- |\n")
+		for _, reference := range reviews.References {
+			fmt.Fprintf(&output, "| `%s` | `%s` | `%s` | %s | %d | %d | %s |\n",
+				markdownCell(reference.ID), markdownCell(reference.ReceiptID),
+				markdownCell(reference.ReceiptContentSHA256),
+				markdownCell(string(reference.Decision)), reference.ReceiptEventSequence,
+				reference.ReviewEventSequence,
+				reference.ReviewedAt.UTC().Format(time.RFC3339Nano))
+		}
+		output.WriteByte('\n')
+	}
 
 	output.WriteString("## Pending Actions\n\n")
 	if len(value.PendingActions) == 0 {

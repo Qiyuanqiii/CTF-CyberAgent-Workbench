@@ -502,12 +502,12 @@ func openAPIOperationSpecs() []openAPIOperationSpec {
 						"maxLength": domain.MaxAgentOperationKeyBytes, "pattern": `^\S+$`}}}},
 		{Path: CodeHandoffPathTemplate, OperationID: "getCodeHandoff",
 			Summary: "Build a resumable Code handoff", Tag: "Runs",
-			Description: "Regenerates a metadata-only Code Run handoff from durable Plan, queue, change-set, verification, explicit per-item coverage, pending-action, and report records. Coverage preserves pass/fail/unknown counts without private summaries or an inferred aggregate result. The handoff performs no composite mutation, starts no execution, and grants no resume authority.",
+			Description: "Regenerates a metadata-only Code Run handoff from durable Plan, queue, change-set, verification, explicit per-item coverage, non-authorizing snapshot-receipt reviews, pending-action, and report records. Coverage and review decisions preserve explicit metadata without private bodies, reviewer identity, or an inferred aggregate result. The handoff performs no composite mutation, starts no execution, and grants no resume authority.",
 			DataType:    reflect.TypeOf(CodeHandoffView{}), NotFound: true,
 			Parameters: []openAPIParameter{runID}},
 		{Path: CodeHandoffExportPathTemplate, OperationID: "exportCodeHandoff",
 			Summary: "Export the current Code handoff", Tag: "Runs",
-			Description: "Builds a bounded Markdown or JSON download projection from one stable Code handoff snapshot. The response includes the durable source event high-water mark and SHA-256 of the exact content; it grants no resume, mutation, report-acceptance, or execution authority.",
+			Description: "Builds a bounded Markdown or JSON download projection from one stable Code handoff snapshot, including non-authorizing snapshot-receipt review metadata. The response includes the durable source event high-water mark and SHA-256 of the exact content; it grants no resume, mutation, report-acceptance, or execution authority.",
 			DataType:    reflect.TypeOf(CodeHandoffExportView{}), NotFound: true,
 			Parameters: []openAPIParameter{runID,
 				{Name: "format", In: "query", Description: "Bounded export representation",
@@ -1174,7 +1174,7 @@ func applyOpenAPIFieldMetadata(typeName string, fieldName string, schema map[str
 	if typeName == "ArtifactView" && fieldName == "sha256" {
 		schema["pattern"] = "^[a-f0-9]{64}$"
 	}
-	if fieldName == "content_sha256" {
+	if fieldName == "content_sha256" || fieldName == "receipt_content_sha256" {
 		schema["pattern"] = "^[a-f0-9]{64}$"
 	}
 	if typeName == "WorkspaceExplorerView" && fieldName == "entries" {
@@ -1227,6 +1227,9 @@ func applyOpenAPIFieldMetadata(typeName string, fieldName string, schema map[str
 	}
 	if typeName == "CodeHandoffVerificationCoverageView" && fieldName == "items" {
 		schema["maxItems"] = application.MaxCodeHandoffCoverageItemRefs
+	}
+	if typeName == "CodeHandoffSnapshotReceiptReviewsView" && fieldName == "references" {
+		schema["maxItems"] = application.MaxCodeHandoffReceiptReviewRefs
 	}
 	if typeName == "CodeHandoffView" && fieldName == "pending_actions" {
 		schema["maxItems"] = application.MaxCodeHandoffActionReferences
@@ -1923,6 +1926,24 @@ func init() {
 	openAPIFieldMaxLengths["VerificationSnapshotReceiptReviewRequestView.receipt_content_sha256"] = 64
 	openAPIFieldEnums["VerificationSnapshotReceiptReviewInventoryView.protocol_version"] =
 		[]string{verification.SnapshotReceiptReviewInventoryProtocolVersion}
+	openAPIFieldEnums["CodeHandoffSnapshotReceiptReviewsView.protocol_version"] =
+		[]string{verification.SnapshotReceiptReviewInventoryProtocolVersion}
+	openAPIFieldEnums["CodeHandoffSnapshotReceiptReviewReferenceView.decision"] = []string{
+		string(verification.SnapshotReceiptReviewMetadataConfirmed),
+		string(verification.SnapshotReceiptReviewMetadataDisputed),
+	}
+	for _, field := range []string{"metadata_confirmed_count", "metadata_disputed_count",
+		"returned_count"} {
+		openAPIFieldMinimums["CodeHandoffSnapshotReceiptReviewsView."+field] = 0
+		openAPIFieldMaximums["CodeHandoffSnapshotReceiptReviewsView."+field] =
+			verification.MaxSnapshotReceiptReviewHistory
+	}
+	for _, field := range []string{"receipt_event_sequence", "review_event_sequence"} {
+		openAPIFieldMinimums["CodeHandoffSnapshotReceiptReviewReferenceView."+field] = 1
+		openAPIFieldMaximums["CodeHandoffSnapshotReceiptReviewReferenceView."+field] =
+			float64(1<<53 - 1)
+	}
+	openAPIFieldMaxLengths["CodeHandoffSnapshotReceiptReviewReferenceView.receipt_content_sha256"] = 64
 }
 
 func runStatuses() []string {

@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useRef, useState, type KeyboardEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Columns2, FileClock, FileCode2, FileDiff, FileInput,
-  FileOutput, GitCommitHorizontal, GitCompareArrows, RefreshCw } from "lucide-react";
+  FileOutput, GitCommitHorizontal, GitCompareArrows, RefreshCw, X } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import { formatDate } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
@@ -17,6 +17,8 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
   const [comparisonPreview, setComparisonPreview] = useState({ workspaceID: "", baseObjectID: "",
     baseHash: "", baseAvailable: false, headObjectID: "", headHash: "", headAvailable: false,
     path: "" });
+  const comparisonPreviewWorkspaceRef = useRef<HTMLElement | null>(null);
+  const comparisonPreviewReturnFocusRef = useRef<HTMLButtonElement | null>(null);
   const selectedObjectID = selection.workspaceID === workspaceID ? selection.objectID : "";
   const comparisonBaseObjectID = comparisonBase.workspaceID === workspaceID ?
     comparisonBase.objectID : "";
@@ -78,13 +80,23 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
     ["regular", "executable"].includes(change.current_kind));
   const pairedPreviewIndex = activeComparisonPreview ? pairedPreviewCandidates.findIndex(
     (change) => change.path === activeComparisonPreview.path) : -1;
-  const selectPairedPreview = (index: number, toggle = false) => {
+  const closePairedPreview = () => {
+    setComparisonPreview({ workspaceID: "", baseObjectID: "", baseHash: "",
+      baseAvailable: false, headObjectID: "", headHash: "", headAvailable: false, path: "" });
+    queueMicrotask(() => {
+      if (comparisonPreviewReturnFocusRef.current?.isConnected) {
+        comparisonPreviewReturnFocusRef.current.focus();
+      }
+    });
+  };
+  const selectPairedPreview = (index: number, toggle = false,
+    returnFocus?: HTMLButtonElement) => {
     const comparison = comparisonQuery.data;
     const change = pairedPreviewCandidates[index];
     if (!comparison || !change) return;
+    if (returnFocus) comparisonPreviewReturnFocusRef.current = returnFocus;
     if (toggle && activeComparisonPreview?.path === change.path) {
-      setComparisonPreview({ workspaceID: "", baseObjectID: "", baseHash: "",
-        baseAvailable: false, headObjectID: "", headHash: "", headAvailable: false, path: "" });
+      closePairedPreview();
       return;
     }
     setComparisonPreview({ workspaceID, baseObjectID: comparison.base_object_id,
@@ -93,6 +105,23 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
       headObjectID: comparison.head_object_id, headHash: comparison.head_hash,
       headAvailable: ["regular", "executable"].includes(change.current_kind),
       path: change.path });
+    if (returnFocus) {
+      queueMicrotask(() => comparisonPreviewWorkspaceRef.current?.focus());
+    }
+  };
+  const handlePairedPreviewKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closePairedPreview();
+    } else if (event.key === "ArrowLeft" && pairedPreviewIndex > 0) {
+      event.preventDefault();
+      selectPairedPreview(pairedPreviewIndex - 1);
+    } else if (event.key === "ArrowRight" && pairedPreviewIndex >= 0 &&
+      pairedPreviewIndex < pairedPreviewCandidates.length - 1) {
+      event.preventDefault();
+      selectPairedPreview(pairedPreviewIndex + 1);
+    }
   };
   if (!workspaceID) return null;
   return <section aria-label="Repository history" className="repository-history-panel">
@@ -250,9 +279,9 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
                     ["regular", "executable"].includes(change.current_kind) ?
                     <button aria-label={`Compare redacted previews for ${change.path} between ${comparisonQuery.data.base_hash} and ${comparisonQuery.data.head_hash}`}
                       aria-pressed={activeComparisonPreview?.path === change.path}
-                      className="icon-button" onClick={() => selectPairedPreview(
+                      className="icon-button" onClick={(event) => selectPairedPreview(
                         pairedPreviewCandidates.findIndex((candidate) => candidate.path === change.path),
-                        true)}
+                        true, event.currentTarget)}
                       title="Open paired redacted previews" type="button">
                       <Columns2 aria-hidden="true" size={14} />
                     </button> : <span aria-hidden="true" className="repository-preview-placeholder" />}
@@ -263,24 +292,34 @@ export function RepositoryHistoryPanel({ client, workspaceID }: {
               {comparisonQuery.data.omitted_change_count} additional changes omitted
             </p>}
           {activeComparisonPreview &&
-            <section aria-label="Paired redacted file preview"
-              className="repository-comparison-preview-workspace">
+            <section aria-keyshortcuts="ArrowLeft ArrowRight Escape"
+              aria-label="Paired redacted file preview"
+              className="repository-comparison-preview-workspace"
+              onKeyDown={handlePairedPreviewKeyDown} ref={comparisonPreviewWorkspaceRef}
+              tabIndex={0}>
               <header><span><Columns2 aria-hidden="true" size={14} />
                 <code title={activeComparisonPreview.path}>{activeComparisonPreview.path}</code></span>
                 <div className="repository-comparison-preview-controls">
                   <span aria-live="polite">{pairedPreviewIndex + 1} of {pairedPreviewCandidates.length}</span>
-                  <button aria-label="Previous paired redacted preview" className="icon-button"
+                  <button aria-keyshortcuts="ArrowLeft"
+                    aria-label="Previous paired redacted preview" className="icon-button"
                     disabled={pairedPreviewIndex <= 0}
                     onClick={() => selectPairedPreview(pairedPreviewIndex - 1)}
                     title="Previous changed file" type="button">
                     <ChevronLeft aria-hidden="true" size={14} />
                   </button>
-                  <button aria-label="Next paired redacted preview" className="icon-button"
+                  <button aria-keyshortcuts="ArrowRight"
+                    aria-label="Next paired redacted preview" className="icon-button"
                     disabled={pairedPreviewIndex < 0 ||
                       pairedPreviewIndex >= pairedPreviewCandidates.length - 1}
                     onClick={() => selectPairedPreview(pairedPreviewIndex + 1)}
                     title="Next changed file" type="button">
                     <ChevronRight aria-hidden="true" size={14} />
+                  </button>
+                  <button aria-keyshortcuts="Escape"
+                    aria-label="Close paired redacted preview" className="icon-button"
+                    onClick={closePairedPreview} title="Close" type="button">
+                    <X aria-hidden="true" size={14} />
                   </button>
                   <StatusBadge status="read-only" />
                 </div></header>

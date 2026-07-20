@@ -1177,6 +1177,17 @@ func codeHandoffView(value application.CodeHandoff) CodeHandoffView {
 			LatestAssociationEventSequence: item.LatestAssociationEventSequence,
 		}
 	}
+	reviewReferences := make([]CodeHandoffSnapshotReceiptReviewReferenceView,
+		len(value.VerificationSnapshotReceiptReviews.References))
+	for index, reference := range value.VerificationSnapshotReceiptReviews.References {
+		reviewReferences[index] = CodeHandoffSnapshotReceiptReviewReferenceView{
+			ID: reference.ID, ReceiptID: reference.ReceiptID,
+			ReceiptContentSHA256: reference.ReceiptContentSHA256,
+			ReceiptEventSequence: reference.ReceiptEventSequence,
+			Decision:             string(reference.Decision), ReviewEventSequence: reference.ReviewEventSequence,
+			ReviewedAt: reference.ReviewedAt,
+		}
+	}
 	actions := make([]CodeHandoffActionReferenceView, len(value.PendingActions))
 	for index, action := range value.PendingActions {
 		actions[index] = CodeHandoffActionReferenceView{
@@ -1239,6 +1250,27 @@ func codeHandoffView(value application.CodeHandoff) CodeHandoffView {
 			ReadOnly:              value.VerificationCoverage.ReadOnly,
 			ResultInferred:        value.VerificationCoverage.ResultInferred,
 			PrivateBodiesIncluded: value.VerificationCoverage.PrivateBodiesIncluded,
+		},
+		VerificationSnapshotReceiptReviews: CodeHandoffSnapshotReceiptReviewsView{
+			ProtocolVersion:          value.VerificationSnapshotReceiptReviews.ProtocolVersion,
+			MetadataConfirmedCount:   value.VerificationSnapshotReceiptReviews.MetadataConfirmedCount,
+			MetadataDisputedCount:    value.VerificationSnapshotReceiptReviews.MetadataDisputedCount,
+			ReturnedCount:            value.VerificationSnapshotReceiptReviews.ReturnedCount,
+			Truncated:                value.VerificationSnapshotReceiptReviews.Truncated,
+			References:               reviewReferences,
+			MetadataOnly:             value.VerificationSnapshotReceiptReviews.MetadataOnly,
+			ReadOnly:                 value.VerificationSnapshotReceiptReviews.ReadOnly,
+			ReviewNonAuthorizing:     value.VerificationSnapshotReceiptReviews.ReviewNonAuthorizing,
+			ContentIncluded:          value.VerificationSnapshotReceiptReviews.ContentIncluded,
+			PrivateBodiesIncluded:    value.VerificationSnapshotReceiptReviews.PrivateBodiesIncluded,
+			OperatorIdentityIncluded: value.VerificationSnapshotReceiptReviews.OperatorIdentityIncluded,
+			SnapshotAccepted:         value.VerificationSnapshotReceiptReviews.SnapshotAccepted,
+			ResultAccepted:           value.VerificationSnapshotReceiptReviews.ResultAccepted,
+			ResultInferred:           value.VerificationSnapshotReceiptReviews.ResultInferred,
+			RecordRewritten:          value.VerificationSnapshotReceiptReviews.RecordRewritten,
+			Approval:                 value.VerificationSnapshotReceiptReviews.Approval,
+			AuthorityGranted:         value.VerificationSnapshotReceiptReviews.AuthorityGranted,
+			ExecutionStarted:         value.VerificationSnapshotReceiptReviews.ExecutionStarted,
 		},
 		PendingActionCount:      value.PendingActionCount,
 		PendingActionsTruncated: value.PendingActionsTruncated, PendingActions: actions,

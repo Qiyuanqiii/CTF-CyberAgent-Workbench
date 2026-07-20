@@ -1912,7 +1912,7 @@
       "get": {
         "operationId": "getCodeHandoff",
         "summary": "Build a resumable Code handoff",
-        "description": "Regenerates a metadata-only Code Run handoff from durable Plan, queue, change-set, verification, explicit per-item coverage, pending-action, and report records. Coverage preserves pass/fail/unknown counts without private summaries or an inferred aggregate result. The handoff performs no composite mutation, starts no execution, and grants no resume authority.",
+        "description": "Regenerates a metadata-only Code Run handoff from durable Plan, queue, change-set, verification, explicit per-item coverage, non-authorizing snapshot-receipt reviews, pending-action, and report records. Coverage and review decisions preserve explicit metadata without private bodies, reviewer identity, or an inferred aggregate result. The handoff performs no composite mutation, starts no execution, and grants no resume authority.",
         "tags": [
           "Runs"
         ],
@@ -1990,7 +1990,7 @@
       "get": {
         "operationId": "exportCodeHandoff",
         "summary": "Export the current Code handoff",
-        "description": "Builds a bounded Markdown or JSON download projection from one stable Code handoff snapshot. The response includes the durable source event high-water mark and SHA-256 of the exact content; it grants no resume, mutation, report-acceptance, or execution authority.",
+        "description": "Builds a bounded Markdown or JSON download projection from one stable Code handoff snapshot, including non-authorizing snapshot-receipt review metadata. The response includes the durable source event high-water mark and SHA-256 of the exact content; it grants no resume, mutation, report-acceptance, or execution authority.",
         "tags": [
           "Runs"
         ],
@@ -9096,6 +9096,159 @@
         ],
         "type": "object"
       },
+      "CodeHandoffSnapshotReceiptReviewReferenceView": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "metadata_confirmed",
+              "metadata_disputed"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "receipt_content_sha256": {
+            "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          },
+          "receipt_event_sequence": {
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "receipt_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "review_event_sequence": {
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reviewed_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "receipt_id",
+          "receipt_content_sha256",
+          "receipt_event_sequence",
+          "decision",
+          "review_event_sequence",
+          "reviewed_at"
+        ],
+        "type": "object"
+      },
+      "CodeHandoffSnapshotReceiptReviewsView": {
+        "additionalProperties": false,
+        "properties": {
+          "approval": {
+            "type": "boolean"
+          },
+          "authority_granted": {
+            "type": "boolean"
+          },
+          "content_included": {
+            "type": "boolean"
+          },
+          "execution_started": {
+            "type": "boolean"
+          },
+          "metadata_confirmed_count": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "metadata_disputed_count": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "metadata_only": {
+            "type": "boolean"
+          },
+          "operator_identity_included": {
+            "type": "boolean"
+          },
+          "private_bodies_included": {
+            "type": "boolean"
+          },
+          "protocol_version": {
+            "enum": [
+              "operator_verification_plan_item_snapshot_receipt_review_inventory.v1"
+            ],
+            "type": "string"
+          },
+          "read_only": {
+            "type": "boolean"
+          },
+          "record_rewritten": {
+            "type": "boolean"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/CodeHandoffSnapshotReceiptReviewReferenceView"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "result_accepted": {
+            "type": "boolean"
+          },
+          "result_inferred": {
+            "type": "boolean"
+          },
+          "returned_count": {
+            "format": "int32",
+            "maximum": 100,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "review_non_authorizing": {
+            "type": "boolean"
+          },
+          "snapshot_accepted": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "metadata_confirmed_count",
+          "metadata_disputed_count",
+          "returned_count",
+          "truncated",
+          "references",
+          "metadata_only",
+          "read_only",
+          "review_non_authorizing",
+          "content_included",
+          "private_bodies_included",
+          "operator_identity_included",
+          "snapshot_accepted",
+          "result_accepted",
+          "result_inferred",
+          "record_rewritten",
+          "approval",
+          "authority_granted",
+          "execution_started"
+        ],
+        "type": "object"
+      },
       "CodeHandoffVerificationCoverageItemView": {
         "additionalProperties": false,
         "properties": {
@@ -9514,6 +9667,9 @@
           "verification_plans": {
             "$ref": "#/components/schemas/CodeHandoffVerificationPlansView"
           },
+          "verification_snapshot_receipt_reviews": {
+            "$ref": "#/components/schemas/CodeHandoffSnapshotReceiptReviewsView"
+          },
           "workspace_id": {
             "maxLength": 256,
             "minLength": 1,
@@ -9538,6 +9694,7 @@
           "verification",
           "verification_plans",
           "verification_coverage",
+          "verification_snapshot_receipt_reviews",
           "pending_action_count",
           "pending_actions_truncated",
           "pending_actions",
@@ -17947,6 +18104,7 @@
           },
           "receipt_content_sha256": {
             "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$",
             "type": "string"
           },
           "receipt_event_sequence": {
@@ -18134,6 +18292,7 @@
           },
           "receipt_content_sha256": {
             "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$",
             "type": "string"
           },
           "receipt_event_sequence": {
@@ -18217,6 +18376,7 @@
           },
           "receipt_content_sha256": {
             "maxLength": 64,
+            "pattern": "^[a-f0-9]{64}$",
             "type": "string"
           },
           "receipt_event_sequence": {

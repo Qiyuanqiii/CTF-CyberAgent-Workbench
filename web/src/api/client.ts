@@ -2191,7 +2191,8 @@ function parseCodeHandoff(value: unknown, runID: string): CodeHandoffView {
     "pending_actions_truncated", "phase", "plan", "private_bodies_included", "protocol_version",
     "queue", "regenerable", "report_references", "report_references_truncated",
     "resume_authorized", "run_id", "run_status", "session_id", "source_event_sequence",
-    "surface", "verification", "verification_coverage", "verification_plans", "workspace_id"];
+    "surface", "verification", "verification_coverage", "verification_plans",
+    "verification_snapshot_receipt_reviews", "workspace_id"];
   if (!hasExactKeys(value, keys) || value.protocol_version !== "code_handoff.v1" ||
     value.run_id !== runID || !boundedIdentity(value.mission_id) || !boundedIdentity(value.session_id) ||
     !boundedIdentity(value.workspace_id) || value.surface !== "code" ||
@@ -2205,6 +2206,7 @@ function parseCodeHandoff(value: unknown, runID: string): CodeHandoffView {
     !isRecord(value.plan) || !isRecord(value.queue) || !isRecord(value.change_set) ||
     !isRecord(value.verification) || !isRecord(value.verification_plans) ||
     !isRecord(value.verification_coverage) ||
+    !isRecord(value.verification_snapshot_receipt_reviews) ||
     !Array.isArray(value.pending_actions) ||
     value.pending_actions.length > 20 || !Array.isArray(value.report_references) ||
     value.report_references.length > 20 || !safeBoundedCount(value.pending_action_count, 100) ||
@@ -2363,6 +2365,64 @@ function parseCodeHandoff(value: unknown, runID: string): CodeHandoffView {
     throw new APIRequestError("Code handoff verification coverage totals are inconsistent",
       "INVALID_RESPONSE", 502);
   }
+  const reviews = value.verification_snapshot_receipt_reviews;
+  const reviewKeys = ["approval", "authority_granted", "content_included", "execution_started",
+    "metadata_confirmed_count", "metadata_disputed_count", "metadata_only",
+    "operator_identity_included", "private_bodies_included", "protocol_version", "read_only",
+    "record_rewritten", "references", "result_accepted", "result_inferred",
+    "returned_count", "review_non_authorizing", "snapshot_accepted", "truncated"];
+  if (!hasExactKeys(reviews, reviewKeys) || reviews.protocol_version !==
+      "operator_verification_plan_item_snapshot_receipt_review_inventory.v1" ||
+    !safeBoundedCount(reviews.metadata_confirmed_count, 100) ||
+    !safeBoundedCount(reviews.metadata_disputed_count, 100) ||
+    !safeBoundedCount(reviews.returned_count, 100) ||
+    reviews.metadata_confirmed_count + reviews.metadata_disputed_count !== reviews.returned_count ||
+    !Array.isArray(reviews.references) || reviews.references.length > 20 ||
+    reviews.references.length !== Math.min(reviews.returned_count, 20) ||
+    reviews.truncated !== (reviews.returned_count > 20) || reviews.metadata_only !== true ||
+    reviews.read_only !== true || reviews.review_non_authorizing !== true ||
+    reviews.content_included !== false || reviews.private_bodies_included !== false ||
+    reviews.operator_identity_included !== false || reviews.snapshot_accepted !== false ||
+    reviews.result_accepted !== false || reviews.result_inferred !== false ||
+    reviews.record_rewritten !== false || reviews.approval !== false ||
+    reviews.authority_granted !== false || reviews.execution_started !== false) {
+    throw new APIRequestError("Code handoff receipt reviews widened authority",
+      "INVALID_RESPONSE", 502);
+  }
+  const reviewIDs = new Set<string>();
+  const reviewedReceiptIDs = new Set<string>();
+  let previousReviewSequence: number | null = null;
+  let returnedConfirmed = 0;
+  let returnedDisputed = 0;
+  for (const review of reviews.references) {
+    if (!hasExactKeys(review, ["decision", "id", "receipt_content_sha256",
+      "receipt_event_sequence", "receipt_id", "review_event_sequence", "reviewed_at"]) ||
+      !boundedIdentity(review.id) || reviewIDs.has(String(review.id)) ||
+      !boundedIdentity(review.receipt_id) || reviewedReceiptIDs.has(String(review.receipt_id)) ||
+      !isSHA256(review.receipt_content_sha256) ||
+      !safePositiveInteger(review.receipt_event_sequence) ||
+      !safePositiveInteger(review.review_event_sequence) ||
+      review.review_event_sequence <= review.receipt_event_sequence ||
+      review.review_event_sequence > value.source_event_sequence ||
+      (previousReviewSequence !== null && review.review_event_sequence >= previousReviewSequence) ||
+      !["metadata_confirmed", "metadata_disputed"].includes(String(review.decision)) ||
+      !validDate(review.reviewed_at)) {
+      throw new APIRequestError("Code handoff receipt review reference is invalid",
+        "INVALID_RESPONSE", 502);
+    }
+    reviewIDs.add(String(review.id));
+    reviewedReceiptIDs.add(String(review.receipt_id));
+    previousReviewSequence = review.review_event_sequence;
+    returnedConfirmed += review.decision === "metadata_confirmed" ? 1 : 0;
+    returnedDisputed += review.decision === "metadata_disputed" ? 1 : 0;
+  }
+  if (returnedConfirmed > reviews.metadata_confirmed_count ||
+    returnedDisputed > reviews.metadata_disputed_count ||
+    (!reviews.truncated && (returnedConfirmed !== reviews.metadata_confirmed_count ||
+      returnedDisputed !== reviews.metadata_disputed_count))) {
+    throw new APIRequestError("Code handoff receipt review totals are inconsistent",
+      "INVALID_RESPONSE", 502);
+  }
   const actionMapping = {
     steering_pending: ["pending", "queue"], approval_pending: ["pending", "approvals"],
     file_edit_review: ["proposed", "diffs"], file_edit_apply: ["approved", "diffs"],
@@ -2453,13 +2513,30 @@ async function parseCodeHandoffExport(value: unknown, runID: string,
       !isRecord(document.verification_coverage) ||
       document.verification_coverage.protocol_version !==
         "operator_verification_plan_coverage.v1" ||
-      document.verification_coverage.result_inferred !== false) {
+      document.verification_coverage.result_inferred !== false ||
+      !isRecord(document.verification_snapshot_receipt_reviews) ||
+      document.verification_snapshot_receipt_reviews.protocol_version !==
+        "operator_verification_plan_item_snapshot_receipt_review_inventory.v1" ||
+      document.verification_snapshot_receipt_reviews.metadata_only !== true ||
+      document.verification_snapshot_receipt_reviews.read_only !== true ||
+      document.verification_snapshot_receipt_reviews.review_non_authorizing !== true ||
+      document.verification_snapshot_receipt_reviews.content_included !== false ||
+      document.verification_snapshot_receipt_reviews.private_bodies_included !== false ||
+      document.verification_snapshot_receipt_reviews.operator_identity_included !== false ||
+      document.verification_snapshot_receipt_reviews.snapshot_accepted !== false ||
+      document.verification_snapshot_receipt_reviews.result_accepted !== false ||
+      document.verification_snapshot_receipt_reviews.result_inferred !== false ||
+      document.verification_snapshot_receipt_reviews.record_rewritten !== false ||
+      document.verification_snapshot_receipt_reviews.approval !== false ||
+      document.verification_snapshot_receipt_reviews.authority_granted !== false ||
+      document.verification_snapshot_receipt_reviews.execution_started !== false) {
       throw new APIRequestError("Code handoff JSON export escaped its source binding",
         "INVALID_RESPONSE", 502);
     }
   } else if (!value.content.startsWith("# CyberAgent Code Handoff\n") ||
     !value.content.includes(`Source event high-water: \`${value.source_event_sequence}\``) ||
-    !value.content.includes("Coverage:")) {
+    !value.content.includes("Coverage:") ||
+    !value.content.includes("Receipt metadata reviews:")) {
     throw new APIRequestError("Code handoff Markdown export omitted its source binding",
       "INVALID_RESPONSE", 502);
   }

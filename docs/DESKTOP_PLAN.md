@@ -1,6 +1,6 @@
 # CyberAgent Workbench Desktop Plan
 
-状态：Desktop D0-A、D0-B 与 D1-R1 至 D1-G11/V10 自动化核心已完成，数据库 schema 为 v84。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill、受控 Run/Session/Plan/审批、安全恢复的 Monaco FileEdit、只读 Repository/脱敏 Diff/本地历史/精确提交预览/可导航精确文件历史/精确提交比较与可连续导航的成对 base/head 预览、多文件独立审阅、不可变操作者验证、snapshot-keyset 逐检查项下钻/快照下载/record-only 回执历史/不授权复核、可恢复 Code Handoff、Code Journey、generation-safe Windows Credential Manager Provider reload，以及默认关闭的有界 wake worker 已经落地。R8 只在内部 `NonProductOnly` 测试边界以两组 Windows/Linux 黄金向量固定六份 metadata evidence 的 canonical digest，不保留规范正文，不宣称 wall-clock order、raw output、process identity、CPU/memory OS enforcement、signal identity 或产品执行入口；Windows 10 实机矩阵、xterm、安装包、签名正式发行、注册表、自启动、更新和高权限执行仍未实现。
+状态：Desktop D0-A、D0-B 与 D1-R1 至 D1-G12/V11 自动化核心已完成，数据库 schema 为 v84。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill、受控 Run/Session/Plan/审批、安全恢复的 Monaco FileEdit、只读 Repository/脱敏 Diff/本地历史/精确提交预览/可导航精确文件历史/精确提交比较与键盘可访问的成对 base/head 预览、多文件独立审阅、不可变操作者验证、snapshot-keyset 逐检查项下钻/快照下载/record-only 回执历史/不授权复核、带有界复核元数据的可恢复 Code Handoff、Code Journey、generation-safe Windows Credential Manager Provider reload，以及默认关闭的有界 wake worker 已经落地。R9 只在内部 `NonProductOnly` 测试边界严格拒绝 malformed/future/digest-mismatched/authority-widening receipt envelope，不保留规范正文，不宣称 wall-clock order、raw output、process identity、CPU/memory OS enforcement、signal identity 或产品执行入口；Windows 10 实机矩阵、xterm、安装包、签名正式发行、注册表、自启动、更新和高权限执行仍未实现。
 
 ## 目标
 
@@ -33,7 +33,7 @@
 - `desktop_skill_package_preview.v1` 只返回有界风险元数据，排除路径、文件名、正文、Manifest description/content path/content digest，并固定安装、命令、网络、Provider、工具和能力授权为 false。
 - D0-A 已把该边界接入 Wails 原生对话框和 React 只读预览；D1-B1 再允许渲染层提交一次性确认句柄，由 Go 重新消费同一已验证包并写入惰性 Registry。渲染层仍不能提交路径或文件字节，安装不会执行包内容、选择 Run 或授予能力；ADR 0033、ADR 0034 与 ADR 0041 记录这些边界。
 
-## D0-A 至 D1-G11/V10 当前实现
+## D0-A 至 D1-G12/V11 当前实现
 
 - `cmd/cyberagent-desktop` 只在 Windows `desktop,wv2runtime.error` build tags 下编译，production 构建再增加 `production`；默认 read-only。共十九项独立 Go gate，包含 `--enable-file-edit-proposals`、`--enable-provider-credentials`、`--enable-wake-worker` 和独立的 `--enable-verification-evidence`；单项启用不能访问 sibling route。模型可用性、Workspace search、receipt history、operator actions、evidence inventory 和凭证配置状态只使用 read token；`Ctrl+K` 只在客户端导航或刷新这些读取。
 - `web/dist` 以 compile-time embed 进入二进制；Go 在启动前验证 index、内容哈希资源、类型、数量、单项/总大小并复制为不可变内存快照。
@@ -239,7 +239,11 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D1-V10 / schema v84：每个 exact snapshot receipt 增加一次 immutable `metadata_confirmed|metadata_disputed` 非授权复核；公开不含 reviewer identity，acceptance/approval/authority/execution 全 false。
 - [x] Runtime R8：normal/forced-timeout 两组 Windows/Linux golden vectors 固定既有 evidence-set receipt canonical bytes/SHA-256，无 raw output/process identity/product starter。
 - [x] D1-G11/V10/R8 后累计六片完整健壮性门通过：ordinary/race 357.6/383.4 秒、聚焦 race 10 轮、ordinary/secure Desktop test/vet、staticcheck、双路径 govulncheck、module、130 React、strict TypeScript、确定性契约、Vite/npm 与 Windows 可复现双构建全绿；OpenAPI 75/83/180，GUI SHA-256 `3bbf545b5ee07597d32345a8dce4f49f063475d881b164a18abf00fd5ff9bc6f`；四项低风险审计修复后无已知未解决高/中风险，边界见 ADR 0059。
-- [ ] 下一批候选 D1-G12 keyboard-accessible paired-preview close/navigation、D1-V11 receipt-review metadata in Code Handoff/export 与 R9 malformed/future receipt compatibility rejection vectors；Local/Docker 产品执行继续关闭。
+- [x] D1-G12：paired preview 增加 region focus、plain ArrowLeft/ArrowRight、Escape/close 与 exact trigger focus restore；modified key、disabled bound 不导航，无新 Repository/Git authority。
+- [x] D1-V11：Code Handoff/Markdown/JSON 增加 bounded receipt-review metadata 与 confirmed/disputed summary；不含 reviewer identity/body/operation，acceptance/authority/execution 全 false。
+- [x] Runtime R9：内部 8 KiB strict receipt compatibility decoder 通过一个有效基线与 11 组 rejection vectors；无产品 import、Runner starter 或 side effect。
+- [x] D1-G12/V11/R9 三切片功能门通过：uncached Go 403.0 秒、focused HTTP/Runner、vet、130 React、strict TypeScript、确定性 75/83/182 契约、Vite/npm 与 Windows 可复现双构建全绿；GUI SHA-256 `a02843a00fc050d9eee51426fc460a0b40eb3413a256c6fb855a838b562c9a72`；四项低风险审计修复后无已知未解决高/中风险，边界见 ADR 0060。
+- [ ] 下一批候选 D1-G13 Handoff review 到既有 Verify 的无授权导航、D1-V12 Code Journey/audit metadata-only review facts 与 R10 accepted-envelope 跨平台 golden vectors；Local/Docker 产品执行继续关闭。
 - [ ] 所有状态 mutation 使用独立 control capability、Origin/Host 校验、稳定 operation key 和 typed errors；显式 Provider 诊断每次只允许一次有界无正文请求。CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。
 
@@ -271,4 +275,4 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - 安装、升级和卸载不会静默删除 Workspace、数据库、凭证或用户创建文件。
 - 未签名开发产物不得伪装成正式发布；正式包必须有可核验签名和哈希。
 
-ADR 0034 至 ADR 0059 依次记录桌面壳与生命周期、受控 Run/Session/Plan/审批/Provider/FileEdit/wake/Skill/Workspace/Repository/Verification/Handoff 能力、运行时防死锁/活锁，以及 exact commit preview/file history/navigation/comparison-side/paired navigation、显式验证覆盖率/snapshot-keyset 分页/快照下载/回执复核，以及 test-only process-tree/exit/runtime/control/timeline/deadline/golden-vector evidence 边界。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。
+ADR 0034 至 ADR 0060 依次记录桌面壳与生命周期、受控 Run/Session/Plan/审批/Provider/FileEdit/wake/Skill/Workspace/Repository/Verification/Handoff 能力、运行时防死锁/活锁，以及 exact commit preview/file history/navigation/comparison-side/paired keyboard navigation、显式验证覆盖率/snapshot-keyset 分页/快照下载/回执复核/Handoff 投影，以及 test-only process-tree/exit/runtime/control/timeline/deadline/golden/compatibility evidence 边界。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。

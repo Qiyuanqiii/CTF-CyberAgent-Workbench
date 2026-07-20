@@ -40,6 +40,7 @@ export function CodeHandoffPanel({ client, runID }: {
         <KeyValue label="Checklists" value={query.data.verification_plans.returned_count} />
         <KeyValue label="Coverage" value={`${query.data.verification_coverage.observed_plan_item_count} / ${query.data.verification_coverage.plan_item_count}`} />
         <KeyValue label="Contradictions" value={query.data.verification_coverage.contradictory_item_count} />
+        <KeyValue label="Receipt reviews" value={`${query.data.verification_snapshot_receipt_reviews.metadata_confirmed_count} confirmed / ${query.data.verification_snapshot_receipt_reviews.metadata_disputed_count} disputed`} />
         <KeyValue label="Actions" value={query.data.pending_action_count} />
         <KeyValue label="Event high-water" value={query.data.source_event_sequence} />
         <KeyValue label="Generated" value={formatDate(query.data.generated_at)} />
@@ -79,6 +80,16 @@ export function CodeHandoffPanel({ client, runID }: {
               </span><StatusBadge status={contradictory ? "conflict" :
                 item.associated_evidence_count > 0 ? "observed" : "unobserved"} /></div>;
             })}</div>}
+        </section>
+        <section><h3>Receipt metadata reviews</h3>
+          {query.data.verification_snapshot_receipt_reviews.references.length === 0 ?
+            <EmptyState>No receipt reviews</EmptyState> :
+            <div className="handoff-reference-list">
+              {query.data.verification_snapshot_receipt_reviews.references.map((item) =>
+                <div key={item.id}><span><strong>{shortID(item.receipt_id)}</strong>
+                  <small>event {item.review_event_sequence}</small></span>
+                  <StatusBadge status={item.decision.replaceAll("_", " ")} /></div>)}
+            </div>}
         </section>
       </div>
     </>}

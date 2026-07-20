@@ -43,6 +43,18 @@ describe("CodeHandoffPanel", () => {
           latest_association_event_sequence: 0 }],
         metadata_only: true, read_only: true, result_inferred: false,
         private_bodies_included: false },
+      verification_snapshot_receipt_reviews: {
+        protocol_version: "operator_verification_plan_item_snapshot_receipt_review_inventory.v1",
+        metadata_confirmed_count: 1, metadata_disputed_count: 0, returned_count: 1,
+        truncated: false, references: [{ id: "verification-snapshot-receipt-review-1",
+          receipt_id: "verification-snapshot-receipt-1", receipt_content_sha256: "d".repeat(64),
+          receipt_event_sequence: 40, decision: "metadata_confirmed",
+          review_event_sequence: 41, reviewed_at: "2026-07-19T11:15:00Z" }],
+        metadata_only: true, read_only: true, review_non_authorizing: true,
+        content_included: false, private_bodies_included: false,
+        operator_identity_included: false, snapshot_accepted: false, result_accepted: false,
+        result_inferred: false, record_rewritten: false, approval: false,
+        authority_granted: false, execution_started: false },
       pending_action_count: 1, pending_actions_truncated: false,
       pending_actions: [{ id: "action-opaque-1", kind: "file_edit_review", state: "proposed",
         destination: "diffs", available_at: "2026-07-19T11:30:00Z" }],
@@ -64,6 +76,8 @@ describe("CodeHandoffPanel", () => {
     expect(screen.getByText("2 findings")).toBeInTheDocument();
     expect(screen.getByText("1 pass / 1 fail / 0 unknown")).toBeInTheDocument();
     expect(screen.getByText("conflict")).toBeInTheDocument();
+    expect(screen.getByText("1 confirmed / 0 disputed")).toBeInTheDocument();
+    expect(screen.getByText("metadata confirmed")).toBeInTheDocument();
     expect(screen.getByText("42")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Markdown" }));
     expect(codeHandoffExport).toHaveBeenCalledWith("run-1", "markdown");

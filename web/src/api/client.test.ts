@@ -959,6 +959,18 @@ describe("CyberAgentClient", () => {
         contradictory_item_count: 0, returned_item_count: 0, truncated: false, items: [],
         metadata_only: true, read_only: true, result_inferred: false,
         private_bodies_included: false },
+      verification_snapshot_receipt_reviews: {
+        protocol_version: "operator_verification_plan_item_snapshot_receipt_review_inventory.v1",
+        metadata_confirmed_count: 1, metadata_disputed_count: 0, returned_count: 1,
+        truncated: false, references: [{ id: "verification-snapshot-receipt-review-1",
+          receipt_id: "verification-snapshot-receipt-1", receipt_content_sha256: "d".repeat(64),
+          receipt_event_sequence: 40, decision: "metadata_confirmed",
+          review_event_sequence: 41, reviewed_at: "2026-07-19T12:00:00Z" }],
+        metadata_only: true, read_only: true, review_non_authorizing: true,
+        content_included: false, private_bodies_included: false,
+        operator_identity_included: false, snapshot_accepted: false, result_accepted: false,
+        result_inferred: false, record_rewritten: false, approval: false,
+        authority_granted: false, execution_started: false },
       pending_action_count: 0, pending_actions_truncated: false, pending_actions: [],
       report_references_truncated: false, report_references: [], regenerable: true,
       durable_sources: true, private_bodies_included: false, composite_mutation: false,
@@ -976,6 +988,12 @@ describe("CyberAgentClient", () => {
         pending_action_count: 1, pending_actions: [{ id: "action-forged-reference",
           kind: "approval_pending", state: "queued", destination: "wake",
           available_at: "2026-07-19T12:00:00Z" }],
+      }))
+      .mockResolvedValueOnce(envelope("req-forged-review-handoff", { ...handoff,
+        verification_snapshot_receipt_reviews: {
+          ...handoff.verification_snapshot_receipt_reviews,
+          operator_identity_included: true,
+        },
       }));
     vi.stubGlobal("fetch", fetchMock);
     const client = new CyberAgentClient("read-secret", "/api/v1", "control-secret", {
@@ -996,6 +1014,8 @@ describe("CyberAgentClient", () => {
       .rejects.toThrow("bounded read-only contract");
     await expect(client.codeHandoff("run-1"))
       .rejects.toThrow("widened navigation");
+    await expect(client.codeHandoff("run-1"))
+      .rejects.toThrow("receipt reviews widened authority");
     await expect(client.recordVerificationEvidence("run-1", {
       version: "operator_verification_evidence.v1", outcome: "pass",
       title: "Focused tests", summary: "line one\rline two",
@@ -1033,7 +1053,19 @@ describe("CyberAgentClient", () => {
       })),
     };
     const recorded = { ...plan, replayed: false };
-    const content = "{\n  \"protocol_version\": \"code_handoff.v1\",\n  \"run_id\": \"run-1\",\n  \"source_event_sequence\": 42,\n  \"verification_coverage\": {\n    \"protocol_version\": \"operator_verification_plan_coverage.v1\",\n    \"result_inferred\": false\n  }\n}\n";
+    const content = `${JSON.stringify({ protocol_version: "code_handoff.v1", run_id: "run-1",
+      source_event_sequence: 42,
+      verification_coverage: { protocol_version: "operator_verification_plan_coverage.v1",
+        result_inferred: false },
+      verification_snapshot_receipt_reviews: {
+        protocol_version: "operator_verification_plan_item_snapshot_receipt_review_inventory.v1",
+        metadata_only: true, read_only: true, review_non_authorizing: true,
+        content_included: false, private_bodies_included: false,
+        operator_identity_included: false, snapshot_accepted: false, result_accepted: false,
+        result_inferred: false, record_rewritten: false, approval: false,
+        authority_granted: false, execution_started: false,
+      },
+    }, null, 2)}\n`;
     const bytes = new TextEncoder().encode(content);
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
     const contentSHA256 = [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
