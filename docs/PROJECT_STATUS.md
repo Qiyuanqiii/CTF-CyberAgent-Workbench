@@ -4,9 +4,9 @@ Last updated: 2026-07-20
 
 ## Resume Context
 
-Current database schema is v84. Schemas v78-v81 add immutable operator verification evidence, livelock recovery, verification plans, and explicit plan-item/evidence associations; schema v82 adds conservative complete-request model-context planning and immutable cumulative handoff memory; schema v83 adds immutable metadata-only verification snapshot receipt history; schema v84 adds one immutable non-authorizing metadata review per exact receipt. Code/Desktop work now reaches D1-G12/V11, while R9 strictly rejects malformed, future, digest-mismatched, or authority-widening receipt envelopes only behind the internal `NonProductOnly` Runner boundary. Root and Specialist requests use a 32K conservative fallback with explicit output/safety reservations, repeated compaction preserves a predecessor-bound cumulative handoff chain, and arbitrary repository documents remain untrusted evidence instead of instructions. Operators can compare any two exact local commit trees, use focus-safe keyboard navigation in the paired redacted preview, page through one frozen verification-item snapshot, download a deterministic metadata-only Markdown/JSON representation, record an immutable digest receipt, separately confirm or dispute only its metadata, and carry bounded review metadata into a regenerable Code Handoff. R9 does not claim wall-clock order, raw output, process identity, CPU/memory enforcement, verified OS quotas, signal identity, or product execution. None grants general Shell, LocalRunner, Docker, child scheduling, install hooks, renderer host-path authority, credential readback, document instruction authority, automatic Skill selection, result acceptance, or product process execution.
+Current database schema is v84. Schemas v78-v81 add immutable operator verification evidence, livelock recovery, verification plans, and explicit plan-item/evidence associations; schema v82 adds conservative complete-request model-context planning and immutable cumulative handoff memory; schema v83 adds immutable metadata-only verification snapshot receipt history; schema v84 adds one immutable non-authorizing metadata review per exact receipt. Code/Desktop work now reaches D1-G13/V12. R9 strictly rejects malformed, future, digest-mismatched, or authority-widening receipt envelopes, while R10 pins accepted envelope bytes/SHA only behind the internal `NonProductOnly` Runner boundary. Root and Specialist requests use a 32K conservative fallback with explicit output/safety reservations, repeated compaction preserves a predecessor-bound cumulative handoff chain, and arbitrary repository documents remain untrusted evidence instead of instructions. Operators can compare any two exact local commit trees, use focus-safe keyboard navigation in the paired redacted preview, page through one frozen verification-item snapshot, download a deterministic metadata-only Markdown/JSON representation, record an immutable digest receipt, separately confirm or dispute only its metadata, carry bounded review metadata into a regenerable Code Handoff/Journey audit, and navigate only after Verify independently matches exact review/receipt/plan/item digests. R9/R10 do not claim wall-clock order, raw output, process identity, CPU/memory enforcement, verified OS quotas, signal identity, or product execution. None grants general Shell, LocalRunner, Docker, child scheduling, install hooks, renderer host-path authority, credential readback, document instruction authority, automatic Skill selection, result acceptance, or product process execution.
 
-Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No product path starts a Runner, container, Shell, or host process. ADR 0024 through ADR 0060 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/recovery/review/apply, Provider credential/generation, inert-install, receipt, Explorer/search, Repository, Verification, Handoff, process-conformance, and portable-build boundaries.
+Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No product path starts a Runner, container, Shell, or host process. ADR 0024 through ADR 0061 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/recovery/review/apply, Provider credential/generation, inert-install, receipt, Explorer/search, Repository, Verification, Handoff, process-conformance, and portable-build boundaries.
 
 CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The CLI-first implementation has resumable Runs, a durable root Agent Coordinator, bounded review-gated Specialist delegation, a separate read-only 1/2/4/6 Fan-out pool, persisted sessions and model calls, context compaction, WorkItems/Notes/Artifacts, a unified Tool Gateway, embedded and inert user Skills, Finding/Evidence/Report lifecycles with SARIF/CI output, loopback HTTP/SSE/OpenAPI, a Run-first TUI, a React/Vite console, and a Windows Wails shell with independently gated Run/Session/Plan/approval, FileEdit proposal/review/apply, Provider credentials, foreground/bounded wake, inert Skills, actions/evidence, and navigation. Core delegation remains capped at two children and only the original application operator can schedule it; models, ordinary tools, HTTP, and the Desktop native bridge cannot autonomously spawn or schedule children.
 
@@ -219,7 +219,7 @@ Use these files first when resuming:
 - Cyber autonomous-workflow usability: about 20%.
 - These values are engineering estimates derived from tested roadmap slices, not performance benchmarks. The retired single-axis "overall product vision" percentage must not be used for current status.
 
-Latest implemented batch: D1-G12/V11/R9 on schema v84. It adds focus-safe keyboard close/navigation to the existing paired exact-redacted preview, bounded non-authorizing receipt-review metadata in the regenerable Code Handoff and exports, and an internal strict compatibility decoder with one valid baseline plus eleven malformed/future/widening rejection vectors. The three-slice functional gate is green after four low-risk contract and validation fixes, with no known unresolved high/medium issue on an enabled path. This is the first half of the current six-slice robustness cycle; ADR 0060 is authoritative.
+Latest implemented batch: D1-G13/V12/R10 on schema v84. It adds exact fail-closed Handoff/Journey-to-Verify receipt-review navigation, at most three metadata-only/non-authorizing Journey audit facts, and two internal accepted-envelope byte/SHA golden vectors with strict round-trip validation. The cumulative six-slice robustness gate is green after five low-risk state/diagnostic fixes, with no known unresolved high/medium issue on an enabled path. ADR 0061 is authoritative.
 
 Completed:
 
@@ -1791,16 +1791,54 @@ unresolved high/medium issue exists on an enabled path. No real Provider/key, Sh
 LocalRunner, Docker, hook, attack traffic, external network, installer, registry
 mutation, or product process start was used. ADR 0060 is authoritative.
 
+## D1-G13/V12/R10: Exact Review Navigation, Journey Audit Facts, And Envelope Golden Vectors
+
+D1-G13 treats every Handoff review row as an untrusted navigation reference. Verify must
+independently match all review metadata, the exact receipt ID/digest/event, and current
+plan/item digests before expanding and focusing the existing receipt projection. Missing,
+truncated, stale, or drifting data fails closed without fallback. The target is ephemeral
+component state, is cleared after leaving Verify, and cannot mutate, approve, accept,
+resume, or execute.
+
+D1-V12 shows at most three metadata-only, non-authorizing receipt-review facts in Code
+Journey. It preserves confirmed/disputed counts, event/time metadata, and source
+truncation, and routes clicks through the same exact Verify matching path. No new API,
+reviewer identity, private body, operation key, browser persistence, or capability is
+introduced.
+
+R10 pins two internal accepted receipt-envelope encodings at 660 bytes and exact SHA-256,
+then requires strict decode, full typed-record compatibility, and byte-identical
+re-encoding. It is selected by the existing Linux/Windows CI expression and remains a
+test-only pure-function boundary with no product import or process starter.
+
+The cumulative six-slice robustness gate passed ordinary/race Go in 421.0/509.5 seconds,
+full vet/staticcheck/module/two-path govulncheck, 37 files/134 Web tests, strict
+TypeScript, deterministic API generation, Vite, zero npm vulnerabilities, secure
+Desktop tests/vet, and a reproducible Windows dual build. OpenAPI remains 75/83/182;
+the unsigned GUI SHA-256 is
+`7ae75f36c2291fbf9e7d9e72071ae8d8534f4e27dd56c6d34bd04dc064f47a19`, with
+`release_ready=false` pending the manual Windows 10/WebView2 matrix.
+
+Audit fixed five low-risk state/diagnostic issues: an ambiguous focus-key encoding,
+missing plan/item digest cross-binding, stale target reuse, hidden exactly-three-item
+source truncation, and focus styling after later projection drift. No known unresolved
+high/medium issue exists on an enabled path. No real Provider/key, Shell, LocalRunner,
+Docker, hook, attack traffic, external network, installer, registry mutation, or product
+process start was used. ADR 0061 is authoritative.
+
 ## Recommended Next Batch
 
-Candidate slices are D1-G13 exact Handoff-review navigation into the existing Verify
-projection, D1-V12 metadata-only receipt-review facts in Code Journey/audit navigation,
-and R10 cross-platform accepted-envelope byte/SHA golden vectors. Keep the Local profile disabled until a real
+Candidate slices are P10-A1 Go-owned analyzer protocol/limits/errors with no process
+starter, P10-A2 a deterministic Rust `clap`/`serde` stdin-JSON fixture tool with no LLM,
+key, config, network, or session ownership, and P10-A3 shared Go/Rust golden vectors in CI
+without product invocation or Artifact commit. The Rust toolchain is not installed on
+this host and may be installed under the user's standing dependency authorization with
+its version recorded. Keep the Local profile disabled until a real
 OS sandbox makes protected host roots unavailable or read-only; never map it to
 unrestricted `os/exec`. Product Docker start/wait/TERM/KILL/orphan behavior still
-requires a later independent release gate; R2-R9 test-binary conformance and post-reap
+requires a later independent release gate; R2-R10 test-binary conformance and post-reap
 metadata are not production evidence. The manual Windows 10 matrix, signed distribution,
-Rust analyzers, xterm input, network grants, end-user process execution, and CTF solving
-remain deferred.
+product analyzer execution, xterm input, network grants, end-user process execution, and
+CTF solving remain deferred.
 
 Real Local/container-process execution remains disabled until every v51 check has independently verified and independently accepted production evidence and Sandbox retained-resource cleanup, resource/network, cancellation, running-orphan, and atomic Artifact-export paths pass separate audits. Schema v52 simulation, v53 metadata observation, v54 compilation/fake writes, v55-v56 non-started daemon rehearsals, v57 sealing, v58 durable capture requirements, v59 never-started handoff evidence, v60 projection plans, v61 never-started volume application, v62 cleanup, v63 design review, v64 profile selection, v65 non-authorizing capture receipts, v66 recoverable capture ownership, v67 read-only daemon metadata, and v68 receipt acceptance do not satisfy that requirement. TypeScript, future Rust analyzers, and model providers remain unable to bypass the Go Tool Gateway or Policy boundary.

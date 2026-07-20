@@ -86,7 +86,7 @@ Read in this order after a long context break:
 - Database schema: v84.
 - `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v84` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
 - Main languages: Go control plane, TypeScript React/Vite local console; Rust has not started.
-- Desktop status: D0-A/D0-B and D1-R1 through D1-G12/V11 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, read-only Repository state/redacted Diff/local history/exact-commit metadata/redacted preview/navigable exact-file history/exact-commit comparison with keyboard-accessible paired base/head previews, independent multi-file review, separate immutable verification plans/results/associations plus snapshot-stable exact per-item drilldown/download/receipt history/non-authorizing review and Handoff coverage, digest-bound Code Handoff export with bounded receipt-review metadata, a Code-only Journey, generation-safe Windows Credential Manager Provider controls, and a default-off one-concurrent/one-step wake worker. Schema v79 protects the shared Go runtime with Tool deadlines, a synchronous wait graph, and a durable no-progress pause; schema v80 adds immutable verification checklists; schema v81 adds immutable plan-item/evidence associations; schema v82 adds the shared conservative model-context gate and cumulative handoff memory; schema v83 adds immutable metadata-only snapshot receipts; schema v84 adds one immutable non-authorizing metadata review per receipt. R9 strictly rejects malformed, future, digest-mismatched, or authority-widening receipt envelopes inside the internal non-product boundary and has no product execution wiring, raw-output retention, wall-clock claim, process identity, or OS CPU/memory enforcement claim. Capability-only launches cannot reach sibling routes. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, terminal, real Shell/Local/Docker process execution, or install-time Skill execution. See ADR 0033 through ADR 0060 and `docs/DESKTOP_PLAN.md`.
+- Desktop status: D0-A/D0-B and D1-R1 through D1-G13/V12 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, read-only Repository state/redacted Diff/local history/exact-commit metadata/redacted preview/navigable exact-file history/exact-commit comparison with keyboard-accessible paired base/head previews, independent multi-file review, separate immutable verification plans/results/associations plus snapshot-stable exact per-item drilldown/download/receipt history/non-authorizing review and Handoff coverage, digest-bound Code Handoff export with exact fail-closed receipt-review navigation, bounded Code Journey audit facts, generation-safe Windows Credential Manager Provider controls, and a default-off one-concurrent/one-step wake worker. Schema v79 protects the shared Go runtime with Tool deadlines, a synchronous wait graph, and a durable no-progress pause; schema v80 adds immutable verification checklists; schema v81 adds immutable plan-item/evidence associations; schema v82 adds the shared conservative model-context gate and cumulative handoff memory; schema v83 adds immutable metadata-only snapshot receipts; schema v84 adds one immutable non-authorizing metadata review per receipt. R9 strictly rejects malformed, future, digest-mismatched, or authority-widening receipt envelopes; R10 pins two accepted 660-byte envelopes and SHA-256 values inside the same internal non-product boundary. Neither has product execution wiring, raw-output retention, wall-clock claims, process identity, or OS CPU/memory enforcement claims. Capability-only launches cannot reach sibling routes. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, terminal, real Shell/Local/Docker process execution, or install-time Skill execution. See ADR 0033 through ADR 0061 and `docs/DESKTOP_PLAN.md`.
 - Custom Skill status: the five embedded `skill.v1` guides and explicitly selected external packages are Run-loadable through separate protocols. Schema v69 adds persistent content-addressed import/history; schema v70 adds a second explicitly confirmed exact Run selection and redacted user-role root/Specialist context; schema v71 adds bounded read-only provenance across HTTP/TUI/Web. D1-A adds a pathless, one-time-handle preview boundary; D1-B1 adds explicit HTTP/Desktop registration through the same inert Registry. External packages remain untrusted and grant no declared tools. Installation executes no content and still does not select a package for a Run. See ADR 0024, ADR 0031 through ADR 0033, ADR 0041, and `docs/SKILL_PACKAGE_PLAN.md`.
 - Protected-delete status: explicit recursive, absolute/traversing/wildcard, environment-derived, command-substituted, current-home, PowerShell/`cmd`, and common interpreter deletion intents are permanently denied before approval across Shell, ScriptProcess, and Sandbox Policy. This is defense in depth; Local/container process execution remains disabled and a future executor still requires OS/container isolation. See ADR 0025.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
@@ -1358,18 +1358,65 @@ unresolved high/medium issue exists on an enabled path. No real Provider/key, Sh
 LocalRunner, Docker, hook, attack traffic, external network, installer, registry
 mutation, or product process start was used. ADR 0060 is authoritative.
 
+## Completed Exact Review Navigation, Journey Audit Facts, And Envelope Golden Vectors (D1-G13/V12/R10)
+
+D1-G13 adds an icon-only Handoff-to-Verify navigation target containing the existing
+seven immutable review-reference fields. Verify independently matches the strict review
+inventory, exact receipt ID/digest/event, and current verification plan/item digests
+before expanding and focusing the receipt. Missing, truncated, stale, or drifting data
+shows a bounded unavailable state and never falls back to a nearby record. The target is
+component-memory-only and is cleared after leaving Verify; it grants no mutation,
+acceptance, approval, resume, or execution authority.
+
+D1-V12 adds at most three receipt-review facts to Code Journey from the existing strict
+`code_handoff.v1` projection. Confirmed/disputed totals, event/time metadata, metadata-
+only/non-authorizing labels, and source truncation remain visible. Clicking a fact uses
+the same exact Verify matching path. No reviewer identity, body, operation key, model
+assertion, browser persistence, new API, or capability is added.
+
+R10 adds two accepted encoded-envelope vectors for the internal non-product
+`runner_evidence_set_receipt.v1`: normal empty exit and forced timeout. Both are exactly
+660 bytes and have pinned SHA-256 values. Strict decode, typed-record compatibility, and
+byte-identical re-encoding are required. The test selector is shared by Linux and Windows
+CI and has no product import, network, subprocess, Docker, or Runner starter connection.
+
+The cumulative six-slice robustness gate passed ordinary/race Go in 421.0/509.5 seconds;
+full vet, zero-warning staticcheck, module verify/tidy, and two govulncheck paths with zero
+reachable findings; 37 files/134 Web tests, strict TypeScript, deterministic API
+generation, Vite, zero npm vulnerabilities; secure Desktop tests/vet; and a reproducible
+Windows dual build. OpenAPI remains 75/83/182 with SHA-256
+`e637623b6931c88466fd8d04412da31091af36c9e57161dc7d6c3784f64f56a3`; generated
+TypeScript SHA-256 is
+`339498e9d72c1fc70b44bf5e799996e255368d89a45b80989e4a31d6015f8578`. The unsigned
+GUI SHA-256 is
+`7ae75f36c2291fbf9e7d9e72071ae8d8534f4e27dd56c6d34bd04dc064f47a19` and remains
+`release_ready=false` pending the manual Windows 10/WebView2 matrix.
+
+Review found and fixed five low-risk state/diagnostic issues: a theoretically ambiguous
+focus key, missing current plan/item digest cross-binding, stale target reuse on ordinary
+Verify navigation, hidden source truncation at exactly three items, and a visual focus
+marker surviving later projection drift. No known unresolved high/medium issue exists on
+an enabled path. No real Provider/key, Shell, LocalRunner, Docker, hook, attack traffic,
+external network, installer, registry mutation, or product process start was used. ADR
+0061 is authoritative.
+
+中文交接：Handoff/Journey 现在只能把有界复核元数据当作“待核对引用”送进 Verify；Verify
+独立核对 review、receipt、plan/item digest 后才聚焦，任何漂移都失败关闭。R10 只固定内部
+纯函数信封的 660-byte/SHA，不是产品导入或执行入口。schema/OpenAPI 未变，真实执行继续关闭。
+
 ## Next Slice
 
 The next three-slice candidates are:
 
-1. D1-G13: navigate a Handoff receipt-review reference to its existing exact Verify projection without adding authority or a new API.
-2. D1-V12: add bounded receipt-review facts to the Code Journey/audit timeline as metadata-only navigation state.
-3. R10: pin accepted receipt-envelope bytes and SHA-256 across Windows/Linux while keeping decoding internal and side-effect-free.
-4. The manual Windows 10 matrix, signed distribution, real Sandbox release gate, Rust analyzers, xterm input, network grants, and CTF solving remain separate.
+1. P10-A1: define a Go-owned `analyzer_protocol.v1` request/result/error/limit boundary with every external capability closed and no subprocess starter.
+2. P10-A2: initialize a deterministic Rust analyzer workspace using `clap` and `serde`, limited to stdin JSON -> stdout JSON fixtures with no LLM, user config, key, network, or session ownership.
+3. P10-A3: make Go and Rust validate shared golden vectors in CI while keeping process invocation and Artifact commit unwired.
+4. The Rust toolchain is not currently installed on this host; installation may proceed under the user's standing dependency authorization, followed by checksum/toolchain-version recording.
+5. The manual Windows 10 matrix, signed distribution, real Sandbox release gate, xterm input, network grants, product analyzer execution, and CTF solving remain separate.
 
 ## Local Machine Note
 
-The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v84 and D1-Q2 through D1-G12/V11 plus H1-H3/R9/C1-C3 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the repository's ignored build root or the OS temporary root.
+The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v84 and D1-Q2 through D1-G13/V12 plus H1-H3/R10/C1-C3 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the repository's ignored build root or the OS temporary root.
 
 ## Delivery Loop
 

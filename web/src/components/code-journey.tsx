@@ -9,7 +9,9 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import type { RunDetailView } from "../api/types";
+import { formatDate, shortID } from "../lib/format";
 import { StatusBadge } from "./common";
+import type { ReceiptReviewFacts, ReceiptReviewNavigationTarget } from "./receipt-review-navigation";
 
 export type CodeJourneyDestination = "overview" | "actions" | "diffs" | "repository" |
   "verify" | "handoff";
@@ -22,9 +24,15 @@ interface JourneyStage {
   icon: typeof ClipboardList;
 }
 
-export function CodeJourney({ detail, onNavigate }: {
+const maxJourneyReceiptReviews = 3;
+
+export function CodeJourney({ detail, receiptReviewFacts, receiptReviewFactsState = "ready",
+  onNavigate, onOpenReceiptReview }: {
   detail: RunDetailView;
+  receiptReviewFacts?: ReceiptReviewFacts;
+  receiptReviewFactsState?: "loading" | "ready" | "unavailable";
   onNavigate: (destination: CodeJourneyDestination) => void;
+  onOpenReceiptReview: (target: ReceiptReviewNavigationTarget) => void;
 }) {
   const queued = detail.operator_steering.pending + detail.operator_steering.prepared;
   const planState = detail.mode.phase === "deliver" ? "deliver" :
@@ -65,6 +73,33 @@ export function CodeJourney({ detail, onNavigate }: {
           </button>
         </div>)}
     </div>
+    <section aria-label="Receipt review audit facts" className="journey-audit-facts">
+      <header><div><strong>Receipt review audit</strong><StatusBadge status="metadata only" />
+        <StatusBadge status="non-authorizing" /></div>
+        {receiptReviewFacts && <span>{receiptReviewFacts.metadata_confirmed_count} confirmed / {receiptReviewFacts.metadata_disputed_count} disputed</span>}
+      </header>
+      {receiptReviewFactsState === "loading" && <p>Loading bounded audit facts</p>}
+      {receiptReviewFactsState === "unavailable" && <p>Audit facts unavailable</p>}
+      {receiptReviewFactsState === "ready" && receiptReviewFacts?.references.length === 0 &&
+        <p>No receipt review facts</p>}
+      {receiptReviewFactsState === "ready" && receiptReviewFacts &&
+        receiptReviewFacts.references.length > 0 && <ul>
+          {receiptReviewFacts.references.slice(0, maxJourneyReceiptReviews).map((item) =>
+            <li key={item.id}><span><strong>{shortID(item.receipt_id)}</strong>
+              <small>event {item.review_event_sequence} / {formatDate(item.reviewed_at)}</small></span>
+              <StatusBadge status={item.decision.replaceAll("_", " ")} />
+              <button aria-label={`Open receipt review ${item.id} in Verify`}
+                className="icon-button" onClick={() => onOpenReceiptReview(item)}
+                title="Open exact receipt review in Verify" type="button">
+                <ChevronRight aria-hidden="true" size={15} />
+              </button></li>)}
+        </ul>}
+      {receiptReviewFacts && (receiptReviewFacts.returned_count > maxJourneyReceiptReviews ||
+        receiptReviewFacts.truncated) &&
+        <footer>Showing {Math.min(maxJourneyReceiptReviews,
+          receiptReviewFacts.references.length)} of {receiptReviewFacts.returned_count}
+          {receiptReviewFacts.truncated && <StatusBadge status="source truncated" />}</footer>}
+    </section>
     <footer>
       <span>Go control plane</span>
       <span>Independent mutations</span>

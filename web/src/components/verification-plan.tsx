@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, ChevronDown, ClipboardList, Download, FileCheck2, ListTree,
   LoaderCircle, Plus, RefreshCw, Trash2 } from "lucide-react";
@@ -7,6 +7,12 @@ import type { VerificationPlanItemCoveragePage, VerificationPlanRequestView } fr
 import { downloadTextFile } from "../lib/download";
 import { formatDate } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, StatusBadge } from "./common";
+import {
+  matchesReceiptReviewTarget,
+  matchesReceiptTarget,
+  receiptReviewTargetKey,
+  type ReceiptReviewNavigationTarget,
+} from "./receipt-review-navigation";
 
 type DraftItem = VerificationPlanRequestView["items"][number];
 
@@ -64,9 +70,10 @@ function mergeCoveragePages(pages: VerificationPlanItemCoveragePage[]) {
   return { detail: first, associations, error: undefined };
 }
 
-export function VerificationPlan({ client, runID }: {
+export function VerificationPlan({ client, runID, receiptReviewTarget }: {
   client: CyberAgentClient;
   runID: string;
+  receiptReviewTarget?: ReceiptReviewNavigationTarget;
 }) {
   const queryClient = useQueryClient();
   const operationKey = useRef("");
@@ -104,13 +111,59 @@ export function VerificationPlan({ client, runID }: {
   const receiptQuery = useQuery({
     queryKey: ["run", runID, "verification-snapshot-receipts"],
     queryFn: ({ signal }) => client.verificationSnapshotReceipts(runID, signal),
-    enabled: Boolean(runID && coverageSelection),
+    enabled: Boolean(runID && (coverageSelection || receiptReviewTarget)),
   });
   const receiptReviewQuery = useQuery({
     queryKey: ["run", runID, "verification-snapshot-receipt-reviews"],
     queryFn: ({ signal }) => client.verificationSnapshotReceiptReviews(runID, signal),
-    enabled: Boolean(runID && coverageSelection),
+    enabled: Boolean(runID && (coverageSelection || receiptReviewTarget)),
   });
+  const receiptReviewFocusKey = receiptReviewTarget ?
+    receiptReviewTargetKey(receiptReviewTarget) : "";
+  const focusedReview = receiptReviewTarget ? receiptReviewQuery.data?.items.find((review) =>
+    matchesReceiptReviewTarget(receiptReviewTarget, review)) : undefined;
+  const focusedReceipt = receiptReviewTarget ? receiptQuery.data?.items.find((receipt) =>
+    matchesReceiptTarget(receiptReviewTarget, receipt)) : undefined;
+  const focusedPlan = focusedReceipt ? query.data?.items.find((plan) =>
+    plan.id === focusedReceipt.plan_id && plan.items.some((item) =>
+      item.ordinal === focusedReceipt.plan_item_ordinal)) : undefined;
+  const focusedCoveragePlan = focusedReceipt ? coverageQuery.data?.plans.find((plan) =>
+    plan.plan_id === focusedReceipt.plan_id &&
+    plan.plan_sha256 === focusedReceipt.plan_sha256) : undefined;
+  const focusedCoverageItem = focusedReceipt && focusedCoveragePlan ?
+    focusedCoveragePlan.items.find((item) =>
+      item.ordinal === focusedReceipt.plan_item_ordinal &&
+      item.item_sha256 === focusedReceipt.plan_item_sha256) : undefined;
+  const receiptReviewFocusLoading = Boolean(receiptReviewTarget) &&
+    (query.isLoading || coverageQuery.isLoading || receiptQuery.isLoading ||
+      receiptReviewQuery.isLoading);
+  const receiptReviewFocusReady = Boolean(receiptReviewTarget && focusedReview && focusedReceipt &&
+    focusedPlan && focusedCoverageItem);
+  const receiptReviewFocusUnavailable = Boolean(receiptReviewTarget) &&
+    !receiptReviewFocusLoading && !receiptReviewFocusReady;
+  const appliedReceiptReviewFocus = useRef("");
+  const focusedReceiptElement = useRef<HTMLLIElement>(null);
+
+  useEffect(() => {
+    if (!receiptReviewTarget) {
+      appliedReceiptReviewFocus.current = "";
+      return;
+    }
+    if (!focusedReview || !focusedReceipt || !focusedPlan || !focusedCoverageItem ||
+      appliedReceiptReviewFocus.current === receiptReviewFocusKey) return;
+    appliedReceiptReviewFocus.current = receiptReviewFocusKey;
+    setCoverageSelection({ planID: focusedReceipt.plan_id,
+      ordinal: focusedReceipt.plan_item_ordinal });
+  }, [focusedCoverageItem, focusedPlan, focusedReceipt, focusedReview,
+    receiptReviewFocusKey, receiptReviewTarget]);
+
+  useEffect(() => {
+    if (!receiptReviewFocusReady || coverageSelection?.planID !== focusedReceipt?.plan_id ||
+      coverageSelection?.ordinal !== focusedReceipt?.plan_item_ordinal) return;
+    focusedReceiptElement.current?.focus({ preventScroll: true });
+    focusedReceiptElement.current?.scrollIntoView?.({ block: "nearest" });
+  }, [coverageDetailQuery.data, coverageSelection, focusedReceipt, receiptReviewFocusKey,
+    receiptReviewFocusReady]);
   const mergedCoverage = mergeCoveragePages(coverageDetailQuery.data?.pages ?? []);
   const exportSnapshot = useMutation({
     mutationFn: ({ planID, ordinal, format }: { planID: string; ordinal: number;
@@ -233,6 +286,14 @@ export function VerificationPlan({ client, runID }: {
               receiptReviewQuery.isFetching ? "spin" : ""}
             size={15} /></button></div>
     </header>
+    {receiptReviewTarget && <div aria-live="polite"
+      className={`verification-receipt-focus ${receiptReviewFocusUnavailable ? "unavailable" : ""}`}>
+      <StatusBadge status="metadata only" /><StatusBadge status="non-authorizing" />
+      {receiptReviewFocusLoading && <span>Locating exact receipt review</span>}
+      {receiptReviewFocusReady && <span>Exact receipt review focused: {receiptReviewTarget.decision.replaceAll("_", " ")} at event {receiptReviewTarget.review_event_sequence}</span>}
+      {receiptReviewFocusUnavailable &&
+        <span>Exact receipt review is unavailable in the bounded Verify inventory</span>}
+    </div>}
     {client.hasVerificationEvidence && <form className="verification-plan-form" onSubmit={submit}>
       <label>Title<input disabled={record.isPending} maxLength={160} required value={title}
         onChange={(event) => changeIntent(() => setTitle(event.target.value))} /></label>
@@ -345,7 +406,12 @@ export function VerificationPlan({ client, runID }: {
                         entry.receipt_id === receipt.id) ??
                         (reviewSnapshotReceipt.data?.review.receipt_id === receipt.id ?
                           reviewSnapshotReceipt.data.review : undefined);
-                      return <li key={receipt.id}>
+                      const focused = Boolean(receiptReviewFocusReady && focusedReceipt &&
+                        receipt.id === focusedReceipt.id);
+                      return <li aria-current={focused ? "location" : undefined}
+                        className={focused ? "receipt-review-focus" : undefined}
+                        key={receipt.id} ref={focused ? focusedReceiptElement : undefined}
+                        tabIndex={focused ? -1 : undefined}>
                         <StatusBadge status={receipt.format} />
                         <code title={receipt.content_sha256}>{receipt.content_sha256.slice(0, 12)}</code>
                         <span>events {receipt.snapshot_high_water_event_sequence} / {receipt.receipt_event_sequence}</span>

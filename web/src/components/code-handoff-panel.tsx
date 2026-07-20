@@ -1,13 +1,15 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { BookOpenCheck, Download, RefreshCw } from "lucide-react";
+import { ArrowRight, BookOpenCheck, Download, RefreshCw } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import { formatBytes, formatDate, shortID } from "../lib/format";
 import { downloadTextFile } from "../lib/download";
 import { EmptyState, ErrorState, KeyValue, LoadingState, StatusBadge } from "./common";
+import type { ReceiptReviewNavigationTarget } from "./receipt-review-navigation";
 
-export function CodeHandoffPanel({ client, runID }: {
+export function CodeHandoffPanel({ client, runID, onOpenReceiptReview }: {
   client: CyberAgentClient;
   runID: string;
+  onOpenReceiptReview: (target: ReceiptReviewNavigationTarget) => void;
 }) {
   const query = useQuery({
     queryKey: ["run", runID, "code-handoff"],
@@ -88,7 +90,14 @@ export function CodeHandoffPanel({ client, runID }: {
               {query.data.verification_snapshot_receipt_reviews.references.map((item) =>
                 <div key={item.id}><span><strong>{shortID(item.receipt_id)}</strong>
                   <small>event {item.review_event_sequence}</small></span>
-                  <StatusBadge status={item.decision.replaceAll("_", " ")} /></div>)}
+                  <div className="handoff-reference-actions">
+                    <StatusBadge status={item.decision.replaceAll("_", " ")} />
+                    <button aria-label={`Open receipt review ${item.id} in Verify`}
+                      className="icon-button" onClick={() => onOpenReceiptReview(item)}
+                      title="Open exact receipt review in Verify" type="button">
+                      <ArrowRight aria-hidden="true" size={14} />
+                    </button>
+                  </div></div>)}
             </div>}
         </section>
       </div>

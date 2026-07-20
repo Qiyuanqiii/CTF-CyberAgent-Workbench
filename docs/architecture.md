@@ -864,3 +864,25 @@ authority widening all fail closed. It recomputes the existing canonical receipt
 than trusting imported summary fields. The decoder has no product caller, filesystem,
 network, subprocess, LocalRunner, Docker, or state mutation. ADR 0060 records these
 bounds.
+
+## Exact Review Navigation, Journey Audit Facts, And Accepted Envelopes
+
+D1-G13 adds no protocol. A Handoff review reference becomes ephemeral renderer state
+containing the existing opaque IDs, digest, event sequences, decision, and time. Verify
+independently resolves it through strict review and receipt inventories, then requires
+the receipt's plan/item digests to match current verification coverage before expanding
+or focusing a row. Any missing, truncated, stale, or drifting field fails closed without
+fallback. Leaving Verify clears the target; it never enters a URL, browser storage,
+SQLite, an event, or an authority decision.
+
+D1-V12 reuses the same strict Code Handoff query and passes at most three metadata-only,
+non-authorizing review facts into the presentational Code Journey component. Source
+truncation remains explicit. The component owns no API client or mutation and routes a
+fact through the same exact Verify matching boundary.
+
+R10 adds accepted transport-envelope golden vectors around the existing R9 decoder.
+Normal empty exit and bounded forced timeout each encode to exactly 660 bytes with a
+pinned SHA-256. Strict decode, typed compatibility, and byte-identical re-encoding are
+required on Linux and Windows CI. These tests are pure and internal; no product import,
+subprocess, filesystem write, network, Docker, or Runner starter is introduced. ADR 0061
+records these bounds.

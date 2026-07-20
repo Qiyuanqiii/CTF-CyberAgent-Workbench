@@ -1,0 +1,15 @@
+{
+  "protocol_version": "runner_evidence_set_receipt_envelope_golden_vectors.v1",
+  "vectors": [
+    {
+      "name": "normal_empty_exit",
+      "envelope_bytes": 660,
+      "envelope_sha256": "38dda925152009b0284af5b870e155f2bd4c332ac0cbf45742b632341b02f28c"
+    },
+    {
+      "name": "forced_timeout_bounded_metadata",
+      "envelope_bytes": 660,
+      "envelope_sha256": "34bda56ca0ff73ded18233e0b92b5273baefeba07c2f8ddf4358d792c24e20d4"
+    }
+  ]
+}

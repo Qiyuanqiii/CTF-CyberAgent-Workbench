@@ -12,7 +12,7 @@
 - 产品可用度：完整 Code + Cyber 产品约 95-97%；其中通用 Coding Agent 工作流约 95-96%，Cyber 自动化工作流约 20%。该指标衡量用户现在能够完成多少真实端到端任务。
 - 上述数值是依据已测试任务切片给出的工程估算，不是性能基准，也不代表仍被安全关闭的功能已经可用。
 
-V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、主动取消、有界工具循环和跨进程 execution lease。P3-P5 已落地 Work/Note/Context、最多两个核心 child、独立 1/2/4/6 只读 Fan-out、Tool Gateway、审批/Grant、预算、ScriptProcess 与 Artifact。P9/Desktop 已推进到 schema v84 / D1-G12/V11，通用运行时安全面已推进到 H1-H3/R9/C1-C3：除既有 Run/Session/Plan/审批/Workspace/证据/回执/行动中心外，现有 API/Desktop 还支持安全恢复的 Monaco FileEdit、独立多文件汇总、exact-root 只读 Repository、可导航精确文件历史、精确提交比较与键盘可访问的成对 base/head 预览、snapshot-keyset 逐检查项验证下钻、确定性快照下载、不可变 record-only 回执历史及不授权元数据复核、带有界复核元数据的 Code Handoff、Code Journey、累计上下文记忆、Provider generation reload 和有界 wake worker。R9 strict receipt compatibility rejection 仍只存在于内部 `NonProductOnly` 测试边界，且不宣称 wall-clock order、raw output、process identity、CPU/memory OS enforcement 或产品执行。真实 Local/Docker/Shell/Git 进程、安装脚本/钩子和远程 Skill 分发继续关闭。
+V2 的 P0/P1 已完成，P2 已具备稳定的单 Agent 恢复、Provider streaming、主动取消、有界工具循环和跨进程 execution lease。P3-P5 已落地 Work/Note/Context、最多两个核心 child、独立 1/2/4/6 只读 Fan-out、Tool Gateway、审批/Grant、预算、ScriptProcess 与 Artifact。P9/Desktop 已推进到 schema v84 / D1-G13/V12，通用运行时安全面已推进到 H1-H3/R10/C1-C3：除既有 Run/Session/Plan/审批/Workspace/证据/回执/行动中心外，现有 API/Desktop 还支持安全恢复的 Monaco FileEdit、独立多文件汇总、exact-root 只读 Repository、可导航精确文件历史、精确提交比较与键盘可访问的成对 base/head 预览、snapshot-keyset 逐检查项验证下钻、确定性快照下载、不可变 record-only 回执历史及不授权元数据复核、带精确 Verify 导航的 Code Handoff、带有界审计事实的 Code Journey、累计上下文记忆、Provider generation reload 和有界 wake worker。R9/R10 strict receipt compatibility rejection 与 accepted-envelope golden 仍只存在于内部 `NonProductOnly` 测试边界，且不宣称 wall-clock order、raw output、process identity、CPU/memory OS enforcement 或产品执行。真实 Local/Docker/Shell/Git 进程、安装脚本/钩子和远程 Skill 分发继续关闭。
 
 P8 已推进到 schema v37 及其只读 CI 投影：v35 把完成的 Fan-out execution 投影为通用 `draft` Finding、不可变 `model_assertion` Evidence 和可重建的 Markdown/JSON Report；v36 增加同 Run 冻结 Artifact Evidence、一次性 operator `validated/rejected` 决定与完整复核；v37 以独立不可变事实完成 `validated -> accepted -> fixed`，并强制修复 Evidence 来自接受后新建且未用于验证的同 Run Artifact。验证、接受和修复始终分离；SARIF、通用 CI gate 与 GitHub Actions annotations 均为同一持久化事实上的 Go 只读投影。
 
@@ -1525,10 +1525,46 @@ LocalRunner、Docker、Git hook、攻击流量、外网、installer、registry m
 保持架构约 99%、完整产品可用度约 95-97%；通用 Coding Agent 约 95-96%，Cyber 自动化约 20%。
 边界见 ADR 0060。
 
-下一批候选为 D1-G13 Handoff review reference 到既有 Verify 精确投影的无授权导航、D1-V12
-Code Journey/audit 中的 metadata-only receipt-review facts，以及 R10 accepted receipt envelope
-跨 Windows/Linux 的 byte/SHA 黄金向量。真实 Local/Docker start、Windows 10 人工矩阵、签名分发、
-Rust analyzer、xterm、网络授权与 CTF 继续独立设门。
+## D1-G13/V12/R10 批次：精确复核导航、Journey 审计事实与 Runner 信封黄金向量
+
+任务 ID：`P9-Exact-Receipt-Review-Navigation-Audit-Facts-Envelope-Golden-v84`。本轮不新增
+SQLite migration，schema 和 OpenAPI 保持 v84 / 75 path / 83 operation / 182 schema，并完成
+当前六切片周期的后三片。
+
+D1-G13 从 Handoff 的 immutable receipt-review row 打开既有 Verify 投影。目标只驻留 React
+内存；Verify 独立核对 review 全字段、receipt ID/digest/event 和当前 plan/item digest 后才展开并
+聚焦精确行。缺失、截断、过期、摘要或事件漂移全部显示不可用，不回退到相近记录；离开 Verify
+后目标清除。该导航不能接受结果、审批、恢复 Run 或执行。
+
+D1-V12 在 Code Journey 显示最多三条 metadata-only/non-authorizing review facts，保留
+confirmed/disputed 计数、event/time 和 source truncation，并复用同一精确 Verify 校验。没有新增
+API、reviewer identity、正文、operation key、browser persistence 或 capability。
+
+R10 为内部 non-product receipt compatibility envelope 增加 normal/forced 两组接受向量，均固定
+660 bytes 及独立 SHA-256，并要求 strict decode、typed compatibility 和 byte-identical re-encode。
+测试进入既有 Windows/Linux selector，但没有产品 import、subprocess、Docker、network 或 Runner
+starter。
+
+累计六切片完整健壮性门通过：uncached Go 普通/race 为 421.0/509.5 秒；vet、零告警
+staticcheck、module verify/tidy、双路径 govulncheck 零可达漏洞；37 文件 134 项 React、strict
+TypeScript、确定性 OpenAPI、Vite、npm 零漏洞；secure Desktop tests/vet 与 Windows 可复现双构建
+全绿。OpenAPI/TypeScript SHA-256 为
+`E637623B6931C88466FD8D04412DA31091AF36C9E57161DC7D6C3784F64F56A3` /
+`339498E9D72C1FC70B44BF5E799996E255368D89A45B80989E4A31D6015F8578`；未签名 GUI
+SHA-256 为 `7ae75f36c2291fbf9e7d9e72071ae8d8534f4e27dd56c6d34bd04dc064f47a19`，继续保持
+`release_ready=false`。
+
+组合审计修复五项低风险状态/诊断问题：焦点 key 理论碰撞、缺少 plan/item digest 交叉绑定、
+普通 Verify 可能复用旧目标、恰好三条时隐藏 truncation、后续投影漂移仍保留视觉焦点。启用路径
+无已知未解决高/中风险；未使用真实 Provider/key、Shell、LocalRunner、Docker、hook、攻击流量、
+外网、installer、registry mutation 或产品进程。双指标维持架构约 99%、完整产品可用度约
+95-97%、通用 Coding Agent 约 95-96%、Cyber 自动化约 20%。边界见 ADR 0061。
+
+下一批候选转入 P10-A1 Go-owned analyzer protocol/limits/errors（无 process starter）、P10-A2
+使用 `clap`/`serde` 的确定性 Rust stdin JSON -> stdout JSON fixture tool，以及 P10-A3 Go/Rust
+共享黄金向量与 CI；产品调用和 Artifact commit 继续不接线。本机当前未安装 Rust toolchain，
+可按用户既有依赖授权安装并记录版本。真实 Local/Docker start、Windows 10 人工矩阵、签名分发、
+xterm、网络授权和 CTF 继续独立设门。
 
 ## 八、仓库同步与恢复约定
 
@@ -1536,4 +1572,4 @@ Rust analyzer、xterm、网络授权与 CTF 继续独立设门。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0060-keyboard-paired-preview-handoff-reviews-receipt-compatibility.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0061-exact-receipt-review-navigation-audit-facts-envelope-golden.md`。

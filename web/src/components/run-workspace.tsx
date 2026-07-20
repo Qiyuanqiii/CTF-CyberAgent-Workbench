@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -66,6 +66,7 @@ import { RepositoryDiffPanel } from "./repository-diff-panel";
 import { RepositoryHistoryPanel } from "./repository-history-panel";
 import { VerificationEvidence } from "./verification-evidence";
 import { VerificationPlan } from "./verification-plan";
+import type { ReceiptReviewNavigationTarget } from "./receipt-review-navigation";
 import { WorkspaceExplorer } from "./workspace-explorer";
 import { AgentGraphPanel, DelegationsPanel, ExternalSkillsPanel, FanoutPanel, FindingsPanel } from "./run-projections";
 
@@ -99,6 +100,8 @@ const tabs: Array<{ id: RunTab; label: string; icon: typeof Activity }> = [
 export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runID: string }) {
   const [tab, setTab] = useState<RunTab>("overview");
   const [fileTarget, setFileTarget] = useState({ runID, path: "." });
+  const [receiptReviewTarget, setReceiptReviewTarget] =
+    useState<ReceiptReviewNavigationTarget | null>(null);
   const queryClient = useQueryClient();
   const detailQuery = useQuery({
     queryKey: ["run", runID],
@@ -116,6 +119,24 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
   const toolsQuery = usePagedResource<SupervisorToolRoundView>(client, ["run", runID, "tools"],
     `/runs/${encodeURIComponent(runID)}/tool-rounds`, { limit: 100 }, Boolean(runID) && tab === "tools");
   const stream = useRunEventStream(client, runID);
+  const journeyHandoffQuery = useQuery({
+    queryKey: ["run", runID, "code-handoff"],
+    queryFn: ({ signal }) => client.codeHandoff(runID, signal),
+    enabled: Boolean(runID) && tab === "journey" && detailQuery.data?.mode.surface === "code",
+  });
+
+  useEffect(() => {
+    setReceiptReviewTarget(null);
+  }, [runID]);
+
+  useEffect(() => {
+    if (tab !== "verify") setReceiptReviewTarget(null);
+  }, [tab]);
+
+  const openReceiptReview = (target: ReceiptReviewNavigationTarget) => {
+    setReceiptReviewTarget({ ...target });
+    setTab("verify");
+  };
 
   const events = useMemo(() => {
     const bySequence = new Map<number, EventView>();
@@ -186,7 +207,11 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
       <div className="workspace-content">
         {tab === "overview" && <RunOverview client={client} detail={detail} />}
         {tab === "journey" && detail.mode.surface === "code" &&
-          <CodeJourney detail={detail} onNavigate={setTab} />}
+          <CodeJourney detail={detail}
+            receiptReviewFacts={journeyHandoffQuery.data?.verification_snapshot_receipt_reviews}
+            receiptReviewFactsState={journeyHandoffQuery.isError ? "unavailable" :
+              journeyHandoffQuery.isLoading ? "loading" : "ready"}
+            onNavigate={setTab} onOpenReceiptReview={openReceiptReview} />}
         {tab === "actions" && <OperatorActionCenter client={client} runID={runID}
           onNavigate={(destination) => setTab(destination === "approvals" ? "approvals" :
             destination === "diffs" ? "diffs" : "overview")} />}
@@ -207,10 +232,12 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
             setTab("files");
           }} />}
         {tab === "verify" && detail.mode.surface === "code" &&
-          <div className="projection-stack"><VerificationPlan client={client} runID={runID} />
+          <div className="projection-stack"><VerificationPlan client={client} runID={runID}
+            receiptReviewTarget={receiptReviewTarget ?? undefined} />
             <VerificationEvidence client={client} runID={runID} /></div>}
         {tab === "handoff" && detail.mode.surface === "code" &&
-          <CodeHandoffPanel client={client} runID={runID} />}
+          <CodeHandoffPanel client={client} runID={runID}
+            onOpenReceiptReview={openReceiptReview} />}
         {tab === "receipts" && <OperationReceiptHistory client={client} runID={runID} />}
         {tab === "agents" && <AgentGraphPanel client={client} runID={runID} />}
         {tab === "delegations" && <DelegationsPanel client={client} runID={runID} />}

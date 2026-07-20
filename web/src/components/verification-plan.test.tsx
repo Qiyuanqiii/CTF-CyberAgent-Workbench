@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import type { CyberAgentClient } from "../api/client";
 import { downloadTextFile } from "../lib/download";
+import type { ReceiptReviewNavigationTarget } from "./receipt-review-navigation";
 import { VerificationPlan } from "./verification-plan";
 
 vi.mock("../lib/download", () => ({ downloadTextFile: vi.fn() }));
@@ -208,4 +209,103 @@ describe("VerificationPlan", () => {
     expect(await screen.findByText("verification-2")).toBeInTheDocument();
     expect(screen.getByText("2 of 2")).toBeInTheDocument();
   });
+
+  it("opens only the exact receipt review referenced by Handoff", async () => {
+    const { client, verificationPlanItemCoveragePage } = receiptReviewFocusClient();
+    render(<QueryClientProvider client={new QueryClient()}>
+      <VerificationPlan client={client} receiptReviewTarget={receiptReviewTarget()}
+        runID="run-1" />
+    </QueryClientProvider>);
+
+    expect(await screen.findByText(
+      "Exact receipt review focused: metadata confirmed at event 10")).toBeInTheDocument();
+    const digest = await screen.findByText("cccccccccccc");
+    const receiptRow = digest.closest("li");
+    expect(receiptRow).toHaveAttribute("aria-current", "location");
+    await waitFor(() => expect(receiptRow).toHaveFocus());
+    expect(verificationPlanItemCoveragePage).toHaveBeenCalledWith(
+      "run-1", "plan-1", 1, "", 25, expect.any(AbortSignal));
+  });
+
+  it("does not fall back when a Handoff receipt review reference drifts", async () => {
+    const { client, verificationPlanItemCoveragePage } = receiptReviewFocusClient();
+    render(<QueryClientProvider client={new QueryClient()}>
+      <VerificationPlan client={client} receiptReviewTarget={{ ...receiptReviewTarget(),
+        receipt_content_sha256: "d".repeat(64) }} runID="run-1" />
+    </QueryClientProvider>);
+
+    expect(await screen.findByText(
+      "Exact receipt review is unavailable in the bounded Verify inventory"))
+      .toBeInTheDocument();
+    expect(verificationPlanItemCoveragePage).not.toHaveBeenCalled();
+    expect(screen.queryByText("cccccccccccc")).not.toBeInTheDocument();
+  });
+
+  it("rejects a receipt whose plan digest differs from the current Verify projection", async () => {
+    const { client, verificationPlanItemCoveragePage } = receiptReviewFocusClient("e".repeat(64));
+    render(<QueryClientProvider client={new QueryClient()}>
+      <VerificationPlan client={client} receiptReviewTarget={receiptReviewTarget()}
+        runID="run-1" />
+    </QueryClientProvider>);
+
+    expect(await screen.findByText(
+      "Exact receipt review is unavailable in the bounded Verify inventory"))
+      .toBeInTheDocument();
+    expect(verificationPlanItemCoveragePage).not.toHaveBeenCalled();
+  });
 });
+
+function receiptReviewTarget(): ReceiptReviewNavigationTarget {
+  return { id: "review-1", receipt_id: "receipt-1",
+    receipt_content_sha256: "c".repeat(64), receipt_event_sequence: 9,
+    decision: "metadata_confirmed", review_event_sequence: 10,
+    reviewed_at: "2026-07-20T01:12:00Z" };
+}
+
+function receiptReviewFocusClient(receiptPlanSHA256 = "a".repeat(64)) {
+  const verificationPlans = vi.fn().mockResolvedValue({
+    items: [{ id: "plan-1", title: "Release checks", summary: "Operator guidance",
+      created_at: "2026-07-20T01:00:00Z", items: [{ ordinal: 1,
+        title: "Focused tests", expected_observation: "Observe explicit results" }] }],
+  });
+  const verificationPlanCoverage = vi.fn().mockResolvedValue({
+    ...emptyCoverage(), plan_count: 1, plan_item_count: 1, observed_plan_item_count: 0,
+    plans: [{ plan_id: "plan-1", plan_sha256: "a".repeat(64), item_count: 1,
+      observed_item_count: 0, associated_evidence_count: 0,
+      items: [{ ordinal: 1, item_sha256: "b".repeat(64), associated_evidence_count: 0,
+        pass_count: 0, fail_count: 0, unknown_count: 0,
+        latest_association_event_sequence: 0 }] }],
+  });
+  const verificationPlanItemCoveragePage = vi.fn().mockResolvedValue({
+    detail: { protocol_version: "operator_verification_plan_item_coverage.v1",
+      run_id: "run-1", session_id: "session-1", workspace_id: "workspace-1",
+      plan_id: "plan-1", plan_sha256: "a".repeat(64), plan_item_ordinal: 1,
+      plan_item_sha256: "b".repeat(64), associated_evidence_count: 0,
+      pass_count: 0, fail_count: 0, unknown_count: 0,
+      latest_association_event_sequence: 0, associations: [],
+      associations_truncated: false, metadata_only: true, read_only: true,
+      private_plan_body_included: false, private_evidence_bodies_included: false,
+      operator_identity_included: false, result_inferred: false, command_executed: false,
+      model_assertion: false, record_rewritten: false, approval: false,
+      authority_granted: false },
+    page: { limit: 25 }, requestID: "request-focus",
+  });
+  const verificationSnapshotReceipts = vi.fn().mockResolvedValue({
+    items: [{ id: "receipt-1", plan_id: "plan-1", plan_item_ordinal: 1,
+      plan_sha256: receiptPlanSHA256, plan_item_sha256: "b".repeat(64),
+      format: "json", content_sha256: "c".repeat(64),
+      snapshot_high_water_event_sequence: 8, receipt_event_sequence: 9,
+      recorded_at: "2026-07-20T01:11:00Z" }],
+  });
+  const verificationSnapshotReceiptReviews = vi.fn().mockResolvedValue({
+    items: [{ id: "review-1", receipt_id: "receipt-1",
+      receipt_content_sha256: "c".repeat(64), receipt_event_sequence: 9,
+      decision: "metadata_confirmed", review_event_sequence: 10,
+      reviewed_at: "2026-07-20T01:12:00Z" }],
+  });
+  const client = { hasVerificationEvidence: false, verificationPlans,
+    verificationPlanCoverage, verificationPlanItemCoveragePage,
+    verificationSnapshotReceipts, verificationSnapshotReceiptReviews,
+  } as unknown as CyberAgentClient;
+  return { client, verificationPlanItemCoveragePage };
+}

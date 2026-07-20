@@ -66,10 +66,12 @@ describe("CodeHandoffPanel", () => {
     });
     const codeHandoffExport = vi.fn().mockResolvedValue({ filename: "handoff.md",
       mime_type: "text/markdown; charset=utf-8", content: "handoff" });
+    const onOpenReceiptReview = vi.fn();
     const client = { codeHandoff, codeHandoffExport } as unknown as CyberAgentClient;
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={queryClient}>
-      <CodeHandoffPanel client={client} runID="run-1" />
+      <CodeHandoffPanel client={client} runID="run-1"
+        onOpenReceiptReview={onOpenReceiptReview} />
     </QueryClientProvider>);
     expect(await screen.findByText("selected")).toBeInTheDocument();
     expect(screen.getByText("file edit review")).toBeInTheDocument();
@@ -79,6 +81,16 @@ describe("CodeHandoffPanel", () => {
     expect(screen.getByText("1 confirmed / 0 disputed")).toBeInTheDocument();
     expect(screen.getByText("metadata confirmed")).toBeInTheDocument();
     expect(screen.getByText("42")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", {
+      name: "Open receipt review verification-snapshot-receipt-review-1 in Verify",
+    }));
+    expect(onOpenReceiptReview).toHaveBeenCalledWith(expect.objectContaining({
+      id: "verification-snapshot-receipt-review-1",
+      receipt_id: "verification-snapshot-receipt-1",
+      receipt_content_sha256: "d".repeat(64),
+      receipt_event_sequence: 40,
+      review_event_sequence: 41,
+    }));
     await user.click(screen.getByRole("button", { name: "Markdown" }));
     expect(codeHandoffExport).toHaveBeenCalledWith("run-1", "markdown");
     expect(downloadTextFile).toHaveBeenCalledWith("handoff.md",

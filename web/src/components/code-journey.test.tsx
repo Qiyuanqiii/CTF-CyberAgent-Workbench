@@ -2,23 +2,66 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { RunDetailView } from "../api/types";
 import { CodeJourney, type CodeJourneyDestination } from "./code-journey";
+import type { ReceiptReviewFacts } from "./receipt-review-navigation";
 
 describe("CodeJourney", () => {
   it("navigates one Code journey through existing independently controlled surfaces", async () => {
     const user = userEvent.setup();
     const onNavigate = vi.fn<(destination: CodeJourneyDestination) => void>();
-    render(<CodeJourney detail={detail()} onNavigate={onNavigate} />);
+    const onOpenReceiptReview = vi.fn();
+    render(<CodeJourney detail={detail()} receiptReviewFacts={receiptReviewFacts()}
+      onNavigate={onNavigate} onOpenReceiptReview={onOpenReceiptReview} />);
 
     expect(screen.getByText("selected")).toBeInTheDocument();
     expect(screen.getByText("2 queued")).toBeInTheDocument();
     expect(screen.getByText("Independent mutations")).toBeInTheDocument();
+    expect(screen.getByText("2 confirmed / 2 disputed")).toBeInTheDocument();
+    expect(screen.getByText("Showing 3 of 4")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /Open receipt review/u })).toHaveLength(3);
+    await user.click(screen.getByRole("button", {
+      name: "Open receipt review review-1 in Verify",
+    }));
+    expect(onOpenReceiptReview).toHaveBeenCalledWith(expect.objectContaining({
+      id: "review-1", receipt_id: "receipt-1", review_event_sequence: 21,
+    }));
     await user.click(screen.getByRole("button", { name: "Open Scope" }));
     await user.click(screen.getByRole("button", { name: "Open Review" }));
     await user.click(screen.getByRole("button", { name: "Open diffs" }));
     expect(onNavigate.mock.calls.map(([destination]) => destination))
       .toEqual(["repository", "actions", "diffs"]);
   });
+
+  it("keeps source truncation visible when all three displayed facts fit", () => {
+    const facts = receiptReviewFacts();
+    facts.references = facts.references.slice(0, 3);
+    facts.returned_count = 3;
+    render(<CodeJourney detail={detail()} receiptReviewFacts={facts}
+      onNavigate={vi.fn()} onOpenReceiptReview={vi.fn()} />);
+
+    expect(screen.getByText("Showing 3 of 3")).toBeInTheDocument();
+    expect(screen.getByText("source truncated")).toBeInTheDocument();
+  });
 });
+
+function receiptReviewFacts(): ReceiptReviewFacts {
+  return {
+    protocol_version: "operator_verification_plan_item_snapshot_receipt_review_inventory.v1",
+    metadata_confirmed_count: 2, metadata_disputed_count: 2, returned_count: 4,
+    truncated: true, metadata_only: true, read_only: true, review_non_authorizing: true,
+    content_included: false, private_bodies_included: false,
+    operator_identity_included: false, snapshot_accepted: false, result_accepted: false,
+    result_inferred: false, record_rewritten: false, approval: false,
+    authority_granted: false, execution_started: false,
+    references: Array.from({ length: 4 }, (_, index) => ({
+      id: `review-${index + 1}`, receipt_id: `receipt-${index + 1}`,
+      receipt_content_sha256: String(index + 1).repeat(64),
+      receipt_event_sequence: 10 + index, decision: index % 2 === 0 ?
+        "metadata_confirmed" as const : "metadata_disputed" as const,
+      review_event_sequence: 21 + index,
+      reviewed_at: `2026-07-20T01:0${index}:00Z`,
+    })),
+  };
+}
 
 function detail(): RunDetailView {
   return {
