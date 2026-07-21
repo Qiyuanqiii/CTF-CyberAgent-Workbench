@@ -70,7 +70,7 @@ type InvocationOutcome struct {
 }
 
 // Transport is sealed to this package. Only the inert DisabledTransport and
-// deterministic FakeTransport satisfy it in this release.
+// deterministic FakeTransport exist in non-test builds in this release.
 type Transport interface {
 	analyzerTransport()
 	name() string
@@ -169,7 +169,18 @@ func NewBridge(transport Transport) (*Bridge, error) {
 func (bridge *Bridge) Invoke(ctx context.Context, candidate InvocationCandidate,
 	rawRequest []byte,
 ) (InvocationOutcome, ErrorCode) {
+	return bridge.invoke(ctx, candidate, rawRequest, ValidateInvocationOutcome)
+}
+
+type invocationOutcomeValidator func(InvocationCandidate, InvocationOutcome) bool
+
+func (bridge *Bridge) invoke(ctx context.Context, candidate InvocationCandidate,
+	rawRequest []byte, validate invocationOutcomeValidator,
+) (InvocationOutcome, ErrorCode) {
 	if bridge == nil || bridge.transport == nil {
+		return InvocationOutcome{}, CodeInternal
+	}
+	if validate == nil {
 		return InvocationOutcome{}, CodeInternal
 	}
 	if code := ValidateInvocationCandidate(candidate, rawRequest); code != "" {
@@ -190,14 +201,14 @@ func (bridge *Bridge) Invoke(ctx context.Context, candidate InvocationCandidate,
 	if bridge.transport.name() == DisabledTransportName {
 		base.Status = InvocationDisabled
 		base.FailureCode = InvocationFailureDisabled
-		return checkedInvocationOutcome(candidate, base)
+		return checkedInvocationOutcome(candidate, base, validate)
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		outcome := contextFailureOutcome(base, err)
-		return checkedInvocationOutcome(candidate, outcome)
+		return checkedInvocationOutcome(candidate, outcome, validate)
 	}
 	deadlineCtx, cancel := context.WithTimeout(ctx,
 		time.Duration(candidate.Limits.TimeoutMilliseconds)*time.Millisecond)
@@ -205,24 +216,24 @@ func (bridge *Bridge) Invoke(ctx context.Context, candidate InvocationCandidate,
 	exchange, transportErr := bridge.transport.exchange(deadlineCtx, candidate, canonicalRequest)
 	if err := ctx.Err(); err != nil {
 		outcome := contextFailureOutcome(base, err)
-		return checkedInvocationOutcome(candidate, outcome)
+		return checkedInvocationOutcome(candidate, outcome, validate)
 	}
 	if err := deadlineCtx.Err(); err != nil {
 		outcome := contextFailureOutcome(base, err)
-		return checkedInvocationOutcome(candidate, outcome)
+		return checkedInvocationOutcome(candidate, outcome, validate)
 	}
 	if errors.Is(transportErr, errTransportDisabled) {
 		base.Status = InvocationDisabled
 		base.FailureCode = InvocationFailureDisabled
-		return checkedInvocationOutcome(candidate, base)
+		return checkedInvocationOutcome(candidate, base, validate)
 	}
 	if transportErr != nil {
 		base.Status = InvocationFailed
 		base.FailureCode = InvocationFailureProcess
-		return checkedInvocationOutcome(candidate, base)
+		return checkedInvocationOutcome(candidate, base, validate)
 	}
 	outcome := classifyInvocationExchange(candidate, base, canonicalRequest, exchange)
-	return checkedInvocationOutcome(candidate, outcome)
+	return checkedInvocationOutcome(candidate, outcome, validate)
 }
 
 func EncodeInvocationOutcome(candidate InvocationCandidate,
@@ -253,11 +264,19 @@ func DecodeInvocationOutcome(raw []byte,
 }
 
 func ValidateInvocationOutcome(candidate InvocationCandidate, outcome InvocationOutcome) bool {
+	return validateInvocationOutcome(candidate, outcome, isProductInvocationExecutionTransport)
+}
+
+func validateInvocationOutcome(candidate InvocationCandidate, outcome InvocationOutcome,
+	isExecutionTransport func(string) bool,
+) bool {
 	candidateDigest, ok := invocationCandidateSHA256(candidate)
-	if !ok || outcome.ProtocolVersion != InvocationOutcomeProtocolVersion ||
+	if !ok || isExecutionTransport == nil ||
+		outcome.ProtocolVersion != InvocationOutcomeProtocolVersion ||
 		outcome.CandidateSHA256 != candidateDigest || outcome.RequestID != candidate.RequestID ||
 		outcome.Analyzer != candidate.Analyzer ||
-		(outcome.Transport != DisabledTransportName && outcome.Transport != FakeTransportName) ||
+		(outcome.Transport != DisabledTransportName &&
+			!isExecutionTransport(outcome.Transport)) ||
 		outcome.DeadlineMilliseconds != candidate.Limits.TimeoutMilliseconds ||
 		!outcome.Completed || !outcome.DeadlineEnforced || !outcome.MetadataOnly ||
 		outcome.RawOutputIncluded || outcome.ProductInvocationEnabled ||
@@ -277,36 +296,37 @@ func ValidateInvocationOutcome(candidate InvocationCandidate, outcome Invocation
 		outcome.AnalyzerErrorCode == "" && !outcome.ResultValidated
 	switch outcome.Status {
 	case InvocationSucceeded:
-		return outcome.Transport == FakeTransportName && outcome.FailureCode == "" &&
+		return isExecutionTransport(outcome.Transport) && outcome.FailureCode == "" &&
 			outcome.AnalyzerErrorCode == "" && outcome.ExitCode == ExitSuccess &&
 			outcome.StdoutBytes > 0 && outcome.StdoutWithinLimit && outcome.ResultValidated &&
 			outcome.ResultProtocol == candidate.Descriptor.ResultProtocol
 	case InvocationRejected:
-		return outcome.Transport == FakeTransportName && outcome.FailureCode == "" &&
+		return isExecutionTransport(outcome.Transport) && outcome.FailureCode == "" &&
 			validAnalyzerRejectionCode(outcome.AnalyzerErrorCode) &&
 			outcome.ExitCode == ExitRejected && outcome.StdoutBytes > 0 &&
 			outcome.StdoutWithinLimit && outcome.ResultValidated &&
 			outcome.ResultProtocol == ErrorProtocolVersion
 	case InvocationTimedOut:
-		return outcome.Transport == FakeTransportName &&
+		return isExecutionTransport(outcome.Transport) &&
 			outcome.FailureCode == InvocationFailureDeadline && outcome.StdoutWithinLimit && noOutput
 	case InvocationCancelled:
-		return outcome.Transport == FakeTransportName &&
+		return isExecutionTransport(outcome.Transport) &&
 			outcome.FailureCode == InvocationFailureCancelled && outcome.StdoutWithinLimit && noOutput
 	case InvocationDisabled:
 		return outcome.Transport == DisabledTransportName &&
 			outcome.FailureCode == InvocationFailureDisabled && outcome.StdoutWithinLimit && noOutput
 	case InvocationFailed:
-		return validateFailedInvocationOutcome(candidate, outcome, noOutput)
+		return validateFailedInvocationOutcome(candidate, outcome, noOutput,
+			isExecutionTransport)
 	default:
 		return false
 	}
 }
 
 func validateFailedInvocationOutcome(candidate InvocationCandidate, outcome InvocationOutcome,
-	noOutput bool,
+	noOutput bool, isExecutionTransport func(string) bool,
 ) bool {
-	if outcome.Transport != FakeTransportName {
+	if isExecutionTransport == nil || !isExecutionTransport(outcome.Transport) {
 		return false
 	}
 	switch outcome.FailureCode {
@@ -335,6 +355,10 @@ func validateFailedInvocationOutcome(candidate InvocationCandidate, outcome Invo
 	default:
 		return false
 	}
+}
+
+func isProductInvocationExecutionTransport(name string) bool {
+	return name == FakeTransportName
 }
 
 func classifyInvocationExchange(candidate InvocationCandidate, base InvocationOutcome,
@@ -454,9 +478,9 @@ func contextFailureOutcome(base InvocationOutcome, err error) InvocationOutcome 
 }
 
 func checkedInvocationOutcome(candidate InvocationCandidate,
-	outcome InvocationOutcome,
+	outcome InvocationOutcome, validate invocationOutcomeValidator,
 ) (InvocationOutcome, ErrorCode) {
-	if !ValidateInvocationOutcome(candidate, outcome) {
+	if validate == nil || !validate(candidate, outcome) {
 		return InvocationOutcome{}, CodeInternal
 	}
 	return outcome, ""

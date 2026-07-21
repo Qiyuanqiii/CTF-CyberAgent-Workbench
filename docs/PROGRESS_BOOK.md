@@ -1698,10 +1698,52 @@ subprocess conformance adapter、P10-D3 crash/timeout/cancel/TERM-KILL/tree-reap
 向量。产品调用、持久化、Artifact commit、Windows 10 人工矩阵、签名、xterm、网络授权和 CTF
 继续独立设门。
 
+## P10-D1/D2/D3 批次：可执行身份封印与仅测试子进程一致性
+
+任务 ID：`P10-Test-Only-Subprocess-Conformance`。本轮不新增 migration、CLI/HTTP/Desktop surface，
+schema/OpenAPI 保持 v84 / 75 path / 83 operation / 182 schema。
+
+P10-D1 新增 strict `analyzer_executable_identity.v1` 与
+`analyzer_invocation_preflight.v1`，绑定固定 descriptor/protocol、目标 GOOS/GOARCH、精确 executable
+bytes/SHA-256；不保存原始 bytes/path/command/args/env/cwd，format verified、process start、product
+invocation 和全部 authority 均 false。空文件与超过 32 MiB 失败关闭，重启后按原 request/candidate/
+bytes 纯重建。
+
+P10-D2 的 Rust subprocess adapter 只编译进 `_test.go`；公开 NewBridge 继续拒绝它。CI 显式注入绝对
+fixture path，adapter 在启动前复读并逐字节比较、重验 identity/preflight，使用空环境、隔离 temp cwd、
+无 Rust 参数、canonical stdin、有界 stdout 与 4 KiB stderr。descriptor deterministic 声明与
+executable semantics verified=false 明确分离；production analyzer Go 文件出现进程 import
+会被回归测试拒绝，outcome 不含 raw stderr/process identity；产品 outcome 校验、编码和解码均拒绝
+测试 transport 标签。
+
+P10-D3 用真实 Rust fixture 覆盖成功、运行时拒绝、blocked-stdin timeout、in-flight cancel 与 forced
+termination；测试专用 Go helper 覆盖正常/强制 descendant reap、parent-exit orphan 检测清理、malformed/
+future/wrong output 和 stderr 隐私。Linux 为 process group TERM/KILL，Windows 为 kill-on-close Job Object
+与 200ms 宽限后硬终止；GitHub CI 新增 Linux/Windows 双平台真实 fixture 门。
+
+三切片功能门通过最终 321.1 秒 uncached 全仓 Go、五轮聚焦 Analyzer race、两个 10 秒 fuzz 共约
+189 万次执行、vet/staticcheck/module、Analyzer govulncheck 零漏洞、7+2 Rust locked tests 与 fmt/clippy、38 文件 137 Web、strict
+TypeScript/确定性 OpenAPI、Vite/npm、secure Desktop 和 Windows 可复现双构建。未签名 GUI SHA-256
+为 `649c7107fdc6e8bad3b718e705d7ce9a5003ea7891c649606695286adf61bf93`，
+`release_ready=false`。
+
+组合审计修复 descriptor deterministic 被误读为 executable 行为认证、空 environment slice 退化为
+nil 后继承父环境、race 插桩下 Go helper 冷启动误判 deadline、单消费者 wait channel 造成清理所有权
+脆弱，以及测试 transport 标签曾可通过产品 outcome codec 五项问题。启用产品路径无已知未解决高/中
+风险；没有 Provider/key、Shell、LocalRunner、Docker、hook、
+攻击流量、产品 analyzer process、Run/Event/SQLite/Artifact 写入、installer 或 registry mutation。
+pathname 复读仍不消除 TOCTOU，格式/架构/签名/来源和 OS 资源限制仍未验证。本批是新六片周期前三片，
+不宣称全仓 race/govulncheck/RustSec 完整门。双指标保持架构约 99%、完整产品可用度约 95-97%、通用
+Coding Agent 约 95-96%、Cyber 自动化约 20%。边界见 ADR 0066。
+
+下一批固定为 P10-E1 inert validated-result/Artifact candidate、P10-E2 test-only atomic staging/rollback/
+replay/crash-recovery 向量、P10-E3 产品 adapter 的 TOCTOU-safe identity、PE/ELF/architecture、签名来源、
+sandbox/resource ceiling/operator control 威胁模型；仍不启用产品进程。该批后累计六片并执行完整健壮性门。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0065-non-starting-analyzer-invocation-bridge.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0066-test-only-analyzer-subprocess-conformance.md`。

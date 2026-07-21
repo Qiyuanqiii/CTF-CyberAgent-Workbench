@@ -1565,14 +1565,55 @@ authority was used. Schema/OpenAPI remain v84 and 75/83/182. ADR 0065 is authori
 Run/Event/SQLite/Artifact 或任何用户入口。架构约 99%、产品可用度约 95-97%、通用 Coding Agent
 约 95-96%、Cyber 自动化约 20%。
 
+## Completed Test-Only Analyzer Subprocess Conformance (P10-D1/D2/D3)
+
+P10-D1 adds `analyzer_executable_identity.v1` and `analyzer_invocation_preflight.v1`.
+They strictly bind the fixed analyzer descriptor/protocols, target GOOS/GOARCH, exact
+executable byte count, and SHA-256 without retaining bytes, path, command, arguments,
+environment, or working directory. Descriptor determinism is not executable-semantic proof;
+format/semantic verification, process start, product invocation,
+persistence, and all authority remain false. Empty or over-32-MiB binaries fail closed.
+
+P10-D2 adds a real Rust subprocess adapter only to analyzer test compilation units. The
+public bridge still rejects it. CI explicitly supplies the fixture path; the adapter re-reads
+and byte-compares it, reconstructs D1 records, uses an isolated temporary working directory,
+empty environment, no Rust arguments, canonical closed stdin, and bounded stdout/stderr.
+Production analyzer files are regression-scanned against process imports. Public product
+outcome validation/encoding/decoding reject the test-only transport label.
+
+P10-D3 covers real Rust success, runtime rejection, blocked-stdin timeout, cancellation after
+start, and forced termination. Test-only Go helpers cover graceful/hard descendant reap,
+parent-exit orphan detection and cleanup, malformed/future/wrong stdout, and stderr privacy.
+Linux uses a process group and TERM/KILL; Windows uses a kill-on-close Job Object and a 200ms
+grace before hard termination. GitHub CI runs the fixture gate on Linux and Windows.
+
+The functional gate passed final 321.1-second full Go, five focused race rounds, about 1.89
+million new-envelope fuzz executions, vet/staticcheck/module, zero-finding Analyzer govulncheck,
+7+2 Rust tests plus fmt/clippy,
+38 files/137 Web tests, strict TypeScript/OpenAPI, Vite/npm, secure Desktop, and a reproducible
+Windows dual build. GUI SHA-256 is
+`649c7107fdc6e8bad3b718e705d7ce9a5003ea7891c649606695286adf61bf93` and
+`release_ready=false`. Review separated descriptor determinism from unverified executable
+semantics and fixed accidental parent-environment inheritance, race helper startup/deadline
+confusion, wait ownership, and the first draft's product-codec acceptance of a test-only
+transport label.
+No enabled product path gained process authority. Schema/OpenAPI remain v84 and 75/83/182;
+ADR 0066 is authoritative.
+
+中文交接：当前 Go 已能在测试门中以精确二进制摘要启动 Rust fixture，并验证成功、拒绝、超时、
+取消、强杀、整树回收、孤儿清理和 stderr 隐私；但公开 Bridge 仍拒绝真实 adapter，CLI/HTTP/Desktop/
+Run/Event/SQLite/Artifact 都没有启动或持久化入口。pathname 复读仍不等于 TOCTOU-safe handle，格式、
+架构、签名、来源和 OS 资源限制也尚未验证。架构约 99%、完整产品可用度约 95-97%、通用 Coding
+Agent 约 95-96%、Cyber 自动化约 20%。
+
 ## Next Slice
 
 The next three-slice candidates are:
 
-1. P10-D1: define a Go-owned inert executable-identity and preflight record that binds the exact analyzer/protocol, OS/architecture, bytes, and SHA-256 without storing a launch command or starting anything.
-2. P10-D2: add a test-only, explicitly non-product subprocess conformance adapter for the repository Rust fixture with bounded stdin/stdout/stderr and no Run, Store, SQLite, Artifact, CLI, HTTP, or Desktop import.
-3. P10-D3: exercise real-fixture crash, timeout, in-flight cancellation, TERM/KILL fallback, process-tree reap/orphan detection, malformed/future/wrong output, and stderr privacy; all product wiring remains disabled.
-4. Atomic Artifact-candidate and persistence semantics remain a later independent gate after process lifecycle evidence passes.
+1. P10-E1: define an inert validated-result/Artifact candidate bound to the invocation candidate, executable identity, preflight, outcome, and exact transient result digest, with no raw result or commit authority.
+2. P10-E2: add test-only atomic staging, rollback, replay, and crash-recovery vectors without Store, SQLite, Run/Event, or product execution wiring.
+3. P10-E3: write and validate the product-adapter threat model for TOCTOU-safe executable identity, PE/ELF format and architecture, signing/provenance, sandboxing, CPU/memory limits, and explicit operator control; do not start a product process.
+4. This next batch completes six slices, so run the full ordinary/race/vet/staticcheck/govulncheck/RustSec/dependency/privacy/reproducible-build robustness gate.
 5. The manual Windows 10 matrix, signed distribution, real Sandbox release gate, xterm input, network grants, product analyzer execution, and CTF solving remain separate.
 
 ## Local Machine Note
@@ -1583,7 +1624,7 @@ WinLibs GCC 16.1.0 supplies the GNU linker. Local commands should set
 `RUSTUP_TOOLCHAIN=1.97.1-x86_64-pc-windows-gnu` when rustup channel synchronization is
 unavailable; the source and lockfile remain the reproducible authority.
 
-The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v84 and D1-Q2 through D1-G13/V12 plus H1-H3/R10/C1-C3 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the repository's ignored build root or the OS temporary root.
+The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v84 and D1-Q2 through D1-G13/V12 plus H1-H3/R10/C1-D3 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the repository's ignored build root or the OS temporary root.
 
 ## Delivery Loop
 

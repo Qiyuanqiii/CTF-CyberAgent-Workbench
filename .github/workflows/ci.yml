@@ -70,11 +70,22 @@ jobs:
         working-directory: analyzers
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
       - run: cargo fmt --all -- --check
       - run: cargo test --locked
       - run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Build deterministic Rust fixture
+        run: cargo build --locked --bin cyberagent-analyzer-fixture
+      - name: Verify Linux subprocess conformance boundary
+        working-directory: .
+        env:
+          CYBERAGENT_ANALYZER_CONFORMANCE_BINARY: ${{ github.workspace }}/analyzers/target/debug/cyberagent-analyzer-fixture
+        run: go test -count=1 ./internal/analyzer -run '^TestSubprocessConformance'
 
   desktop:
     name: Windows Desktop shell
@@ -90,6 +101,11 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal
+      - name: Build deterministic Rust fixture
+        working-directory: analyzers
+        run: cargo +1.97.1 build --locked --bin cyberagent-analyzer-fixture
       - name: Build embedded renderer
         working-directory: web
         run: |
@@ -99,6 +115,11 @@ jobs:
         run: go test -tags "desktop,wv2runtime.error" -count=1 ./cmd/cyberagent-desktop ./internal/desktop ./internal/webui
       - name: Verify cross-platform Runner receipt vectors
         run: go test -count=1 ./internal/runner -run 'TestEvidenceSetReceipt(Golden|Compatibility).*Vectors'
+      - name: Verify Windows analyzer subprocess conformance boundary
+        shell: pwsh
+        run: |
+          $env:CYBERAGENT_ANALYZER_CONFORMANCE_BINARY = Join-Path $env:GITHUB_WORKSPACE "analyzers\target\debug\cyberagent-analyzer-fixture.exe"
+          go test -count=1 ./internal/analyzer -run '^TestSubprocessConformance'
       - name: Build and verify portable Desktop shell
         shell: pwsh
         run: ./scripts/build-desktop.ps1 -SkipFrontend -VerifyReproducible

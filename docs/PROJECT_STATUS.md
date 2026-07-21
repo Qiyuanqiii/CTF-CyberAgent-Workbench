@@ -1949,14 +1949,55 @@ Architecture completion remains about 99%, complete product usability about 95-9
 Coding Agent usability about 95-96%, and Cyber automation about 20%. This internal bridge
 does not yet create an end-user analyzer workflow.
 
+## P10-D1/D2/D3: Test-Only Analyzer Subprocess Conformance
+
+P10-D1 adds strict `analyzer_executable_identity.v1` and
+`analyzer_invocation_preflight.v1` records. They bind the exact descriptor/protocols, target
+GOOS/GOARCH, executable byte count, and SHA-256 while omitting bytes, path, command, arguments,
+environment, and persistence. Descriptor determinism is separate from executable-semantic
+verification; format/semantic verification, process start, product invocation, and all
+authority remain false. Empty or over-32-MiB executables fail closed; strict restart
+reconstruction rejects schema, digest, platform, or authority drift.
+
+P10-D2 adds the first real Go-to-Rust pipe adapter only in `_test.go`. Public `NewBridge`
+continues to reject it. The harness re-reads and checks exact bytes, revalidates identity and
+preflight, starts the explicitly supplied fixture in an isolated temporary directory with an
+empty environment and no Rust arguments, closes canonical JSON stdin, and captures bounded
+stdout/stderr. Outcome state contains no raw stderr or process identity. A regression test
+rejects process imports from every production analyzer Go file. Product outcome validation,
+encoding, and decoding reject the test-only transport label.
+
+P10-D3 exercises real Rust success, rejection, blocked-stdin timeout, in-flight cancellation,
+and forced termination plus test-binary descendant reap, TERM-to-hard-stop, orphan detection/
+cleanup, malformed/future/wrong stdout, and stderr privacy. Linux uses a process group;
+Windows uses a kill-on-close Job Object. CI now runs the real fixture gate on both platforms.
+
+The functional gate passed final 321.1-second uncached full Go, five focused Analyzer race rounds,
+about 1.89 million identity/preflight fuzz executions, vet/staticcheck/module, a zero-finding
+Analyzer govulncheck, 7+2 locked Rust
+tests plus fmt/clippy, 38 files/137 Web tests, strict TypeScript, deterministic OpenAPI, Vite/
+npm, secure Desktop, and a reproducible Windows dual build. The unsigned GUI SHA-256 is
+`649c7107fdc6e8bad3b718e705d7ce9a5003ea7891c649606695286adf61bf93` and
+`release_ready=false`. Review separated descriptor determinism from unverified executable
+semantics, fixed accidental parent-environment inheritance from a nil empty slice,
+race-instrumented helper startup misclassification, fragile one-consumer wait ownership, and
+test-transport acceptance through the first draft's product outcome codec.
+No known unresolved high/medium issue exists on an
+enabled product path. Schema/OpenAPI remain v84 and 75/83/182; ADR 0066 is authoritative.
+
+Architecture completion remains about 99%, complete product usability about 95-97%, generic
+Coding Agent usability about 95-96%, and Cyber automation about 20%. This is test evidence,
+not a user workflow or product process grant.
+
 ## Recommended Next Batch
 
-Candidate slices are P10-D1 an inert exact executable-identity/preflight record with no start,
-P10-D2 a test-only explicitly non-product Rust fixture subprocess conformance adapter with
-bounded stdin/stdout/stderr, and P10-D3 real-fixture lifecycle/failure vectors for crash,
-timeout, cancellation, TERM/KILL fallback, tree reap/orphan detection, malformed output, and
-stderr privacy. Product invocation, Run/Event/SQLite persistence, and Artifact commit remain
-unwired after this harness unless they pass later independent gates.
+Candidate slices are P10-E1 an inert validated-result/Artifact candidate bound to candidate,
+identity, preflight, outcome, and exact result digest; P10-E2 test-only atomic staging,
+rollback, replay, and crash-recovery vectors; and P10-E3 a product-adapter threat model for
+TOCTOU-safe executable identity, format/architecture/signing/provenance, sandboxing, resource
+ceilings, and operator control. Product startup and persistence remain closed. The next batch
+completes six slices and therefore must run the full repository race, govulncheck, RustSec,
+dependency, privacy, and reproducible-build robustness gate.
 Keep
 the Local profile disabled until a real
 OS sandbox makes protected host roots unavailable or read-only; never map it to
