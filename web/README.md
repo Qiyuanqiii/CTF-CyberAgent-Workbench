@@ -1,4 +1,4 @@
-# CyberAgent Web Console
+# Prayu Web Console
 
 ## 中文
 
@@ -8,7 +8,21 @@ schema v45-v46 的 Run 概览显示操作者引导队列的 pending/prepared/com
 
 schema v71 的 External Skills 面板只读显示 Run 固定选择的 surface/profile、版本、信任类别、token 上界、声明工具数量以及 root/Specialist 准备/提交计数。它不接收 Skill 正文、路径、字节数、hash/digest/fingerprint、安装/选择 ID、operation key 或操作者/agent 身份，也没有 Run 选择、授权或执行按钮。D1-B1 仅在 Desktop 原生预览后提供另一次显式惰性安装确认；它不自动改变该面板对应的 Run 选择。
 
-这是 CyberAgent Workbench 的本地 read-mostly 运维界面。React/Vite 只消费 Go 生成的 OpenAPI 3.1 DTO 和 `api.v1`，不会重新实现 Policy、审批、工作区权限、Shell、Docker、模型路由或 SQLite 逻辑。当前窄 mutation 包括非授权档位、受控 Run/Session/Plan/审批、Go-issued FileEdit 提案/审阅/apply、不可变操作者验证、显式 plan-item/evidence 关联、record-only 快照回执及其不授权元数据复核、status-only Provider 凭证设置、wake 意图/前台消费，以及 Desktop 确认式惰性 Skill 安装。FileEdit 恢复、Repository Diff/History/Exact Commit/Comparison 键盘可访问成对预览、逐检查项验证快照下载/回执历史、带复核元数据和精确 Verify 导航的 Code Handoff、带有界审计事实的 Code Journey 和 runtime capability/worker health 是只读投影；wake worker 只能由 Go 进程启动参数开启，TypeScript 没有运行时启用入口。
+这是 Prayu 的本地 read-mostly 运维界面。React/Vite 只消费 Go 生成的 OpenAPI 3.1 DTO 和 `api.v1`，不会重新实现 Policy、审批、工作区权限、Shell、Docker、模型路由或 SQLite 逻辑。当前窄 mutation 包括非授权档位、受控 Run/Session/Plan/审批、Go-issued FileEdit 提案/审阅/apply、不可变操作者验证、显式 plan-item/evidence 关联、record-only 快照回执及其不授权元数据复核、status-only Provider 凭证设置、wake 意图/前台消费，以及 Desktop 确认式惰性 Skill 安装。FileEdit 恢复、Repository Diff/History/Exact Commit/Comparison 键盘可访问成对预览、逐检查项验证快照下载/回执历史、带复核元数据和精确 Verify 导航的 Code Handoff、带有界审计事实的 Code Journey 和 runtime capability/worker health 是只读投影；wake worker 只能由 Go 进程启动参数开启，TypeScript 没有运行时启用入口。
+
+## Prayu 桌面界面 / Prayu Desktop Surface
+
+D1-UX1/UX2/UX3 使用独立的工作台和设置页背景、Prayu 艺术字，以及用户提供的橙色选中态笔刷。
+任务、Run 与设置导航共享同一选中语义：暖黑底、右侧橙色笔刷、橙色图标和米黄色文字；正文区
+使用米黄色半透明表面。设置页显示真实的 API、schema、版本、surface 与 capability 投影，只把
+紧凑度保存在 `prayu.ui-density`，不保存凭证或授权结果。桌面与移动布局都保持无横向溢出。
+
+The Prayu shell uses separate workspace and Settings backgrounds, the supplied wordmark,
+and the supplied orange active-brush asset. Selected task, Run, and Settings rows share
+one state language: warm dark surface, orange brush and icon, and cream text. Settings is
+a read-only projection of Go-owned runtime facts; its local density preference is purely
+presentational. Established `CYBERAGENT_*`, HTTP, API, and CLI identifiers remain for
+backward compatibility.
 
 D1-G1/I3/F1 进一步增加只读 Repository 页、metadata-only 多文件 change-set 摘要和 Code-only Journey。Repository 不执行 `git`、网络或 hook，也不返回 host root/body/remote；change set 不提供 Apply All，所有 mutation 仍是逐文件独立 Go route；Journey 的导航组件自身没有 API client，D1-V12 仅由父级传入既有严格 Handoff 查询中的最多三条非授权审计事实。
 

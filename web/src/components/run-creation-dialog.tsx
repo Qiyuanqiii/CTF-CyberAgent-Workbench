@@ -110,7 +110,7 @@ export function RunCreationDialog({ client, open, onClose }: {
         <header>
           <div>
             <span className="dialog-icon"><Plus aria-hidden="true" size={17} /></span>
-            <div><h2 id="run-creation-title">New Run</h2><small>CyberAgent Workbench</small></div>
+            <div><h2 id="run-creation-title">New Run</h2><small>Prayu</small></div>
           </div>
           <button aria-label="Close" className="icon-button" disabled={mutation.isPending}
             onClick={close} title="Close" type="button"><X aria-hidden="true" size={16} /></button>

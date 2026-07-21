@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import App from "./App";
 import { useConnectionStore } from "./state/connection";
 
@@ -42,5 +42,11 @@ describe("App capability wiring", () => {
     render(<QueryClientProvider client={new QueryClient()}><App /></QueryClientProvider>);
 
     expect(screen.getByTestId("verification-capability")).toHaveTextContent("true");
+    expect(document.querySelector(".prayu-shell.workspace-mode")).toBeInTheDocument();
+    expect(screen.getByText("Prayu")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    expect(document.querySelector(".prayu-shell.settings-mode")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "个人资料" })).toHaveClass("active");
   });
 });

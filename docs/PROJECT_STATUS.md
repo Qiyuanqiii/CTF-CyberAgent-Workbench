@@ -4,11 +4,13 @@ Last updated: 2026-07-21
 
 ## Resume Context
 
+D1-UX1/UX2/UX3 is the latest non-schema desktop batch. It introduces the Prayu user-facing name while preserving stable compatibility identifiers, uses the supplied workspace/wordmark/active-brush assets, gives Settings a distinct background, and standardizes selected rows as warm dark surfaces with an orange brush/icon and cream text. The cream translucent work surface, functional Settings navigation, read-only runtime facts, display-only density preference, and 1440x900/390x844 responsive layouts add no renderer authority. ADR 0064 is authoritative.
+
 Current database schema is v84. Schemas v78-v81 add immutable operator verification evidence, livelock recovery, verification plans, and explicit plan-item/evidence associations; schema v82 adds conservative complete-request model-context planning and immutable cumulative handoff memory; schema v83 adds immutable metadata-only verification snapshot receipt history; schema v84 adds one immutable non-authorizing metadata review per exact receipt. Code/Desktop work now reaches D1-G13/V12. R9 strictly rejects malformed, future, digest-mismatched, or authority-widening receipt envelopes, while R10 pins accepted envelope bytes/SHA only behind the internal `NonProductOnly` Runner boundary. P10-A1 through P10-B3 establish a Go-owned analyzer boundary: a strict bounded request/result/error protocol, a fixed inert two-entry descriptor Registry, deterministic digest and in-memory ZIP central-directory functions, strict no-extraction archive result validation, and two independent Go/Rust five-vector suites. There is no Go-to-Rust product process bridge, file/path input, Run/Event/SQLite persistence, or Artifact commit. Root and Specialist requests use a 32K conservative fallback with explicit output/safety reservations, repeated compaction preserves a predecessor-bound cumulative handoff chain, and arbitrary repository documents remain untrusted evidence instead of instructions. Operators can compare any two exact local commit trees, use focus-safe keyboard navigation in the paired redacted preview, page through one frozen verification-item snapshot, download a deterministic metadata-only Markdown/JSON representation, record an immutable digest receipt, separately confirm or dispute only its metadata, carry bounded review metadata into a regenerable Code Handoff/Journey audit, and navigate only after Verify independently matches exact review/receipt/plan/item digests. R9/R10 and P10 do not claim wall-clock order, raw output, process identity, CPU/memory enforcement, verified OS quotas, signal identity, or product execution. None grants general Shell, LocalRunner, Docker, child scheduling, install hooks, renderer host-path authority, credential readback, document instruction authority, automatic Skill selection, result acceptance, or product process execution.
 
-Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No product path starts a Runner, container, Shell, host process, or Rust analyzer. ADR 0024 through ADR 0063 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/recovery/review/apply, Provider credential/generation, inert-install, receipt, Explorer/search, Repository, Verification, Handoff, process-conformance, portable-build, and analyzer boundaries.
+Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No product path starts a Runner, container, Shell, host process, or Rust analyzer. ADR 0024 through ADR 0064 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/recovery/review/apply, Provider credential/generation, inert-install, receipt, Explorer/search, Repository, Verification, Handoff, process-conformance, portable-build, analyzer, and Prayu interface boundaries.
 
-CyberAgent Workbench is a local-first Go agent runtime for cyber-oriented work. The CLI-first implementation has resumable Runs, a durable root Agent Coordinator, bounded review-gated Specialist delegation, a separate read-only 1/2/4/6 Fan-out pool, persisted sessions and model calls, context compaction, WorkItems/Notes/Artifacts, a unified Tool Gateway, embedded and inert user Skills, Finding/Evidence/Report lifecycles with SARIF/CI output, loopback HTTP/SSE/OpenAPI, a Run-first TUI, a React/Vite console, and a Windows Wails shell with independently gated Run/Session/Plan/approval, FileEdit proposal/review/apply, Provider credentials, foreground/bounded wake, inert Skills, actions/evidence, and navigation. Core delegation remains capped at two children and only the original application operator can schedule it; models, ordinary tools, HTTP, and the Desktop native bridge cannot autonomously spawn or schedule children.
+Prayu is a local-first Go agent runtime for coding and controlled cyber-oriented work. The CLI-first implementation has resumable Runs, a durable root Agent Coordinator, bounded review-gated Specialist delegation, a separate read-only 1/2/4/6 Fan-out pool, persisted sessions and model calls, context compaction, WorkItems/Notes/Artifacts, a unified Tool Gateway, embedded and inert user Skills, Finding/Evidence/Report lifecycles with SARIF/CI output, loopback HTTP/SSE/OpenAPI, a Run-first TUI, a React/Vite console, and a Windows Wails shell with independently gated Run/Session/Plan/approval, FileEdit proposal/review/apply, Provider credentials, foreground/bounded wake, inert Skills, actions/evidence, and navigation. The `cyberagent` CLI and other established CyberAgent identifiers remain compatibility contracts. Core delegation remains capped at two children and only the original application operator can schedule it; models, ordinary tools, HTTP, and the Desktop native bridge cannot autonomously spawn or schedule children.
 
 Schemas v48-v68 form the current Sandbox chain: strict Manifest preparation, exact approval and disabled candidates, generation-fenced lifecycle recovery, fixed threat checks, simulation evidence, read-only Docker observation, deterministic plans, never-started rehearsals, sealed host-input capture and handoff, read-only runtime-input projection, retained-resource cleanup, a blocked start-gate review, non-authorizing execution-profile selection, production-evidence receipts and recoverable attempts, the bounded opt-in Linux read-only daemon harness, and an immutable operator receipt review. These records, including an accepted v68 receipt, grant no execution authority. Local and container-process execution remain disabled, and TypeScript, future Rust analyzers, Skills, models, documents, and approval facts cannot bypass Go Policy, Scope, budgets, or the Tool Gateway.
 
@@ -219,7 +221,7 @@ Use these files first when resuming:
 - Cyber autonomous-workflow usability: about 20%.
 - These values are engineering estimates derived from tested roadmap slices, not performance benchmarks. The retired single-axis "overall product vision" percentage must not be used for current status.
 
-Latest implemented batch: P10-B1/B2/B3 on unchanged schema v84. It adds a fixed inert analyzer descriptor Registry, strict in-memory/no-extraction ZIP central-directory inventory, a deterministic Rust implementation, and five exact cross-language adversarial vectors. The cumulative six-slice gate passed, including a RustSec scan of 42 locked crate dependencies against 1,166 official advisories with zero known vulnerabilities; no known unresolved high/medium issue exists on an enabled path. ADR 0063 is authoritative.
+Latest implemented batch: D1-UX1/UX2/UX3 on unchanged schema v84 and unchanged OpenAPI 75/83/182. It introduces the Prayu product identity and a tested dual-surface desktop shell while preserving compatibility identifiers and all Go authority boundaries. The previous P10-B1/B2/B3 cumulative six-slice gate passed with zero known RustSec vulnerabilities across 42 locked crates. ADR 0064 is authoritative for the current interface; ADR 0063 remains authoritative for the analyzer boundary.
 
 Completed:
 
@@ -1887,6 +1889,29 @@ hostile-size/name-classification, warning/deprecation, and declared-CRC evidence
 issues. No known
 unresolved high/medium issue exists on an enabled path. Schema/OpenAPI remain v84 and
 75/83/182. ADR 0063 is authoritative.
+
+## D1-UX1/UX2/UX3: Prayu Brand And Dual-Surface Desktop Shell
+
+D1-UX1 centralizes the user-visible product name as Prayu across Go build information,
+CLI/TUI/Desktop labels, generated workspace text, Agent prompts, React metadata, and the
+connection gate. The `cyberagent` command, Go module, data directory, environment names,
+HTTP compatibility headers, credential targets, OpenAPI identity, SARIF identity, and
+Windows class name remain unchanged to avoid a destructive compatibility migration.
+
+D1-UX2 installs the exact supplied workspace background, Prayu wordmark, and active-brush
+asset, plus a separately generated and approved Settings background. Workspace content is
+a cream 90%-opaque surface. Selected tasks, Runs, and Settings rows share a warm dark base,
+orange icon and brush, and cream text. D1-UX3 adds real Settings navigation, bounded
+runtime-capability facts, display-only density persistence, sidebar controls, and desktop/
+mobile layouts with no horizontal overflow. The renderer receives no credential, Policy,
+model, tool, Shell, Docker, filesystem, subprocess, or persistence authority.
+
+The gate passed 400.5 seconds of uncached full Go tests, full vet, 38 files/137 React
+tests, strict TypeScript, deterministic OpenAPI, Vite, zero-vulnerability npm audit,
+7+2 locked Rust tests, fmt/clippy, secure Desktop test/vet, and a reproducible Windows
+dual build. In-app-browser visual checks passed at 1440x900 and 390x844. Schema/OpenAPI
+remain v84 and 75/83/182, and the four progress estimates remain 99%, 95-97%, 95-96%,
+and 20% rather than increasing on visual work alone.
 
 ## Recommended Next Batch
 

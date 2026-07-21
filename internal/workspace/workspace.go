@@ -38,7 +38,7 @@ func (m *Manager) Init(ctx context.Context, name string) (session.WorkspaceRecor
 	}
 	readme := filepath.Join(root, "README.md")
 	if _, err := os.Stat(readme); os.IsNotExist(err) {
-		content := fmt.Sprintf("# %s\n\nCyberAgent Workbench local workspace.\n", name)
+		content := fmt.Sprintf("# %s\n\nPrayu local workspace.\n", name)
 		if err := os.WriteFile(readme, []byte(content), 0o644); err != nil {
 			return session.WorkspaceRecord{}, err
 		}

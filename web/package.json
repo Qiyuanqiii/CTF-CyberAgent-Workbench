@@ -1,5 +1,5 @@
 {
-  "name": "cyberagent-workbench-web",
+  "name": "prayu-web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -35,5 +35,10 @@
     "typescript": "5.9.3",
     "vite": "8.1.4",
     "vitest": "4.1.10"
+  },
+  "overrides": {
+    "@redocly/openapi-core": {
+      "js-yaml": "4.3.0"
+    }
   }
 }

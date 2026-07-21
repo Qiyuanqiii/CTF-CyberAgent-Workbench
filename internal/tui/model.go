@@ -462,9 +462,9 @@ func (m *Model) Snapshot() string {
 		sideWidth = width - 4
 	}
 
-	headerText := fmt.Sprintf("CyberAgent Workbench  session=%s  route=%s", m.session.ID, m.session.Route)
+	headerText := fmt.Sprintf("Prayu  session=%s  route=%s", m.session.ID, m.session.Route)
 	if m.runContext.Found {
-		headerText = fmt.Sprintf("CyberAgent Workbench  run=%s  status=%s  mode=%s/%s  session=%s  route=%s",
+		headerText = fmt.Sprintf("Prayu  run=%s  status=%s  mode=%s/%s  session=%s  route=%s",
 			m.runContext.Run.ID, m.runContext.Run.Status, m.runContext.Mode.Surface,
 			m.runContext.Mode.Phase, m.session.ID, m.session.Route)
 	}

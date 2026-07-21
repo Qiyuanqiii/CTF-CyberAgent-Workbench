@@ -1629,10 +1629,41 @@ LocalRunner、Docker、hook、攻击流量、产品 analyzer process、SQLite/Ev
 malformed/future/wrong-analyzer/oversized-output 假传输向量。真实子进程、Run/Event/SQLite/Artifact、
 Local/Docker start、Windows 10 人工矩阵、签名分发、xterm、网络授权和 CTF 继续独立设门。
 
+## D1-UX1/UX2/UX3 批次：Prayu 品牌、双界面主题与选中态
+
+任务 ID：`D1-Prayu-Brand-Dual-Surface-Responsive-Shell`。本轮是非 schema 的 Desktop/Web
+体验批次，schema/OpenAPI 保持 v84 / 75 path / 83 operation / 182 schema。
+
+D1-UX1 用 Go-owned `buildinfo.ProductName` 统一 CLI/TUI/Desktop、Agent 提示、工作区文本和
+React 的用户可见产品名为 Prayu。`cyberagent` 命令、Go module、数据目录、环境变量、HTTP 兼容
+头、凭证目标、OpenAPI/SARIF identity 与 Windows class name 保留，避免破坏脚本、数据和凭证。
+
+D1-UX2 接入用户提供的工作台背景、Prayu 艺术字和选中态笔刷，并使用单独的设置页背景。任务、
+Run 与设置导航的 active 状态统一为暖黑底、右侧橙色笔刷、橙色图标和米黄色文字；正文使用
+90% 不透明的米黄色表面。D1-UX3 完成工作台/设置切换、设置导航、真实只读运行时事实、仅影响
+显示的密度偏好，以及 1440x900/390x844 响应式布局。
+
+三切片功能门通过：400.5 秒 uncached 全仓 Go、全仓 vet、38 文件 137 项 React、strict
+TypeScript、确定性 OpenAPI、Vite、npm 零漏洞、7+2 个锁定 Rust 测试、fmt/clippy、secure
+Desktop test/vet 与 Windows 可复现双构建。未签名 Desktop SHA-256 为
+`0b294a9759e216c918775f05710148da6d45cde0e4e443e773894ecad6801a9b`，继续保持
+`release_ready=false`。npm 首轮审计对 Redocly 间接锁定的 `js-yaml 4.2.0` 失败关闭；仅将该
+传递依赖覆盖到修复版 4.3.0 后，API 生成、全部前端测试、构建与零漏洞复审通过。
+
+组合审计确认 TypeScript 没有新增凭证、Policy、模型、工具、文件、Shell、Docker、进程、网络、
+审批或执行权限；用户测试 key 精确前缀未进入仓库。真实浏览器只使用内存只读 fixture，桌面与
+移动均无横向溢出，选中项和双背景符合约定。审计修复浏览器拒绝 `localStorage` 时显示偏好可能
+阻断界面的低风险问题，并新增失败回退测试。未发现启用路径中的已知未解决高/中风险；没有调用
+真实 Provider/key、Runner、攻击流量、installer 或 registry。双指标维持架构约 99%、完整产品
+可用度约 95-97%、通用 Coding Agent 约 95-96%、Cyber 自动化约 20%。边界见 ADR 0064。
+
+下一批仍为 P10-C1 无启动 invocation candidate、P10-C2 Disabled/Fake Transport 与 P10-C3
+失败向量；视觉改版不改变安全路线的优先级。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0063-inert-analyzer-registry-zip-inventory-shared-vectors.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0064-prayu-brand-and-dual-surface-desktop-shell.md`。

@@ -168,7 +168,7 @@ func (p *Picker) Snapshot() string {
 	width := max(80, p.width)
 	height := max(16, p.height)
 	contentHeight := max(8, height-6)
-	header := headerStyle.Width(width).Render("CyberAgent Workbench  " + string(p.view))
+	header := headerStyle.Width(width).Render("Prayu  " + string(p.view))
 	content := p.renderSessions(width-4, contentHeight-2)
 	if p.view == pickerRuns {
 		content = p.renderRuns(width-4, contentHeight-2)

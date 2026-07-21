@@ -660,7 +660,7 @@ func (m *Manager) resolveModelRef(route string) (llm.ModelRef, error) {
 }
 
 func systemPrompt(sess Session) string {
-	return "You are CyberAgent Workbench, a local-first coding agent. Prefer safe, scoped, auditable actions. " +
+	return "You are Prayu, a local-first coding agent. Prefer safe, scoped, auditable actions. " +
 		UntrustedContextPolicy + " CTF-specific solving is deferred unless explicitly requested."
 }
 

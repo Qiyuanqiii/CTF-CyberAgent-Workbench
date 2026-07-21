@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, LoaderCircle, ShieldCheck } from "lucide-react";
+import { ArrowRight, LoaderCircle } from "lucide-react";
+import prayuWordmark from "../assets/prayu-wordmark.png";
 import { CyberAgentClient, clientCapabilitiesFromRuntime } from "../api/client";
 import { desktopBridgeAvailable, desktopErrorMessage, loadDesktopBootstrap } from "../lib/desktop-bridge";
 import { useConnectionStore } from "../state/connection";
@@ -93,16 +94,10 @@ export function ConnectionGate() {
   return (
     <main className="connection-page">
       <form className="connection-panel" onSubmit={submit}>
-        <div className="brand-lockup">
-          <span className="brand-mark"><ShieldCheck aria-hidden="true" size={24} /></span>
-          <span>
-            <strong>CyberAgent Workbench</strong>
-            <small>Local control console</small>
-          </span>
-        </div>
+        <img alt="Prayu" className="connection-wordmark" src={prayuWordmark} />
         <div className="connection-heading">
           <h1>连接本地控制面</h1>
-          <p>Go API / api.v1</p>
+          <p>Prayu · Go API / api.v1</p>
         </div>
         {connecting && desktopBridgeAvailable() &&
           <div className="desktop-connecting"><LoaderCircle aria-hidden="true" className="spin" size={16} />启动桌面工作台</div>}

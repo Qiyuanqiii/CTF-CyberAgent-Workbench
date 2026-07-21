@@ -53,9 +53,12 @@ describe("ResourceSidebar", () => {
       defaultOptions: { queries: { retry: false } },
     });
 
+    const onCreateRun = vi.fn();
+    const onOpenSettings = vi.fn();
     const { container } = render(
       <QueryClientProvider client={queryClient}>
-        <ResourceSidebar client={client} />
+        <ResourceSidebar client={client} onCreateRun={onCreateRun}
+          onOpenSettings={onOpenSettings} />
       </QueryClientProvider>,
     );
 
@@ -75,5 +78,14 @@ describe("ResourceSidebar", () => {
     await waitFor(() => expect(getPage).toHaveBeenCalledTimes(2));
     expect(getPage.mock.calls[1]?.[2]).toBe("cursor-terminal-page");
     expect(useConnectionStore.getState().selectedRunID).toBe("run-paused");
+    expect(screen.getByAltText("Prayu")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "任务" })).toHaveClass("active");
+    expect(container.querySelector(".resource-row.selected strong"))
+      .toHaveTextContent("run-paused");
+
+    fireEvent.click(screen.getByRole("button", { name: /新建任务/ }));
+    fireEvent.click(screen.getByRole("button", { name: /本地操作者/ }));
+    expect(onCreateRun).toHaveBeenCalledTimes(1);
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 });

@@ -204,7 +204,7 @@ func (m *Model) renderEditDetailScreen() string {
 	selected := m.runContext.FileEdits[m.selectedEdit]
 	preview := selected.Preview
 	header := headerStyle.Width(width).Render(truncate(
-		"CyberAgent Workbench  read-only diff  "+preview.Path, width-2))
+		"Prayu  read-only diff  "+preview.Path, width-2))
 	meta := []string{
 		truncate(fmt.Sprintf("edit=%s status=%s redacted=%t", preview.ID,
 			preview.Status, preview.SecretsRedacted), width-4),

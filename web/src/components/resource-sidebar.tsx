@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { Archive, ListTree, RefreshCw, Search, TerminalSquare } from "lucide-react";
+import {
+  Archive,
+  CircleUserRound,
+  ListTree,
+  RefreshCw,
+  Search,
+  Settings,
+  SquarePen,
+  TerminalSquare,
+} from "lucide-react";
+import prayuWordmark from "../assets/prayu-wordmark.png";
 import type { CyberAgentClient } from "../api/client";
 import type { RunView, SessionView } from "../api/types";
 import { usePagedResource } from "../hooks/use-paged-resource";
@@ -9,7 +19,11 @@ import { EmptyState, ErrorState, LoadMoreButton, LoadingState, StatusBadge } fro
 
 const runStatuses = ["", "created", "preparing", "running", "waiting_approval", "paused", "completed", "failed", "cancelled"];
 
-export function ResourceSidebar({ client }: { client: CyberAgentClient }) {
+export function ResourceSidebar({ client, onCreateRun, onOpenSettings }: {
+  client: CyberAgentClient;
+  onCreateRun?: () => void;
+  onOpenSettings?: () => void;
+}) {
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
   const kind = useConnectionStore((state) => state.resourceKind);
@@ -48,12 +62,18 @@ export function ResourceSidebar({ client }: { client: CyberAgentClient }) {
 
   return (
     <aside className="resource-sidebar">
+      <div className="sidebar-brand">
+        <img alt="Prayu" src={prayuWordmark} />
+      </div>
+      {onCreateRun && <button className="sidebar-create" onClick={onCreateRun} type="button">
+        <SquarePen aria-hidden="true" size={16} />新建任务
+      </button>}
       <div className="resource-tabs" role="tablist" aria-label="资源类型">
         <button aria-selected={kind === "run"} className={kind === "run" ? "active" : ""} onClick={() => setKind("run")} role="tab" type="button">
-          <ListTree aria-hidden="true" size={16} />Runs
+          <ListTree aria-hidden="true" size={16} />任务
         </button>
         <button aria-selected={kind === "session"} className={kind === "session" ? "active" : ""} onClick={() => setKind("session")} role="tab" type="button">
-          <TerminalSquare aria-hidden="true" size={16} />Sessions
+          <TerminalSquare aria-hidden="true" size={16} />会话
         </button>
       </div>
       <div className="sidebar-tools">
@@ -70,6 +90,10 @@ export function ResourceSidebar({ client }: { client: CyberAgentClient }) {
           {runStatuses.map((value) => <option key={value || "all"} value={value}>{value ? value.replaceAll("_", " ") : "全部状态"}</option>)}
         </select>
       )}
+      <div className="resource-list-heading">
+        <span>{kind === "run" ? "最近任务" : "最近会话"}</span>
+        <small>{kind === "run" ? visibleRuns.length : visibleSessions.length}</small>
+      </div>
       <div className="resource-list">
         {activeQuery.isLoading && <LoadingState />}
         {activeQuery.isError && <ErrorState error={activeQuery.error} />}
@@ -92,6 +116,11 @@ export function ResourceSidebar({ client }: { client: CyberAgentClient }) {
         )}
         <LoadMoreButton hasNextPage={Boolean(activeQuery.hasNextPage)} isFetching={activeQuery.isFetchingNextPage} onClick={() => void activeQuery.fetchNextPage()} />
       </div>
+      <button className="sidebar-profile" onClick={onOpenSettings} type="button">
+        <CircleUserRound aria-hidden="true" size={21} />
+        <span><strong>本地操作者</strong><small>设置与账户</small></span>
+        <Settings aria-hidden="true" size={15} />
+      </button>
     </aside>
   );
 }

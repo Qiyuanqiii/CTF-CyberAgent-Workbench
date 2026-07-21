@@ -1,4 +1,4 @@
-# CyberAgent Workbench
+# Prayu
 
 > 本地优先、可恢复、可审计的通用 AI Agent 工作台<br>
 > A local-first, resumable, and auditable workbench for general-purpose AI agents.
@@ -19,19 +19,23 @@ Starting with schema v49, the project reports two engineering indicators so arch
 
 ### 中文
 
-CyberAgent Workbench 是一个由 Go 驱动的本地 AI Agent 工作台，面向代码开发、代码审查、安全学习、脚本任务和受控网络安全分析。它把模型调用、长上下文、工作区文件、策略检查、审批、执行预算和事件记录统一到一套可恢复的运行时中，让一次任务即使在程序退出后也能继续，并且每一步都可以追踪和复核。
+Prayu 是一个由 Go 驱动的本地 AI Agent 工作台，面向代码开发、代码审查、安全学习、脚本任务和受控网络安全分析。它把模型调用、长上下文、工作区文件、策略检查、审批、执行预算和事件记录统一到一套可恢复的运行时中，让一次任务即使在程序退出后也能继续，并且每一步都可以追踪和复核。
 
 每个用户目标会被记录为一个 `Mission`，每次可恢复的执行过程则是一个 `Run`。Go 是唯一控制平面，负责模型路由、状态机、SQLite 持久化、安全策略和工具边界；TypeScript read-mostly 控制台与当前 Rust 确定性协议夹具都受 Go 定义的边界约束，不绕过安全控制。
 
 项目当前优先完善通用 Agent 运行时及其受控多 Agent 内核。CTF 将作为后续 Profile 和 Skills 能力接入，而不是另建一套独立运行系统。
 
+`Prayu` 是当前产品与界面名称。为保护已有脚本、数据库和凭证，CLI 命令 `cyberagent`、Go module `cyberagent-workbench`、数据目录 `.cyberagent-workbench`、`CYBERAGENT_*` 环境变量、HTTP 兼容头和凭证目标暂不迁移；它们是兼容标识，不是第二套产品或控制平面。
+
 ### English
 
-CyberAgent Workbench is a local AI agent workbench powered by Go for coding, code review, security learning, scripting, and controlled cybersecurity analysis. It unifies model calls, long-context memory, workspace files, policy checks, approvals, execution budgets, and event history in one resumable and auditable runtime.
+Prayu is a local AI agent workbench powered by Go for coding, code review, security learning, scripting, and controlled cybersecurity analysis. It unifies model calls, long-context memory, workspace files, policy checks, approvals, execution budgets, and event history in one resumable and auditable runtime.
 
 Each user objective is stored as a `Mission`, while each resumable execution attempt is a `Run`. Go is the sole control plane for model routing, state machines, SQLite persistence, safety policy, and tool boundaries. The TypeScript console and the current deterministic Rust protocol fixture remain behind Go-defined boundaries instead of bypassing those controls.
 
 The current priority is the general-purpose Agent runtime and its controlled multi-agent kernel. CTF capabilities will be added later as Profiles and Skills on the same foundation rather than as a separate execution system.
+
+`Prayu` is the current product and interface name. The `cyberagent` CLI, `cyberagent-workbench` Go module, `.cyberagent-workbench` data directory, `CYBERAGENT_*` environment variables, compatibility HTTP headers, and credential targets remain stable to protect existing scripts, databases, and credentials. They are compatibility identifiers, not a second product or control plane.
 
 ## 开发历程 / Development History
 
@@ -2074,13 +2078,39 @@ known high/medium issue remains on an enabled path. Product process transport, R
 SQLite persistence, Artifact commit, CLI/HTTP/Desktop invocation, and all execution
 authority remain closed. ADR 0063 is authoritative.
 
+### D1-UX1/UX2/UX3：Prayu 品牌、双界面主题与响应式交互
+
+本批不新增 migration，schema/OpenAPI 继续保持 v84 与 75 path / 83 operation / 182 schema。
+D1-UX1 将用户可见产品名统一为 `Prayu`，同时保留 `cyberagent` CLI、Go module、数据目录、
+环境变量、HTTP 兼容头、凭证目标和 Windows class name，避免破坏既有脚本、数据与凭证。
+
+D1-UX2 使用用户提供的工作台背景、Prayu 艺术字和选中态笔刷素材，并为设置页使用独立背景。
+工作台正文采用米黄色半透明表面；任务、Run 和设置导航的选中态统一为暖黑底、右侧橙色笔刷、
+橙色图标与米黄色文字。D1-UX3 增加可操作的设置导航、只读运行时事实、仅影响显示密度的本地
+偏好，以及 1440x900 与 390x844 两档响应式布局。设置页只投影 Go 返回的事实，不保存密钥、
+不判断权限，也不启动模型、工具或进程。
+
+三切片功能门通过 400.5 秒 uncached 全仓 Go、vet、38 文件 137 项 React、strict TypeScript、
+确定性 OpenAPI、Vite、npm 零漏洞、7+2 Rust、fmt/clippy、secure Desktop 和 Windows 可复现
+双构建；浏览器视觉复核覆盖 1440x900 与 390x844。架构约 99%、完整产品可用度约 95-97%、
+通用 Coding Agent 约 95-96%、Cyber 自动化约 20% 的口径不因视觉改版而虚增。
+
+This non-schema D1-UX1/UX2/UX3 batch introduces the Prayu product identity while
+preserving established CyberAgent compatibility identifiers. It uses the supplied
+workspace, wordmark, and active-brush assets, gives Settings a distinct background,
+and standardizes the selected state as a warm dark surface with an orange brush,
+orange icon, and cream text. The cream translucent work surface, functional Settings
+navigation, read-only runtime facts, display-only density preference, and desktop/mobile
+layouts add no renderer authority. TypeScript still cannot read credentials, decide
+Policy, call models or tools, or start host/container processes. ADR 0064 is authoritative.
+
 ## Project Memory
 
 Read [docs/PROJECT_MEMORY.md](docs/PROJECT_MEMORY.md), [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [docs/PROGRESS_BOOK.md](docs/PROGRESS_BOOK.md), [docs/TASK_BOOK.md](docs/TASK_BOOK.md), [docs/http-api.md](docs/http-api.md), [docs/openapi.json](docs/openapi.json), [web/README.md](web/README.md), [docs/errors.md](docs/errors.md), and the chronological [ADR 0001](docs/adr/0001-go-control-plane.md), [ADR 0002](docs/adr/0002-run-centric-runtime.md), [ADR 0003](docs/adr/0003-run-execution-modes.md), [ADR 0004](docs/adr/0004-plan-delivery-workflow.md), [ADR 0005](docs/adr/0005-operator-steering-queue.md), [ADR 0006](docs/adr/0006-operator-steering-controls.md), [ADR 0007](docs/adr/0007-specialist-skill-context.md), [ADR 0008](docs/adr/0008-sandbox-manifest-boundary.md), [ADR 0009](docs/adr/0009-sandbox-approval-candidate.md), [ADR 0010](docs/adr/0010-disabled-sandbox-lifecycle.md), [ADR 0011](docs/adr/0011-disabled-sandbox-preflight.md), [ADR 0012](docs/adr/0012-simulation-only-sandbox-evidence.md), [ADR 0013](docs/adr/0013-read-only-docker-observation.md), [ADR 0014](docs/adr/0014-deterministic-docker-container-plan.md), [ADR 0015](docs/adr/0015-bounded-docker-write-rehearsal.md), [ADR 0016](docs/adr/0016-recoverable-docker-rehearsal-attempt.md), [ADR 0017](docs/adr/0017-descriptor-sealed-host-input-staging.md), [ADR 0018](docs/adr/0018-durable-pre-stage-host-input-requirement.md), [ADR 0019](docs/adr/0019-daemon-owned-host-input-handoff.md), [ADR 0020](docs/adr/0020-deterministic-runtime-input-projection.md), [ADR 0021](docs/adr/0021-recoverable-runtime-input-application.md), [ADR 0022](docs/adr/0022-retained-runtime-input-resource-lifecycle.md), [ADR 0023](docs/adr/0023-blocked-docker-start-gate-review.md), [ADR 0024](docs/adr/0024-strict-inert-skill-package.md), [ADR 0025](docs/adr/0025-protected-delete-command-guard.md), [ADR 0026](docs/adr/0026-run-execution-profile-selection.md), [ADR 0027](docs/adr/0027-non-authorizing-docker-production-evidence-ledger.md), and [ADR 0028](docs/adr/0028-recoverable-docker-production-evidence-attempts.md) when resuming development after a long conversation. They record current progress, language ownership, run architecture, execution mode, Plan/Delivery and steering invariants, Specialist Skill delivery, Sandbox authority boundaries, API and error contracts, audit notes, verified commands, and the recommended next slice.
 
 The latest decisions are [ADR 0029](docs/adr/0029-bounded-linux-read-only-docker-evidence-harness.md), [ADR 0030](docs/adr/0030-immutable-docker-production-evidence-review.md), [ADR 0031](docs/adr/0031-content-addressed-inert-skill-registry.md), [ADR 0032](docs/adr/0032-external-skill-run-context.md), [ADR 0033](docs/adr/0033-pathless-desktop-skill-preview.md), [ADR 0034](docs/adr/0034-embedded-read-first-wails-shell.md), [ADR 0035](docs/adr/0035-desktop-lifecycle-and-event-resumption.md), [ADR 0036](docs/adr/0036-idempotent-controlled-run-creation.md), [ADR 0037](docs/adr/0037-controlled-session-message-submission.md), [ADR 0038](docs/adr/0038-idempotent-run-control-and-bounded-handoff.md), [ADR 0039](docs/adr/0039-model-plan-and-approval-controls.md), [ADR 0040](docs/adr/0040-provider-diff-wake-controls.md), [ADR 0041](docs/adr/0041-explicit-wake-file-apply-and-inert-skill-install.md), [ADR 0042](docs/adr/0042-receipts-explorer-portable-build.md), [ADR 0043](docs/adr/0043-workspace-search-evidence-attachment-receipt-history.md), [ADR 0044](docs/adr/0044-operator-action-center-evidence-inventory-command-palette.md), [ADR 0045](docs/adr/0045-go-issued-editor-system-credentials-bounded-wake-worker.md), [ADR 0046](docs/adr/0046-safe-editor-recovery-provider-generation-worker-health.md), [ADR 0047](docs/adr/0047-read-only-repository-change-set-code-journey.md), [ADR 0048](docs/adr/0048-bounded-diff-verification-code-handoff.md), [ADR 0049](docs/adr/0049-deadlock-livelock-runtime-guards.md), [ADR 0050](docs/adr/0050-repository-history-verification-plan-handoff-export.md), [ADR 0051](docs/adr/0051-exact-commit-verification-association-runner-lifecycle.md), [ADR 0052](docs/adr/0052-conservative-model-context-cumulative-handoff-memory.md), [ADR 0053](docs/adr/0053-commit-preview-handoff-coverage-process-conformance.md), [ADR 0054](docs/adr/0054-file-history-verification-drilldown-runner-exit-evidence.md), [ADR 0055](docs/adr/0055-history-navigation-verification-pagination-runner-runtime-evidence.md), [ADR 0056](docs/adr/0056-exact-commit-comparison-keyset-verification-runner-control-evidence.md), [ADR 0057](docs/adr/0057-comparison-preview-verification-snapshot-runner-timeline-evidence.md), [ADR 0058](docs/adr/0058-paired-comparison-snapshot-receipts-runner-evidence-set.md), and [ADR 0059](docs/adr/0059-paired-navigation-receipt-review-runner-golden-vectors.md).
 
-The newest decisions are [ADR 0061](docs/adr/0061-exact-receipt-review-navigation-audit-facts-envelope-golden.md), [ADR 0062](docs/adr/0062-go-owned-analyzer-protocol-rust-fixture-shared-vectors.md), and [ADR 0063](docs/adr/0063-inert-analyzer-registry-zip-inventory-shared-vectors.md).
+The newest decisions are [ADR 0061](docs/adr/0061-exact-receipt-review-navigation-audit-facts-envelope-golden.md), [ADR 0062](docs/adr/0062-go-owned-analyzer-protocol-rust-fixture-shared-vectors.md), [ADR 0063](docs/adr/0063-inert-analyzer-registry-zip-inventory-shared-vectors.md), and [ADR 0064](docs/adr/0064-prayu-brand-and-dual-surface-desktop-shell.md).
 
 Windows Desktop D0-A/D0-B 与 D1-R1 至 D1-G13/V12 加 R10 非产品 Runner 回执信封黄金边界的自动化核心已实现，但仍是未签名开发/便携测试壳，不是安装版或完整工作台；Windows 10 实机发布矩阵仍待完成。分阶段方案见 [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md)。自定义 Skill 已具备严格 `skill_package.v1` 校验、schema v69 本地惰性 Registry、schema v70 CLI Run 选择/最小上下文、schema v71 三端只读来源投影，以及 HTTP/Desktop 显式确认的惰性安装；签名、远程分发和安装时执行仍未开放。详情见 [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md)。
 

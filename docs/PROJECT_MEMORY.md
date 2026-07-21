@@ -1,10 +1,10 @@
-# CyberAgent Workbench Project Memory
+# Prayu Project Memory
 
 Last updated: 2026-07-21
 
 ## Resume First
 
-CyberAgent Workbench is a local-first, resumable, auditable AI Agent workbench. Go is the only control plane. TypeScript consumes Go-owned HTTP/OpenAPI contracts, while the current Rust fixture implements deterministic digest and in-memory ZIP central-directory functions behind Go-owned JSON protocols without product invocation. CTF-specific solving remains deferred until the generic runtime, Skills, Sandbox, and analyzer boundaries are stable.
+Prayu is a local-first, resumable, auditable AI Agent workbench. Go is the only control plane. TypeScript consumes Go-owned HTTP/OpenAPI contracts, while the current Rust fixture implements deterministic digest and in-memory ZIP central-directory functions behind Go-owned JSON protocols without product invocation. The `cyberagent` CLI, Go module, data directory, environment, HTTP, credential, and selected Windows identifiers remain stable compatibility contracts. CTF-specific solving remains deferred until the generic runtime, Skills, Sandbox, and analyzer boundaries are stable.
 
 Read in this order after a long context break:
 
@@ -76,8 +76,9 @@ Read in this order after a long context break:
 66. `docs/adr/0061-exact-receipt-review-navigation-audit-facts-envelope-golden.md`
 67. `docs/adr/0062-go-owned-analyzer-protocol-rust-fixture-shared-vectors.md`
 68. `docs/adr/0063-inert-analyzer-registry-zip-inventory-shared-vectors.md`
-69. `docs/DESKTOP_PLAN.md`
-70. `docs/SKILL_PACKAGE_PLAN.md`
+69. `docs/adr/0064-prayu-brand-and-dual-surface-desktop-shell.md`
+70. `docs/DESKTOP_PLAN.md`
+71. `docs/SKILL_PACKAGE_PLAN.md`
 
 ## Current Baseline
 
@@ -91,6 +92,7 @@ Read in this order after a long context break:
 - Main languages: Go control plane, TypeScript React/Vite local console, and deterministic Rust 1.97.1 digest/ZIP protocol functions. Rust has no Agent, LLM, config, key, persistence, network, filesystem, subprocess, or product-lifecycle ownership.
 - Analyzer status: P10-A1 through P10-B3 fix `analyzer_protocol.v1`, a two-entry inert `analyzer_descriptor.v1` Registry, strict digest and `archive.inventory.v1` result validation, bounded Rust stdin/stdout functions, and two five-vector semantic/bytes/SHA suites with separate CI. The ZIP function only reads an in-memory central directory and never opens, decompresses, extracts, or writes entry data. A Go-to-Rust product process bridge, product invocation, Run/Event/SQLite persistence, and Artifact commit remain absent. See ADR 0062, ADR 0063, and `analyzers/README.md`.
 - Desktop status: D0-A/D0-B and D1-R1 through D1-G13/V12 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, read-only Repository state/redacted Diff/local history/exact-commit metadata/redacted preview/navigable exact-file history/exact-commit comparison with keyboard-accessible paired base/head previews, independent multi-file review, separate immutable verification plans/results/associations plus snapshot-stable exact per-item drilldown/download/receipt history/non-authorizing review and Handoff coverage, digest-bound Code Handoff export with exact fail-closed receipt-review navigation, bounded Code Journey audit facts, generation-safe Windows Credential Manager Provider controls, and a default-off one-concurrent/one-step wake worker. Schema v79 protects the shared Go runtime with Tool deadlines, a synchronous wait graph, and a durable no-progress pause; schema v80 adds immutable verification checklists; schema v81 adds immutable plan-item/evidence associations; schema v82 adds the shared conservative model-context gate and cumulative handoff memory; schema v83 adds immutable metadata-only snapshot receipts; schema v84 adds one immutable non-authorizing metadata review per receipt. R9 strictly rejects malformed, future, digest-mismatched, or authority-widening receipt envelopes; R10 pins two accepted 660-byte envelopes and SHA-256 values inside the same internal non-product boundary. Neither has product execution wiring, raw-output retention, wall-clock claims, process identity, or OS CPU/memory enforcement claims. Capability-only launches cannot reach sibling routes. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, terminal, real Shell/Local/Docker process execution, or install-time Skill execution. See ADR 0033 through ADR 0061 and `docs/DESKTOP_PLAN.md`.
+- Prayu UX status: D1-UX1/UX2/UX3 introduces the Prayu user-facing identity, exact supplied workspace/wordmark/active-brush assets, a distinct Settings background, a cream translucent work surface, functional Settings navigation and display-only density, plus 1440x900 and 390x844 responsive layouts. Stable CyberAgent compatibility identifiers remain unchanged. Settings is a read-only projection and TypeScript gains no credential, Policy, model, tool, Shell, Docker, process, or persistence authority. See ADR 0064.
 - Custom Skill status: the five embedded `skill.v1` guides and explicitly selected external packages are Run-loadable through separate protocols. Schema v69 adds persistent content-addressed import/history; schema v70 adds a second explicitly confirmed exact Run selection and redacted user-role root/Specialist context; schema v71 adds bounded read-only provenance across HTTP/TUI/Web. D1-A adds a pathless, one-time-handle preview boundary; D1-B1 adds explicit HTTP/Desktop registration through the same inert Registry. External packages remain untrusted and grant no declared tools. Installation executes no content and still does not select a package for a Run. See ADR 0024, ADR 0031 through ADR 0033, ADR 0041, and `docs/SKILL_PACKAGE_PLAN.md`.
 - Protected-delete status: explicit recursive, absolute/traversing/wildcard, environment-derived, command-substituted, current-home, PowerShell/`cmd`, and common interpreter deletion intents are permanently denied before approval across Shell, ScriptProcess, and Sandbox Policy. This is defense in depth; Local/container process execution remains disabled and a future executor still requires OS/container isolation. See ADR 0025.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
@@ -1483,6 +1485,40 @@ an enabled path.
 中文交接：Go 现在有一个不可变、无启动器的两项 analyzer 目录；Rust 可以确定性列出内存 ZIP
 中央目录并标注风险，但产品仍无法调用它。没有路径输入、解压、文件写入、Go `os/exec`、Run/Event/
 SQLite/Artifact 接线或新授权。schema/OpenAPI 仍为 v84 与 75/83/182，边界见 ADR 0063。
+
+## Completed Prayu Brand And Dual-Surface Desktop Shell (D1-UX1/UX2/UX3)
+
+D1-UX1 makes Prayu the user-visible identity through one Go-owned product constant and
+the React shell. Established `cyberagent` CLI/module/data/environment/HTTP/credential/
+Windows compatibility identifiers remain unchanged, so no schema, database, credential,
+or script migration occurs.
+
+D1-UX2 installs the exact supplied workspace background, wordmark, and active-brush PNG,
+plus a distinct approved Settings background. Selected task, Run, and Settings rows use
+the same warm dark base, right-side orange brush, orange icon, and cream text. The main
+workspace is a cream 90%-opaque surface rather than a second nested card.
+
+D1-UX3 adds working workspace/Settings switching, Settings navigation, bounded API/schema/
+version/surface/capability facts, a display-only comfortable/compact preference, and
+responsive desktop/mobile geometry. TypeScript receives no new credential, Policy, model,
+tool, filesystem, Shell, Docker, subprocess, network, approval, or execution authority.
+
+The three-slice gate passed 400.5 seconds of uncached full-repository Go tests, full vet,
+38 files/137 React tests, strict TypeScript, deterministic OpenAPI regeneration, Vite,
+zero-vulnerability npm audit, 7+2 locked Rust tests, fmt/clippy, secure Desktop test/vet,
+and a reproducible Windows dual build. The unsigned Desktop SHA-256 is
+`0b294a9759e216c918775f05710148da6d45cde0e4e443e773894ecad6801a9b` and
+`release_ready=false`. The dependency audit initially failed closed on `js-yaml 4.2.0`;
+the narrowly scoped Redocly transitive override to fixed 4.3.0 passed API generation,
+all Web tests, build, and a zero-vulnerability re-audit.
+
+Visual QA used only an in-memory read-only fixture at 1440x900 and 390x844. It confirmed
+the exact selected-state brush, distinct backgrounds, translucent work surface, fully
+visible mobile selection, and no horizontal overflow. Review found no unresolved high or
+medium risk on an enabled path; one low-risk denied-`localStorage` startup failure was
+fixed with a fail-soft fallback and regression test. No Provider/key, Shell, LocalRunner, Docker, product Rust
+process, attack traffic, installer, registry mutation, or new product execution was used.
+Schema/OpenAPI remain v84 and 75/83/182. ADR 0064 is authoritative.
 
 ## Next Slice
 

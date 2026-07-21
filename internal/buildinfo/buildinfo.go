@@ -12,6 +12,11 @@ import (
 
 const DiagnosticProtocolVersion = "portable_build_diagnostic.v1"
 
+// ProductName is the user-facing application identity. Stable protocol,
+// module, credential, and data-directory identifiers intentionally retain
+// their CyberAgent names for backward compatibility.
+const ProductName = "Prayu"
+
 // These values are intentionally reproducible inputs. Release builds set them
 // with -ldflags; no wall-clock build timestamp is embedded.
 var (

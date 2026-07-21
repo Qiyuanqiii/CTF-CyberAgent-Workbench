@@ -81,9 +81,9 @@ func (nativeSkillPackagePicker) OpenSkillPackage(ctx context.Context) (string, e
 		return "", errors.New("desktop lifecycle is unavailable")
 	}
 	return runtime.OpenFileDialog(ctx, runtime.OpenDialogOptions{
-		Title: "Select CyberAgent Skill package",
+		Title: "Select Prayu Skill package",
 		Filters: []runtime.FileFilter{
-			{DisplayName: "CyberAgent Skill package (*.zip)", Pattern: "*.zip"},
+			{DisplayName: "Prayu Skill package (*.zip)", Pattern: "*.zip"},
 		},
 		ShowHiddenFiles:      false,
 		CanCreateDirectories: false,
@@ -145,7 +145,7 @@ func main() {
 		os.Exit(2)
 	}
 	if config.version {
-		fmt.Fprintf(os.Stdout, "CyberAgent Workbench desktop %s\n", app.Version)
+		fmt.Fprintf(os.Stdout, "%s desktop %s\n", app.Name, app.Version)
 		return
 	}
 	if err := runDesktop(config); err != nil {
@@ -157,7 +157,7 @@ func main() {
 func reportDesktopStartupFailure(err error) {
 	fmt.Fprintln(os.Stderr, "error:", err)
 	message, messageErr := syswindows.UTF16PtrFromString(desktopStartupFailureMessage(err))
-	title, titleErr := syswindows.UTF16PtrFromString("CyberAgent Workbench")
+	title, titleErr := syswindows.UTF16PtrFromString(app.Name)
 	if messageErr != nil || titleErr != nil {
 		return
 	}
@@ -167,13 +167,13 @@ func reportDesktopStartupFailure(err error) {
 
 func desktopStartupFailureMessage(err error) string {
 	if errors.Is(err, errWebView2RuntimeRequired) {
-		return "CyberAgent Workbench requires Microsoft Edge WebView2 Runtime " +
+		return "Prayu requires Microsoft Edge WebView2 Runtime " +
 			minimumWebView2RuntimeVersion + " or newer.\r\n\r\n" +
 			"Install or update it through a trusted Windows software channel, then reopen the app.\r\n\r\n" +
 			"No download or installation was started."
 	}
 	code := apperror.CodeOf(apperror.Normalize(err))
-	return "CyberAgent Workbench could not start.\r\n\r\nError code: " + string(code) +
+	return "Prayu could not start.\r\n\r\nError code: " + string(code) +
 		"\r\n\r\nLocal data was not deleted or reset. Keep it for diagnosis."
 }
 
@@ -345,9 +345,9 @@ func runDesktop(config desktopOptions) error {
 	}
 
 	return wails.Run(&options.App{
-		Title: "CyberAgent Workbench", Width: 1440, Height: 900, MinWidth: 1024, MinHeight: 680,
+		Title: app.Name, Width: 1440, Height: 900, MinWidth: 1024, MinHeight: 680,
 		WindowStartState: options.Normal,
-		BackgroundColour: options.NewRGB(245, 247, 249),
+		BackgroundColour: options.NewRGB(23, 22, 20),
 		AssetServer: &assetserver.Options{
 			Handler: inProcessAPIHandler{next: controlPlane.Handler()},
 		},
@@ -401,16 +401,16 @@ func requireWebView2Runtime(probe webView2RuntimeProbe) error {
 
 func desktopWebView2Messages() *windows.Messages {
 	return &windows.Messages{
-		InstallationRequired: "Microsoft Edge WebView2 Runtime is required. Use a trusted Windows software channel, then reopen CyberAgent Workbench.",
-		UpdateRequired:       "Microsoft Edge WebView2 Runtime must be updated through a trusted Windows software channel before CyberAgent Workbench can start.",
-		MissingRequirements:  "CyberAgent Workbench prerequisite",
+		InstallationRequired: "Microsoft Edge WebView2 Runtime is required. Use a trusted Windows software channel, then reopen Prayu.",
+		UpdateRequired:       "Microsoft Edge WebView2 Runtime must be updated through a trusted Windows software channel before Prayu can start.",
+		MissingRequirements:  "Prayu prerequisite",
 		Webview2NotInstalled: "Microsoft Edge WebView2 Runtime is unavailable.",
-		Error:                "CyberAgent Workbench prerequisite",
+		Error:                "Prayu prerequisite",
 		FailedToInstall:      "Microsoft Edge WebView2 Runtime remains unavailable.",
 		DownloadPage:         "",
 		PressOKToInstall:     "",
 		ContactAdmin:         "Microsoft Edge WebView2 Runtime is required. Contact your administrator or use a trusted Windows software channel.",
 		InvalidFixedWebview2: "The configured WebView2 Runtime does not meet the required version.",
-		WebView2ProcessCrash: "The WebView2 process stopped. Reopen CyberAgent Workbench; local data was not reset.",
+		WebView2ProcessCrash: "The WebView2 process stopped. Reopen Prayu; local data was not reset.",
 	}
 }

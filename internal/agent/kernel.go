@@ -39,7 +39,7 @@ func (k *Kernel) Step(ctx context.Context, taskID string) error {
 
 	req := llm.ChatRequest{
 		Messages: []llm.Message{
-			{Role: "system", Content: "You are CyberAgent Workbench mock planner. Return safe, concise next steps."},
+			{Role: "system", Content: "You are the Prayu mock planner. Return safe, concise next steps."},
 			{Role: "user", Content: fmt.Sprintf("kind=%s mode=%s goal=%s", task.Kind, task.Mode, task.Goal)},
 		},
 		Metadata: map[string]string{
