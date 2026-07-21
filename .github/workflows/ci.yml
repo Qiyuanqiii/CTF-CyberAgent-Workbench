@@ -85,7 +85,7 @@ jobs:
         working-directory: .
         env:
           CYBERAGENT_ANALYZER_CONFORMANCE_BINARY: ${{ github.workspace }}/analyzers/target/debug/cyberagent-analyzer-fixture
-        run: go test -count=1 ./internal/analyzer -run '^TestSubprocessConformance'
+        run: go test -count=1 ./internal/analyzer -run '^Test(SubprocessConformance|AnalyzerResultStaging)'
 
   desktop:
     name: Windows Desktop shell
@@ -115,11 +115,11 @@ jobs:
         run: go test -tags "desktop,wv2runtime.error" -count=1 ./cmd/cyberagent-desktop ./internal/desktop ./internal/webui
       - name: Verify cross-platform Runner receipt vectors
         run: go test -count=1 ./internal/runner -run 'TestEvidenceSetReceipt(Golden|Compatibility).*Vectors'
-      - name: Verify Windows analyzer subprocess conformance boundary
+      - name: Verify Windows analyzer conformance boundaries
         shell: pwsh
         run: |
           $env:CYBERAGENT_ANALYZER_CONFORMANCE_BINARY = Join-Path $env:GITHUB_WORKSPACE "analyzers\target\debug\cyberagent-analyzer-fixture.exe"
-          go test -count=1 ./internal/analyzer -run '^TestSubprocessConformance'
+          go test -count=1 ./internal/analyzer -run '^Test(SubprocessConformance|AnalyzerResultStaging)'
       - name: Build and verify portable Desktop shell
         shell: pwsh
         run: ./scripts/build-desktop.ps1 -SkipFrontend -VerifyReproducible

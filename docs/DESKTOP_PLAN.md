@@ -256,6 +256,7 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] P10-B1/B2/B3：完成惰性 analyzer descriptor Registry、memory-only/no-extraction ZIP inventory 协议及 Rust/shared adversarial vectors；未增加 Desktop analyzer UI、产品 invocation 或 Local/Docker 执行。secure Desktop 与可复现双构建通过，GUI SHA-256 `871c6270de44f3d6aecd31064127cdbfb400c5d6e6936e44698bcc30b0c611db`，`release_ready=false`；边界见 ADR 0063。
 - [x] P10-C1/C2/C3：完成无启动 invocation candidate、密封 Disabled/Fake Transport 与八类失败/重放向量；Desktop surface 与真实 analyzer process 继续关闭。累计六片门通过，GUI SHA-256 `82a5f7b4f012c0bc39da13d3b00cc98831e8002653a4a59f54d58f63e7126b50`，`release_ready=false`；边界见 ADR 0065。
 - [x] P10-D1/D2/D3：完成无启动 executable identity/preflight 与仅测试 Rust subprocess/进程树一致性门；公开 Bridge、Desktop surface、Run/Event/SQLite/Artifact 和产品 process 继续关闭。三切片功能门全绿，GUI SHA-256 `649c7107fdc6e8bad3b718e705d7ce9a5003ea7891c649606695286adf61bf93`，`release_ready=false`；边界见 ADR 0066。
+- [x] P10-E1/E2/E3：完成无正文结果/Artifact candidate、仅测试原子暂存恢复与 20 项产品 adapter 启动阻塞清单；Desktop 没有新增 analyzer 控件、进程、持久化或 override。累计六片门全绿，GUI SHA-256 `10effa0de5f5fc159e43f99aa97f45fc7579e4413b4ec0f3c7051dd4e217dabf`，`release_ready=false`；边界见 ADR 0067。
 - [ ] 所有状态 mutation 使用独立 control capability、Origin/Host 校验、稳定 operation key 和 typed errors；显式 Provider 诊断每次只允许一次有界无正文请求。CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。
 
@@ -287,4 +288,4 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - 安装、升级和卸载不会静默删除 Workspace、数据库、凭证或用户创建文件。
 - 未签名开发产物不得伪装成正式发布；正式包必须有可核验签名和哈希。
 
-ADR 0034 至 ADR 0066 依次记录桌面壳与生命周期、受控 Run/Session/Plan/审批/Provider/FileEdit/wake/Skill/Workspace/Repository/Verification/Handoff 能力、运行时防死锁/活锁，以及 exact commit preview/file history/navigation/comparison-side/paired keyboard navigation、显式验证覆盖率/snapshot-keyset 分页/快照下载/回执复核/Handoff 精确导航与 Journey 审计事实、test-only process evidence、Prayu 双界面视觉壳和 analyzer test-only subprocess conformance 边界。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。
+ADR 0034 至 ADR 0067 依次记录桌面壳与生命周期、受控 Run/Session/Plan/审批/Provider/FileEdit/wake/Skill/Workspace/Repository/Verification/Handoff 能力、运行时防死锁/活锁，以及 exact commit preview/file history/navigation/comparison-side/paired keyboard navigation、显式验证覆盖率/snapshot-keyset 分页/快照下载/回执复核/Handoff 精确导航与 Journey 审计事实、test-only process evidence、Prayu 双界面视觉壳，以及 analyzer test-only subprocess、结果暂存和产品 adapter 启动阻塞边界。Wails 使用 MIT 许可证；D2 生成任何可分发 ZIP/MSIX 前必须把 Wails 及其他运行时依赖的许可证/notice、SBOM 和哈希一起打包。

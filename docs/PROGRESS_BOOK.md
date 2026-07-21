@@ -1740,10 +1740,50 @@ Coding Agent 约 95-96%、Cyber 自动化约 20%。边界见 ADR 0066。
 replay/crash-recovery 向量、P10-E3 产品 adapter 的 TOCTOU-safe identity、PE/ELF/architecture、签名来源、
 sandbox/resource ceiling/operator control 威胁模型；仍不启用产品进程。该批后累计六片并执行完整健壮性门。
 
+## P10-E1/E2/E3 批次：无授权结果封印、测试原子暂存与产品启动阻塞清单
+
+任务 ID：`P10-Inert-Result-Staging-And-Adapter-Blockers`。本轮不新增 migration、CLI/HTTP/Desktop
+surface，schema/OpenAPI 保持 v84 / 75 path / 83 operation / 182 schema。
+
+P10-E1 新增 strict `analyzer_validated_result_candidate.v1` 与
+`analyzer_artifact_candidate.v1`。Go 重建并复核 invocation candidate、executable identity、preflight、
+产品 codec 可接受的成功 outcome 和确定性结果正文，候选只保存各层 canonical SHA-256、结果协议和
+字节数。Artifact 形状不含正文、路径、Run/Session/Workspace 绑定，也没有 Store/Event、发布或 commit
+authority。
+
+P10-E2 只在 `_test.go` 内实现原子暂存一致性：私有 `t.TempDir()` 中的 mode-0600 pending 经 file sync
+后使用同卷 hard link 原子且不可覆盖地发布。成功、幂等重放、取消、显式回滚、发布前后崩溃、截断和
+外来碰撞全部覆盖。审计发现并修复 rollback 可能删除同名外来 pending 的低风险问题；现在只删除完整
+预期信封或与中断写一致的前缀，其他 pending/final 原样保留。该夹具没有 directory fsync、durable
+intent、generation lease、Store/SQLite/Run/Event、Artifact writer 或多进程产品 durability。
+
+P10-E3 固化 `analyzer_product_adapter_threat_model.v1` 的 20 项控制，涵盖 immutable handle identity、
+PE/ELF、架构、签名来源、版本 allowlist、最小权限身份、文件/网络/环境隔离、CPU/内存/进程数、
+deadline/tree reap、stdio 脱敏、操作者 scope、原子 handoff、durable recovery、append-only audit 和
+orphan reconciliation。当前全部 required/unimplemented/unverified/start-blocking，override 明确关闭。
+
+累计六切片最终健壮性门通过：全仓 ordinary/race 397.6/462.5 秒，最终 staging race 20 轮，审查中
+真实 Rust/process-tree/staging 联合 race 10 轮，三个 10 秒 fuzz 共约 216.75 万次；vet/staticcheck/
+module、7+2 Rust locked tests、fmt/clippy/RustSec、38 文件 137 Web、strict TypeScript/OpenAPI、Vite/npm、
+secure Desktop、Linux Analyzer 交叉编译、隐私/编码/链接/diff 与 Windows 可复现双构建全绿。GUI
+SHA-256 为 `10effa0de5f5fc159e43f99aa97f45fc7579e4413b4ec0f3c7051dd4e217dabf`，
+`release_ready=false`。govulncheck 的 reachable/imported package 均为 0；唯一 module-level 残余是
+项目未导入的 `golang.org/x/crypto/openpgp` 对应 GO-2026-5932，且公告无修复版本。
+
+首次全仓普通 Go 曾遇到一次无诊断 Windows GCC/ld 瞬时失败，相关 Tool Gateway 单包及随后两次完整
+最终门均通过，未复现为代码缺陷。启用路径无已知未解决高/中风险；没有真实 Provider/key、Shell、
+LocalRunner、Docker、hook、攻击流量、产品 analyzer process、Run/Event/SQLite/Artifact 写入、installer、
+registry mutation 或新权限。双指标保持架构约 99%、完整产品可用度约 95-97%、通用 Coding Agent 约
+95-96%、Cyber 自动化约 20%。边界见 ADR 0067。
+
+下一批为 P10-F1 纯 caller-byte PE/ELF/architecture 检查、P10-F2 digest-pinned release manifest 与
+provenance/signature allowlist 候选、P10-F3 操作者复核的 resource/sandbox launch-plan 候选；三项继续
+不启动进程。本批开启新六片周期，F3 后跑统一功能门，下一批结束再跑完整健壮性门。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0066-test-only-analyzer-subprocess-conformance.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0067-inert-analyzer-result-staging-and-product-adapter-threat-model.md`。

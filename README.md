@@ -7,12 +7,12 @@
 
 项目从 schema v49 起同时使用两项工程指标，避免把“架构已经搭好”误解为“产品已经完整可用”。这些百分比是基于当前任务书和可验证工作流的工程估算，不是性能基准。
 
-- **架构完成度 / Architecture completion：约 99%**。衡量 Go 控制平面、Run/Session、状态恢复、Policy、审批、预算、事件流、Tool Gateway、Agent 协调、Skills、报告、Sandbox 协议及 Go/TypeScript/Rust 边界的覆盖程度；其中 V2 Run-centric Runtime 约 99%。schema v84 已覆盖同步等待环检测、工具硬超时、Run 活锁熔断、模型总上下文闸门、不可变累计交接记忆、验证快照回执历史和不授权的回执元数据复核；D1-G13/V12/R10 完成精确复核导航与 Runner 信封黄金边界，P10-A1 至 P10-D3 又落地 Go-owned analyzer 协议、惰性 descriptor Registry、内存 ZIP 中央目录清单、确定性 Rust 实现、双语言共享黄金向量、无启动 invocation bridge，以及仅测试使用的 Linux/Windows Rust 子进程一致性与进程树回收门。产品 analyzer 子进程调用仍未接线。
+- **架构完成度 / Architecture completion：约 99%**。衡量 Go 控制平面、Run/Session、状态恢复、Policy、审批、预算、事件流、Tool Gateway、Agent 协调、Skills、报告、Sandbox 协议及 Go/TypeScript/Rust 边界的覆盖程度；其中 V2 Run-centric Runtime 约 99%。schema v84 已覆盖同步等待环检测、工具硬超时、Run 活锁熔断、模型总上下文闸门、不可变累计交接记忆、验证快照回执历史和不授权的回执元数据复核；D1-G13/V12/R10 完成精确复核导航与 Runner 信封黄金边界，P10-A1 至 P10-E3 又落地 Go-owned analyzer 协议、惰性 descriptor Registry、内存 ZIP 中央目录清单、确定性 Rust 实现、双语言共享黄金向量、无启动 invocation bridge、仅测试 Linux/Windows 子进程一致性、无授权结果/Artifact 候选、测试原子暂存恢复和 20 项产品 adapter 阻塞清单。产品 analyzer 子进程调用仍未接线。
 - **产品可用度 / Product usability：约 95-97%**。衡量普通用户能否依靠当前 CLI、TUI、Web 和 Windows Desktop 完成真实端到端工作。通用 Coding Agent 工作流约 95-96%，Cyber 自动化工作流约 20%；Run 工作台现已提供安全恢复的 Monaco 提案/Diff 编辑器、只读仓库状态/脱敏 Diff/本地提交与可导航的精确文件历史、支持键盘关闭与导航的成对 base/head 精确预览、多文件独立审阅、分离的验证计划/结果、可分页的逐检查项证据下钻及 Markdown/JSON 快照下载/回执历史/不授权复核、带摘要/事件高水位/回执复核元数据的 Code Handoff 导出、Code Journey、可热重载的 Windows 系统凭证和有界 wake worker。真实 Sandbox/宿主进程执行、安装时脚本/钩子、Windows 10 人工发布矩阵和 Cyber 工具链仍未开放或完成。
 
 Starting with schema v49, the project reports two engineering indicators so architectural maturity is not mistaken for end-user completeness. These percentages are roadmap estimates backed by tested workflows, not performance benchmarks.
 
-- **Architecture completion: about 99%.** This covers the Go control plane and its Run/Session recovery, Policy, approval, budget, event, Tool Gateway, Agent coordination, Skills, reporting, Sandbox protocol, and Go/TypeScript/Rust boundaries. The V2 run-centric runtime itself is about 99% complete. Schema v84 includes synchronous wait-cycle rejection, hard Tool deadlines, a recoverable Run livelock circuit breaker, an aggregate model-context gate, immutable cumulative handoff memory, verification snapshot receipt history, and non-authorizing receipt-metadata review. P10-A1 through P10-D3 now add the Go-owned analyzer protocol, an inert descriptor Registry, bounded in-memory ZIP central-directory inventory, a deterministic Rust implementation, shared cross-language vectors, a non-starting invocation bridge, and test-only Linux/Windows Rust subprocess plus process-tree conformance gates. Product analyzer subprocess invocation remains unwired.
+- **Architecture completion: about 99%.** This covers the Go control plane and its Run/Session recovery, Policy, approval, budget, event, Tool Gateway, Agent coordination, Skills, reporting, Sandbox protocol, and Go/TypeScript/Rust boundaries. The V2 run-centric runtime itself is about 99% complete. Schema v84 includes synchronous wait-cycle rejection, hard Tool deadlines, a recoverable Run livelock circuit breaker, an aggregate model-context gate, immutable cumulative handoff memory, verification snapshot receipt history, and non-authorizing receipt-metadata review. P10-A1 through P10-E3 now add the Go-owned analyzer protocol, an inert descriptor Registry, bounded in-memory ZIP central-directory inventory, a deterministic Rust implementation, shared cross-language vectors, a non-starting invocation bridge, test-only Linux/Windows subprocess conformance, inert result/Artifact candidates, test-only atomic staging recovery, and a 20-control product-adapter blocker model. Product analyzer subprocess invocation remains unwired.
 - **Product usability: about 95-97%.** This measures how much real end-to-end work a user can complete through the current CLI, TUI, Web, and Windows Desktop shell. The generic coding-agent workflow is about 95-96% usable and the Cyber automation workflow about 20%. The Run workbench now includes safely recoverable Monaco proposal/Diff editing, read-only repository state/redacted Diffs/local commit and navigable exact-file history, keyboard-accessible paired exact base/head comparison previews, independent multi-file review, separate verification plans/outcomes with paginated per-check drilldown and Markdown/JSON snapshot downloads/receipt history/non-authorizing review, digest- and event-high-water-bound Code Handoff exports with exact receipt-review navigation, bounded Code Journey audit facts, hot-reloaded Windows system credentials, and a bounded wake worker. Real Sandbox/host-process execution, install-time scripts/hooks, the manual Windows 10 release matrix, and the Cyber toolchain remain disabled or unfinished.
 
 ## 项目简介 / Project Overview
@@ -2201,13 +2201,53 @@ Run, Store, SQLite, Artifact, CLI, HTTP, or Desktop path can launch it.
 Executable-format/signature/provenance, TOCTOU-safe handles, OS resource limits, atomic
 result handoff, and all product invocation remain later independent gates.
 
+### P10-E1/E2/E3：无授权结果候选、测试原子暂存与产品 adapter 阻塞清单
+
+P10-E1 新增严格的 `analyzer_validated_result_candidate.v1` 和
+`analyzer_artifact_candidate.v1`。Go 只接受与当前 invocation、executable identity、preflight、
+成功 outcome 和确定性结果逐字节一致的完整来源链；候选只保存规范摘要、结果协议、字节数和
+SHA-256。Artifact 形状不包含正文、路径或 Run/Session/Workspace 绑定，持久化、事件写入、发布与
+commit authority 全为 false。
+
+P10-E2 的暂存器仅存在于 `_test.go`。它在私有 `t.TempDir()` 内写入并同步 mode-0600 pending 文件，
+再用同卷 hard link 原子、不可覆盖地发布 final；测试覆盖成功、幂等重放、取消、显式回滚、同步后崩溃、
+发布后崩溃、截断 pending，以及外来 pending/final 碰撞保留。回执无正文且全部产品权限为 false；它
+没有目录 fsync、持久 intent、generation lease、Store/SQLite/Run/Event 或产品 durability 声明。
+
+P10-E3 固化 `analyzer_product_adapter_threat_model.v1` 的 20 项强制控制，覆盖 TOCTOU-safe handle、
+PE/ELF、架构、签名来源、版本 allowlist、最小权限身份、文件/网络/环境隔离、CPU/内存/进程数、
+deadline/tree reap、stdio 脱敏、操作者 scope、原子结果、durable recovery、append-only audit 与 orphan
+reconciliation。当前 implemented/verified 均为 0，全部 `blocks_product_start=true`，且不存在 override。
+
+累计六切片最终门通过：全仓普通/race Go 为 397.6/462.5 秒，新切片 20 轮 race、真实 Rust/Windows
+进程与 staging 联合 10 轮 race、三组 10 秒 fuzz 共约 216.75 万次；vet/staticcheck/module 全绿，
+Go 可达和已导入包漏洞为 0。`GO-2026-5932` 只命中依赖模块中项目未导入的
+`golang.org/x/crypto/openpgp`，公告无修复版本，项目实际依赖同模块的 `hkdf`。Rust 7+2 测试、
+fmt/clippy 与 RustSec（1166 条公告、42 个 crate）通过；38 文件 137 项 Web、strict TypeScript/
+OpenAPI、Vite/npm、secure Desktop 与可复现双构建通过。未签名 GUI SHA-256 为
+`10effa0de5f5fc159e43f99aa97f45fc7579e4413b4ec0f3c7051dd4e217dabf`，
+`release_ready=false`。审计修复测试 rollback 可能删除同名外来 pending 的一项低风险问题；首次
+全仓普通门出现一次 Windows GCC/ld 空诊断瞬时失败，Tool Gateway 单包与两次完整最终门随后通过。
+启用产品路径无已知未解决高/中风险，双指标保持架构约 99%、完整产品可用度约 95-97%、通用 Coding
+Agent 约 95-96%、Cyber 自动化约 20%。边界见
+[ADR 0067](docs/adr/0067-inert-analyzer-result-staging-and-product-adapter-threat-model.md)。
+
+This non-schema P10-E1/E2/E3 batch seals exact successful result metadata into an inert,
+body-free Artifact candidate; exercises no-replace test-only staging, rollback, replay, and
+crash recovery; and fixes 20 mandatory product-adapter controls at unimplemented/unverified.
+The public bridge, product outcome codec, Store, Run/Event, Artifact writer, CLI, HTTP, Desktop,
+and process starter remain unchanged and closed. Full ordinary/race, static, vulnerability,
+dependency, Rust, Web, Desktop, privacy, and reproducible-build gates pass on the final code.
+The only Go advisory residual is an unreachable module-level `openpgp` notice with no fixed
+version; no imported package or reachable symbol is affected.
+
 ## Project Memory
 
 Read [docs/PROJECT_MEMORY.md](docs/PROJECT_MEMORY.md), [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md), [docs/PROGRESS_BOOK.md](docs/PROGRESS_BOOK.md), [docs/TASK_BOOK.md](docs/TASK_BOOK.md), [docs/http-api.md](docs/http-api.md), [docs/openapi.json](docs/openapi.json), [web/README.md](web/README.md), [docs/errors.md](docs/errors.md), and the chronological [ADR 0001](docs/adr/0001-go-control-plane.md), [ADR 0002](docs/adr/0002-run-centric-runtime.md), [ADR 0003](docs/adr/0003-run-execution-modes.md), [ADR 0004](docs/adr/0004-plan-delivery-workflow.md), [ADR 0005](docs/adr/0005-operator-steering-queue.md), [ADR 0006](docs/adr/0006-operator-steering-controls.md), [ADR 0007](docs/adr/0007-specialist-skill-context.md), [ADR 0008](docs/adr/0008-sandbox-manifest-boundary.md), [ADR 0009](docs/adr/0009-sandbox-approval-candidate.md), [ADR 0010](docs/adr/0010-disabled-sandbox-lifecycle.md), [ADR 0011](docs/adr/0011-disabled-sandbox-preflight.md), [ADR 0012](docs/adr/0012-simulation-only-sandbox-evidence.md), [ADR 0013](docs/adr/0013-read-only-docker-observation.md), [ADR 0014](docs/adr/0014-deterministic-docker-container-plan.md), [ADR 0015](docs/adr/0015-bounded-docker-write-rehearsal.md), [ADR 0016](docs/adr/0016-recoverable-docker-rehearsal-attempt.md), [ADR 0017](docs/adr/0017-descriptor-sealed-host-input-staging.md), [ADR 0018](docs/adr/0018-durable-pre-stage-host-input-requirement.md), [ADR 0019](docs/adr/0019-daemon-owned-host-input-handoff.md), [ADR 0020](docs/adr/0020-deterministic-runtime-input-projection.md), [ADR 0021](docs/adr/0021-recoverable-runtime-input-application.md), [ADR 0022](docs/adr/0022-retained-runtime-input-resource-lifecycle.md), [ADR 0023](docs/adr/0023-blocked-docker-start-gate-review.md), [ADR 0024](docs/adr/0024-strict-inert-skill-package.md), [ADR 0025](docs/adr/0025-protected-delete-command-guard.md), [ADR 0026](docs/adr/0026-run-execution-profile-selection.md), [ADR 0027](docs/adr/0027-non-authorizing-docker-production-evidence-ledger.md), and [ADR 0028](docs/adr/0028-recoverable-docker-production-evidence-attempts.md) when resuming development after a long conversation. They record current progress, language ownership, run architecture, execution mode, Plan/Delivery and steering invariants, Specialist Skill delivery, Sandbox authority boundaries, API and error contracts, audit notes, verified commands, and the recommended next slice.
 
 The latest decisions are [ADR 0029](docs/adr/0029-bounded-linux-read-only-docker-evidence-harness.md), [ADR 0030](docs/adr/0030-immutable-docker-production-evidence-review.md), [ADR 0031](docs/adr/0031-content-addressed-inert-skill-registry.md), [ADR 0032](docs/adr/0032-external-skill-run-context.md), [ADR 0033](docs/adr/0033-pathless-desktop-skill-preview.md), [ADR 0034](docs/adr/0034-embedded-read-first-wails-shell.md), [ADR 0035](docs/adr/0035-desktop-lifecycle-and-event-resumption.md), [ADR 0036](docs/adr/0036-idempotent-controlled-run-creation.md), [ADR 0037](docs/adr/0037-controlled-session-message-submission.md), [ADR 0038](docs/adr/0038-idempotent-run-control-and-bounded-handoff.md), [ADR 0039](docs/adr/0039-model-plan-and-approval-controls.md), [ADR 0040](docs/adr/0040-provider-diff-wake-controls.md), [ADR 0041](docs/adr/0041-explicit-wake-file-apply-and-inert-skill-install.md), [ADR 0042](docs/adr/0042-receipts-explorer-portable-build.md), [ADR 0043](docs/adr/0043-workspace-search-evidence-attachment-receipt-history.md), [ADR 0044](docs/adr/0044-operator-action-center-evidence-inventory-command-palette.md), [ADR 0045](docs/adr/0045-go-issued-editor-system-credentials-bounded-wake-worker.md), [ADR 0046](docs/adr/0046-safe-editor-recovery-provider-generation-worker-health.md), [ADR 0047](docs/adr/0047-read-only-repository-change-set-code-journey.md), [ADR 0048](docs/adr/0048-bounded-diff-verification-code-handoff.md), [ADR 0049](docs/adr/0049-deadlock-livelock-runtime-guards.md), [ADR 0050](docs/adr/0050-repository-history-verification-plan-handoff-export.md), [ADR 0051](docs/adr/0051-exact-commit-verification-association-runner-lifecycle.md), [ADR 0052](docs/adr/0052-conservative-model-context-cumulative-handoff-memory.md), [ADR 0053](docs/adr/0053-commit-preview-handoff-coverage-process-conformance.md), [ADR 0054](docs/adr/0054-file-history-verification-drilldown-runner-exit-evidence.md), [ADR 0055](docs/adr/0055-history-navigation-verification-pagination-runner-runtime-evidence.md), [ADR 0056](docs/adr/0056-exact-commit-comparison-keyset-verification-runner-control-evidence.md), [ADR 0057](docs/adr/0057-comparison-preview-verification-snapshot-runner-timeline-evidence.md), [ADR 0058](docs/adr/0058-paired-comparison-snapshot-receipts-runner-evidence-set.md), and [ADR 0059](docs/adr/0059-paired-navigation-receipt-review-runner-golden-vectors.md).
 
-The newest decisions are [ADR 0061](docs/adr/0061-exact-receipt-review-navigation-audit-facts-envelope-golden.md), [ADR 0062](docs/adr/0062-go-owned-analyzer-protocol-rust-fixture-shared-vectors.md), [ADR 0063](docs/adr/0063-inert-analyzer-registry-zip-inventory-shared-vectors.md), [ADR 0064](docs/adr/0064-prayu-brand-and-dual-surface-desktop-shell.md), [ADR 0065](docs/adr/0065-non-starting-analyzer-invocation-bridge.md), and [ADR 0066](docs/adr/0066-test-only-analyzer-subprocess-conformance.md).
+The newest decisions are [ADR 0061](docs/adr/0061-exact-receipt-review-navigation-audit-facts-envelope-golden.md), [ADR 0062](docs/adr/0062-go-owned-analyzer-protocol-rust-fixture-shared-vectors.md), [ADR 0063](docs/adr/0063-inert-analyzer-registry-zip-inventory-shared-vectors.md), [ADR 0064](docs/adr/0064-prayu-brand-and-dual-surface-desktop-shell.md), [ADR 0065](docs/adr/0065-non-starting-analyzer-invocation-bridge.md), [ADR 0066](docs/adr/0066-test-only-analyzer-subprocess-conformance.md), and [ADR 0067](docs/adr/0067-inert-analyzer-result-staging-and-product-adapter-threat-model.md).
 
 Windows Desktop D0-A/D0-B 与 D1-R1 至 D1-G13/V12 加 R10 非产品 Runner 回执信封黄金边界的自动化核心已实现，但仍是未签名开发/便携测试壳，不是安装版或完整工作台；Windows 10 实机发布矩阵仍待完成。分阶段方案见 [docs/DESKTOP_PLAN.md](docs/DESKTOP_PLAN.md)。自定义 Skill 已具备严格 `skill_package.v1` 校验、schema v69 本地惰性 Registry、schema v70 CLI Run 选择/最小上下文、schema v71 三端只读来源投影，以及 HTTP/Desktop 显式确认的惰性安装；签名、远程分发和安装时执行仍未开放。详情见 [docs/SKILL_PACKAGE_PLAN.md](docs/SKILL_PACKAGE_PLAN.md)。
 

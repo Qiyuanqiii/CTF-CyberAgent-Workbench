@@ -1989,17 +1989,53 @@ Architecture completion remains about 99%, complete product usability about 95-9
 Coding Agent usability about 95-96%, and Cyber automation about 20%. This is test evidence,
 not a user workflow or product process grant.
 
+## P10-E1/E2/E3: Inert Result Staging And Product Adapter Blockers
+
+P10-E1 adds strict, restart-reconstructable validated-result and Artifact-shaped candidates.
+The complete invocation/identity/preflight/outcome/result chain is revalidated, while the
+candidate retains only canonical hashes, result protocol, and byte count. It has no body,
+path, Run/Session/Workspace binding, Store/Event integration, publication, or commit power.
+
+P10-E2 proves atomic no-replace staging only in test compilation. Private mode-0600 pending
+files are synced and hard-linked to a fixed final name. Replay, cancellation, rollback,
+pre/post-publish crash, truncation, and collision vectors pass. Rollback deletes only exact
+owned bytes or an interrupted prefix; foreign pending/final files survive. This is not a
+durable product writer and has no directory fsync, intent ledger, generation fencing, or
+multi-process protocol.
+
+P10-E3 publishes a strict 20-control product-adapter threat model. All controls are required,
+unimplemented, unverified, start-blocking, and non-overridable. The list covers executable
+handle/format/architecture/provenance/version, OS identity and isolation, resource/deadline/
+tree cleanup, bounded redacted stdio, operator scope, atomic result handoff, durable recovery,
+append-only audit, and orphan reconciliation.
+
+The completed P10-D/P10-E six-slice gate passed final uncached ordinary/race Go in
+397.6/462.5 seconds, twenty final staging race rounds, a ten-round real Rust/process-tree/
+staging race gate during review, and about 2.17 million fuzz executions. Vet, staticcheck,
+module verification/tidy, 7+2 locked Rust tests, fmt/clippy/RustSec, 38 files/137 Web tests,
+strict TypeScript/OpenAPI, Vite/npm, secure Desktop, Linux cross-compilation, privacy/repository
+scans, and a reproducible Windows dual build passed. The unsigned GUI SHA-256 is
+`10effa0de5f5fc159e43f99aa97f45fc7579e4413b4ec0f3c7051dd4e217dabf` and
+`release_ready=false`. `govulncheck` has no reachable or imported-package finding; its sole
+module-level residual is GO-2026-5932 in unimported `x/crypto/openpgp`, with no fixed version.
+
+Review fixed one low-risk test rollback-ownership issue. A transient first Windows GCC/ld
+failure had no diagnostic and did not reproduce in the affected package or either complete
+final gate. No enabled product path has a known unresolved high/medium issue, and no product
+process/persistence/authority was added. Schema/OpenAPI remain v84 and 75/83/182; ADR 0067 is
+authoritative. Architecture completion remains about 99%, complete product usability about
+95-97%, generic Coding Agent usability about 95-96%, and Cyber automation about 20%.
+
 ## Recommended Next Batch
 
-Candidate slices are P10-E1 an inert validated-result/Artifact candidate bound to candidate,
-identity, preflight, outcome, and exact result digest; P10-E2 test-only atomic staging,
-rollback, replay, and crash-recovery vectors; and P10-E3 a product-adapter threat model for
-TOCTOU-safe executable identity, format/architecture/signing/provenance, sandboxing, resource
-ceilings, and operator control. Product startup and persistence remain closed. The next batch
-completes six slices and therefore must run the full repository race, govulncheck, RustSec,
-dependency, privacy, and reproducible-build robustness gate.
-Keep
-the Local profile disabled until a real
+Candidate slices are P10-F1 pure bounded PE/ELF format and target-architecture inspection from
+caller-owned bytes, P10-F2 a digest-pinned release-manifest and provenance/signature allowlist
+candidate, and P10-F3 an operator-reviewed resource/sandbox launch-plan candidate. All three
+must remain pathless or handle-free metadata boundaries with start, persistence, Artifact,
+Run/Event, CLI, HTTP, and Desktop authority false. This begins a new six-slice cycle, so run
+the integrated functional gate after F3 and the full robustness gate after the following batch.
+
+Keep the Local profile disabled until a real
 OS sandbox makes protected host roots unavailable or read-only; never map it to
 unrestricted `os/exec`. Product Docker start/wait/TERM/KILL/orphan behavior still
 requires a later independent release gate; R2-R10 test-binary conformance and post-reap

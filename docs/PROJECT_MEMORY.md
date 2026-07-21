@@ -1606,14 +1606,61 @@ Run/Event/SQLite/Artifact 都没有启动或持久化入口。pathname 复读仍
 架构、签名、来源和 OS 资源限制也尚未验证。架构约 99%、完整产品可用度约 95-97%、通用 Coding
 Agent 约 95-96%、Cyber 自动化约 20%。
 
+## Completed Inert Analyzer Result Staging And Adapter Blockers (P10-E1/E2/E3)
+
+P10-E1 adds strict `analyzer_validated_result_candidate.v1` and
+`analyzer_artifact_candidate.v1` records. Go rebuilds and validates the invocation candidate,
+executable identity, preflight, successful product-codec outcome, and exact deterministic
+result before emitting body-free metadata. The nested Artifact candidate has no path,
+Run/Session/Workspace binding, persistence, event, publication, or commit authority.
+
+P10-E2 adds atomic no-replace staging only in `_test.go`. A private test directory receives a
+mode-0600 pending envelope, file sync, and same-volume hard-link publication. Recovery covers
+replay, cancellation, explicit rollback, crash before/after publish, truncation, and foreign
+collisions. Rollback removes only the exact expected envelope or a valid interrupted prefix;
+unrelated same-name pending/final files are preserved. There is no directory-fsync proof,
+durable intent, generation lease, Store/SQLite/Run/Event integration, or product durability.
+
+P10-E3 fixes 20 mandatory controls in
+`analyzer_product_adapter_threat_model.v1`. All remain required, unimplemented, unverified,
+start-blocking, and non-overridable. They cover immutable executable-handle identity,
+PE/ELF and architecture checks, provenance/version allowlists, least privilege, filesystem/
+network/environment isolation, CPU/memory/process/deadline limits, complete tree reap,
+bounded redacted stdio, operator-scoped approval, atomic handoff, durable recovery,
+append-only audit, and orphan reconciliation.
+
+The final six-slice gate passed uncached full ordinary/race Go in 397.6/462.5 seconds, twenty
+final staging race repetitions, a ten-round real Rust/process-tree/staging race gate during
+review, and about 2.17 million new fuzz executions. Vet/staticcheck/module checks, 7+2 locked
+Rust tests, fmt/clippy/RustSec, 38 files/137 Web tests, strict TypeScript/OpenAPI, Vite/npm,
+secure Desktop, Linux Analyzer cross-compilation, and a reproducible Windows dual build all
+passed. `govulncheck` found no reachable or imported-package issue; it reports only
+GO-2026-5932 for the unimported `golang.org/x/crypto/openpgp` package in a dependency module,
+with no fixed version. The unsigned GUI SHA-256 is
+`10effa0de5f5fc159e43f99aa97f45fc7579e4413b4ec0f3c7051dd4e217dabf` and
+`release_ready=false`.
+
+Review fixed one low-risk test-harness rollback ownership issue. One initial full Go command
+also hit a transient Windows GCC/ld failure with no linker diagnostic; the affected package
+and both complete final ordinary/race gates subsequently passed. No enabled product path has
+a known unresolved high/medium issue. No real Provider/key, Shell, LocalRunner, Docker, hook,
+attack traffic, product analyzer process, Store/Event/Artifact write, installer, registry
+mutation, or new authority was used. Schema/OpenAPI remain v84 and 75/83/182. ADR 0067 is
+authoritative.
+
+中文交接：Go 现在可以把一份确定性成功结果封印成无正文、无提交权的候选，并在测试目录验证原子
+暂存与崩溃恢复；20 项产品 adapter 条件仍全部阻塞启动。它不是可供用户调用的 Rust 执行入口，也
+没有接入 Run、事件、SQLite、Artifact writer、CLI、HTTP 或 Desktop。架构约 99%、完整产品可用度约
+95-97%、通用 Coding Agent 约 95-96%、Cyber 自动化约 20%。
+
 ## Next Slice
 
 The next three-slice candidates are:
 
-1. P10-E1: define an inert validated-result/Artifact candidate bound to the invocation candidate, executable identity, preflight, outcome, and exact transient result digest, with no raw result or commit authority.
-2. P10-E2: add test-only atomic staging, rollback, replay, and crash-recovery vectors without Store, SQLite, Run/Event, or product execution wiring.
-3. P10-E3: write and validate the product-adapter threat model for TOCTOU-safe executable identity, PE/ELF format and architecture, signing/provenance, sandboxing, CPU/memory limits, and explicit operator control; do not start a product process.
-4. This next batch completes six slices, so run the full ordinary/race/vet/staticcheck/govulncheck/RustSec/dependency/privacy/reproducible-build robustness gate.
+1. P10-F1: inspect caller-supplied executable bytes as a pure bounded PE/ELF format and target-architecture candidate, without a path, handle, loader, or process start.
+2. P10-F2: define a digest-pinned release-manifest and provenance/signature allowlist candidate; verification metadata must remain non-authorizing and body-free.
+3. P10-F3: define an operator-reviewed resource/sandbox launch-plan candidate covering identity, scope, limits, isolation, cleanup, and audit while every start capability remains false.
+4. This is the first batch in a new six-slice cycle. Run the integrated functional gate after F3; reserve the next full race/dependency/privacy robustness gate for the following three-slice batch.
 5. The manual Windows 10 matrix, signed distribution, real Sandbox release gate, xterm input, network grants, product analyzer execution, and CTF solving remain separate.
 
 ## Local Machine Note
@@ -1624,7 +1671,7 @@ WinLibs GCC 16.1.0 supplies the GNU linker. Local commands should set
 `RUSTUP_TOOLCHAIN=1.97.1-x86_64-pc-windows-gnu` when rustup channel synchronization is
 unavailable; the source and lockfile remain the reproducible authority.
 
-The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v84 and D1-Q2 through D1-G13/V12 plus H1-H3/R10/C1-D3 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the repository's ignored build root or the OS temporary root.
+The default `~/.cyberagent-workbench/cyberagent.db` currently carries a historical schema-v30 checksum that differs from this repository's immutable migration definition, so CLI startup correctly fails closed with `migration 30 checksum or name mismatch` and Desktop shows a bounded `FAILED_PRECONDITION`/startup code instead of silently resetting it. The v75-v84 and D1-Q2 through D1-G13/V12 plus H1-H3/R10/C1-E3 slices did not rewrite migrations 1-74, and fresh/upgrade fixtures pass. Preserve that local database for backup/diagnosis; do not delete it or rewrite `schema_migrations` automatically. Desktop visual and recovery tests use separate `CYBERAGENT_HOME` directories under the repository's ignored build root or the OS temporary root.
 
 ## Delivery Loop
 
