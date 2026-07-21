@@ -1,0 +1,77 @@
+{
+  "protocol_version": "analyzer_invocation_failure_vectors.v1",
+  "vectors": [
+    {
+      "name": "crash",
+      "mode": "crash",
+      "output": "none",
+      "exit_code": 0,
+      "timeout_ms": 100,
+      "expected_status": "failed",
+      "expected_failure": "process_failed"
+    },
+    {
+      "name": "timeout",
+      "mode": "timeout",
+      "output": "none",
+      "exit_code": 0,
+      "timeout_ms": 100,
+      "expected_status": "timed_out",
+      "expected_failure": "deadline_exceeded"
+    },
+    {
+      "name": "cancellation",
+      "mode": "cancelled",
+      "output": "none",
+      "exit_code": 0,
+      "timeout_ms": 500,
+      "expected_status": "cancelled",
+      "expected_failure": "cancelled"
+    },
+    {
+      "name": "malformed_json",
+      "mode": "response",
+      "output": "malformed",
+      "exit_code": 0,
+      "timeout_ms": 500,
+      "expected_status": "failed",
+      "expected_failure": "invalid_result"
+    },
+    {
+      "name": "future_json",
+      "mode": "response",
+      "output": "future",
+      "exit_code": 0,
+      "timeout_ms": 500,
+      "expected_status": "failed",
+      "expected_failure": "invalid_result"
+    },
+    {
+      "name": "wrong_analyzer",
+      "mode": "response",
+      "output": "wrong_analyzer",
+      "exit_code": 0,
+      "timeout_ms": 500,
+      "expected_status": "failed",
+      "expected_failure": "invalid_result"
+    },
+    {
+      "name": "oversized_output",
+      "mode": "response",
+      "output": "oversized",
+      "exit_code": 0,
+      "timeout_ms": 500,
+      "expected_status": "failed",
+      "expected_failure": "output_limit_exceeded"
+    },
+    {
+      "name": "unknown_exit",
+      "mode": "response",
+      "output": "valid",
+      "exit_code": 17,
+      "timeout_ms": 500,
+      "expected_status": "failed",
+      "expected_failure": "process_failed"
+    }
+  ]
+}

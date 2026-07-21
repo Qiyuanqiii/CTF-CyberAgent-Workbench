@@ -1520,14 +1520,59 @@ fixed with a fail-soft fallback and regression test. No Provider/key, Shell, Loc
 process, attack traffic, installer, registry mutation, or new product execution was used.
 Schema/OpenAPI remain v84 and 75/83/182. ADR 0064 is authoritative.
 
+## Completed Non-Starting Analyzer Invocation Bridge (P10-C1/C2/C3)
+
+P10-C1 adds the Go-owned `analyzer_invocation.v1` candidate. It embeds the exact fixed
+descriptor and binds descriptor, canonical request, and decoded inline-input SHA-256 plus
+input bytes, media type, and request limits. It retains no body, Base64, path, command,
+environment, or executable. Product invocation, process start, file input, result
+persistence, Artifact commit, and all capabilities remain false. Strict decoding rejects
+unknown, duplicate, missing, future, digest-drifted, or widened fields; pure validation
+reconstructs the expected value from the fixed Registry and original request.
+
+P10-C2 adds a package-sealed Transport implemented only by DisabledTransport and the
+constructor-validated deterministic FakeTransport. The bridge revalidates the candidate,
+canonicalizes request stdin, enforces the declared deadline and three stdout bounds,
+classifies 0/2/3/other exits, selects the exact descriptor result decoder, and requires
+deterministic success/rejection bytes to match recomputation from the current request. Its
+`analyzer_invocation_outcome.v1` contains only bounded metadata and explicit false raw-output
+and product-invocation claims. It retains no stdout body, stderr, or process identity.
+
+P10-C3 fixes eight versioned failure vectors: crash, in-flight cancellation, timeout,
+malformed JSON, future JSON, wrong analyzer, oversized stdout, and unknown exit. Every case
+survives candidate encode/decode reconstruction, a new bridge, two executions, strict outcome
+decode, and byte-identical replay. Candidate/outcome fuzz targets require idempotent accepted
+envelopes.
+
+The cumulative six-slice gate passed 418.5/459.2-second final uncached ordinary/race Go, twenty
+additional final-code analyzer race repetitions, about 4.65 million batch fuzz executions,
+vet/staticcheck, two zero-reachable-finding govulncheck paths, module verify/tidy, 7+2 locked
+Rust tests, fmt/clippy/RustSec, 38 files/137 Web tests, strict TypeScript, deterministic
+OpenAPI, Vite/npm, secure Desktop, and a reproducible Windows dual build. The unsigned GUI
+SHA-256 is `82a5f7b4f012c0bc39da13d3b00cc98831e8002653a4a59f54d58f63e7126b50` and
+`release_ready=false`.
+
+Review fixed four validation/integrity issues before the final gate, including cross-input
+archive success/error replay under one request ID. No known
+unresolved high/medium issue exists on an enabled path. The analyzer package imports only
+the Go standard library; exact key-prefix and forbidden product-import/process-entry scans
+found nothing. No real Provider/key, Shell, LocalRunner, Docker, hook, attack traffic,
+product analyzer process, SQLite/Event/Artifact write, installer, registry mutation, or new
+authority was used. Schema/OpenAPI remain v84 and 75/83/182. ADR 0065 is authoritative.
+
+中文交接：当前 Go 已经能生成并重启复核 analyzer 调用候选，也能用 Disabled/Fake bridge 固定
+超时、取消、崩溃、输出上限、退出码和严格结果语义；但它仍不会启动 Rust 二进制，也没有接入
+Run/Event/SQLite/Artifact 或任何用户入口。架构约 99%、产品可用度约 95-97%、通用 Coding Agent
+约 95-96%、Cyber 自动化约 20%。
+
 ## Next Slice
 
 The next three-slice candidates are:
 
-1. P10-C1: define a Go-owned `analyzer_invocation.v1` candidate that binds an exact descriptor, canonical request digest, inline-input digest, limits, and all authority false without starting anything.
-2. P10-C2: add only `DisabledTransport` and deterministic `FakeTransport` behind a Go bridge that enforces deadline, stdout bound, exit classification, and strict result validation; it must import no product Runner, Store, Run, or Artifact package.
-3. P10-C3: add fake-transport crash, timeout, cancellation, malformed/future JSON, wrong analyzer, and oversized-output conformance vectors plus restart-independent idempotent pure validation.
-4. A real Rust subprocess adapter remains a later independent gate requiring executable identity, process-tree cancellation, TERM/KILL/orphan handling, stderr privacy, and atomic Artifact semantics.
+1. P10-D1: define a Go-owned inert executable-identity and preflight record that binds the exact analyzer/protocol, OS/architecture, bytes, and SHA-256 without storing a launch command or starting anything.
+2. P10-D2: add a test-only, explicitly non-product subprocess conformance adapter for the repository Rust fixture with bounded stdin/stdout/stderr and no Run, Store, SQLite, Artifact, CLI, HTTP, or Desktop import.
+3. P10-D3: exercise real-fixture crash, timeout, in-flight cancellation, TERM/KILL fallback, process-tree reap/orphan detection, malformed/future/wrong output, and stderr privacy; all product wiring remains disabled.
+4. Atomic Artifact-candidate and persistence semantics remain a later independent gate after process lifecycle evidence passes.
 5. The manual Windows 10 matrix, signed distribution, real Sandbox release gate, xterm input, network grants, product analyzer execution, and CTF solving remain separate.
 
 ## Local Machine Note

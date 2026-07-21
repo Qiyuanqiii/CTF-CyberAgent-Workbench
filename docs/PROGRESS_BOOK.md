@@ -1660,10 +1660,48 @@ Desktop test/vet 与 Windows 可复现双构建。未签名 Desktop SHA-256 为
 下一批仍为 P10-C1 无启动 invocation candidate、P10-C2 Disabled/Fake Transport 与 P10-C3
 失败向量；视觉改版不改变安全路线的优先级。
 
+## P10-C1/C2/C3 批次：无启动调用候选、密封桥与失败向量
+
+任务 ID：`P10-NonStarting-Invocation-Bridge`。本轮不新增 migration、CLI/HTTP/Desktop surface，
+schema/OpenAPI 保持 v84 / 75 path / 83 operation / 182 schema。
+
+P10-C1 新增 Go-owned `analyzer_invocation.v1`：完整绑定固定 descriptor、canonical descriptor/
+request SHA-256、decoded inline-input SHA-256/bytes、媒体类型与 limits，不保存正文/Base64/path/
+command/environment/executable。capability 与 product invocation/process start/file input/result
+persistence/Artifact commit 全 false，严格 decoder 和纯重建验证拒绝 schema/digest/authority 漂移。
+
+P10-C2 增加包内密封 Transport；只有 DisabledTransport 与构造期复制 stdout 的确定性
+FakeTransport 可实现。Bridge 重新验证候选、规范化 stdin、执行 deadline 和三重 stdout 上限、
+0/2/3/其他退出分类及 descriptor-selected strict result validation；确定性的成功/拒绝结果还须与
+当前请求的 Go 重算结果逐字节一致；outcome 只有 metadata 摘要，
+无 raw stdout/stderr/process identity/product execution。
+
+P10-C3 用版本化 JSON 固定 crash、运行中 cancel、timeout、malformed/future/wrong-analyzer、
+oversized-output 和 unknown-exit 八类向量。每项都在重新解码 candidate 和新建 bridge 后执行两次，
+要求 strict outcome 与 byte-identical replay；新增 candidate/outcome 两个 fuzz 入口。
+
+累计六切片门通过最终 418.5/459.2 秒 uncached 全仓普通/race Go、最终代码额外 20 轮 analyzer race、
+本批约 465 万次 fuzz、vet/staticcheck/双路径 govulncheck/module、7+2 Rust locked tests、fmt/
+clippy/RustSec、38 文件 137 Web、strict TypeScript、确定性 OpenAPI、Vite/npm、secure Desktop 与
+Windows 可复现双构建。未签名 GUI SHA-256 为
+`82a5f7b4f012c0bc39da13d3b00cc98831e8002653a4a59f54d58f63e7126b50`，`release_ready=false`。
+
+审计修复四项问题：失败状态布尔优先级、反序列化 stdout count/limit 一致性、取消 context 与
+DisabledTransport 状态优先级，以及同一 request ID 下 ZIP 成功/拒绝结果跨输入重放。首轮 npm ci 的 EPERM 仅由旧 Vite preview 占锁导致，精准停止项目
+PID 后完整复跑通过，Codex 主进程未受影响。用户测试 key 前缀与禁止项目 import/process entry
+扫描无命中；启用路径无已知未解决高/中风险。没有真实 Provider/key、Shell、LocalRunner、Docker、
+hook、攻击流量、产品 analyzer process、SQLite/Event/Artifact 写入或新权限。双指标维持架构约
+99%、完整产品可用度约 95-97%、通用 Coding Agent 约 95-96%、Cyber 自动化约 20%。边界见 ADR 0065。
+
+下一批固定为 P10-D1 无启动 executable identity/preflight、P10-D2 仅测试使用的 non-product Rust
+subprocess conformance adapter、P10-D3 crash/timeout/cancel/TERM-KILL/tree-reap/orphan/stderr 隐私
+向量。产品调用、持久化、Artifact commit、Windows 10 人工矩阵、签名、xterm、网络授权和 CTF
+继续独立设门。
+
 ## 八、仓库同步与恢复约定
 
 规范远程仓库：`https://github.com/Qiyuanqiii/CTF-CyberAgent-Workbench`。
 
 每三个聚焦切片组成一个交付批次；第三片后统一执行功能复核、普通/聚焦测试、组合差异审查、项目记忆更新、Git 提交、GitHub 推送和 CI 复核。每两个批次即六个切片再执行全仓 race、vet、staticcheck、govulncheck、依赖/隐私与完整构建健壮性门。当前仓库直接开发并推送 `main`；除非用户明确要求，不创建功能分支或 PR。
 
-长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0064-prayu-brand-and-dual-surface-desktop-shell.md`。
+长对话恢复时依次阅读：`README.md`、`docs/PROJECT_MEMORY.md`、`docs/PROJECT_STATUS.md`、本文件、`docs/TASK_BOOK.md`、`docs/http-api.md`、`docs/errors.md`，再按序阅读 `docs/adr/0001-*.md` 到 `docs/adr/0065-non-starting-analyzer-invocation-bridge.md`。

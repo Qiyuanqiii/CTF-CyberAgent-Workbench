@@ -254,7 +254,7 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D1-UX3：设置导航、只读运行时事实、显示密度偏好与 1440x900/390x844 响应式布局完成；无 renderer 权限扩张，边界见 ADR 0064。
 - [x] P10-A1/A2/A3：完成 Go-owned analyzer request/result/error 协议、无 LLM/网络/密钥/路径的 Rust metadata fixture 和 Go/Rust shared golden vectors；未增加 Desktop surface、产品 invocation 或 Artifact commit。secure Desktop 与可复现双构建通过，GUI SHA-256 `69ed40aede0cfc23e075df824fecf6c1ef7b4b0586a8f4b685b7d8aa95dde3b4`，`release_ready=false`；边界见 ADR 0062。
 - [x] P10-B1/B2/B3：完成惰性 analyzer descriptor Registry、memory-only/no-extraction ZIP inventory 协议及 Rust/shared adversarial vectors；未增加 Desktop analyzer UI、产品 invocation 或 Local/Docker 执行。secure Desktop 与可复现双构建通过，GUI SHA-256 `871c6270de44f3d6aecd31064127cdbfb400c5d6e6936e44698bcc30b0c611db`，`release_ready=false`；边界见 ADR 0063。
-- [ ] P10-C1/C2/C3：只增加无启动 invocation candidate、Disabled/Fake Transport 和失败向量；Desktop surface 与真实 analyzer process 继续关闭。
+- [x] P10-C1/C2/C3：完成无启动 invocation candidate、密封 Disabled/Fake Transport 与八类失败/重放向量；Desktop surface 与真实 analyzer process 继续关闭。累计六片门通过，GUI SHA-256 `82a5f7b4f012c0bc39da13d3b00cc98831e8002653a4a59f54d58f63e7126b50`，`release_ready=false`；边界见 ADR 0065。
 - [ ] 所有状态 mutation 使用独立 control capability、Origin/Host 校验、稳定 operation key 和 typed errors；显式 Provider 诊断每次只允许一次有界无正文请求。CLI/Desktop 并发、窗口重开、后台 Run、重放与断线续传不得只沿用 D0 结论。
 - [ ] Code 与 Cyber 保持不同 Skill 目录和风险呈现；桌面切换不改变 Run 内不可变模式。
 

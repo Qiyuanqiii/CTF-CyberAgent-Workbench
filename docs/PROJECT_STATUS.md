@@ -1913,13 +1913,50 @@ dual build. In-app-browser visual checks passed at 1440x900 and 390x844. Schema/
 remain v84 and 75/83/182, and the four progress estimates remain 99%, 95-97%, 95-96%,
 and 20% rather than increasing on visual work alone.
 
+## P10-C1/C2/C3: Non-Starting Invocation Candidate And Sealed Bridge
+
+P10-C1 adds `analyzer_invocation.v1`, a Go-owned metadata candidate that embeds the exact
+fixed descriptor and binds canonical descriptor/request plus decoded inline-input digests.
+The body and Base64 are absent, and every capability plus product invocation, process start,
+file input, result persistence, and Artifact commit authority remains false. Strict decoding
+and reconstruction reject schema, digest, limit, descriptor, or authority drift.
+
+P10-C2 adds a package-sealed bridge with only DisabledTransport and deterministic
+FakeTransport. It enforces the request deadline and stdout bounds, classifies exact exit
+semantics, validates the descriptor-selected result, requires deterministic success/rejection bytes to match
+deterministic recomputation from the current request, and emits a strict metadata-only
+`analyzer_invocation_outcome.v1`. It has no executable, filesystem, network, environment,
+stderr, process identity, persistence, or product package dependency.
+
+P10-C3 fixes eight failure vectors and byte-identical replay after candidate reconstruction:
+crash, cancellation while waiting, timeout, malformed/future result JSON, wrong analyzer,
+oversized stdout, and unknown exit. Candidate and outcome fuzz targets enforce bounded,
+idempotent accepted envelopes.
+
+The cumulative six-slice robustness gate passed final uncached full ordinary/race Go in
+418.5/459.2 seconds, twenty extra final-code analyzer race rounds, about 4.65 million batch
+fuzz executions, vet/staticcheck, two govulncheck paths with zero reachable findings,
+module verify/tidy, 7+2 locked Rust tests, fmt/clippy/RustSec, 38 files/137 Web tests, strict
+TypeScript, deterministic OpenAPI, Vite/npm, secure Desktop, and a reproducible Windows dual
+build. The unsigned GUI SHA-256 is
+`82a5f7b4f012c0bc39da13d3b00cc98831e8002653a4a59f54d58f63e7126b50` and release readiness
+remains false. Four validation/integrity issues were fixed before the final gate, including
+rejection of valid archive success/error output replayed across different inputs with one request ID;
+no known unresolved high/medium issue exists on an enabled path. Schema/OpenAPI remain v84
+and 75/83/182. ADR 0065 is authoritative.
+
+Architecture completion remains about 99%, complete product usability about 95-97%, generic
+Coding Agent usability about 95-96%, and Cyber automation about 20%. This internal bridge
+does not yet create an end-user analyzer workflow.
+
 ## Recommended Next Batch
 
-Candidate slices are P10-C1 a non-starting `analyzer_invocation.v1` candidate bound to an
-exact descriptor/request/input digest, P10-C2 Go-only `DisabledTransport` and deterministic
-`FakeTransport` enforcement of deadline/stdout/exit/result rules, and P10-C3 fake crash,
-timeout, cancellation, malformed/future/wrong-analyzer/oversized-output conformance vectors.
-Product invocation, process startup, result persistence, and Artifact commit remain unwired.
+Candidate slices are P10-D1 an inert exact executable-identity/preflight record with no start,
+P10-D2 a test-only explicitly non-product Rust fixture subprocess conformance adapter with
+bounded stdin/stdout/stderr, and P10-D3 real-fixture lifecycle/failure vectors for crash,
+timeout, cancellation, TERM/KILL fallback, tree reap/orphan detection, malformed output, and
+stderr privacy. Product invocation, Run/Event/SQLite persistence, and Artifact commit remain
+unwired after this harness unless they pass later independent gates.
 Keep
 the Local profile disabled until a real
 OS sandbox makes protected host roots unavailable or read-only; never map it to
