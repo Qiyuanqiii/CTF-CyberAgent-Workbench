@@ -11,6 +11,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.47
 	github.com/wailsapp/go-webview2 v1.0.22
 	github.com/wailsapp/wails/v2 v2.13.0
+	golang.org/x/net v0.55.0
 	golang.org/x/sys v0.45.0
 )
 
@@ -71,7 +72,6 @@ require (
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/crypto v0.52.0 // indirect
-	golang.org/x/net v0.55.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )

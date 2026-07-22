@@ -2036,14 +2036,46 @@ process/persistence/authority was added. Schema/OpenAPI remain v84 and 75/83/182
 authoritative. Architecture completion remains about 99%, complete product usability about
 95-97%, generic Coding Agent usability about 95-96%, and Cyber automation about 20%.
 
+## P11-A1/A2/A3: Browser Profiles, Exact Target Scope, And Inert Session Plan
+
+P11-A1 adds the fixed Go-owned `safe-web`, `ctf-lab`, and `ctf-instrumented` profile Registry.
+Code mode keeps normal browser security and excludes private targets; CTF Lab permits explicitly
+scoped private targets and request tooling; Instrumented additionally permits explicit security-
+relaxation requests, requires risk acknowledgement and a future container, and marks evidence as
+instrumented. All runtime authority is false, and every profile requires disposable state while
+forbidding personal profiles, extensions, password stores, and host filesystem access.
+
+P11-A2 adds `browser_target_scope.v1`: at most eight canonical exact HTTP(S) origins, IDNA/port/
+IPv4/IPv6 normalization, redirect and resolved-address revalidation, literal-IP pinning, and a
+default-deny fingerprint. Safe Web rejects private/loopback DNS rebinding. Even the highest CTF
+profile always blocks cloud metadata, link-local, multicast, unspecified/reserved addresses,
+credentials in URLs, fragments, backslashes, and non-HTTP schemes.
+
+P11-A3 adds `browser_session_plan.v1`, binding Session/Run/Workspace, profile and target digests,
+non-secret proxy endpoint plus system credential reference, requested capture/mutation/replay/
+cookie/security-relaxation features, fixed disposable isolation, evidence class, limits, backend,
+and launch blockers. Every plan remains `start_blocked=true`; process/network/profile-write/
+mutation/replay/Artifact authority and proxy credential/network authority remain false.
+
+The functional gate passed 364.5 seconds of full Go tests on the final dependency graph, full vet,
+targeted race/staticcheck, about 8.2 million URL/proxy fuzz executions, 38 files/137 React tests,
+strict TypeScript/Vite production build, and zero-vulnerability npm audit. The first targeted Go
+scan found reachable GO-2026-5970 through IDNA in `x/text v0.37.0`; upgrading to fixed v0.39.0
+removed the reachable finding. No real browser, network request, process, profile directory, credential,
+Docker, Shell, Provider, Store/Event, or Artifact path ran. ADR 0069 is authoritative.
+
+Architecture completion remains about 99%, complete product usability about 95-97%, generic
+Coding Agent usability about 95-96%, and Cyber automation about 20%. This batch makes future
+browser execution safer but does not yet give the user an operational browser.
+
 ## Recommended Next Batch
 
-Candidate slices are P10-F1 pure bounded PE/ELF format and target-architecture inspection from
-caller-owned bytes, P10-F2 a digest-pinned release-manifest and provenance/signature allowlist
-candidate, and P10-F3 an operator-reviewed resource/sandbox launch-plan candidate. All three
-must remain pathless or handle-free metadata boundaries with start, persistence, Artifact,
-Run/Event, CLI, HTTP, and Desktop authority false. This begins a new six-slice cycle, so run
-the integrated functional gate after F3 and the full robustness gate after the following batch.
+Candidate slices are P11-B1 bounded Chromium/Edge executable discovery and byte identity without
+launch, P11-B2 Go-owned disposable profile-directory ownership and exact cleanup planning without
+creating a profile, and P11-B3 a sealed Disabled/Fake CDP transport with navigation/capture outcome
+contracts. Process and network authority must remain false through B3. P10-F1/F2/F3 remain queued
+after this browser-control batch rather than being discarded. This starts a new six-slice browser
+cycle, so the full robustness gate is due after P11-B3 plus the following three browser slices.
 
 Keep the Local profile disabled until a real
 OS sandbox makes protected host roots unavailable or read-only; never map it to

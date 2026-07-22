@@ -1654,15 +1654,48 @@ authoritative.
 没有接入 Run、事件、SQLite、Artifact writer、CLI、HTTP 或 Desktop。架构约 99%、完整产品可用度约
 95-97%、通用 Coding Agent 约 95-96%、Cyber 自动化约 20%。
 
+## Completed Browser Control Foundation (P11-A1/A2/A3)
+
+P11-A1 fixes three Go-owned browser descriptors: `safe-web`, `ctf-lab`, and
+`ctf-instrumented`. Code mode keeps normal browser security and excludes private targets;
+CTF Lab can describe exact private targets plus interception/mutation/replay/cookie tooling;
+Instrumented can additionally request three explicit security relaxations, requires risk
+acknowledgement and a future container, and marks evidence as instrumented. Every descriptor
+requires disposable state, forbids personal profiles/extensions/password stores/host files,
+and grants zero runtime authority.
+
+P11-A2 adds `browser_target_scope.v1` with at most eight canonical exact HTTP(S) origins,
+IDNA/default-port/IP normalization, redirect and DNS-result revalidation, literal-IP pinning,
+and a stable fingerprint. Safe Web rejects private/loopback rebinding. Every profile rejects
+cloud metadata, link-local, multicast, unspecified/reserved addresses, non-HTTP schemes, URL
+credentials/fragments/backslashes, and off-scope origins.
+
+P11-A3 adds `browser_session_plan.v1`. It binds Session/Run/Workspace, profile/scope digests,
+proxy endpoint and system credential name, requested tooling/relaxations, disposable isolation,
+limits, evidence class, backend, and sorted launch blockers. It stores no proxy secret or userinfo;
+the model cannot clean profiles. `start_blocked` is true and all process/network/profile-write/
+mutation/replay/Artifact plus proxy credential/network authority is false.
+
+The gate passed a final-dependency 364.5-second full Go run, full vet, targeted race/staticcheck, about 8.2
+million URL/proxy fuzz executions, 38 files/137 Web tests, strict TypeScript/Vite, and zero-
+vulnerability npm audit. A first targeted scan found reachable GO-2026-5970 through IDNA in
+`x/text v0.37.0`; v0.39.0 fixes it and the repeated scan has zero reachable findings. No real browser/network/process/
+profile directory/credential/Docker/Shell/Provider/Store/Event/Artifact path ran. Schema/OpenAPI
+remain v84 and 75/83/182. ADR 0069 is authoritative.
+
+中文交接：当前只有 Go 浏览器控制合同，没有可操作窗口、Chromium 启动、导航或抓包。Wails
+WebView2 继续只渲染 Prayu；不能把“Browser Session Plan 已完成”误写成“内置浏览器已可用”。
+架构仍约 99%，完整产品可用度约 95-97%，Coding 约 95-96%，Cyber 自动化约 20%。
+
 ## Next Slice
 
 The next three-slice candidates are:
 
-1. P10-F1: inspect caller-supplied executable bytes as a pure bounded PE/ELF format and target-architecture candidate, without a path, handle, loader, or process start.
-2. P10-F2: define a digest-pinned release-manifest and provenance/signature allowlist candidate; verification metadata must remain non-authorizing and body-free.
-3. P10-F3: define an operator-reviewed resource/sandbox launch-plan candidate covering identity, scope, limits, isolation, cleanup, and audit while every start capability remains false.
-4. This is the first batch in a new six-slice cycle. Run the integrated functional gate after F3; reserve the next full race/dependency/privacy robustness gate for the following three-slice batch.
-5. The manual Windows 10 matrix, signed distribution, real Sandbox release gate, xterm input, network grants, product analyzer execution, and CTF solving remain separate.
+1. P11-B1: discover installed Chromium/Edge candidates and bind bounded executable byte identity, version, and platform metadata without launching them or trusting PATH alone.
+2. P11-B2: define Go-owned disposable profile-directory ownership, collision, restart-recovery, and exact cleanup plans without creating or deleting a real profile directory.
+3. P11-B3: add a package-sealed Disabled/Fake CDP transport with bounded navigation, DOM, screenshot, and request-capture outcome contracts; product process and network authority remain false.
+4. This is the first batch in a new six-slice browser cycle. Run the integrated functional gate after B3; run the full race/dependency/privacy robustness gate after the following three slices.
+5. P10-F1/F2/F3 remain queued. The manual Windows 10 matrix, signed distribution, real Sandbox release gate, xterm input, real browser/network grants, product analyzer execution, and CTF solving remain separate.
 
 ## Local Machine Note
 
