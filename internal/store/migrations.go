@@ -8353,7 +8353,7 @@ func validateMigrationPlan(migrations []migration, applied map[int]appliedMigrat
 		if !ok {
 			return fmt.Errorf("database schema version %d is newer or unknown", version)
 		}
-		if recorded.Name != item.Name || recorded.Checksum != migrationChecksum(item) {
+		if recorded.Name != item.Name || !acceptedMigrationChecksum(item, recorded.Checksum) {
 			return fmt.Errorf("migration %d checksum or name mismatch", version)
 		}
 	}
@@ -8369,6 +8369,17 @@ func validateMigrationPlan(migrations []migration, applied map[int]appliedMigrat
 		break
 	}
 	return nil
+}
+
+const legacyWindowsPreviewMigration30Checksum = "bef87a078e337c7c78f020b0470b5d3c8a889a42c3f5993ef62f16e761018ae7"
+
+func acceptedMigrationChecksum(item migration, recorded string) bool {
+	if recorded == migrationChecksum(item) {
+		return true
+	}
+	// One Windows preview profile recorded this exact v30 history. The
+	// compatibility path is immutable and cannot be widened at runtime.
+	return item.Version == 30 && recorded == legacyWindowsPreviewMigration30Checksum
 }
 
 func migrationChecksum(item migration) string {

@@ -25,6 +25,16 @@ type testWindowRestorer struct {
 func (r *testWindowRestorer) Unminimise(context.Context) { r.unminimised++ }
 func (r *testWindowRestorer) Show(context.Context)       { r.shown++ }
 
+func newWailsRendererRequest(method, target string, body io.Reader) *http.Request {
+	request := httptest.NewRequest(method, target, body)
+	request.Host = "wails.localhost"
+	request.Header.Set("User-Agent", "PrayuDesktopTest/1.0 wails.io")
+	request.URL.Scheme = ""
+	request.URL.Host = ""
+	request.RequestURI = request.URL.RequestURI()
+	return request
+}
+
 func TestDesktopOptionsDefaultToReadOnlyAndRequireExplicitCapabilities(t *testing.T) {
 	defaults, err := parseDesktopOptions(nil)
 	if err != nil {
@@ -167,8 +177,7 @@ func TestInProcessAPIHandlerPinsLoopbackBoundaryWithoutMutatingRequest(t *testin
 		writer.WriteHeader(http.StatusNoContent)
 	})
 	handler := inProcessAPIHandler{next: next}
-	request := httptest.NewRequest(http.MethodGet, "http://wails.localhost/api/v1/health", nil)
-	request.Host = "wails.localhost"
+	request := newWailsRendererRequest(http.MethodGet, "http://wails.localhost/api/v1/health", nil)
 	request.RemoteAddr = "203.0.113.10:443"
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -180,8 +189,23 @@ func TestInProcessAPIHandlerPinsLoopbackBoundaryWithoutMutatingRequest(t *testin
 			response.Code, receivedHost, receivedRemote, receivedPath)
 	}
 	if request.Host != "wails.localhost" || request.RemoteAddr != "203.0.113.10:443" ||
-		request.URL.Scheme != "http" || request.URL.Host != "wails.localhost" {
+		request.URL.Scheme != "" || request.URL.Host != "" {
 		t.Fatalf("original request was mutated: host=%q remote=%q", request.Host, request.RemoteAddr)
+	}
+}
+
+func TestInProcessAPIHandlerAcceptsWailsWebViewRequestShape(t *testing.T) {
+	called := false
+	handler := inProcessAPIHandler{next: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		called = true
+		writer.WriteHeader(http.StatusNoContent)
+	})}
+	request := newWailsRendererRequest(http.MethodGet,
+		"http://wails.localhost/api/v1/desktop/bootstrap", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || !called {
+		t.Fatalf("real Wails request shape was rejected: status=%d called=%t", response.Code, called)
 	}
 }
 
@@ -198,7 +222,9 @@ func TestInProcessAPIHandlerRejectsNonRendererOrigins(t *testing.T) {
 				called = true
 			})}
 			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
+			request := httptest.NewRequest(http.MethodGet, target, nil)
+			request.Header.Set("User-Agent", "PrayuDesktopTest/1.0 wails.io")
+			handler.ServeHTTP(response, request)
 			if response.Code != http.StatusForbidden || called {
 				t.Fatalf("origin %q reached API: status=%d called=%t", target, response.Code, called)
 			}
@@ -222,12 +248,49 @@ func TestInProcessAPIHandlerRejectsNonCanonicalRendererURL(t *testing.T) {
 			handler := inProcessAPIHandler{next: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 				called = true
 			})}
-			request := httptest.NewRequest(http.MethodGet, "http://wails.localhost/api/v1/health", nil)
+			request := newWailsRendererRequest(http.MethodGet,
+				"http://wails.localhost/api/v1/health", nil)
 			current.mutate(request)
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)
 			if response.Code != http.StatusForbidden || called {
 				t.Fatalf("non-canonical renderer URL reached API: status=%d called=%t",
+					response.Code, called)
+			}
+		})
+	}
+}
+
+func TestInProcessAPIHandlerRejectsOriginlessRequestsWithoutWailsAuthority(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*http.Request)
+	}{
+		{name: "missing user agent", mutate: func(request *http.Request) {
+			request.Header.Del("User-Agent")
+		}},
+		{name: "substring user agent", mutate: func(request *http.Request) {
+			request.Header.Set("User-Agent", "not-wails.io-client")
+		}},
+		{name: "missing host", mutate: func(request *http.Request) { request.Host = "" }},
+		{name: "wrong host", mutate: func(request *http.Request) { request.Host = "untrusted.example" }},
+		{name: "host port", mutate: func(request *http.Request) { request.Host = "wails.localhost:80" }},
+		{name: "host whitespace", mutate: func(request *http.Request) { request.Host = " wails.localhost" }},
+		{name: "partial authority", mutate: func(request *http.Request) { request.URL.Scheme = "http" }},
+	}
+	for _, current := range tests {
+		t.Run(current.name, func(t *testing.T) {
+			called := false
+			handler := inProcessAPIHandler{next: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				called = true
+			})}
+			request := newWailsRendererRequest(http.MethodGet,
+				"http://wails.localhost/api/v1/health", nil)
+			current.mutate(request)
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden || called {
+				t.Fatalf("untrusted originless request reached API: status=%d called=%t",
 					response.Code, called)
 			}
 		})
@@ -261,7 +324,8 @@ func TestInProcessAPIHandlerRebuildsMissingRequestURIFromURL(t *testing.T) {
 		requestURI = request.RequestURI
 		writer.WriteHeader(http.StatusNoContent)
 	})}
-	request := httptest.NewRequest(http.MethodGet, "http://wails.localhost/api/v1/health?probe=one", nil)
+	request := newWailsRendererRequest(http.MethodGet,
+		"http://wails.localhost/api/v1/health?probe=one", nil)
 	request.RequestURI = ""
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -279,7 +343,7 @@ func TestInProcessAPIHandlerCanonicalizesMismatchedRequestURI(t *testing.T) {
 		requestURI = request.RequestURI
 		writer.WriteHeader(http.StatusNoContent)
 	})}
-	request := httptest.NewRequest(http.MethodGet,
+	request := newWailsRendererRequest(http.MethodGet,
 		"http://wails.localhost/api/v1/health?probe=one", nil)
 	request.RequestURI = "http://untrusted.example/private?secret=true"
 	response := httptest.NewRecorder()
@@ -302,7 +366,7 @@ func TestInProcessAPIHandlerCanonicalizesOnlyTheWailsEmptyRoot(t *testing.T) {
 		contentLength = request.ContentLength
 		writer.WriteHeader(http.StatusNoContent)
 	})}
-	request := httptest.NewRequest(http.MethodGet, "http://wails.localhost/", nil)
+	request := newWailsRendererRequest(http.MethodGet, "http://wails.localhost/", nil)
 	request.URL.Path = ""
 	request.RequestURI = ""
 	request.ContentLength = -1
@@ -324,7 +388,8 @@ func TestInProcessAPIHandlerDoesNotEraseUnknownRequestBodies(t *testing.T) {
 		contentLength = request.ContentLength
 		writer.WriteHeader(http.StatusNoContent)
 	})}
-	request := httptest.NewRequest(http.MethodGet, "http://wails.localhost/api/v1/health", nil)
+	request := newWailsRendererRequest(http.MethodGet,
+		"http://wails.localhost/api/v1/health", nil)
 	request.ContentLength = -1
 	request.Body = io.NopCloser(strings.NewReader("unexpected"))
 	response := httptest.NewRecorder()

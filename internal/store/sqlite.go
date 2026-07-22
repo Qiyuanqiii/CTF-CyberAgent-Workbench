@@ -112,6 +112,10 @@ func (s *SQLiteStore) Close() error {
 }
 
 func (s *SQLiteStore) Migrate(ctx context.Context) error {
+	return s.applyMigrations(ctx, migrationPlan())
+}
+
+func migrationPlan() []migration {
 	baseline := []string{
 		`CREATE TABLE IF NOT EXISTS workspaces (
 			id TEXT PRIMARY KEY,
@@ -222,7 +226,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_file_edits_session_status_updated_at
 			ON file_edits(session_id, status, updated_at);`,
 	}
-	return s.applyMigrations(ctx, []migration{
+	return []migration{
 		{Version: 1, Name: "v0.1 baseline", Statements: baseline},
 		{Version: 2, Name: "run-centric foundation", Statements: runCentricSchemaStatements},
 		{Version: 3, Name: "run session projection", Statements: runSessionProjectionStatements},
@@ -307,7 +311,7 @@ func (s *SQLiteStore) Migrate(ctx context.Context) error {
 		{Version: 82, Name: "immutable cumulative context handoff memory", Statements: cumulativeHandoffMemoryStatements},
 		{Version: 83, Name: "immutable verification snapshot receipt history", Statements: operatorVerificationSnapshotReceiptStatements},
 		{Version: 84, Name: "immutable non-authorizing verification snapshot receipt reviews", Statements: operatorVerificationSnapshotReceiptReviewStatements},
-	})
+	}
 }
 
 func (s *SQLiteStore) SaveWorkspace(ctx context.Context, rec WorkspaceRecord) error {

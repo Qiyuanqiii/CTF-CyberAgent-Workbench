@@ -334,6 +334,92 @@ func TestSQLiteStoreVersionedMigrationsAreIdempotent(t *testing.T) {
 	}
 }
 
+func TestSQLiteUpgradesLegacyWindowsPreviewV30WithoutLosingData(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "legacy-v30.db")
+	db, err := sql.Open("sqlite3", sqliteDSN(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA foreign_keys = ON;`); err != nil {
+		t.Fatal(err)
+	}
+	legacy := &SQLiteStore{db: db, home: filepath.Dir(path)}
+	if _, err := db.Exec(`CREATE TABLE schema_migrations (
+		version INTEGER PRIMARY KEY,
+		name TEXT NOT NULL,
+		checksum TEXT NOT NULL,
+		applied_at TEXT NOT NULL
+	);`); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range migrationPlan()[:30] {
+		if err := legacy.applyMigration(ctx, item); err != nil {
+			t.Fatalf("apply legacy migration %d: %v", item.Version, err)
+		}
+	}
+	createdAt := time.Date(2026, 7, 12, 10, 0, 0, 0, time.UTC)
+	if err := legacy.SaveWorkspace(ctx, WorkspaceRecord{
+		ID: "workspace-legacy-v30", Name: "legacy-preview", RootPath: `C:\preview`, CreatedAt: createdAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE schema_migrations SET checksum = ? WHERE version = 30`,
+		legacyWindowsPreviewMigration30Checksum); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	upgraded, err := Open(path)
+	if err != nil {
+		t.Fatalf("legacy v30 database did not upgrade in place: %v", err)
+	}
+	defer upgraded.Close()
+	version, err := upgraded.SchemaVersion(ctx)
+	if err != nil || version != LatestSchemaVersion {
+		t.Fatalf("version=%d want=%d err=%v", version, LatestSchemaVersion, err)
+	}
+	workspaces, err := upgraded.ListWorkspaces(ctx)
+	if err != nil || len(workspaces) != 1 || workspaces[0].ID != "workspace-legacy-v30" {
+		t.Fatalf("legacy workspace was not preserved: %#v err=%v", workspaces, err)
+	}
+	var integrity string
+	if err := upgraded.db.QueryRowContext(ctx, `PRAGMA integrity_check;`).Scan(&integrity); err != nil {
+		t.Fatal(err)
+	}
+	if integrity != "ok" {
+		t.Fatalf("upgraded legacy database integrity=%q", integrity)
+	}
+}
+
+func TestMigration30ReleasedChecksumsArePinned(t *testing.T) {
+	item := migrationPlan()[29]
+	const canonical = "cfd24a5af6bd9b0994984887ab568c3833f1971da8285642905c83a73ae0e0f5"
+	if checksum := migrationChecksum(item); checksum != canonical {
+		t.Fatalf("released migration 30 changed: checksum=%q", checksum)
+	}
+	if !acceptedMigrationChecksum(item, legacyWindowsPreviewMigration30Checksum) {
+		t.Fatal("released Windows preview migration 30 checksum was rejected")
+	}
+	wrongVersion := item
+	wrongVersion.Version = 31
+	if acceptedMigrationChecksum(wrongVersion, legacyWindowsPreviewMigration30Checksum) {
+		t.Fatal("migration 30 legacy checksum escaped its exact version")
+	}
+	if acceptedMigrationChecksum(item, strings.Repeat("0", 64)) {
+		t.Fatal("unknown migration 30 checksum was accepted")
+	}
+	if err := validateMigrationPlan(migrationPlan(), map[int]appliedMigration{
+		30: {Name: "wrong migration name", Checksum: legacyWindowsPreviewMigration30Checksum},
+	}); err == nil {
+		t.Fatal("legacy checksum bypassed the exact migration name")
+	}
+}
+
 func TestSQLiteStoreUpgradesLegacyDatabaseWithoutLosingData(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "legacy.db")
 	db, err := sql.Open("sqlite3", path)

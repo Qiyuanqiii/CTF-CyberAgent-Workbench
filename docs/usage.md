@@ -122,7 +122,7 @@ Schema v40 loads the complete selected set for root Supervisor turns. Before eve
 
 Schema v47 derives `specialist_skill_context.v1` for each active child Attempt. Go reloads the child after Attempt start, binds the current immutable Run mode and parent selection, requires delegated `model.chat`, and selects at most one already-pinned guide. Code uses the guide matching its Profile. Cyber receives no broad Code/Review/Learn guide and receives `script` only for the Script Profile. `plan-delivery` is root-only. The default child budget is 1,024 conservative tokens with a 2,048 hard maximum. Preparation is idempotent across concurrent Store callers and commits atomically with the first Specialist model start; a selected Run cannot start that call without preparation. Child assignment text, model output, HTTP, Tool Gateway, and external directories cannot select Skills. The body remains in the current Go Provider request only, while SQLite and events store aggregate metadata and fingerprints.
 
-## Windows Desktop D0-A Through D1-I1/M3/J1
+## Windows Desktop D0-A Through D1-G13/V12
 
 Build the unsigned development/portable-test shell from the repository root:
 
@@ -132,6 +132,8 @@ powershell -ExecutionPolicy Bypass -File scripts/build-desktop.ps1
 ```
 
 The build script installs the locked frontend dependencies, checks the generated API contract, runs frontend and focused Go tests, builds the production renderer, and then compiles the Windows GUI binary with the mandatory `desktop,production,wv2runtime.error` tags. The machine needs Windows 10/11 and WebView2 Evergreen Runtime `94.0.992.31` or newer. The binary checks that prerequisite before opening SQLite and never downloads or installs it. `web/dist` is generated and ignored by Git; a direct Desktop build intentionally fails if the production bundle or secure WebView2 strategy tag is absent.
+
+The resulting EXE may also be opened directly from File Explorer. Existing data is migrated transactionally in place and is never deleted or reset to recover startup. If a historical profile needs diagnosis, copy `~/.cyberagent-workbench/cyberagent.db` before launch and keep that copy outside the active filename. The known Windows-preview v30 checksum is accepted only for the exact v30 migration name; unknown history still fails closed. ADR 0068 records the real Wails request shape and the v30-to-v84 data-preserving launch verification.
 
 The shell opens the same `$CYBERAGENT_HOME/cyberagent.db` as the CLI and defaults to read-only. It generates an ephemeral read token in memory and calls the existing Go API through Wails' in-process AssetServer Handler, so no TCP port or copied bearer token is required. Run events use `/events/poll` on Windows because Wails v2 does not stream AssetServer responses there; this endpoint shares the SSE Run-bound high-water cursor, while ordinary Web clients continue to use SSE. Cursor/frame memory is bounded to 16 Runs and 500 frames per Run and never enters browser storage.
 

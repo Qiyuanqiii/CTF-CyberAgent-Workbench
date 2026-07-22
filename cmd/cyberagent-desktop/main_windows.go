@@ -21,6 +21,7 @@ import (
 
 	"github.com/wailsapp/go-webview2/webviewloader"
 	"github.com/wailsapp/wails/v2"
+	wailsassetserver "github.com/wailsapp/wails/v2/pkg/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
@@ -126,11 +127,29 @@ func (h inProcessAPIHandler) ServeHTTP(writer http.ResponseWriter, request *http
 
 func trustedDesktopRendererOrigin(request *http.Request) bool {
 	if request == nil || request.URL == nil || request.URL.User != nil || request.URL.Fragment != "" ||
-		request.URL.Opaque != "" {
+		request.URL.RawFragment != "" || request.URL.Opaque != "" {
 		return false
+	}
+	if !strings.EqualFold(request.Host, "wails.localhost") ||
+		!containsUserAgentToken(request.UserAgent(), wailsassetserver.WailsUserAgentValue) {
+		return false
+	}
+	if request.URL.Scheme == "" || request.URL.Host == "" {
+		// Wails converts the intercepted WebView request into server form before
+		// invoking the custom AssetServer handler, leaving authority in Request.Host.
+		return request.URL.Scheme == "" && request.URL.Host == ""
 	}
 	return strings.EqualFold(request.URL.Scheme, "http") &&
 		strings.EqualFold(request.URL.Hostname(), "wails.localhost") && request.URL.Port() == ""
+}
+
+func containsUserAgentToken(value, expected string) bool {
+	for _, token := range strings.Fields(value) {
+		if strings.EqualFold(token, expected) {
+			return true
+		}
+	}
+	return false
 }
 
 type desktopBindingError struct {
