@@ -2088,14 +2088,42 @@ automated compatibility checks. The unsigned GUI SHA-256 is
 `28ae5b21efa7746f0bd3c6646351daca6234aeeb2e85c082982e4e915b95400b` and
 `release_ready=false`. No new renderer or execution authority exists. ADR 0070 is authoritative.
 
+## P11-B1/B2/B3: Inert Browser Runtime Adapters
+
+P11-B1 adds fixed-location, read-only Edge/Chrome/Chromium discovery. Windows Known Folder roots
+and Go-owned suffixes replace PATH lookup; existing candidates must be non-link regular PE files
+inside the admitted root. Identity binds version/platform/architecture, exact bytes and SHA-256,
+then rechecks the path still identifies the same file. Publisher signature, launch trust, path
+persistence, process start, product launch, and runtime authority are explicitly false.
+
+P11-B2 adds pure disposable-profile ownership, observation, reconciliation, and cleanup plans.
+The exact path is derived from the Session token below `browser-profiles`. Stale exact ownership
+uses N-to-N+1 generation fencing; old generations and foreign/corrupt markers are refused. Only
+an exact released current owner can produce a no-wildcard, delete-blocked cleanup candidate. No
+filesystem operation exists in the package.
+
+P11-B3 adds a package-sealed Disabled/Fake CDP bridge for navigation, DOM, screenshot, and request
+capture contracts. It revalidates all Session/executable/profile/scope bindings and enforces
+action-specific payload/count limits, cancellation, deadlines, canonical JSON, and metadata-only
+outcomes. Fake results are synthetic. No raw page/capture data or process/network/profile-write/
+mutation/replay/Artifact/product authority can appear.
+
+The combined audit fixed post-version path replacement checking, explicit non-verification of
+publisher/launch trust, and Fake screenshot/capture format/count validation. Focused normal/race/
+vet/staticcheck and source-capability tests pass with 77.8% package coverage. The integrated gate
+passes 378.0-second full Go, full vet, 41 files/143 React tests, strict TypeScript, Vite build,
+zero-vulnerability npm audit, and patch hygiene. Schema/OpenAPI remain v84 and 75/83/182. No real
+browser/process/network/profile/credential/Store/Event/Artifact path ran. ADR 0071 is authoritative.
+
 ## Recommended Next Batch
 
-Candidate slices are P11-B1 bounded Chromium/Edge executable discovery and byte identity without
-launch, P11-B2 Go-owned disposable profile-directory ownership and exact cleanup planning without
-creating a profile, and P11-B3 a sealed Disabled/Fake CDP transport with navigation/capture outcome
-contracts. Process and network authority must remain false through B3. P10-F1/F2/F3 remain queued
-after this browser-control batch rather than being discarded. This starts a new six-slice browser
-cycle, so the full robustness gate is due after P11-B3 plus the following three browser slices.
+Candidate slices are P11-C1 publisher/provenance policy plus same-open-handle revalidation without
+launch, P11-C2 durable launch-attempt/generation-lease/process-tree reconciliation through Disabled/
+Fake lifecycle adapters, and P11-C3 an independent operator launch review bound to exact scope,
+sandbox, budget, and append-only audit. Acceptance must remain separate from a real start adapter.
+These slices finish the current six-slice browser cycle, so the complete race/staticcheck/
+govulncheck/dependency/privacy/reproducibility gate is due after C3. Real Safe Web start is considered
+only after that gate. P10-F1/F2/F3 remain queued rather than discarded.
 
 Keep the Local profile disabled until a real
 OS sandbox makes protected host roots unavailable or read-only; never map it to

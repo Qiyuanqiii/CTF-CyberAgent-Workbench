@@ -1729,14 +1729,55 @@ authoritative.
 输入区。模型、附件、Plan 和 Skill 都没有绕过 Go；高/最高推理强度在协议未支持前保持禁用。选中态
 已改为纯 CSS 橙色笔刷，不再把概念图贴进功能框。设置页独立背景已按视觉复核结果调亮并重建。
 
+## Completed Inert Browser Runtime Adapters (P11-B1/B2/B3)
+
+P11-B1 discovers Edge, Chrome, and Chromium only below Windows Known Folder roots and fixed
+Go-owned suffixes. It rejects filesystem indirection and non-regular or malformed PE files,
+then binds product/channel/path, host and target architecture, exact byte count, SHA-256, and
+read-only Windows file-version metadata. It never searches PATH or executes a candidate.
+Publisher signature, launch trust, path persistence, process start, and all runtime authority
+remain false. A post-version same-file check closes ordinary replacement drift; this still is
+not a TOCTOU-safe launch handle.
+
+P11-B2 derives one exact disposable directory from the Session profile token under a dedicated
+`browser-profiles` root. Pure metadata classifies absent, exact active/stale/released, foreign,
+and corrupt states. Exact stale recovery advances generation N to N+1 and changes owner/marker
+digests; an old generation becomes foreign. Only an exact released current owner can produce a
+delete-blocked, no-wildcard cleanup candidate. No directory or marker is created, read, renamed,
+written, or deleted.
+
+P11-B3 adds a package-sealed CDP bridge admitting only Disabled and deterministic Fake
+transports. Exact-scope navigation, DOM JSON, PNG/JPEG screenshot, and request-capture JSON
+contracts enforce action-specific byte/count limits, cancellation, deadlines, strict canonical
+outcome JSON, and metadata-only results. Fake successes are explicitly synthetic. Raw DOM,
+pixels, headers, cookies, bodies, and request entries are absent; process/network/profile-write/
+mutation/replay/Artifact/product-execution facts and authority remain false.
+
+The combined audit found and fixed three future-wiring risks before delivery: path identity is
+rechecked after version lookup, PE identity explicitly does not claim publisher/launch trust,
+and Fake screenshot/capture successes validate minimum format and count consistency. Focused
+normal/race/vet/staticcheck, source-capability and mutation tests pass with 77.8% package statement
+coverage. The integrated gate passes final-graph full Go in 378.0 seconds, full vet, 41 files/143
+React tests, strict TypeScript, Vite build, zero-vulnerability npm audit, and patch hygiene.
+
+No real browser, process, network, profile directory, credential, Docker, Shell, Provider,
+Store/Event, or Artifact path ran. Schema/OpenAPI remain v84 and 75/83/182. Overall architecture
+remains about 99%, full product usability about 95-97%, Coding about 95-96%, and Cyber automation
+about 20%. Browser-control architecture is materially stronger, but end-user browser usability
+is still 0% because no real launch or navigation exists. ADR 0071 is authoritative.
+
+中文交接：P11-B1/B2/B3 只完成浏览器发现、目录生命周期和 Fake/Disabled CDP 的不可执行合同。
+不要把 synthetic success、PE 摘要或 cleanup candidate 写成真实浏览器、可信签名或删除授权；Wails
+WebView2 仍只渲染 Prayu，内置浏览器对用户仍不可用。
+
 ## Next Slice
 
 The next three-slice candidates are:
 
-1. P11-B1: discover installed Chromium/Edge candidates and bind bounded executable byte identity, version, and platform metadata without launching them or trusting PATH alone.
-2. P11-B2: define Go-owned disposable profile-directory ownership, collision, restart-recovery, and exact cleanup plans without creating or deleting a real profile directory.
-3. P11-B3: add a package-sealed Disabled/Fake CDP transport with bounded navigation, DOM, screenshot, and request-capture outcome contracts; product process and network authority remain false.
-4. This is the first batch in a new six-slice browser cycle. Run the integrated functional gate after B3; run the full race/dependency/privacy robustness gate after the following three slices.
+1. P11-C1: bind Authenticode/publisher and release provenance policy plus same-open-handle byte revalidation to an immutable browser acceptance candidate; it must remain non-starting.
+2. P11-C2: define durable browser launch attempt/generation lease, cancellation, process-tree ownership, restart reconciliation, and exact cleanup contracts first through Disabled/Fake lifecycle adapters.
+3. P11-C3: add an independent operator launch review bound to executable, profile generation, exact scope, sandbox, budgets, and append-only audit; review acceptance must still be separate from the real start adapter.
+4. This completes the second half of the six-slice browser cycle, so run the full race/staticcheck/govulncheck/dependency/privacy/reproducibility robustness gate after C3. Real Safe Web start is considered only after that gate.
 5. P10-F1/F2/F3 remain queued. The manual Windows 10 matrix, signed distribution, real Sandbox release gate, xterm input, real browser/network grants, product analyzer execution, and CTF solving remain separate.
 
 ## Local Machine Note
