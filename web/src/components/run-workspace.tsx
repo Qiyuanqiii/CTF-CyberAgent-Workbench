@@ -37,6 +37,7 @@ import type {
   ArtifactView,
   EventView,
   NoteView,
+  MessageView,
   OperatorSteeringQueueView,
   PlanDeliveryStateView,
   RunDetailView,
@@ -68,6 +69,7 @@ import { VerificationEvidence } from "./verification-evidence";
 import { VerificationPlan } from "./verification-plan";
 import type { ReceiptReviewNavigationTarget } from "./receipt-review-navigation";
 import { WorkspaceExplorer } from "./workspace-explorer";
+import { SessionComposer } from "./session-composer";
 import { AgentGraphPanel, DelegationsPanel, ExternalSkillsPanel, FanoutPanel, FindingsPanel } from "./run-projections";
 
 type RunTab = "overview" | "journey" | "actions" | "approvals" | "diffs" | "repository" | "files" | "evidence" | "verify" | "handoff" |
@@ -97,7 +99,11 @@ const tabs: Array<{ id: RunTab; label: string; icon: typeof Activity }> = [
   { id: "tools", label: "工具", icon: Wrench },
 ];
 
-export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runID: string }) {
+export function RunWorkspace({ client, runID, onOpenPlugins }: {
+  client: CyberAgentClient;
+  runID: string;
+  onOpenPlugins?: () => void;
+}) {
   const [tab, setTab] = useState<RunTab>("overview");
   const [fileTarget, setFileTarget] = useState({ runID, path: "." });
   const [receiptReviewTarget, setReceiptReviewTarget] =
@@ -108,6 +114,11 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
     queryFn: ({ signal }) => client.get<RunDetailView>(`/runs/${encodeURIComponent(runID)}`, {}, signal),
     enabled: Boolean(runID),
   });
+  const boundSessionID = detailQuery.data?.run.session_id ?? "";
+  const contextMessagesQuery = usePagedResource<MessageView>(client,
+    ["session", boundSessionID, "messages"],
+    `/sessions/${encodeURIComponent(boundSessionID)}/messages`,
+    { limit: 100, include_compacted: true }, Boolean(boundSessionID));
   const eventsQuery = usePagedResource<EventView>(client, ["run", runID, "events"],
     `/runs/${encodeURIComponent(runID)}/events`, { limit: 100 }, Boolean(runID) && tab === "events");
   const workQuery = usePagedResource<WorkItemView>(client, ["run", runID, "work"],
@@ -154,6 +165,9 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
   const notes = useMemo(() => notesQuery.data?.pages.flatMap((page) => page.items) ?? [], [notesQuery.data]);
   const artifacts = useMemo(() => artifactsQuery.data?.pages.flatMap((page) => page.items) ?? [], [artifactsQuery.data]);
   const rounds = useMemo(() => toolsQuery.data?.pages.flatMap((page) => page.items) ?? [], [toolsQuery.data]);
+  const contextTokens = useMemo(() => (contextMessagesQuery.data?.pages
+    .flatMap((page) => page.items) ?? []).filter((message) => !message.compacted)
+    .reduce((total, message) => total + message.token_estimate, 0), [contextMessagesQuery.data]);
   const visibleTabs = useMemo(() => detailQuery.data?.mode.surface === "cyber"
     ? tabs.filter(({ id }) => !["journey", "verify", "handoff"].includes(id)) : tabs,
   [detailQuery.data?.mode.surface]);
@@ -275,6 +289,10 @@ export function RunWorkspace({ client, runID }: { client: CyberAgentClient; runI
           </CollectionState>
         )}
       </div>
+      {detail.run.session_id && <SessionComposer client={client}
+        contextPartial={Boolean(contextMessagesQuery.hasNextPage)} contextTokens={contextTokens}
+        onOpenPlugins={onOpenPlugins} run={detail.run} sessionID={detail.run.session_id}
+        workspaceID={detail.mission.workspace_id ?? ""} />}
     </div>
   );
 }

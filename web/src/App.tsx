@@ -1,27 +1,34 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   ArrowRight,
-  Cpu,
   LogOut,
-  PackageSearch,
+  Minus,
   PanelLeft,
-  Plus,
   RefreshCw,
   Settings,
+  Square,
+  X,
 } from "lucide-react";
 import { CyberAgentClient } from "./api/client";
 import { ConnectionGate } from "./components/connection-gate";
 import { DesktopSkillPreviewDialog } from "./components/desktop-skill-preview";
-import { ModelAvailabilityDialog } from "./components/model-availability-dialog";
+import { ModelAvailabilityDialog, ModelAvailabilityWorkspace } from "./components/model-availability-dialog";
 import { RunCreationDialog } from "./components/run-creation-dialog";
-import { ResourceSidebar } from "./components/resource-sidebar";
+import { ResourceSidebar, type WorkbenchSection } from "./components/resource-sidebar";
 import { RunWorkspace } from "./components/run-workspace";
 import { SessionWorkspace } from "./components/session-workspace";
 import { SettingsView, type SettingsCapability } from "./components/settings-view";
+import { EmptyConversation, SidebarResizeHandle, UtilityWorkspace,
+  WorkbenchFrame, clampSidebarWidth, defaultSidebarWidth,
+  type NewRunDraft } from "./components/workbench-frame";
 import { desktopBridgeAvailable } from "./lib/desktop-bridge";
+import { closeDesktopWindow, minimiseDesktopWindow,
+  toggleDesktopWindowMaximised } from "./lib/desktop-window";
 import { useConnectionStore } from "./state/connection";
+
+const sidebarWidthStorageKey = "prayu.sidebar.width.v1";
 
 export default function App() {
   const token = useConnectionStore((state) => state.token);
@@ -102,7 +109,11 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [skillPreviewOpen, setSkillPreviewOpen] = useState(false);
   const [runCreationOpen, setRunCreationOpen] = useState(false);
+  const [runDraft, setRunDraft] = useState<Partial<NewRunDraft>>({});
   const [modelsOpen, setModelsOpen] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth);
+  const [workspaceSection, setWorkspaceSection] = useState<Exclude<WorkbenchSection, "new-task">>(
+    "conversation");
   const desktop = desktopBridgeAvailable();
   const client = useMemo(() => new CyberAgentClient(token, undefined, controlToken, {
     runControlEnabled, runCreationEnabled, sessionMessageEnabled,
@@ -169,12 +180,65 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
 
   const leave = () => {
     setSurface("workspace");
+    setWorkspaceSection("conversation");
     setSkillPreviewOpen(false);
     setRunCreationOpen(false);
     setModelsOpen(false);
     queryClient.clear();
     disconnect();
   };
+
+  const openRunCreation = (draft: Partial<NewRunDraft> = {}) => {
+    setSurface("workspace");
+    setWorkspaceSection("conversation");
+    setRunDraft(draft);
+    setRunCreationOpen(true);
+  };
+
+  const resizeSidebar = (value: number) => {
+    const normalized = clampSidebarWidth(value);
+    setSidebarWidth(normalized);
+    try {
+      localStorage.setItem(sidebarWidthStorageKey, String(normalized));
+    } catch {
+      // Window geometry remains usable when browser storage is unavailable.
+    }
+  };
+
+  const navigateWorkspace = (section: WorkbenchSection) => {
+    setSurface("workspace");
+    if (section === "new-task") {
+      openRunCreation();
+      return;
+    }
+    setWorkspaceSection(section);
+    if (section === "plugins" && desktop) setSkillPreviewOpen(true);
+  };
+
+  const selectedResourceID = resourceKind === "run" ? selectedRunID : selectedSessionID;
+  const panelTitle = workspaceSection === "conversation"
+    ? selectedResourceID
+      ? `${resourceKind === "run" ? "任务" : "对话"} / ${selectedResourceID.slice(0, 18)}`
+      : "Prayu 工作台"
+    : workspaceSection === "pull-requests" ? "拉取请求"
+      : workspaceSection === "models" ? "模型切换"
+        : workspaceSection === "schedule" ? "自动定时" : "插件";
+
+  const workspaceContent = workspaceSection === "models"
+    ? <ModelAvailabilityWorkspace client={client} />
+    : workspaceSection === "pull-requests" || workspaceSection === "schedule" ||
+      workspaceSection === "plugins"
+      ? <UtilityWorkspace kind={workspaceSection}
+        onOpenPlugins={desktop ? () => setSkillPreviewOpen(true) : undefined} />
+      : selectedResourceID
+        ? resourceKind === "run"
+          ? <RunWorkspace client={client} onOpenPlugins={desktop ? () => setSkillPreviewOpen(true) : undefined}
+            runID={selectedRunID} />
+          : <SessionWorkspace client={client} onOpenPlugins={desktop ? () => setSkillPreviewOpen(true) : undefined}
+            sessionID={selectedSessionID} />
+        : <EmptyConversation client={client} creationEnabled={runCreationEnabled}
+          onCreateRun={openRunCreation}
+          onOpenPlugins={desktop ? () => setSkillPreviewOpen(true) : undefined} />;
 
   return (
     <>
@@ -193,31 +257,19 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
               <ArrowRight aria-hidden="true" size={16} />
             </button>
             <nav aria-label="应用菜单" className="titlebar-menu">
-              <button disabled={!runCreationEnabled} onClick={() => setRunCreationOpen(true)}
+              <button disabled={!runCreationEnabled} onClick={() => openRunCreation()}
                 title="新建任务" type="button">文件</button>
-              <button onClick={() => setModelsOpen(true)} title="模型与 Provider" type="button">编辑</button>
+              <button onClick={() => navigateWorkspace("models")} title="模型与 Provider"
+                type="button">编辑</button>
               <button disabled={surface === "settings"}
                 onClick={() => setSidebarVisible((visible) => !visible)} title="切换侧栏" type="button">视图</button>
               <button onClick={() => setSurface("settings")} title="设置与关于" type="button">帮助</button>
             </nav>
           </div>
-          <div className="titlebar-product"><span aria-hidden="true">P</span><strong>Prayu</strong></div>
           <div className="topbar-actions">
             <span className={`health-indicator ${healthQuery.isError ? "offline" : "online"}`}>
               <i />{healthQuery.isError ? "API error" : `api.v1 / schema ${healthQuery.data?.schema_version ?? "-"}`}
             </span>
-            {runCreationEnabled &&
-              <button aria-label="Create Run" className="icon-button" onClick={() => setRunCreationOpen(true)} title="Create Run" type="button">
-                <Plus aria-hidden="true" size={17} />
-              </button>}
-            <button aria-label="Model availability" className="icon-button"
-              onClick={() => setModelsOpen(true)} title="Models" type="button">
-              <Cpu aria-hidden="true" size={16} />
-            </button>
-            {desktop &&
-              <button aria-label="预览 Skill 包" className="icon-button" onClick={() => setSkillPreviewOpen(true)} title="预览 Skill 包" type="button">
-                <PackageSearch aria-hidden="true" size={16} />
-              </button>}
             <button aria-label="刷新" className="icon-button" disabled={healthQuery.isFetching} onClick={() => void healthQuery.refetch()} title="刷新" type="button">
               <RefreshCw aria-hidden="true" className={healthQuery.isFetching ? "spin" : ""} size={16} />
             </button>
@@ -225,15 +277,32 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
               <Settings aria-hidden="true" size={16} />
             </button>
             {!desktop && <button aria-label="断开连接" className="icon-button" onClick={leave} title="断开连接" type="button"><LogOut aria-hidden="true" size={16} /></button>}
+            {desktop && <div aria-label="窗口控制" className="desktop-window-controls" role="group">
+              <button aria-label="最小化" onClick={minimiseDesktopWindow} title="最小化" type="button">
+                <Minus aria-hidden="true" size={15} />
+              </button>
+              <button aria-label="最大化或还原" onClick={toggleDesktopWindowMaximised}
+                title="最大化或还原" type="button">
+                <Square aria-hidden="true" size={12} />
+              </button>
+              <button aria-label="关闭" className="desktop-window-close" onClick={closeDesktopWindow}
+                title="关闭" type="button">
+                <X aria-hidden="true" size={16} />
+              </button>
+            </div>}
           </div>
         </header>
-        {surface === "workspace" ? <div className={`shell-body ${sidebarVisible ? "" : "sidebar-hidden"}`}>
+        {surface === "workspace" ? <div className={`shell-body ${sidebarVisible ? "" : "sidebar-hidden"}`}
+          style={{ "--prayu-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
           {sidebarVisible && <ResourceSidebar client={client}
-            onCreateRun={runCreationEnabled ? () => setRunCreationOpen(true) : undefined}
+            activeSection={runCreationOpen ? "new-task" : workspaceSection}
+            onCreateRun={runCreationEnabled ? openRunCreation : undefined}
+            onNavigate={navigateWorkspace}
             onOpenSettings={() => setSurface("settings")} />}
-          <main className="main-workspace">
-            {resourceKind === "run" ? <RunWorkspace client={client} runID={selectedRunID} /> : <SessionWorkspace client={client} sessionID={selectedSessionID} />}
-          </main>
+          {sidebarVisible && <SidebarResizeHandle onChange={resizeSidebar} value={sidebarWidth} />}
+          <WorkbenchFrame onOpenSettings={() => setSurface("settings")} title={panelTitle}>
+            {workspaceContent}
+          </WorkbenchFrame>
         </div> : <SettingsView capabilities={settingsCapabilities} desktop={desktop}
           health={healthQuery.data ?? health ?? null} onBack={() => setSurface("workspace")}
           onOpenModels={() => setModelsOpen(true)}
@@ -244,7 +313,18 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
       <ModelAvailabilityDialog client={client} open={modelsOpen}
         onClose={() => setModelsOpen(false)} />
       <RunCreationDialog client={client} open={runCreationOpen}
+        initialGoal={runDraft.goal} initialPhase={runDraft.phase}
         onClose={() => setRunCreationOpen(false)} />
     </>
   );
+}
+
+function readSidebarWidth(): number {
+  try {
+    const stored = Number(localStorage.getItem(sidebarWidthStorageKey));
+    return Number.isFinite(stored) && stored > 0
+      ? clampSidebarWidth(stored) : defaultSidebarWidth;
+  } catch {
+    return defaultSidebarWidth;
+  }
 }

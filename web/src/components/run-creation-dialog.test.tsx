@@ -85,4 +85,19 @@ describe("RunCreationDialog", () => {
     expect(screen.getByRole("button", { name: "Create Run" })).toBeDisabled();
     expect(createRun).not.toHaveBeenCalled();
   });
+
+  it("prefills a task drafted in the workbench composer", async () => {
+    const client = {
+      getPage: vi.fn().mockResolvedValue({ items: [{ id: "workspace-1", name: "Project",
+        created_at: "2026-07-18T00:00:00Z" }], page: { limit: 100 }, requestID: "req-workspaces" }),
+      createRun: vi.fn(),
+    } as unknown as CyberAgentClient;
+    render(<QueryClientProvider client={new QueryClient()}>
+      <RunCreationDialog client={client} initialGoal="Audit the parser" initialPhase="plan"
+        open onClose={vi.fn()} />
+    </QueryClientProvider>);
+
+    await waitFor(() => expect(screen.getByLabelText("Goal")).toHaveValue("Audit the parser"));
+    expect(screen.getByRole("button", { name: "plan" })).toHaveAttribute("aria-pressed", "true");
+  });
 });

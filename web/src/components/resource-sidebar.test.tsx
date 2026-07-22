@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { CyberAgentClient } from "../api/client";
-import type { RunView } from "../api/types";
+import type { RunView, SessionView } from "../api/types";
 import { useConnectionStore } from "../state/connection";
 import { ResourceSidebar } from "./resource-sidebar";
 
@@ -13,6 +13,18 @@ function run(id: string, status: RunView["status"]): RunView {
     status,
     config: { model_route: "code", interactive: false },
     budget: { max_turns: 8 },
+    created_at: "2026-07-13T00:00:00Z",
+    updated_at: "2026-07-13T00:01:00Z",
+  };
+}
+
+function session(id: string, title: string): SessionView {
+  return {
+    id,
+    route: "code",
+    status: "active",
+    title,
+    workspace_id: "workspace-demo",
     created_at: "2026-07-13T00:00:00Z",
     updated_at: "2026-07-13T00:01:00Z",
   };
@@ -32,9 +44,14 @@ describe("ResourceSidebar", () => {
     ];
     const secondPage = [run("run-running", "running")];
     const getPage = vi.fn().mockImplementation((path: string, _query: unknown, cursor: string) => {
-      if (path !== "/runs") {
-        throw new Error(`unexpected path ${path}`);
+      if (path === "/sessions") {
+        return Promise.resolve({
+          items: [session("session-alpha", "修复登录回归")],
+          page: { limit: 50 },
+          requestID: "req-sessions-1",
+        });
       }
+      if (path !== "/runs") throw new Error(`unexpected path ${path}`);
       if (cursor === "cursor-terminal-page") {
         return Promise.resolve({
           items: secondPage,
@@ -54,38 +71,45 @@ describe("ResourceSidebar", () => {
     });
 
     const onCreateRun = vi.fn();
+    const onNavigate = vi.fn();
     const onOpenSettings = vi.fn();
     const { container } = render(
       <QueryClientProvider client={queryClient}>
-        <ResourceSidebar client={client} onCreateRun={onCreateRun}
-          onOpenSettings={onOpenSettings} />
+        <ResourceSidebar activeSection="conversation" client={client}
+          onCreateRun={onCreateRun} onNavigate={onNavigate} onOpenSettings={onOpenSettings} />
       </QueryClientProvider>,
     );
 
     await waitFor(() => {
       for (const status of ["paused", "completed", "failed", "cancelled"]) {
-        expect(container.querySelector(`.status-badge.status-${status}`))
-          .toHaveTextContent(status);
+        expect(container.querySelector(`.history-status.status-${status}`)).toBeInTheDocument();
       }
     });
-    const loadMore = container.querySelector<HTMLButtonElement>("button.load-more");
+    const loadMore = Array.from(container.querySelectorAll<HTMLButtonElement>("button.load-more"))
+      .find((button) => button.textContent?.includes("加载更多"));
     expect(loadMore).not.toBeNull();
     await act(async () => {
       fireEvent.click(loadMore!);
     });
 
-    expect(await screen.findAllByText("running")).not.toHaveLength(0);
-    await waitFor(() => expect(getPage).toHaveBeenCalledTimes(2));
-    expect(getPage.mock.calls[1]?.[2]).toBe("cursor-terminal-page");
+    await waitFor(() => expect(container.querySelector(".history-status.status-running"))
+      .toBeInTheDocument());
+    await waitFor(() => expect(getPage.mock.calls.some((call) =>
+      call[0] === "/runs" && call[2] === "cursor-terminal-page")).toBe(true));
     expect(useConnectionStore.getState().selectedRunID).toBe("run-paused");
     expect(screen.getByAltText("Prayu")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "任务" })).toHaveClass("active");
+    expect(screen.getByRole("navigation", { name: "工作台导航" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "模型切换" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "自动定时" })).toBeInTheDocument();
+    expect(screen.getByText("修复登录回归")).toBeInTheDocument();
     expect(container.querySelector(".resource-row.selected strong"))
-      .toHaveTextContent("run-paused");
+      .toHaveTextContent("任务");
 
     fireEvent.click(screen.getByRole("button", { name: /新建任务/ }));
+    fireEvent.click(screen.getByRole("button", { name: "模型切换" }));
     fireEvent.click(screen.getByRole("button", { name: /本地操作者/ }));
     expect(onCreateRun).toHaveBeenCalledTimes(1);
+    expect(onNavigate).toHaveBeenCalledWith("models");
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 });

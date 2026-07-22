@@ -4,11 +4,11 @@ Last updated: 2026-07-22
 
 ## Resume Context
 
-The latest non-schema Desktop repair closes two real startup blockers missed by build-only checks. Prayu now validates the actual Wails v2 server-form request (`Host: wails.localhost`, complete `wails.io` User-Agent token, empty URL authority) before pinning loopback, and Store migration validation accepts one exact legacy Windows-preview v30 checksum while continuing to reject unknown history. A copied real v30 database upgraded to v84 with data and integrity preserved before the original profile was opened; the rebuilt executable then rendered both the workbench and distinct Settings page on Windows 11 and closed cleanly. ADR 0068 is authoritative. D1-UX1/UX2/UX3 remains the visual baseline from ADR 0064.
+The latest non-schema Desktop batch adds the D1-UX4/UX5/UX6 frameless Prayu titlebar, bounded persisted resizable sidebar, pure-CSS active state, and shared Agent composer over existing Go controls. The preceding startup repair still validates the actual Wails v2 server-form request and one exact legacy Windows-preview v30 checksum; ADR 0068 remains authoritative for startup compatibility, while ADR 0064 and ADR 0070 define the current visual and interaction baseline.
 
 Current database schema is v84. Schemas v78-v81 add immutable operator verification evidence, livelock recovery, verification plans, and explicit plan-item/evidence associations; schema v82 adds conservative complete-request model-context planning and immutable cumulative handoff memory; schema v83 adds immutable metadata-only verification snapshot receipt history; schema v84 adds one immutable non-authorizing metadata review per exact receipt. Code/Desktop work now reaches D1-G13/V12. R9 strictly rejects malformed, future, digest-mismatched, or authority-widening receipt envelopes, while R10 pins accepted envelope bytes/SHA only behind the internal `NonProductOnly` Runner boundary. P10-A1 through P10-B3 establish a Go-owned analyzer boundary: a strict bounded request/result/error protocol, a fixed inert two-entry descriptor Registry, deterministic digest and in-memory ZIP central-directory functions, strict no-extraction archive result validation, and two independent Go/Rust five-vector suites. There is no Go-to-Rust product process bridge, file/path input, Run/Event/SQLite persistence, or Artifact commit. Root and Specialist requests use a 32K conservative fallback with explicit output/safety reservations, repeated compaction preserves a predecessor-bound cumulative handoff chain, and arbitrary repository documents remain untrusted evidence instead of instructions. Operators can compare any two exact local commit trees, use focus-safe keyboard navigation in the paired redacted preview, page through one frozen verification-item snapshot, download a deterministic metadata-only Markdown/JSON representation, record an immutable digest receipt, separately confirm or dispute only its metadata, carry bounded review metadata into a regenerable Code Handoff/Journey audit, and navigate only after Verify independently matches exact review/receipt/plan/item digests. R9/R10 and P10 do not claim wall-clock order, raw output, process identity, CPU/memory enforcement, verified OS quotas, signal identity, or product execution. None grants general Shell, LocalRunner, Docker, child scheduling, install hooks, renderer host-path authority, credential readback, document instruction authority, automatic Skill selection, result acceptance, or product process execution.
 
-Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No product path starts a Runner, container, Shell, host process, or Rust analyzer. ADR 0024 through ADR 0068 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/recovery/review/apply, Provider credential/generation, inert-install, receipt, Explorer/search, Repository, Verification, Handoff, process-conformance, portable-build, analyzer, Prayu interface, and real-startup compatibility boundaries.
+Schema v63 remains the blocked Sandbox start-gate review; schemas v48-v68 keep Local and container-process execution disabled. Schema v64 records only backend preference, schema v65 records non-authorizing machine-capture receipts, schema v66 adds recoverable ownership, schema v67 permits only five fixed read-only daemon GETs after explicit Linux opt-in, and schema v68 records a non-authorizing receipt decision without contacting Docker. No product path starts a Runner, container, Shell, host process, or Rust analyzer. ADR 0024 through ADR 0070 record the Skill, Sandbox, Desktop, Run-control, foreground-wake/worker, FileEdit proposal/recovery/review/apply, Provider credential/generation, inert-install, receipt, Explorer/search, Repository, Verification, Handoff, process-conformance, portable-build, analyzer, Prayu interface, real-startup compatibility, browser-control, and current workbench boundaries.
 
 Prayu is a local-first Go agent runtime for coding and controlled cyber-oriented work. The CLI-first implementation has resumable Runs, a durable root Agent Coordinator, bounded review-gated Specialist delegation, a separate read-only 1/2/4/6 Fan-out pool, persisted sessions and model calls, context compaction, WorkItems/Notes/Artifacts, a unified Tool Gateway, embedded and inert user Skills, Finding/Evidence/Report lifecycles with SARIF/CI output, loopback HTTP/SSE/OpenAPI, a Run-first TUI, a React/Vite console, and a Windows Wails shell with independently gated Run/Session/Plan/approval, FileEdit proposal/review/apply, Provider credentials, foreground/bounded wake, inert Skills, actions/evidence, and navigation. The `cyberagent` CLI and other established CyberAgent identifiers remain compatibility contracts. Core delegation remains capped at two children and only the original application operator can schedule it; models, ordinary tools, HTTP, and the Desktop native bridge cannot autonomously spawn or schedule children.
 
@@ -231,7 +231,7 @@ Use these files first when resuming:
 - Cyber autonomous-workflow usability: about 20%.
 - These values are engineering estimates derived from tested roadmap slices, not performance benchmarks. The retired single-axis "overall product vision" percentage must not be used for current status.
 
-Latest implemented batch: D1-UX1/UX2/UX3 on unchanged schema v84 and unchanged OpenAPI 75/83/182. It introduces the Prayu product identity and a tested dual-surface desktop shell while preserving compatibility identifiers and all Go authority boundaries. The previous P10-B1/B2/B3 cumulative six-slice gate passed with zero known RustSec vulnerabilities across 42 locked crates. ADR 0064 is authoritative for the current interface; ADR 0063 remains authoritative for the analyzer boundary.
+Latest implemented batch: D1-UX4/UX5/UX6 on unchanged schema v84 and unchanged OpenAPI 75/83/182. It adds the frameless Prayu titlebar, transparent bounded sidebar splitter, CSS active state, and shared Agent composer while preserving all Go authority boundaries. The focused gate passes full Go tests/vet, Desktop-tag tests, 41 files/143 React tests, strict TypeScript, Vite, npm audit, and Windows compatibility checks. ADR 0070 is authoritative for the current interface; ADR 0069 remains authoritative for the inert browser boundary.
 
 Completed:
 
@@ -1908,10 +1908,10 @@ connection gate. The `cyberagent` command, Go module, data directory, environmen
 HTTP compatibility headers, credential targets, OpenAPI identity, SARIF identity, and
 Windows class name remain unchanged to avoid a destructive compatibility migration.
 
-D1-UX2 installs the exact supplied workspace background, Prayu wordmark, and active-brush
-asset, plus a separately generated and approved Settings background. Workspace content is
+D1-UX2 installs the exact supplied workspace background and Prayu wordmark plus a separately
+generated and approved Settings background. Workspace content is
 a cream 90%-opaque surface. Selected tasks, Runs, and Settings rows share a warm dark base,
-orange icon and brush, and cream text. D1-UX3 adds real Settings navigation, bounded
+orange icon and CSS brush, and cream text. D1-UX3 adds real Settings navigation, bounded
 runtime-capability facts, display-only density persistence, sidebar controls, and desktop/
 mobile layouts with no horizontal overflow. The renderer receives no credential, Policy,
 model, tool, Shell, Docker, filesystem, subprocess, or persistence authority.
@@ -2067,6 +2067,26 @@ Docker, Shell, Provider, Store/Event, or Artifact path ran. ADR 0069 is authorit
 Architecture completion remains about 99%, complete product usability about 95-97%, generic
 Coding Agent usability about 95-96%, and Cyber automation about 20%. This batch makes future
 browser execution safer but does not yet give the user an operational browser.
+
+## D1-UX4/UX5/UX6: Frameless Workbench And Agent Composer
+
+D1-UX4 provides a frameless Wails development window with React-owned visible chrome and
+runtime-backed minimize, maximize/restore, and close controls. D1-UX5 adds a 286 px default,
+232-420 px bounded sidebar with pointer/keyboard resize, double-click reset, presentation-only
+local persistence, and a transparent drag target. Selected rows now render the orange brush
+entirely in CSS; the cropped concept-image asset is removed.
+
+D1-UX6 shares one composer across new Run, Run delivery, and Session chat. Its add menu reaches
+only existing workspace attachment, target/Plan, and installed-Skill paths. Model availability
+loads lazily from Go and route changes retain the existing controlled mutation. Context usage is
+conservative. Unsupported High/Max reasoning settings remain disabled because the Provider
+contract has no `reasoning_effort` field.
+
+The gate passes full Go tests, Desktop-tag tests, full vet, 41 files/143 React tests, strict
+TypeScript, Vite production build, zero-vulnerability npm audit, patch hygiene, and Windows
+automated compatibility checks. The unsigned GUI SHA-256 is
+`28ae5b21efa7746f0bd3c6646351daca6234aeeb2e85c082982e4e915b95400b` and
+`release_ready=false`. No new renderer or execution authority exists. ADR 0070 is authoritative.
 
 ## Recommended Next Batch
 

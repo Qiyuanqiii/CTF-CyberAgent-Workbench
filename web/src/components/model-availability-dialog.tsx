@@ -10,6 +10,21 @@ export function ModelAvailabilityDialog({ client, open, onClose }: {
   open: boolean;
   onClose: () => void;
 }) {
+  return <ModelAvailabilitySurface client={client} onClose={onClose} open={open}
+    presentation="dialog" />;
+}
+
+export function ModelAvailabilityWorkspace({ client }: { client: CyberAgentClient }) {
+  return <ModelAvailabilitySurface client={client} onClose={() => undefined} open
+    presentation="workspace" />;
+}
+
+function ModelAvailabilitySurface({ client, open, onClose, presentation }: {
+  client: CyberAgentClient;
+  open: boolean;
+  onClose: () => void;
+  presentation: "dialog" | "workspace";
+}) {
   const queryClient = useQueryClient();
   const [selections, setSelections] = useState<Record<string, string>>({});
   const [diagnostic, setDiagnostic] = useState<ProviderDiagnosticView | null>(null);
@@ -76,19 +91,22 @@ export function ModelAvailabilityDialog({ client, open, onClose }: {
   if (!open) {
     return null;
   }
-  return (
-    <div className="desktop-dialog-backdrop" role="presentation">
-      <section aria-label="Model availability" aria-modal="true"
-        className="desktop-dialog model-availability-dialog" role="dialog">
+  const surface = (
+      <section aria-label={presentation === "dialog" ? "Model availability" : "模型切换"}
+        aria-modal={presentation === "dialog" ? "true" : undefined}
+        className={presentation === "dialog"
+          ? "desktop-dialog model-availability-dialog" : "model-control-workspace"}
+        role={presentation === "dialog" ? "dialog" : "region"}>
         <header>
           <div>
             <span className="dialog-icon"><Cpu aria-hidden="true" size={18} /></span>
-            <div><h2>Models / 模型</h2><small>model_availability.v1</small></div>
+            <div><h2>{presentation === "dialog" ? "Models / 模型" : "模型切换"}</h2>
+              <small>model_availability.v1</small></div>
           </div>
-          <button aria-label="Close model availability" className="icon-button"
+          {presentation === "dialog" && <button aria-label="Close model availability" className="icon-button"
             onClick={onClose} title="Close" type="button">
             <X aria-hidden="true" size={17} />
-          </button>
+          </button>}
         </header>
         <div className="desktop-dialog-body model-availability-body">
           {query.isLoading && <LoadingState label="Loading model availability" />}
@@ -214,6 +232,7 @@ export function ModelAvailabilityDialog({ client, open, onClose }: {
           )}
         </div>
       </section>
-    </div>
   );
+  if (presentation === "workspace") return surface;
+  return <div className="desktop-dialog-backdrop" role="presentation">{surface}</div>;
 }

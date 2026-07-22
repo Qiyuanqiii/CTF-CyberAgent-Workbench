@@ -365,6 +365,7 @@ func runDesktop(config desktopOptions) error {
 
 	return wails.Run(&options.App{
 		Title: app.Name, Width: 1440, Height: 900, MinWidth: 1024, MinHeight: 680,
+		Frameless:        true,
 		WindowStartState: options.Normal,
 		BackgroundColour: options.NewRGB(23, 22, 20),
 		AssetServer: &assetserver.Options{

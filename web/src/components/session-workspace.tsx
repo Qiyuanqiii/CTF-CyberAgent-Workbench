@@ -8,7 +8,11 @@ import { formatDate, formatNumber, shortID } from "../lib/format";
 import { EmptyState, ErrorState, KeyValue, LoadMoreButton, LoadingState, StatusBadge } from "./common";
 import { SessionComposer, SessionSteeringQueue } from "./session-composer";
 
-export function SessionWorkspace({ client, sessionID }: { client: CyberAgentClient; sessionID: string }) {
+export function SessionWorkspace({ client, sessionID, onOpenPlugins }: {
+  client: CyberAgentClient;
+  sessionID: string;
+  onOpenPlugins?: () => void;
+}) {
   const detailQuery = useQuery({
     queryKey: ["session", sessionID],
     queryFn: ({ signal }) => client.get<SessionDetailView>(`/sessions/${encodeURIComponent(sessionID)}`, {}, signal),
@@ -17,6 +21,8 @@ export function SessionWorkspace({ client, sessionID }: { client: CyberAgentClie
   const messagesQuery = usePagedResource<MessageView>(client, ["session", sessionID, "messages"],
     `/sessions/${encodeURIComponent(sessionID)}/messages`, { limit: 100, include_compacted: true }, Boolean(sessionID));
   const messages = useMemo(() => messagesQuery.data?.pages.flatMap((page) => page.items) ?? [], [messagesQuery.data]);
+  const contextTokens = useMemo(() => messages.filter((message) => !message.compacted)
+    .reduce((total, message) => total + message.token_estimate, 0), [messages]);
   const boundRunID = detailQuery.data?.run?.id ?? "";
   const runQuery = useQuery({
     queryKey: ["run", boundRunID],
@@ -52,8 +58,9 @@ export function SessionWorkspace({ client, sessionID }: { client: CyberAgentClie
           <KeyValue label="Updated" value={formatDate(detail.session.updated_at)} />
         </dl>
       </div>
-      <SessionComposer client={client} key={sessionID} run={detail.run ?? null}
-        sessionID={sessionID} />
+      <SessionComposer client={client} contextPartial={Boolean(messagesQuery.hasNextPage)}
+        contextTokens={contextTokens} key={sessionID} onOpenPlugins={onOpenPlugins}
+        run={detail.run ?? null} sessionID={sessionID} workspaceID={detail.session.workspace_id ?? ""} />
       <SessionSteeringQueue client={client} sessionID={sessionID}
         state={runQuery.data?.operator_steering ?? null} />
       <div className="workspace-content session-content">

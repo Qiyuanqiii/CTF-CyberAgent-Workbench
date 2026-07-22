@@ -25,9 +25,9 @@ must not turn TypeScript into a second control plane.
    `cyberagent-workbench` Go module, `.cyberagent-workbench` data directory,
    `CYBERAGENT_*` environment variables, HTTP compatibility headers, credential targets,
    current OpenAPI/SARIF identifiers, and `CyberAgentWorkbench` Windows class name.
-3. The workspace uses the exact user-supplied background, wordmark, and active-brush PNGs.
-   Settings uses a distinct approved background. These are repository assets, not runtime
-   downloads.
+3. The workspace uses the exact user-supplied background and wordmark. Settings uses a
+   distinct approved background. These are repository assets, not runtime downloads. The
+   original active-brush PNG decision is superseded by ADR 0070's CSS-generated state.
 4. Selected task, Run, and Settings rows share one visual state: warm dark base, right-side
    orange brush, orange icon/accent, and cream text. The main work surface is cream with
    90% opacity so the supplied background remains visible without reducing readability.
@@ -72,8 +72,8 @@ reading or writing the display-only density preference. The UI now catches both 
 falls back to comfortable density, and has a dedicated regression test.
 
 In-app-browser visual checks used an in-memory read-only API fixture at 1440x900 and
-390x844. They confirmed distinct workspace/Settings backgrounds, the exact active-brush
-asset on selected rows, the cream translucent work surface, fully visible selected mobile
+390x844. They confirmed distinct workspace/Settings backgrounds, the original selected-row
+treatment, the cream translucent work surface, fully visible selected mobile
 rows, and no top-level horizontal overflow. The fixture did not call a Provider, tool,
 Runner, network target, or product execution path.
 

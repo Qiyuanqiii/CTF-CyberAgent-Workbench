@@ -93,7 +93,7 @@ Read in this order after a long context break:
 - Main languages: Go control plane, TypeScript React/Vite local console, and deterministic Rust 1.97.1 digest/ZIP protocol functions. Rust has no Agent, LLM, config, key, persistence, network, filesystem, subprocess, or product-lifecycle ownership.
 - Analyzer status: P10-A1 through P10-B3 fix `analyzer_protocol.v1`, a two-entry inert `analyzer_descriptor.v1` Registry, strict digest and `archive.inventory.v1` result validation, bounded Rust stdin/stdout functions, and two five-vector semantic/bytes/SHA suites with separate CI. The ZIP function only reads an in-memory central directory and never opens, decompresses, extracts, or writes entry data. A Go-to-Rust product process bridge, product invocation, Run/Event/SQLite persistence, and Artifact commit remain absent. See ADR 0062, ADR 0063, and `analyzers/README.md`.
 - Desktop status: D0-A/D0-B and D1-R1 through D1-G13/V12 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, read-only Repository state/redacted Diff/local history/exact-commit metadata/redacted preview/navigable exact-file history/exact-commit comparison with keyboard-accessible paired base/head previews, independent multi-file review, separate immutable verification plans/results/associations plus snapshot-stable exact per-item drilldown/download/receipt history/non-authorizing review and Handoff coverage, digest-bound Code Handoff export with exact fail-closed receipt-review navigation, bounded Code Journey audit facts, generation-safe Windows Credential Manager Provider controls, and a default-off one-concurrent/one-step wake worker. The 2026-07-22 repair now tests the real Wails server-form request rather than an absolute-URL mock, and one exact legacy v30 preview checksum upgrades in place while unknown history remains rejected. A real Windows 11 launch rendered the workbench and Settings against the upgraded default profile, then closed with SQLite integrity `ok`; the pre-upgrade database backup is `~/.cyberagent-workbench/backups/cyberagent-v30-before-v84-20260722.db`. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, terminal, real Shell/Local/Docker process execution, or install-time Skill execution. See ADR 0033 through ADR 0061, ADR 0064, ADR 0068, and `docs/DESKTOP_PLAN.md`.
-- Prayu UX status: D1-UX1/UX2/UX3 introduces the Prayu user-facing identity, exact supplied workspace/wordmark/active-brush assets, a distinct Settings background, a cream translucent work surface, functional Settings navigation and display-only density, plus 1440x900 and 390x844 responsive layouts. Stable CyberAgent compatibility identifiers remain unchanged. Settings is a read-only projection and TypeScript gains no credential, Policy, model, tool, Shell, Docker, process, or persistence authority. See ADR 0064.
+- Prayu UX status: D1-UX1 through D1-UX6 introduce the Prayu user-facing identity, supplied workspace/Settings backgrounds and wordmark, a CSS-generated selected-state brush, a cream translucent work surface, functional Settings navigation and display-only density, a frameless Wails titlebar, a bounded persisted resizable sidebar, and an Agent composer with Go-backed model routing, truthful reasoning capability state, attachments, target/plan modes, Skills, and conservative context usage. Stable CyberAgent compatibility identifiers remain unchanged. Settings is a read-only projection and TypeScript gains no credential, Policy, tool, Shell, Docker, process, or persistence authority; model changes still cross the existing Go mutation boundary. See ADR 0064 and ADR 0070.
 - Custom Skill status: the five embedded `skill.v1` guides and explicitly selected external packages are Run-loadable through separate protocols. Schema v69 adds persistent content-addressed import/history; schema v70 adds a second explicitly confirmed exact Run selection and redacted user-role root/Specialist context; schema v71 adds bounded read-only provenance across HTTP/TUI/Web. D1-A adds a pathless, one-time-handle preview boundary; D1-B1 adds explicit HTTP/Desktop registration through the same inert Registry. External packages remain untrusted and grant no declared tools. Installation executes no content and still does not select a package for a Run. See ADR 0024, ADR 0031 through ADR 0033, ADR 0041, and `docs/SKILL_PACKAGE_PLAN.md`.
 - Protected-delete status: explicit recursive, absolute/traversing/wildcard, environment-derived, command-substituted, current-home, PowerShell/`cmd`, and common interpreter deletion intents are permanently denied before approval across Shell, ScriptProcess, and Sandbox Policy. This is defense in depth; Local/container process execution remains disabled and a future executor still requires OS/container isolation. See ADR 0025.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
@@ -1494,10 +1494,11 @@ the React shell. Established `cyberagent` CLI/module/data/environment/HTTP/crede
 Windows compatibility identifiers remain unchanged, so no schema, database, credential,
 or script migration occurs.
 
-D1-UX2 installs the exact supplied workspace background, wordmark, and active-brush PNG,
-plus a distinct approved Settings background. Selected task, Run, and Settings rows use
-the same warm dark base, right-side orange brush, orange icon, and cream text. The main
-workspace is a cream 90%-opaque surface rather than a second nested card.
+D1-UX2 installs the exact supplied workspace background and wordmark plus a distinct
+approved Settings background. Selected task, Run, and Settings rows use the same warm dark
+base, CSS-generated right-side orange brush, orange icon, and cream text; no screenshot crop
+is used as a selected-state asset. The main workspace is a cream 90%-opaque surface rather
+than a second nested card.
 
 D1-UX3 adds working workspace/Settings switching, Settings navigation, bounded API/schema/
 version/surface/capability facts, a display-only comfortable/compact preference, and
@@ -1514,7 +1515,7 @@ the narrowly scoped Redocly transitive override to fixed 4.3.0 passed API genera
 all Web tests, build, and a zero-vulnerability re-audit.
 
 Visual QA used only an in-memory read-only fixture at 1440x900 and 390x844. It confirmed
-the exact selected-state brush, distinct backgrounds, translucent work surface, fully
+the CSS selected-state brush, distinct backgrounds, translucent work surface, fully
 visible mobile selection, and no horizontal overflow. Review found no unresolved high or
 medium risk on an enabled path; one low-risk denied-`localStorage` startup failure was
 fixed with a fail-soft fallback and regression test. No Provider/key, Shell, LocalRunner, Docker, product Rust
@@ -1686,6 +1687,47 @@ remain v84 and 75/83/182. ADR 0069 is authoritative.
 中文交接：当前只有 Go 浏览器控制合同，没有可操作窗口、Chromium 启动、导航或抓包。Wails
 WebView2 继续只渲染 Prayu；不能把“Browser Session Plan 已完成”误写成“内置浏览器已可用”。
 架构仍约 99%，完整产品可用度约 95-97%，Coding 约 95-96%，Cyber 自动化约 20%。
+
+## Completed Frameless Workbench And Agent Composer (D1-UX4/UX5/UX6)
+
+D1-UX4 switches the Windows Wails development shell to a frameless surface and implements
+the visible application titlebar in React. Minimize, maximize/restore, and close call the
+existing Wails runtime only when it is present; browser tests remain fail-soft. This does
+not add an installer, registry writes, startup behavior, updater, or a second desktop host.
+
+D1-UX5 replaces the fixed sidebar with a 286 px default, 232-420 px bounded splitter. Pointer,
+keyboard, and double-click reset paths share the same clamp; the width is a presentation-only
+local preference. Its drag target is intentionally transparent, so resizing no longer draws
+the orange line that was mistaken for content. Active rows use a CSS-generated orange brush
+and never paste the supplied concept screenshot or an extracted active-row bitmap.
+
+D1-UX6 adds one shared Agent composer for new Runs, Run delivery, and Session chat. Its add
+menu exposes only already-supported workspace attachments, target mode, Plan mode, and
+installed Skills. Model choices are loaded lazily from the Go model-availability API and
+changes use the existing controlled route mutation. The context ring reports conservative
+Go-owned limits. The current Provider contract has no `reasoning_effort`, so Standard is the
+only active choice and High/Max remain visibly disabled rather than claiming a false setting.
+New-Run text prefills the existing controlled Run dialog; it does not bypass Go authorization.
+
+The focused Web gate passes strict TypeScript, production Vite build, and 41 files/143 tests.
+Desktop automated checks and the reproducible Windows development build pass; the latest
+unsigned GUI SHA-256 is
+`28ae5b21efa7746f0bd3c6646351daca6234aeeb2e85c082982e4e915b95400b` and
+`release_ready=false`. Visual QA at 1440x900 confirmed the frameless titlebar, bounded cream
+work surface, add/model/reasoning/context popovers, fully visible model labels, and pure-CSS
+active state. A Settings-background opacity issue found in QA was corrected and rebuilt;
+the final post-rebuild click-through was intentionally skipped when the desktop-control tool
+detected concurrent physical user input. No Codex window was controlled or closed.
+
+No credential/key, Policy, Tool, Shell, LocalRunner, Docker, browser, filesystem, process,
+network, approval, persistence, or installer authority was added. Schema/OpenAPI remain v84
+and 75/83/182. Architecture remains about 99%, full product usability about 95-97%, general
+Coding Agent capability about 95-96%, and Cyber automation about 20%. ADR 0070 is
+authoritative.
+
+中文交接：本批完成无边框 Prayu 窗口、透明热区的有界可调侧栏，以及复用既有 Go API 的 Agent
+输入区。模型、附件、Plan 和 Skill 都没有绕过 Go；高/最高推理强度在协议未支持前保持禁用。选中态
+已改为纯 CSS 橙色笔刷，不再把概念图贴进功能框。设置页独立背景已按视觉复核结果调亮并重建。
 
 ## Next Slice
 

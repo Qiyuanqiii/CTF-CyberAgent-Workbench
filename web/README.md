@@ -12,17 +12,27 @@ schema v71 的 External Skills 面板只读显示 Run 固定选择的 surface/pr
 
 ## Prayu 桌面界面 / Prayu Desktop Surface
 
-D1-UX1/UX2/UX3 使用独立的工作台和设置页背景、Prayu 艺术字，以及用户提供的橙色选中态笔刷。
-任务、Run 与设置导航共享同一选中语义：暖黑底、右侧橙色笔刷、橙色图标和米黄色文字；正文区
-使用米黄色半透明表面。设置页显示真实的 API、schema、版本、surface 与 capability 投影，只把
-紧凑度保存在 `prayu.ui-density`，不保存凭证或授权结果。桌面与移动布局都保持无横向溢出。
+D1-UX1/UX2/UX3 使用独立的工作台和设置页背景以及 Prayu 艺术字。任务、Run 与设置导航共享同一
+选中语义：暖黑底、由 CSS 绘制的右侧橙色笔刷、橙色图标和米黄色文字；不再把概念截图或裁切图
+直接贴进选中项。正文区使用米黄色半透明表面。设置页显示真实的 API、schema、版本、surface 与
+capability 投影，只把紧凑度保存在 `prayu.ui-density`，不保存凭证或授权结果。
 
-The Prayu shell uses separate workspace and Settings backgrounds, the supplied wordmark,
-and the supplied orange active-brush asset. Selected task, Run, and Settings rows share
-one state language: warm dark surface, orange brush and icon, and cream text. Settings is
-a read-only projection of Go-owned runtime facts; its local density preference is purely
-presentational. Established `CYBERAGENT_*`, HTTP, API, and CLI identifiers remain for
-backward compatibility.
+D1-UX4/UX5/UX6 增加 Wails 无边框窗口和原生最小化/最大化/关闭控制、默认 286 px 且可在
+232-420 px 内拖拽/键盘调整并本地记忆的侧栏，以及 Agent 输入区的附件/工作区、目标模式、计划模式、
+插件/Skill、模型、推理强度和上下文占用控件。侧栏拖拽热区保持透明，不显示橙色分隔线。模型列表
+按需读取 Go API 的真实可用性并沿用既有路由 mutation；当前 Provider 合同没有
+`reasoning_effort`，所以“高/最高”只展示为禁用能力，不会伪造已生效状态。桌面与移动布局都保持
+无横向溢出。
+
+The Prayu shell uses separate workspace and Settings backgrounds plus the supplied
+wordmark. Selected task, Run, and Settings rows share one state language: a warm dark
+surface, a CSS-generated orange brush and icon, and cream text; no screenshot crop is used
+as the selected state. D1-UX4/UX5/UX6 add a frameless Wails window, native window controls,
+a bounded and persisted resizable sidebar with a transparent drag target, and composer
+controls for attachments, target/plan modes, installed Skills, lazy Go-backed model routing,
+truthful reasoning capability state, and conservative context usage. Settings remains a
+read-only projection of Go-owned runtime facts. Established `CYBERAGENT_*`, HTTP, API, and
+CLI identifiers remain for backward compatibility.
 
 D1-G1/I3/F1 进一步增加只读 Repository 页、metadata-only 多文件 change-set 摘要和 Code-only Journey。Repository 不执行 `git`、网络或 hook，也不返回 host root/body/remote；change set 不提供 Apply All，所有 mutation 仍是逐文件独立 Go route；Journey 的导航组件自身没有 API client，D1-V12 仅由父级传入既有严格 Handoff 查询中的最多三条非授权审计事实。
 

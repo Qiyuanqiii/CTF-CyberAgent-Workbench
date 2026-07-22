@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Archive,
+  CalendarClock,
   CircleUserRound,
+  Cpu,
+  GitPullRequest,
   ListTree,
+  MessagesSquare,
+  PackageSearch,
   RefreshCw,
   Search,
   Settings,
   SquarePen,
-  TerminalSquare,
+  X,
 } from "lucide-react";
 import prayuWordmark from "../assets/prayu-wordmark.png";
 import type { CyberAgentClient } from "../api/client";
@@ -15,107 +20,169 @@ import type { RunView, SessionView } from "../api/types";
 import { usePagedResource } from "../hooks/use-paged-resource";
 import { formatCompactDate, shortID } from "../lib/format";
 import { useConnectionStore } from "../state/connection";
-import { EmptyState, ErrorState, LoadMoreButton, LoadingState, StatusBadge } from "./common";
+import { ErrorState, LoadMoreButton, LoadingState } from "./common";
 
-const runStatuses = ["", "created", "preparing", "running", "waiting_approval", "paused", "completed", "failed", "cancelled"];
+export type WorkbenchSection =
+  | "conversation"
+  | "new-task"
+  | "pull-requests"
+  | "models"
+  | "schedule"
+  | "plugins";
 
-export function ResourceSidebar({ client, onCreateRun, onOpenSettings }: {
+type NavigationSection = Exclude<WorkbenchSection, "conversation" | "new-task">;
+
+const navigationItems: Array<{
+  id: NavigationSection;
+  label: string;
+  icon: typeof GitPullRequest;
+}> = [
+  { id: "pull-requests", label: "拉取请求", icon: GitPullRequest },
+  { id: "models", label: "模型切换", icon: Cpu },
+  { id: "schedule", label: "自动定时", icon: CalendarClock },
+  { id: "plugins", label: "插件", icon: PackageSearch },
+];
+
+export function ResourceSidebar({ client, activeSection, onCreateRun, onNavigate,
+  onOpenSettings }: {
   client: CyberAgentClient;
+  activeSection: WorkbenchSection;
   onCreateRun?: () => void;
+  onNavigate?: (section: WorkbenchSection) => void;
   onOpenSettings?: () => void;
 }) {
-  const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const kind = useConnectionStore((state) => state.resourceKind);
   const selectedRunID = useConnectionStore((state) => state.selectedRunID);
   const selectedSessionID = useConnectionStore((state) => state.selectedSessionID);
   const selectRun = useConnectionStore((state) => state.selectRun);
   const selectSession = useConnectionStore((state) => state.selectSession);
-  const setKind = useConnectionStore((state) => state.setResourceKind);
 
-  const runsQuery = usePagedResource<RunView>(client, ["runs", status], "/runs", {
-    limit: 50,
-    status: status || undefined,
-  }, kind === "run");
-  const sessionsQuery = usePagedResource<SessionView>(client, ["sessions"], "/sessions", { limit: 50 }, kind === "session");
-  const runs = useMemo(() => runsQuery.data?.pages.flatMap((page) => page.items) ?? [], [runsQuery.data]);
-  const sessions = useMemo(() => sessionsQuery.data?.pages.flatMap((page) => page.items) ?? [], [sessionsQuery.data]);
+  const runsQuery = usePagedResource<RunView>(client, ["runs"], "/runs", { limit: 50 }, true);
+  const sessionsQuery = usePagedResource<SessionView>(client, ["sessions"], "/sessions",
+    { limit: 50 }, true);
+  const runs = useMemo(() => runsQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    [runsQuery.data]);
+  const sessions = useMemo(() => sessionsQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    [sessionsQuery.data]);
   const normalizedSearch = search.trim().toLowerCase();
-  const visibleRuns = runs.filter((run) => !normalizedSearch || `${run.id} ${run.mission_id} ${run.status}`.toLowerCase().includes(normalizedSearch));
-  const visibleSessions = sessions.filter((session) => !normalizedSearch || `${session.id} ${session.title} ${session.route}`.toLowerCase().includes(normalizedSearch));
+  const visibleRuns = runs.filter((run) => !normalizedSearch ||
+    `${run.id} ${run.mission_id} ${run.status}`.toLowerCase().includes(normalizedSearch));
+  const visibleSessions = sessions.filter((session) => !normalizedSearch ||
+    `${session.id} ${session.title} ${session.route}`.toLowerCase().includes(normalizedSearch));
 
   useEffect(() => {
     if (kind === "run" && !runsQuery.isLoading && !runsQuery.isFetching &&
       !runs.some((run) => run.id === selectedRunID)) {
-      selectRun(runs[0]?.id ?? "");
+      if (runs[0]) selectRun(runs[0].id);
+      else if (sessions[0]) selectSession(sessions[0].id);
     }
-  }, [kind, runs, runsQuery.isFetching, runsQuery.isLoading, selectRun, selectedRunID]);
+  }, [kind, runs, runsQuery.isFetching, runsQuery.isLoading, selectRun, selectedRunID,
+    selectSession, sessions]);
 
   useEffect(() => {
     if (kind === "session" && !sessionsQuery.isLoading && !sessionsQuery.isFetching &&
       !sessions.some((session) => session.id === selectedSessionID)) {
-      selectSession(sessions[0]?.id ?? "");
+      if (sessions[0]) selectSession(sessions[0].id);
+      else if (runs[0]) selectRun(runs[0].id);
     }
-  }, [kind, selectSession, selectedSessionID, sessions, sessionsQuery.isFetching, sessionsQuery.isLoading]);
+  }, [kind, runs, selectRun, selectSession, selectedSessionID, sessions,
+    sessionsQuery.isFetching, sessionsQuery.isLoading]);
 
-  const activeQuery = kind === "run" ? runsQuery : sessionsQuery;
+  const selectConversation = (select: () => void) => {
+    select();
+    onNavigate?.("conversation");
+  };
+  const refreshHistory = () => void Promise.all([runsQuery.refetch(), sessionsQuery.refetch()]);
+  const historyBusy = runsQuery.isFetching || sessionsQuery.isFetching;
 
   return (
-    <aside className="resource-sidebar">
+    <aside className="resource-sidebar prayu-sidebar">
       <div className="sidebar-brand">
         <img alt="Prayu" src={prayuWordmark} />
-      </div>
-      {onCreateRun && <button className="sidebar-create" onClick={onCreateRun} type="button">
-        <SquarePen aria-hidden="true" size={16} />新建任务
-      </button>}
-      <div className="resource-tabs" role="tablist" aria-label="资源类型">
-        <button aria-selected={kind === "run"} className={kind === "run" ? "active" : ""} onClick={() => setKind("run")} role="tab" type="button">
-          <ListTree aria-hidden="true" size={16} />任务
-        </button>
-        <button aria-selected={kind === "session"} className={kind === "session" ? "active" : ""} onClick={() => setKind("session")} role="tab" type="button">
-          <TerminalSquare aria-hidden="true" size={16} />会话
+        <button aria-label="搜索历史对话" className="sidebar-brand-action"
+          onClick={() => setSearchOpen((open) => !open)} title="搜索历史对话" type="button">
+          {searchOpen ? <X aria-hidden="true" size={16} /> : <Search aria-hidden="true" size={16} />}
         </button>
       </div>
-      <div className="sidebar-tools">
-        <label className="search-field">
-          <Search aria-hidden="true" size={15} />
-          <input aria-label="搜索" onChange={(event) => setSearch(event.target.value)} placeholder="搜索" type="search" value={search} />
-        </label>
-        <button aria-label="刷新列表" className="icon-button" disabled={activeQuery.isFetching} onClick={() => void activeQuery.refetch()} title="刷新列表" type="button">
-          <RefreshCw aria-hidden="true" className={activeQuery.isFetching ? "spin" : ""} size={16} />
-        </button>
-      </div>
-      {kind === "run" && (
-        <select aria-label="Run 状态" className="status-filter" onChange={(event) => setStatus(event.target.value)} value={status}>
-          {runStatuses.map((value) => <option key={value || "all"} value={value}>{value ? value.replaceAll("_", " ") : "全部状态"}</option>)}
-        </select>
-      )}
-      <div className="resource-list-heading">
-        <span>{kind === "run" ? "最近任务" : "最近会话"}</span>
-        <small>{kind === "run" ? visibleRuns.length : visibleSessions.length}</small>
-      </div>
-      <div className="resource-list">
-        {activeQuery.isLoading && <LoadingState />}
-        {activeQuery.isError && <ErrorState error={activeQuery.error} />}
-        {!activeQuery.isLoading && !activeQuery.isError && kind === "run" && visibleRuns.map((run) => (
-          <button className={`resource-row ${selectedRunID === run.id ? "selected" : ""}`} key={run.id} onClick={() => selectRun(run.id)} type="button">
-            <span className="resource-row-top"><strong>{shortID(run.id)}</strong><StatusBadge status={run.status} /></span>
-            <span>Mission {shortID(run.mission_id)}</span>
-            <time dateTime={run.updated_at}>{formatCompactDate(run.updated_at)}</time>
+
+      <nav aria-label="工作台导航" className="sidebar-primary-navigation">
+        {onCreateRun && <button className={activeSection === "new-task" ? "active" : ""}
+          onClick={onCreateRun} type="button">
+          <SquarePen aria-hidden="true" size={16} /><span>新建任务</span>
+        </button>}
+        {navigationItems.map(({ id, label, icon: Icon }) => (
+          <button aria-current={activeSection === id ? "page" : undefined}
+            className={activeSection === id ? "active" : ""} key={id}
+            onClick={() => onNavigate?.(id)} type="button">
+            <Icon aria-hidden="true" size={16} /><span>{label}</span>
           </button>
         ))}
-        {!activeQuery.isLoading && !activeQuery.isError && kind === "session" && visibleSessions.map((session) => (
-          <button className={`resource-row ${selectedSessionID === session.id ? "selected" : ""}`} key={session.id} onClick={() => selectSession(session.id)} type="button">
-            <span className="resource-row-top"><strong>{session.title}</strong><StatusBadge status={session.status} /></span>
-            <span>{session.route} / {shortID(session.id)}</span>
-            <time dateTime={session.updated_at}>{formatCompactDate(session.updated_at)}</time>
-          </button>
-        ))}
-        {!activeQuery.isLoading && !activeQuery.isError && ((kind === "run" && visibleRuns.length === 0) || (kind === "session" && visibleSessions.length === 0)) && (
-          <EmptyState><Archive aria-hidden="true" size={19} />暂无数据</EmptyState>
-        )}
-        <LoadMoreButton hasNextPage={Boolean(activeQuery.hasNextPage)} isFetching={activeQuery.isFetchingNextPage} onClick={() => void activeQuery.fetchNextPage()} />
+      </nav>
+
+      {searchOpen && <label className="sidebar-history-search">
+        <Search aria-hidden="true" size={14} />
+        <input aria-label="搜索历史对话" autoFocus onChange={(event) => setSearch(event.target.value)}
+          placeholder="搜索对话与任务" type="search" value={search} />
+      </label>}
+
+      <div className="sidebar-history">
+        <section aria-labelledby="session-history-heading">
+          <header className="sidebar-history-heading">
+            <span id="session-history-heading">历史对话</span>
+            <button aria-label="刷新历史记录" disabled={historyBusy} onClick={refreshHistory}
+              title="刷新历史记录" type="button">
+              <RefreshCw aria-hidden="true" className={historyBusy ? "spin" : ""} size={13} />
+            </button>
+          </header>
+          {sessionsQuery.isLoading && <LoadingState label="加载历史对话" />}
+          {sessionsQuery.isError && <ErrorState error={sessionsQuery.error} />}
+          {!sessionsQuery.isLoading && !sessionsQuery.isError && visibleSessions.length === 0 &&
+            <div className="sidebar-history-empty"><Archive aria-hidden="true" size={15} />暂无对话</div>}
+          {visibleSessions.map((session) => (
+            <button className={`resource-row sidebar-history-row ${selectedSessionID === session.id &&
+              activeSection === "conversation" ? "selected" : ""}`} key={session.id}
+              onClick={() => selectConversation(() => selectSession(session.id))} type="button">
+              <MessagesSquare aria-hidden="true" size={15} />
+              <span className="sidebar-history-copy">
+                <strong>{session.title}</strong>
+                <small>{session.route} · {formatCompactDate(session.updated_at)}</small>
+              </span>
+              <i aria-label={session.status} className={`history-status status-${session.status}`} />
+            </button>
+          ))}
+          <LoadMoreButton hasNextPage={Boolean(sessionsQuery.hasNextPage)}
+            isFetching={sessionsQuery.isFetchingNextPage}
+            onClick={() => void sessionsQuery.fetchNextPage()} />
+        </section>
+
+        <section aria-labelledby="run-history-heading">
+          <header className="sidebar-history-heading">
+            <span id="run-history-heading">运行记录</span><small>{visibleRuns.length}</small>
+          </header>
+          {runsQuery.isLoading && <LoadingState label="加载运行记录" />}
+          {runsQuery.isError && <ErrorState error={runsQuery.error} />}
+          {!runsQuery.isLoading && !runsQuery.isError && visibleRuns.length === 0 &&
+            <div className="sidebar-history-empty"><Archive aria-hidden="true" size={15} />暂无任务</div>}
+          {visibleRuns.map((run) => (
+            <button className={`resource-row sidebar-history-row ${selectedRunID === run.id &&
+              activeSection === "conversation" ? "selected" : ""}`} key={run.id}
+              onClick={() => selectConversation(() => selectRun(run.id))} type="button">
+              <ListTree aria-hidden="true" size={15} />
+              <span className="sidebar-history-copy">
+                <strong>任务 {shortID(run.mission_id)}</strong>
+                <small>{shortID(run.id)} · {formatCompactDate(run.updated_at)}</small>
+              </span>
+              <i aria-label={run.status} className={`history-status status-${run.status}`} />
+            </button>
+          ))}
+          <LoadMoreButton hasNextPage={Boolean(runsQuery.hasNextPage)}
+            isFetching={runsQuery.isFetchingNextPage}
+            onClick={() => void runsQuery.fetchNextPage()} />
+        </section>
       </div>
+
       <button className="sidebar-profile" onClick={onOpenSettings} type="button">
         <CircleUserRound aria-hidden="true" size={21} />
         <span><strong>本地操作者</strong><small>设置与账户</small></span>

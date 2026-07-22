@@ -30,6 +30,7 @@ describe("App capability wiring", () => {
     }, "control-token", {
       verificationEvidenceEnabled: true,
     });
+    useConnectionStore.getState().selectRun("run-test");
   });
 
   afterEach(() => {
@@ -43,7 +44,7 @@ describe("App capability wiring", () => {
 
     expect(screen.getByTestId("verification-capability")).toHaveTextContent("true");
     expect(document.querySelector(".prayu-shell.workspace-mode")).toBeInTheDocument();
-    expect(screen.getByText("Prayu")).toBeInTheDocument();
+    expect(document.querySelector(".prayu-conversation-panel")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "设置" }));
     expect(document.querySelector(".prayu-shell.settings-mode")).toBeInTheDocument();

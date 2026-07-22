@@ -5,6 +5,8 @@ import type { CyberAgentClient } from "../api/client";
 import type { RunView, SessionMessageControlRequestView,
   SessionMessageControlView, OperatorSteeringQueueView } from "../api/types";
 import { StatusBadge } from "./common";
+import { AgentComposerControls } from "./agent-composer-controls";
+import { WorkspaceAttachmentDialog } from "./workspace-attachment-dialog";
 
 const maximumContentBytes = 16 * 1024;
 
@@ -73,12 +75,18 @@ export function SessionSteeringQueue({ client, sessionID, state }: {
   );
 }
 
-export function SessionComposer({ client, sessionID, run }: {
+export function SessionComposer({ client, sessionID, run, workspaceID = "", contextTokens = 0,
+  contextPartial = false, onOpenPlugins }: {
   client: CyberAgentClient;
   sessionID: string;
   run: RunView | null;
+  workspaceID?: string;
+  contextTokens?: number;
+  contextPartial?: boolean;
+  onOpenPlugins?: () => void;
 }) {
   const [content, setContent] = useState("");
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
   const [lastResult, setLastResult] = useState<SessionMessageControlView | null>(null);
   const retryIntent = useRef<RetryIntent | null>(null);
   const queryClient = useQueryClient();
@@ -130,30 +138,34 @@ export function SessionComposer({ client, sessionID, run }: {
     mutation.reset();
   };
 
-  return (
+  return <>
     <form className="session-composer" onSubmit={submit}>
       <textarea aria-label="Session message" autoComplete="off"
         disabled={!mutable || mutation.isPending} onChange={(event) => changeContent(event.target.value)}
         placeholder="Message this Run" rows={3} spellCheck value={content} />
-      <div className="session-composer-footer">
-        <div className="session-composer-state" aria-live="polite">
+      <AgentComposerControls client={client} contextPartial={contextPartial}
+        contextTokens={contextTokens}
+        onOpenFiles={client.hasEvidenceAttachment && workspaceID
+          ? () => setAttachmentsOpen(true) : undefined}
+        onOpenPlugins={onOpenPlugins} route={run.config?.model_route ?? "code"}
+        status={<div className="session-composer-state" aria-live="polite">
           {!mutable && <><StatusBadge status={run.status} /><span>Run unavailable</span></>}
           {contentTooLarge && <span className="connection-error">Message exceeds 16384 UTF-8 bytes</span>}
           {mutation.isError && <span className="connection-error">{errorMessage(mutation.error)}</span>}
           {lastResult && <><StatusBadge status={lastResult.steering.status} />
             <span>Queued #{lastResult.steering.sequence}{lastResult.replayed ? " · replayed" : ""}</span></>}
-        </div>
-        <span className={contentTooLarge ? "byte-count invalid" : "byte-count"}>
-          {contentBytes} / {maximumContentBytes} bytes
-        </span>
-        <button aria-label="Queue message" className="session-send-button" disabled={!ready}
+          {!contentTooLarge && !mutation.isError && !lastResult &&
+            <span className="byte-count">{contentBytes} / {maximumContentBytes} bytes</span>}
+        </div>}
+        trailing={<button aria-label="Queue message" className="session-send-button" disabled={!ready}
           title="Queue message" type="submit">
           {mutation.isPending ? <LoaderCircle aria-hidden="true" className="spin" size={17} /> :
             <SendHorizontal aria-hidden="true" size={17} />}
-        </button>
-      </div>
+        </button>} />
     </form>
-  );
+    <WorkspaceAttachmentDialog client={client} onClose={() => setAttachmentsOpen(false)}
+      open={attachmentsOpen} runID={run.id} workspaceID={workspaceID} />
+  </>;
 }
 
 function errorMessage(value: unknown): string {

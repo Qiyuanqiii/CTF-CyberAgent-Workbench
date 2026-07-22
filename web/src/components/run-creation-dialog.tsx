@@ -18,10 +18,13 @@ interface RetryIntent {
   key: string;
 }
 
-export function RunCreationDialog({ client, open, onClose }: {
+export function RunCreationDialog({ client, open, onClose, initialGoal = "",
+  initialPhase = "deliver" }: {
   client: CyberAgentClient;
   open: boolean;
   onClose: () => void;
+  initialGoal?: string;
+  initialPhase?: NonNullable<RunCreationControlRequestView["phase"]>;
 }) {
   const [goal, setGoal] = useState("");
   const [workspaceID, setWorkspaceID] = useState("");
@@ -29,6 +32,7 @@ export function RunCreationDialog({ client, open, onClose }: {
   const [surface, setSurface] = useState<NonNullable<RunCreationControlRequestView["surface"]>>("code");
   const [phase, setPhase] = useState<NonNullable<RunCreationControlRequestView["phase"]>>("deliver");
   const retryIntent = useRef<RetryIntent | null>(null);
+  const wasOpen = useRef(false);
   const queryClient = useQueryClient();
   const selectRun = useConnectionStore((state) => state.selectRun);
   const workspaces = useQuery({
@@ -49,6 +53,17 @@ export function RunCreationDialog({ client, open, onClose }: {
       onClose();
     },
   });
+  const resetMutation = mutation.reset;
+
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      setGoal(initialGoal);
+      setPhase(initialPhase);
+      retryIntent.current = null;
+      resetMutation();
+    }
+    wasOpen.current = open;
+  }, [initialGoal, initialPhase, open, resetMutation]);
 
   useEffect(() => {
     if (!workspaceID && workspaces.data?.items[0]) {
