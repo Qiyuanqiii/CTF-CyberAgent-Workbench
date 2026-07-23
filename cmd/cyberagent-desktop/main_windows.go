@@ -358,6 +358,7 @@ func runDesktop(config desktopOptions) error {
 		VerificationEvidenceEnabled:   config.verificationEvidence,
 		AppVersion:                    app.Version, UIDigest: bundle.Digest(), Selector: selector,
 		PreviewBridge: preview, SkillInstaller: controlPlane.SkillInstaller(),
+		WorkspaceResolver: controlPlane, WorkspaceLauncher: newNativeWorkspaceLauncher(),
 	})
 	if err != nil {
 		return err

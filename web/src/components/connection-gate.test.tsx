@@ -75,6 +75,7 @@ describe("ConnectionGate", () => {
       skill_installation_enabled: false,
       evidence_attachment_enabled: false,
       verification_evidence_enabled: false,
+      workspace_open_enabled: false,
       renderer_path_input_supported: false,
     });
     window.go = { desktop: { DesktopBridge: {

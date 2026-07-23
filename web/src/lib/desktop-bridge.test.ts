@@ -33,6 +33,7 @@ const bootstrap = {
   skill_installation_enabled: false,
   evidence_attachment_enabled: false,
   verification_evidence_enabled: false,
+  workspace_open_enabled: false,
   renderer_path_input_supported: false,
 };
 
@@ -275,6 +276,92 @@ describe("desktop native bridge", () => {
     module = await import("./desktop-bridge");
     await expect(module.selectDesktopSkillPreview()).rejects.toThrow("rejected");
   });
+
+  it("opens a registered Workspace only through a strict pathless native contract", async () => {
+    const enabled = { ...bootstrap, workspace_open_enabled: true };
+    const launchers = {
+      protocol_version: "desktop_workspace_launcher_list.v1",
+      workspace_id: "workspace-1",
+      launchers: [
+        { id: "file-explorer", label: "File Explorer", kind: "folder" },
+        { id: "terminal", label: "Terminal", kind: "terminal" },
+      ],
+      root_path_exposed: false,
+      renderer_path_input_supported: false,
+      arbitrary_arguments_accepted: false,
+      agent_authority_granted: false,
+    };
+    const result = {
+      protocol_version: "desktop_workspace_open.v1",
+      workspace_id: "workspace-1",
+      launcher_id: "file-explorer",
+      status: "started",
+      operator_confirmed: true,
+      external_process_started: true,
+      arbitrary_arguments_accepted: false,
+      command_executed: false,
+      root_path_exposed: false,
+      agent_authority_granted: false,
+    };
+    const list = vi.fn().mockResolvedValue(launchers);
+    const open = vi.fn().mockResolvedValue(result);
+    installBridge({ Bootstrap: vi.fn().mockResolvedValue(enabled),
+      WorkspaceLaunchers: list, OpenWorkspace: open });
+    const module = await import("./desktop-bridge");
+    await module.loadDesktopBootstrap();
+    await expect(module.listDesktopWorkspaceLaunchers("workspace-1"))
+      .resolves.toEqual(launchers.launchers);
+    await expect(module.openDesktopWorkspace("workspace-1", "file-explorer"))
+      .resolves.toEqual(result);
+    expect(list).toHaveBeenCalledWith("workspace-1");
+    expect(open).toHaveBeenCalledWith({
+      protocol_version: "desktop_workspace_open.v1",
+      workspace_id: "workspace-1",
+      launcher_id: "file-explorer",
+    });
+  });
+
+  it("rejects path disclosure, arbitrary arguments, and inconsistent open receipts", async () => {
+    const enabled = { ...bootstrap, workspace_open_enabled: true };
+    installBridge({
+      Bootstrap: vi.fn().mockResolvedValue(enabled),
+      WorkspaceLaunchers: vi.fn().mockResolvedValue({
+        protocol_version: "desktop_workspace_launcher_list.v1",
+        workspace_id: "workspace-1",
+        launchers: [],
+        root_path_exposed: false,
+        renderer_path_input_supported: false,
+        arbitrary_arguments_accepted: false,
+        agent_authority_granted: false,
+        root_path: "C:\\PRIVATE",
+      }),
+    });
+    let module = await import("./desktop-bridge");
+    await module.loadDesktopBootstrap();
+    await expect(module.listDesktopWorkspaceLaunchers("workspace-1")).rejects.toThrow("rejected");
+
+    vi.resetModules();
+    installBridge({
+      Bootstrap: vi.fn().mockResolvedValue(enabled),
+      OpenWorkspace: vi.fn().mockResolvedValue({
+        protocol_version: "desktop_workspace_open.v1",
+        workspace_id: "workspace-1",
+        launcher_id: "terminal",
+        status: "started",
+        operator_confirmed: false,
+        external_process_started: true,
+        arbitrary_arguments_accepted: false,
+        command_executed: false,
+        root_path_exposed: false,
+        agent_authority_granted: false,
+      }),
+    });
+    module = await import("./desktop-bridge");
+    await module.loadDesktopBootstrap();
+    await expect(module.openDesktopWorkspace("workspace-1", "terminal")).rejects.toThrow("rejected");
+    await expect(module.openDesktopWorkspace("workspace-1", "terminal -- powershell"))
+      .rejects.toThrow("request was rejected");
+  });
 });
 
 function installBridge(overrides: Partial<{
@@ -282,6 +369,8 @@ function installBridge(overrides: Partial<{
   InstallSkillPackage: (request: unknown) => Promise<unknown>;
   PreviewSkillPackage: (handle: string) => Promise<unknown>;
   SelectSkillPackage: () => Promise<unknown>;
+  OpenWorkspace: (request: unknown) => Promise<unknown>;
+  WorkspaceLaunchers: (workspaceID: string) => Promise<unknown>;
 }>) {
   window.go = {
     desktop: {
@@ -289,11 +378,13 @@ function installBridge(overrides: Partial<{
         Bootstrap: vi.fn().mockResolvedValue(bootstrap),
         InstallSkillPackage: vi.fn().mockRejectedValue(new Error("disabled")),
         PreviewSkillPackage: vi.fn().mockResolvedValue(preview),
+        OpenWorkspace: vi.fn().mockRejectedValue(new Error("disabled")),
         SelectSkillPackage: vi.fn().mockResolvedValue({
           protocol_version: "desktop_skill_package_dialog.v1",
           status: "cancelled",
           selection: null,
         }),
+        WorkspaceLaunchers: vi.fn().mockRejectedValue(new Error("disabled")),
         ...overrides,
       },
     },

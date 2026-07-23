@@ -3,6 +3,8 @@ export const desktopSkillDialogProtocol = "desktop_skill_package_dialog.v1";
 export const desktopSkillSelectionProtocol = "desktop_file_selection.v1";
 export const desktopSkillPreviewProtocol = "desktop_skill_package_preview.v1";
 export const desktopSkillInstallProtocol = "desktop_skill_package_install.v1";
+export const desktopWorkspaceLauncherProtocol = "desktop_workspace_launcher_list.v1";
+export const desktopWorkspaceOpenProtocol = "desktop_workspace_open.v1";
 
 export interface DesktopOperationReceipt {
   protocol_version: "operation_receipt.v1";
@@ -47,7 +49,43 @@ export interface DesktopConnectionBootstrap {
   skill_installation_enabled: boolean;
   evidence_attachment_enabled: boolean;
   verification_evidence_enabled: boolean;
+  workspace_open_enabled: boolean;
   renderer_path_input_supported: false;
+}
+
+export interface DesktopWorkspaceLauncher {
+  id: string;
+  label: string;
+  kind: "folder" | "terminal" | "editor";
+}
+
+export interface DesktopWorkspaceLauncherList {
+  protocol_version: typeof desktopWorkspaceLauncherProtocol;
+  workspace_id: string;
+  launchers: DesktopWorkspaceLauncher[];
+  root_path_exposed: false;
+  renderer_path_input_supported: false;
+  arbitrary_arguments_accepted: false;
+  agent_authority_granted: false;
+}
+
+export interface DesktopWorkspaceOpenRequest {
+  protocol_version: typeof desktopWorkspaceOpenProtocol;
+  workspace_id: string;
+  launcher_id: string;
+}
+
+export interface DesktopWorkspaceOpenResult {
+  protocol_version: typeof desktopWorkspaceOpenProtocol;
+  workspace_id: string;
+  launcher_id: string;
+  status: "cancelled" | "started";
+  operator_confirmed: boolean;
+  external_process_started: boolean;
+  arbitrary_arguments_accepted: false;
+  command_executed: false;
+  root_path_exposed: false;
+  agent_authority_granted: false;
 }
 
 export interface DesktopSkillSelection {
@@ -122,9 +160,14 @@ export interface DesktopSkillInstallResult {
 interface NativeDesktopBridge {
   Bootstrap: () => Promise<unknown>;
   InstallSkillPackage: (request: DesktopSkillInstallRequest) => Promise<unknown>;
+  OpenWorkspace?: (request: DesktopWorkspaceOpenRequest) => Promise<unknown>;
   PreviewSkillPackage: (handle: string) => Promise<unknown>;
   SelectSkillPackage: () => Promise<unknown>;
+  WorkspaceLaunchers?: (workspaceID: string) => Promise<unknown>;
 }
+
+type NativeWorkspaceBridge = NativeDesktopBridge & Required<Pick<NativeDesktopBridge,
+  "OpenWorkspace" | "WorkspaceLaunchers">>;
 
 declare global {
   interface Window {
@@ -216,6 +259,44 @@ export async function installDesktopSkillPackage(preview: DesktopSkillPreview,
   return value;
 }
 
+export async function listDesktopWorkspaceLaunchers(
+  workspaceID: string,
+): Promise<DesktopWorkspaceLauncher[]> {
+  const bridge = getWorkspaceBridge();
+  if (!bridge || !activeBootstrap?.workspace_open_enabled) {
+    throw new Error("Desktop workspace opening is disabled");
+  }
+  if (!validWorkspaceID(workspaceID)) {
+    throw new Error("Desktop workspace launcher request was rejected");
+  }
+  const value = await bridge.WorkspaceLaunchers(workspaceID);
+  if (!validWorkspaceLauncherList(value, workspaceID)) {
+    throw new Error("Desktop workspace launcher list was rejected");
+  }
+  return value.launchers;
+}
+
+export async function openDesktopWorkspace(workspaceID: string,
+  launcherID: string): Promise<DesktopWorkspaceOpenResult> {
+  const bridge = getWorkspaceBridge();
+  if (!bridge || !activeBootstrap?.workspace_open_enabled) {
+    throw new Error("Desktop workspace opening is disabled");
+  }
+  if (!validWorkspaceID(workspaceID) || !validLauncherID(launcherID)) {
+    throw new Error("Desktop workspace open request was rejected");
+  }
+  const request: DesktopWorkspaceOpenRequest = {
+    protocol_version: desktopWorkspaceOpenProtocol,
+    workspace_id: workspaceID,
+    launcher_id: launcherID,
+  };
+  const value = await bridge.OpenWorkspace(request);
+  if (!validWorkspaceOpenResult(value, request)) {
+    throw new Error("Desktop workspace open result was rejected");
+  }
+  return value;
+}
+
 export function desktopErrorMessage(value: unknown): string {
   if (value instanceof Error && value.message.trim()) {
     return value.message;
@@ -237,6 +318,15 @@ function getBridge(): NativeDesktopBridge | null {
   return candidate as NativeDesktopBridge;
 }
 
+function getWorkspaceBridge(): NativeWorkspaceBridge | null {
+  const bridge = getBridge();
+  if (!bridge || typeof bridge.OpenWorkspace !== "function" ||
+    typeof bridge.WorkspaceLaunchers !== "function") {
+    return null;
+  }
+  return bridge as NativeWorkspaceBridge;
+}
+
 function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
   if (!hasExactKeys(value, [
     "api_base_url", "api_version", "app_version", "approval_control_enabled",
@@ -252,6 +342,7 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
     "run_wake_execution_enabled", "run_wake_worker_enabled",
     "session_message_enabled", "skill_installation_enabled", "ui_digest",
     "session_steering_control_enabled",
+    "workspace_open_enabled",
   ])) {
     return false;
   }
@@ -277,6 +368,7 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
     typeof value.skill_installation_enabled === "boolean" &&
     typeof value.evidence_attachment_enabled === "boolean" &&
 	typeof value.verification_evidence_enabled === "boolean" &&
+    typeof value.workspace_open_enabled === "boolean" &&
     (value.control_token !== "") === (value.control_enabled || value.run_creation_enabled ||
       value.session_message_enabled || value.session_steering_control_enabled ||
       value.run_lifecycle_enabled || value.run_execution_enabled ||
@@ -302,6 +394,48 @@ function validBootstrap(value: unknown): value is DesktopConnectionBootstrap {
     value.process_execution_enabled === false && value.shell_execution_enabled === false &&
     value.docker_execution_enabled === false &&
     value.renderer_path_input_supported === false;
+}
+
+function validWorkspaceLauncherList(value: unknown,
+  workspaceID: string): value is DesktopWorkspaceLauncherList {
+  if (!hasExactKeys(value, ["agent_authority_granted", "arbitrary_arguments_accepted",
+    "launchers", "protocol_version", "renderer_path_input_supported", "root_path_exposed",
+    "workspace_id"]) || value.protocol_version !== desktopWorkspaceLauncherProtocol ||
+    value.workspace_id !== workspaceID || value.root_path_exposed !== false ||
+    value.renderer_path_input_supported !== false || value.arbitrary_arguments_accepted !== false ||
+    value.agent_authority_granted !== false || !Array.isArray(value.launchers) ||
+    value.launchers.length > 12) {
+    return false;
+  }
+  const ids = new Set<string>();
+  for (const launcher of value.launchers) {
+    if (!hasExactKeys(launcher, ["id", "kind", "label"]) || !validLauncherID(launcher.id) ||
+      !boundedText(launcher.label, 1, 80) ||
+      (launcher.kind !== "folder" && launcher.kind !== "terminal" && launcher.kind !== "editor") ||
+      ids.has(launcher.id)) {
+      return false;
+    }
+    ids.add(launcher.id);
+  }
+  return true;
+}
+
+function validWorkspaceOpenResult(value: unknown,
+  request: DesktopWorkspaceOpenRequest): value is DesktopWorkspaceOpenResult {
+  if (!hasExactKeys(value, ["agent_authority_granted", "arbitrary_arguments_accepted",
+    "command_executed", "external_process_started", "launcher_id", "operator_confirmed",
+    "protocol_version", "root_path_exposed", "status", "workspace_id"]) ||
+    value.protocol_version !== desktopWorkspaceOpenProtocol ||
+    value.workspace_id !== request.workspace_id || value.launcher_id !== request.launcher_id ||
+    value.root_path_exposed !== false || value.arbitrary_arguments_accepted !== false ||
+    value.command_executed !== false || value.agent_authority_granted !== false) {
+    return false;
+  }
+  if (value.status === "started") {
+    return value.operator_confirmed === true && value.external_process_started === true;
+  }
+  return value.status === "cancelled" && value.operator_confirmed === false &&
+    value.external_process_started === false;
 }
 
 function validDialogResult(value: unknown): value is DesktopSkillDialogResult {
@@ -401,6 +535,14 @@ function boundedText(value: unknown, minimum: number, maximum: number): value is
 
 function validToken(value: unknown): value is string {
   return boundedText(value, 32, 512) && !/\s/u.test(value);
+}
+
+function validWorkspaceID(value: unknown): value is string {
+  return boundedText(value, 1, 256) && !/[\s\u0000-\u001f\u007f]/u.test(value);
+}
+
+function validLauncherID(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9-]{0,63}$/.test(value);
 }
 
 function isSHA256(value: unknown): value is string {

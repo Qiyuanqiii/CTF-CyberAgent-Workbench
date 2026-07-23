@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"path/filepath"
@@ -197,6 +198,32 @@ func (c *ControlPlane) SkillInstaller() SkillPackageInstaller {
 		return nil
 	}
 	return c.skillInstaller
+}
+
+// ResolveWorkspace keeps the registered root inside the Go control plane. The
+// renderer selects only an opaque Workspace ID and never receives RootPath.
+func (c *ControlPlane) ResolveWorkspace(ctx context.Context,
+	workspaceID string) (WorkspaceOpenTarget, error) {
+	if c == nil || c.stateStore == nil {
+		return WorkspaceOpenTarget{}, apperror.New(apperror.CodeFailedPrecondition,
+			"desktop workspace resolver is unavailable")
+	}
+	if ctx == nil || !validWorkspaceIdentity(workspaceID) {
+		return WorkspaceOpenTarget{}, apperror.New(apperror.CodeInvalidArgument,
+			"desktop workspace identifier is invalid")
+	}
+	record, err := c.stateStore.GetWorkspaceByID(ctx, workspaceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return WorkspaceOpenTarget{}, apperror.New(apperror.CodeNotFound,
+			"desktop workspace was not found")
+	}
+	if err != nil {
+		return WorkspaceOpenTarget{}, apperror.New(apperror.CodeUnavailable,
+			"desktop workspace lookup failed")
+	}
+	return WorkspaceOpenTarget{
+		ID: record.ID, Name: record.Name, RootPath: filepath.Clean(record.RootPath),
+	}, nil
 }
 
 func (c *ControlPlane) StartWakeWorker(parent context.Context) error {

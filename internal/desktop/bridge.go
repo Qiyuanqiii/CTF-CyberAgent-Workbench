@@ -60,6 +60,7 @@ type ConnectionBootstrap struct {
 	SkillInstallationEnabled      bool   `json:"skill_installation_enabled"`
 	EvidenceAttachmentEnabled     bool   `json:"evidence_attachment_enabled"`
 	VerificationEvidenceEnabled   bool   `json:"verification_evidence_enabled"`
+	WorkspaceOpenEnabled          bool   `json:"workspace_open_enabled"`
 	RendererPathInputSupported    bool   `json:"renderer_path_input_supported"`
 }
 
@@ -147,18 +148,23 @@ type DesktopBridgeConfig struct {
 	Selector                      NativeSkillPackageSelector
 	PreviewBridge                 *SkillPackagePreviewBridge
 	SkillInstaller                SkillPackageInstaller
+	WorkspaceResolver             WorkspaceResolver
+	WorkspaceLauncher             NativeWorkspaceLauncher
 }
 
 // DesktopBridge is the complete renderer binding surface for D0-A. Keep this
 // type deliberately small: Wails binds every exported method.
 type DesktopBridge struct {
-	contextProvider func() context.Context
-	filePicker      SkillPackageFilePicker
-	selector        NativeSkillPackageSelector
-	previewBridge   *SkillPackagePreviewBridge
-	skillInstaller  SkillPackageInstaller
-	bootstrap       ConnectionBootstrap
-	dialogActive    atomic.Bool
+	contextProvider     func() context.Context
+	filePicker          SkillPackageFilePicker
+	selector            NativeSkillPackageSelector
+	previewBridge       *SkillPackagePreviewBridge
+	skillInstaller      SkillPackageInstaller
+	workspaceResolver   WorkspaceResolver
+	workspaceLauncher   NativeWorkspaceLauncher
+	bootstrap           ConnectionBootstrap
+	dialogActive        atomic.Bool
+	workspaceOpenActive atomic.Bool
 }
 
 func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
@@ -195,6 +201,10 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 		return nil, apperror.New(apperror.CodeInvalidArgument,
 			"desktop Skill installation requires the Go Registry installer")
 	}
+	if (config.WorkspaceResolver == nil) != (config.WorkspaceLauncher == nil) {
+		return nil, apperror.New(apperror.CodeInvalidArgument,
+			"desktop workspace opening requires paired resolver and launcher dependencies")
+	}
 	readHash := sha256.Sum256([]byte(config.ReadToken))
 	controlHash := sha256.Sum256([]byte(config.ControlToken))
 	if config.ControlToken != "" && subtle.ConstantTimeCompare(readHash[:], controlHash[:]) == 1 {
@@ -209,11 +219,13 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 			"desktop bridge version and UI digest metadata are invalid")
 	}
 	return &DesktopBridge{
-		contextProvider: config.ContextProvider,
-		filePicker:      config.FilePicker,
-		selector:        config.Selector,
-		previewBridge:   config.PreviewBridge,
-		skillInstaller:  config.SkillInstaller,
+		contextProvider:   config.ContextProvider,
+		filePicker:        config.FilePicker,
+		selector:          config.Selector,
+		previewBridge:     config.PreviewBridge,
+		skillInstaller:    config.SkillInstaller,
+		workspaceResolver: config.WorkspaceResolver,
+		workspaceLauncher: config.WorkspaceLauncher,
 		bootstrap: ConnectionBootstrap{
 			ProtocolVersion: ConnectionBootstrapProtocolVersion,
 			APIBaseURL:      DesktopAPIBasePath, APIVersion: apiVersion, AppVersion: appVersion,
@@ -239,6 +251,7 @@ func NewDesktopBridge(config DesktopBridgeConfig) (*DesktopBridge, error) {
 			SkillInstallationEnabled:    config.SkillInstallationEnabled,
 			EvidenceAttachmentEnabled:   config.EvidenceAttachmentEnabled,
 			VerificationEvidenceEnabled: config.VerificationEvidenceEnabled,
+			WorkspaceOpenEnabled:        config.WorkspaceResolver != nil,
 			RendererPathInputSupported:  false,
 		},
 	}, nil

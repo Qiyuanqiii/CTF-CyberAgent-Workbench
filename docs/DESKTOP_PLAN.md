@@ -2,7 +2,7 @@
 
 状态：Desktop D0-A、D0-B 与 D1-R1 至 D1-G13/V12 自动化核心已完成，数据库 schema 为 v84。Wails v2.13.0 Windows 壳、嵌入式 React bundle、进程内 Go API、同库恢复、高水位事件续传、WebView2 失败关闭、内存令牌、原生 `.zip` 对话框、路径隔离 Skill、受控 Run/Session/Plan/审批、安全恢复的 Monaco FileEdit、只读 Repository/脱敏 Diff/本地历史/精确提交预览/可导航精确文件历史/精确提交比较与键盘可访问的成对 base/head 预览、多文件独立审阅、不可变操作者验证、snapshot-keyset 逐检查项下钻/快照下载/record-only 回执历史/不授权复核、带有界复核元数据和精确 Verify 导航的可恢复 Code Handoff、带有界审计事实的 Code Journey、generation-safe Windows Credential Manager Provider reload，以及默认关闭的有界 wake worker 已经落地。2026-07-22 的真实启动修复已覆盖 Wails server-form 请求、v30 预览库兼容升级、默认配置工作台/设置页实机渲染和退出后 SQLite 完整性。R10 只在内部 `NonProductOnly` 测试边界固定接受信封的 bytes/SHA；P10-A1 至 P10-B3 只增加 Go-owned analyzer 协议/惰性 Registry、开发期 Rust digest/内存 ZIP 中央目录函数和共享向量，没有 Desktop surface 或产品进程入口。Windows 10 实机矩阵、xterm、安装包、签名正式发行、注册表、自启动、更新和高权限执行仍未实现。
 
-D1-UX1 至 D1-UX6 已把用户可见名称统一为 Prayu，并落地用户提供的工作台背景、艺术字、独立设置背景、米黄色半透明正文区、纯 CSS 橙色选中态、无边框标题栏、透明热区的有界可调侧栏和复用既有 Go 边界的 Agent 输入区。设置页只展示 Go-owned 运行时事实；TypeScript 没有获得凭证、Policy、工具、Shell、Docker 或进程权限，模型切换仍走既有 Go mutation。CLI、module、数据目录和协议标识继续兼容既有 CyberAgent 名称。
+D1-UX1 至 D1-UX9 已把用户可见名称统一为 Prayu，并落地用户提供的工作台背景、艺术字、独立设置背景、米黄色半透明正文区、纯 CSS 橙色选中态、无边框标题栏、透明热区的有界可调侧栏、复用既有 Go 边界的 Agent 输入区，以及可组合的摘要/底部/右侧工具面板。设置页只展示 Go-owned 运行时事实；内置终端和浏览器仍未启动。TypeScript 没有获得凭证、Policy、工具、Shell、Docker 或通用进程权限；模型切换仍走既有 Go mutation。操作员可在原生确认后用固定外部应用打开精确已登记 Workspace，但 renderer 不接收路径、命令、环境或任意参数，该能力不属于 Agent/Runner/Shell。CLI、module、数据目录和协议标识继续兼容既有 CyberAgent 名称。
 
 ## 目标
 
@@ -256,6 +256,9 @@ Plan 选择只消费已持久化的三方向提案并创建既有 WorkItem/Note 
 - [x] D1-UX4：Wails Windows 壳无边框化，React 标题栏通过现有 runtime 控制当前窗口；无安装器、注册表、自启动或更新器。
 - [x] D1-UX5：侧栏默认 286 px、范围 232-420 px，透明拖拽热区支持指针/键盘/双击复位并只持久化显示宽度；选中态不再使用裁切图片。
 - [x] D1-UX6：新 Run、Run 与 Session 共享 Agent 输入区；附件/目标/Plan/Skill/模型/上下文复用 Go-owned API，未支持的 reasoning 强度保持禁用，边界见 ADR 0070。
+- [x] D1-UX7：四控件工作台、独立摘要/底部/右侧面板与键盘切换完成；没有截图占位。
+- [x] D1-UX8：摘要、审阅、文件与侧边任务复用既有只读/有界 Go 能力；终端和浏览器明确保持未启动。
+- [x] D1-UX9：pathless 原生工作区打开完成；仅操作员确认后启动固定外部应用，不授予 renderer 或 Agent 通用进程能力，边界见 ADR 0072。
 - [x] P10-A1/A2/A3：完成 Go-owned analyzer request/result/error 协议、无 LLM/网络/密钥/路径的 Rust metadata fixture 和 Go/Rust shared golden vectors；未增加 Desktop surface、产品 invocation 或 Artifact commit。secure Desktop 与可复现双构建通过，GUI SHA-256 `69ed40aede0cfc23e075df824fecf6c1ef7b4b0586a8f4b685b7d8aa95dde3b4`，`release_ready=false`；边界见 ADR 0062。
 - [x] P10-B1/B2/B3：完成惰性 analyzer descriptor Registry、memory-only/no-extraction ZIP inventory 协议及 Rust/shared adversarial vectors；未增加 Desktop analyzer UI、产品 invocation 或 Local/Docker 执行。secure Desktop 与可复现双构建通过，GUI SHA-256 `871c6270de44f3d6aecd31064127cdbfb400c5d6e6936e44698bcc30b0c611db`，`release_ready=false`；边界见 ADR 0063。
 - [x] P10-C1/C2/C3：完成无启动 invocation candidate、密封 Disabled/Fake Transport 与八类失败/重放向量；Desktop surface 与真实 analyzer process 继续关闭。累计六片门通过，GUI SHA-256 `82a5f7b4f012c0bc39da13d3b00cc98831e8002653a4a59f54d58f63e7126b50`，`release_ready=false`；边界见 ADR 0065。

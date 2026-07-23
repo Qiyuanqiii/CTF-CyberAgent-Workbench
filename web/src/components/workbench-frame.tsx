@@ -3,16 +3,14 @@ import { useRef, useState, type FormEvent, type KeyboardEvent, type PointerEvent
 import {
   ArrowUp,
   CalendarClock,
-  FolderOpen,
   GitPullRequest,
   MessagesSquare,
-  MoreHorizontal,
   PackageSearch,
-  Settings2,
 } from "lucide-react";
 import type { CyberAgentClient } from "../api/client";
 import type { RunCreationControlRequestView } from "../api/types";
 import { AgentComposerControls } from "./agent-composer-controls";
+import { WorkbenchDock, type WorkbenchResourceKind } from "./workbench-dock";
 
 export const minimumSidebarWidth = 232;
 export const maximumSidebarWidth = 420;
@@ -63,30 +61,20 @@ export function SidebarResizeHandle({ value, onChange }: {
     onPointerMove={onPointerMove} onPointerUp={finishDrag} role="separator" tabIndex={0} />;
 }
 
-export function WorkbenchFrame({ title, children, onOpenSettings }: {
+export function WorkbenchFrame({ title, children, client, desktop, resourceKind, runID,
+  sessionID }: {
   title: string;
   children: ReactNode;
-  onOpenSettings: () => void;
+  client: CyberAgentClient;
+  desktop: boolean;
+  resourceKind: WorkbenchResourceKind;
+  runID: string;
+  sessionID: string;
 }) {
-  return (
-    <main className="main-workspace prayu-conversation-panel">
-      <header className="workspace-panel-toolbar">
-        <div className="workspace-panel-location">
-          <FolderOpen aria-hidden="true" size={16} />
-          <strong>{title}</strong>
-          <button aria-label="更多工作区操作" className="workspace-panel-icon"
-            disabled title="更多工作区操作" type="button">
-            <MoreHorizontal aria-hidden="true" size={16} />
-          </button>
-        </div>
-        <button aria-label="打开设置" className="workspace-panel-icon" onClick={onOpenSettings}
-          title="打开设置" type="button">
-          <Settings2 aria-hidden="true" size={16} />
-        </button>
-      </header>
-      <div className="workspace-panel-stage">{children}</div>
-    </main>
-  );
+  return <WorkbenchDock client={client} desktop={desktop} resourceKind={resourceKind}
+    runID={runID} sessionID={sessionID} title={title}>
+    {children}
+  </WorkbenchDock>;
 }
 
 export interface NewRunDraft {

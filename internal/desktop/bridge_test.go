@@ -52,12 +52,13 @@ func (p *testSkillPackagePicker) OpenSkillPackage(ctx context.Context) (string, 
 	return path, err
 }
 
-func TestDesktopBridgeBindsOnlyFourPathlessMethods(t *testing.T) {
+func TestDesktopBridgeBindsOnlySixBoundedMethods(t *testing.T) {
 	typ := reflect.TypeFor[*DesktopBridge]()
-	if typ.NumMethod() != 4 {
-		t.Fatalf("exported method count = %d, want 4", typ.NumMethod())
+	if typ.NumMethod() != 6 {
+		t.Fatalf("exported method count = %d, want 6", typ.NumMethod())
 	}
-	want := []string{"Bootstrap", "InstallSkillPackage", "PreviewSkillPackage", "SelectSkillPackage"}
+	want := []string{"Bootstrap", "InstallSkillPackage", "OpenWorkspace", "PreviewSkillPackage",
+		"SelectSkillPackage", "WorkspaceLaunchers"}
 	for index, name := range want {
 		if method := typ.Method(index); method.Name != name {
 			t.Fatalf("method %d = %s, want %s", index, method.Name, name)
@@ -98,6 +99,7 @@ func TestDesktopBridgeBootstrapsMemoryOnlyClosedAuthority(t *testing.T) {
 		bootstrap.ShellExecutionEnabled || bootstrap.DockerExecutionEnabled ||
 		bootstrap.SkillInstallationEnabled || bootstrap.EvidenceAttachmentEnabled ||
 		bootstrap.VerificationEvidenceEnabled ||
+		bootstrap.WorkspaceOpenEnabled ||
 		bootstrap.RendererPathInputSupported {
 		t.Fatalf("unexpected bootstrap: %#v", bootstrap)
 	}
@@ -119,6 +121,7 @@ func TestDesktopBridgeBootstrapsMemoryOnlyClosedAuthority(t *testing.T) {
 		"session_message_enabled", "session_steering_control_enabled",
 		"skill_installation_enabled", "evidence_attachment_enabled",
 		"verification_evidence_enabled", "ui_digest",
+		"workspace_open_enabled",
 	})
 }
 
@@ -463,6 +466,12 @@ func TestNewDesktopBridgeRejectsInvalidMetadataAndDependencies(t *testing.T) {
 		{name: "verification without token", change: func(c *DesktopBridgeConfig) { c.VerificationEvidenceEnabled = true }},
 		{name: "bad digest", change: func(c *DesktopBridgeConfig) { c.UIDigest = strings.Repeat("g", 64) }},
 		{name: "missing version", change: func(c *DesktopBridgeConfig) { c.APIVersion = "" }},
+		{name: "workspace resolver without launcher", change: func(c *DesktopBridgeConfig) {
+			c.WorkspaceResolver = testWorkspaceResolver{}
+		}},
+		{name: "workspace launcher without resolver", change: func(c *DesktopBridgeConfig) {
+			c.WorkspaceLauncher = &testWorkspaceLauncher{}
+		}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

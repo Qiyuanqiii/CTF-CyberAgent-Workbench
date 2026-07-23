@@ -300,7 +300,9 @@ function ConnectedWorkbench({ token, controlToken, runControlEnabled, runCreatio
             onNavigate={navigateWorkspace}
             onOpenSettings={() => setSurface("settings")} />}
           {sidebarVisible && <SidebarResizeHandle onChange={resizeSidebar} value={sidebarWidth} />}
-          <WorkbenchFrame onOpenSettings={() => setSurface("settings")} title={panelTitle}>
+          <WorkbenchFrame client={client} desktop={desktop} resourceKind={resourceKind}
+            runID={selectedRunID} sessionID={selectedSessionID}
+            title={panelTitle}>
             {workspaceContent}
           </WorkbenchFrame>
         </div> : <SettingsView capabilities={settingsCapabilities} desktop={desktop}

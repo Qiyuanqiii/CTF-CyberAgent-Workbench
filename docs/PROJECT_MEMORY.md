@@ -1,6 +1,6 @@
 # Prayu Project Memory
 
-Last updated: 2026-07-22
+Last updated: 2026-07-23
 
 ## Resume First
 
@@ -77,9 +77,16 @@ Read in this order after a long context break:
 67. `docs/adr/0062-go-owned-analyzer-protocol-rust-fixture-shared-vectors.md`
 68. `docs/adr/0063-inert-analyzer-registry-zip-inventory-shared-vectors.md`
 69. `docs/adr/0064-prayu-brand-and-dual-surface-desktop-shell.md`
-70. `docs/adr/0068-real-wails-startup-and-migration-compatibility.md`
-71. `docs/DESKTOP_PLAN.md`
-72. `docs/SKILL_PACKAGE_PLAN.md`
+70. `docs/adr/0065-non-starting-analyzer-invocation-bridge.md`
+71. `docs/adr/0066-test-only-analyzer-subprocess-conformance.md`
+72. `docs/adr/0067-inert-analyzer-result-staging-and-product-adapter-threat-model.md`
+73. `docs/adr/0068-real-wails-startup-and-migration-compatibility.md`
+74. `docs/adr/0069-go-owned-browser-profiles-target-scope-and-session-plan.md`
+75. `docs/adr/0070-frameless-workbench-resizable-sidebar-agent-composer.md`
+76. `docs/adr/0071-inert-browser-executable-profile-lifecycle-and-sealed-cdp.md`
+77. `docs/adr/0072-workbench-docks-and-operator-confirmed-workspace-opening.md`
+78. `docs/DESKTOP_PLAN.md`
+79. `docs/SKILL_PACKAGE_PLAN.md`
 
 ## Current Baseline
 
@@ -92,8 +99,8 @@ Read in this order after a long context break:
 - `README.md` carries the canonical bilingual schema timeline in strict `v1 -> v84` order. `internal/store/readme_history_test.go` binds its row count and ordering to `LatestSchemaVersion`, so a future migration cannot silently leave the public history missing or out of sequence.
 - Main languages: Go control plane, TypeScript React/Vite local console, and deterministic Rust 1.97.1 digest/ZIP protocol functions. Rust has no Agent, LLM, config, key, persistence, network, filesystem, subprocess, or product-lifecycle ownership.
 - Analyzer status: P10-A1 through P10-B3 fix `analyzer_protocol.v1`, a two-entry inert `analyzer_descriptor.v1` Registry, strict digest and `archive.inventory.v1` result validation, bounded Rust stdin/stdout functions, and two five-vector semantic/bytes/SHA suites with separate CI. The ZIP function only reads an in-memory central directory and never opens, decompresses, extracts, or writes entry data. A Go-to-Rust product process bridge, product invocation, Run/Event/SQLite persistence, and Artifact commit remain absent. See ADR 0062, ADR 0063, and `analyzers/README.md`.
-- Desktop status: D0-A/D0-B and D1-R1 through D1-G13/V12 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, read-only Repository state/redacted Diff/local history/exact-commit metadata/redacted preview/navigable exact-file history/exact-commit comparison with keyboard-accessible paired base/head previews, independent multi-file review, separate immutable verification plans/results/associations plus snapshot-stable exact per-item drilldown/download/receipt history/non-authorizing review and Handoff coverage, digest-bound Code Handoff export with exact fail-closed receipt-review navigation, bounded Code Journey audit facts, generation-safe Windows Credential Manager Provider controls, and a default-off one-concurrent/one-step wake worker. The 2026-07-22 repair now tests the real Wails server-form request rather than an absolute-URL mock, and one exact legacy v30 preview checksum upgrades in place while unknown history remains rejected. A real Windows 11 launch rendered the workbench and Settings against the upgraded default profile, then closed with SQLite integrity `ok`; the pre-upgrade database backup is `~/.cyberagent-workbench/backups/cyberagent-v30-before-v84-20260722.db`. Automated PE/hash/build diagnostics pass, but Windows 10 release coverage remains pending and `release_ready=false`. It has no installer, formal signed release, registry/startup/update behavior, terminal, real Shell/Local/Docker process execution, or install-time Skill execution. See ADR 0033 through ADR 0061, ADR 0064, ADR 0068, and `docs/DESKTOP_PLAN.md`.
-- Prayu UX status: D1-UX1 through D1-UX6 introduce the Prayu user-facing identity, supplied workspace/Settings backgrounds and wordmark, a CSS-generated selected-state brush, a cream translucent work surface, functional Settings navigation and display-only density, a frameless Wails titlebar, a bounded persisted resizable sidebar, and an Agent composer with Go-backed model routing, truthful reasoning capability state, attachments, target/plan modes, Skills, and conservative context usage. Stable CyberAgent compatibility identifiers remain unchanged. Settings is a read-only projection and TypeScript gains no credential, Policy, tool, Shell, Docker, process, or persistence authority; model changes still cross the existing Go mutation boundary. See ADR 0064 and ADR 0070.
+- Desktop status: D0-A/D0-B and D1-R1 through D1-G13/V12 pin Wails v2.13.0 and build a reproducible Windows development/portable-test binary with an embedded React bundle, in-process Go API, ephemeral memory-only tokens, resumable event polling, same-database recovery, controlled Run/Session/lifecycle/Plan/approval workflows, explicit model diagnostics/routes, safely recoverable Monaco proposal/Diff editing, read-only Repository state/redacted Diff/local history/exact-commit metadata/redacted preview/navigable exact-file history/exact-commit comparison with keyboard-accessible paired base/head previews, independent multi-file review, separate immutable verification plans/results/associations plus snapshot-stable exact per-item drilldown/download/receipt history/non-authorizing review and Handoff coverage, digest-bound Code Handoff export with exact fail-closed receipt-review navigation, bounded Code Journey audit facts, generation-safe Windows Credential Manager Provider controls, and a default-off one-concurrent/one-step wake worker. D1-UX7/UX8/UX9 add composable Summary/Bottom/Right docks plus a pathless, native-confirmed operator action for opening one registered Workspace in a fixed recognized external application. The renderer receives no path/command/environment/arbitrary arguments; this is not Agent, Runner, Tool, or Shell execution. The 2026-07-22 repair tests the real Wails server-form request rather than an absolute-URL mock, and one exact legacy v30 preview checksum upgrades in place while unknown history remains rejected. Windows 10 release coverage remains pending and `release_ready=false`. There is no installer, formal signed release, registry/startup/update behavior, embedded terminal, real Shell/Local/Docker Agent execution, or install-time Skill execution. See ADR 0033 through ADR 0061, ADR 0064, ADR 0068, ADR 0070, ADR 0072, and `docs/DESKTOP_PLAN.md`.
+- Prayu UX status: D1-UX1 through D1-UX9 introduce the Prayu user-facing identity, supplied workspace/Settings backgrounds and wordmark, a CSS-generated selected-state brush, a cream translucent work surface, functional Settings navigation and display-only density, a frameless Wails titlebar, a bounded persisted resizable sidebar, a Go-backed Agent composer, and the compact four-control workbench toolbar. Summary/Review/Files/Side Tasks use existing read-only Go surfaces; Browser and embedded Terminal remain explicitly inert. Open Workspace is operator-confirmed and pathless at the renderer boundary. Stable CyberAgent compatibility identifiers remain unchanged. See ADR 0064, ADR 0070, and ADR 0072.
 - Custom Skill status: the five embedded `skill.v1` guides and explicitly selected external packages are Run-loadable through separate protocols. Schema v69 adds persistent content-addressed import/history; schema v70 adds a second explicitly confirmed exact Run selection and redacted user-role root/Specialist context; schema v71 adds bounded read-only provenance across HTTP/TUI/Web. D1-A adds a pathless, one-time-handle preview boundary; D1-B1 adds explicit HTTP/Desktop registration through the same inert Registry. External packages remain untrusted and grant no declared tools. Installation executes no content and still does not select a package for a Run. See ADR 0024, ADR 0031 through ADR 0033, ADR 0041, and `docs/SKILL_PACKAGE_PLAN.md`.
 - Protected-delete status: explicit recursive, absolute/traversing/wildcard, environment-derived, command-substituted, current-home, PowerShell/`cmd`, and common interpreter deletion intents are permanently denied before approval across Shell, ScriptProcess, and Sandbox Policy. This is defense in depth; Local/container process execution remains disabled and a future executor still requires OS/container isolation. See ADR 0025.
 - Canonical branch: `main`; do not create a branch or PR unless the user asks.
@@ -1769,6 +1776,53 @@ is still 0% because no real launch or navigation exists. ADR 0071 is authoritati
 中文交接：P11-B1/B2/B3 只完成浏览器发现、目录生命周期和 Fake/Disabled CDP 的不可执行合同。
 不要把 synthetic success、PE 摘要或 cleanup candidate 写成真实浏览器、可信签名或删除授权；Wails
 WebView2 仍只渲染 Prayu，内置浏览器对用户仍不可用。
+
+## Completed Workbench Docks And Native Workspace Opening (D1-UX7/UX8/UX9)
+
+D1-UX7 replaces the former single Settings action with the requested compact four-control
+workbench toolbar. Summary, Bottom Panel, and Right Sidecar are independent layout states and can
+remain visible together. Keyboard routes match the visible menu for Review, Browser, Files, Side
+Tasks, and the bottom panel. The sidecar is a real React component tree, not a pasted screenshot.
+
+D1-UX8 reuses existing bounded Go surfaces: Summary reads repository plus selected Run/Session
+metadata, Review embeds the redacted Repository Diff, Files embeds Workspace Explorer, and Side
+Tasks pages current WorkItems. Browser and terminal surfaces intentionally report that they are
+not started. The bottom panel contains no PTY, xterm input, Shell, process, or browser bridge.
+
+D1-UX9 adds a separate Desktop-native manual convenience contract. TypeScript submits only an
+opaque registered Workspace ID and one fixed launcher ID. Go resolves the root from SQLite and
+returns no path. Windows discovers a bounded recognized catalog, validates the exact directory
+and executable, presents both in a native confirmation, revalidates after confirmation, and starts
+at most one selected external app. Explorer/editors receive only the registered root; an external
+Terminal receives no command arguments and only inherits that root as its working directory.
+
+This action is not Agent execution. It grants no model, child, HTTP, Tool Gateway, Runner, Shell,
+browser, arbitrary argument, or environment authority. The external app runs under its own Windows
+permissions after operator confirmation and Prayu does not supervise its later behavior or claim
+publisher/signature trust. `process_execution_enabled`, embedded terminal, browser start, Local,
+and Docker gates remain false.
+
+The six-slice robustness gate passes serial ordinary/race full Go in 512/603 seconds, full vet and
+staticcheck, focused Desktop race, secure Desktop-tag test/vet, zero-reachable-finding ordinary and
+Desktop govulncheck, module verification/tidy, 42 files/148 Web tests, strict TypeScript,
+deterministic OpenAPI, Vite, and zero-vulnerability npm audits. Rust fmt, 7+2 locked tests, Clippy,
+and a cached RustSec scan over 1,166 advisories/42 crates pass; the attempted online RustSec refresh
+failed on a GitHub Git-transport I/O error and is not represented as fresh. The reproducible Windows
+dual build passes with SHA-256
+`8aaf3365e3c4d2e41b6f6b6dbf75f1b580a48d24419ba288d4235a41b5549cb8` and
+`release_ready=false`.
+
+Parallel full Go testing on this Windows host can time out because many packages concurrently run
+the 84-step SQLite migration suite; `-p 1` is the authoritative local full gate and passes. This is
+a test-infrastructure performance residual, not evidence of an Agent/Runner deadlock. Review fixed
+one low-risk future-resolver gap by rejecting non-canonical absolute Workspace roots independently
+at the bridge and native launcher. Schema and
+OpenAPI remain v84 and 75/83/182. Metrics remain architecture about 99%, full product usability
+about 95-97%, Coding about 95-96%, and Cyber automation about 20%. ADR 0072 is authoritative.
+
+中文交接：右上角四控件、摘要、底栏和右侧栏已是真实 UI；审阅/文件/侧边任务复用既有 Go 能力，
+终端和浏览器仍明确未启动。只有操作员可在原生确认后用固定应用打开已登记 Workspace；渲染层拿不到
+路径，也不能提交命令或参数。这不代表 Agent 已获得宿主机进程权限。
 
 ## Next Slice
 

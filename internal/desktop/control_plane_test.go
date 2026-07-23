@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"cyberagent-workbench/internal/apperror"
 	"cyberagent-workbench/internal/application"
 	"cyberagent-workbench/internal/domain"
 	"cyberagent-workbench/internal/httpapi"
@@ -26,6 +27,36 @@ type desktopAPIEnvelope struct {
 	Version   string          `json:"version"`
 	RequestID string          `json:"request_id"`
 	Data      json.RawMessage `json:"data"`
+}
+
+func TestControlPlaneResolvesOnlyRegisteredWorkspaceRoots(t *testing.T) {
+	plane, err := OpenControlPlane(ControlPlaneConfig{
+		DatabasePath: filepath.Join(t.TempDir(), "workspace-open.db"),
+		ReadToken:    desktopControlPlaneTestToken, AppVersion: "desktop-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plane.Close()
+	root := t.TempDir()
+	record := store.WorkspaceRecord{ID: "workspace-desktop-open", Name: "desktop-open",
+		RootPath: root}
+	if err := plane.stateStore.SaveWorkspace(t.Context(), record); err != nil {
+		t.Fatal(err)
+	}
+	target, err := plane.ResolveWorkspace(t.Context(), record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.ID != record.ID || target.Name != record.Name || target.RootPath != root {
+		t.Fatalf("unexpected Workspace target: %#v", target)
+	}
+	if _, err := plane.ResolveWorkspace(t.Context(), "missing-workspace"); apperror.CodeOf(err) != apperror.CodeNotFound {
+		t.Fatalf("missing Workspace error = %v, code = %s", err, apperror.CodeOf(err))
+	}
+	if _, err := plane.ResolveWorkspace(t.Context(), "bad workspace"); apperror.CodeOf(err) != apperror.CodeInvalidArgument {
+		t.Fatalf("invalid Workspace error = %v, code = %s", err, apperror.CodeOf(err))
+	}
 }
 
 func TestControlPlaneSharesCLIStoreAndReopensFromAHighWaterCursor(t *testing.T) {
